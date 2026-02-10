@@ -42,7 +42,7 @@
     "url": "https://github.com/GrafeoDB/grafeo/issues"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "scripts": {
     "artifacts": "napi artifacts",
