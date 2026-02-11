@@ -56,7 +56,7 @@ This roadmap outlines the planned development of Grafeo. Priorities may shift ba
 ### Expanded Support
 
 - **RDF** - full support with Ring Index and SPARQL optimization
-- All 5 query languages promoted to full support
+- All query languages promoted to full support
 - NetworkX and solvOR integrations promoted to full support
 
 ---
@@ -160,11 +160,27 @@ CREATE VECTOR INDEX movie_embeddings ON :Movie(embedding)
 
 *Preparing for production readiness*
 
-### Focus Areas
-- Performance optimizations across all components
-- Lots of bug hunting and fixing
-- Documentation improvements, user guides and examples
-- API stabilization
+### Search & Retrieval (0.5.1)
+
+- **BM25 text search** (`text-index` feature) — inverted index with Okapi BM25 scoring, Unicode tokenizer, stop word removal
+- **Hybrid search** (`hybrid-search` feature) — combine BM25 + vector similarity via Reciprocal Rank Fusion (RRF) or weighted fusion
+- **Built-in embeddings** (`embed` feature, opt-in) — in-process ONNX Runtime embedding generation, load any `.onnx` model
+
+### Change Tracking (0.5.1)
+
+- **Change data capture** (`cdc` feature) — before/after property snapshots for all mutations, `history()` and `changes_between()` APIs
+
+### Engine Improvements (0.5.0)
+
+- **Topology-only HNSW** — ~50% memory reduction for vector workloads
+- **Standardized error codes** — machine-readable `GRAFEO-XXXX` codes
+- **Query timeout** — configurable `query_timeout` with clean abort
+- **MVCC auto-GC** — automatic version chain garbage collection
+- **Dead code removal** — ~1,500 lines of confirmed dead code removed
+
+### Ecosystem (0.5.1)
+
+- **[grafeo-memory](https://github.com/GrafeoDB/grafeo-memory)** — AI memory layer, LLM-driven fact extraction, knowledge graph storage
 
 ### Goal
 - Ready for production evaluation

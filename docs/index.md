@@ -39,7 +39,7 @@ hide:
 
     ---
 
-    GQL, Cypher, Gremlin, GraphQL, and SPARQL. Choose the query language that fits your needs and expertise.
+    GQL, Cypher, Gremlin, GraphQL, SPARQL, and SQL/PGQ. Choose the query language that fits your needs and expertise.
 
 -   :material-graph:{ .lg .middle } **LPG & RDF Support**
 

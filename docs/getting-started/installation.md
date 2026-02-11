@@ -120,25 +120,54 @@ grafeo = "0.4"
 
 ### Feature Flags
 
-All query languages are enabled by default. To use a minimal build:
+All query languages and AI features are enabled by default via the `full` feature group. Use feature groups or individual flags to customize:
 
 ```toml
 [dependencies]
-# Default: all query languages enabled
-grafeo = "0.4"
+# Default: all languages + AI features
+grafeo = "0.5"
 
-# Minimal: only specific languages
-grafeo = { version = "0.4", default-features = false, features = ["gql"] }
+# Only query languages, no AI features
+grafeo = { version = "0.5", default-features = false, features = ["languages"] }
+
+# GQL with AI features
+grafeo = { version = "0.5", default-features = false, features = ["gql", "ai"] }
+
+# Minimal: GQL only
+grafeo = { version = "0.5", default-features = false, features = ["gql"] }
+
+# With ONNX embedding generation (opt-in, not in full)
+grafeo = { version = "0.5", features = ["embed"] }
 ```
+
+#### Feature Groups
+
+| Group | Contents | Description |
+|-------|----------|-------------|
+| `full` | languages + ai | Everything (default) |
+| `languages` | gql, cypher, sparql, gremlin, graphql, sql-pgq | All query language parsers |
+| `ai` | vector-index, text-index, hybrid-search, cdc | AI/RAG search + change tracking |
+| `embed` | ort, tokenizers | ONNX embedding generation (opt-in, ~17MB) |
+
+#### Individual Language Flags
 
 | Feature | Description |
 |---------|-------------|
-| `default` | All query languages (GQL, Cypher, Gremlin, GraphQL, SPARQL) |
-| `gql` | GQL only |
-| `cypher` | Cypher only |
-| `sparql` | SPARQL and RDF support |
-| `gremlin` | Gremlin only |
-| `graphql` | GraphQL only |
+| `gql` | GQL (ISO/IEC 39075) — default query language |
+| `cypher` | Cypher (openCypher 9.0) |
+| `sparql` | SPARQL (W3C 1.1) + RDF support |
+| `gremlin` | Gremlin (Apache TinkerPop) |
+| `graphql` | GraphQL |
+| `sql-pgq` | SQL/PGQ (SQL:2023 GRAPH_TABLE) |
+
+#### Individual AI Flags
+
+| Feature | Description |
+|---------|-------------|
+| `vector-index` | HNSW approximate nearest neighbor index |
+| `text-index` | BM25 inverted index for full-text search |
+| `hybrid-search` | Combined text + vector search with score fusion |
+| `cdc` | Change data capture (before/after property snapshots) |
 
 ### Verify Installation
 
@@ -151,6 +180,36 @@ fn main() -> Result<(), grafeo::Error> {
     Ok(())
 }
 ```
+
+## Grafeo Server (Docker)
+
+For a standalone database server accessible via REST API, use [grafeo-server](../ecosystem/grafeo-server.md):
+
+```bash
+# Standard — all query languages, AI/search, web UI
+docker run -p 7474:7474 grafeo/grafeo-server
+```
+
+Three image variants are available:
+
+| Variant | Tag | Description |
+|---------|-----|-------------|
+| **lite** | `grafeo-server:lite` | GQL only, no UI — smallest footprint |
+| **standard** | `grafeo-server:latest` | All languages + AI/search + web UI |
+| **full** | `grafeo-server:full` | Everything + auth + TLS + ONNX embed |
+
+```bash
+# Lite — minimal, GQL only
+docker run -p 7474:7474 grafeo/grafeo-server:lite
+
+# Full — production with auth and TLS
+docker run -p 7474:7474 grafeo/grafeo-server:full \
+  --auth-token my-secret --data-dir /data
+```
+
+Server at `http://localhost:7474`. Web UI (standard/full) at `http://localhost:7474/studio/`.
+
+See the [grafeo-server documentation](../ecosystem/grafeo-server.md) for full API reference and configuration.
 
 ## Building from Source
 

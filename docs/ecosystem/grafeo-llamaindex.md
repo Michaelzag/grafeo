@@ -14,7 +14,7 @@ LlamaIndex integration that implements the `PropertyGraphStore` interface backed
 
 grafeo-llamaindex provides `GrafeoPropertyGraphStore`, a full implementation of LlamaIndex's PropertyGraphStore interface. It supports:
 
-- Structured queries (GQL, Cypher, Gremlin, GraphQL, SPARQL)
+- Structured queries (GQL, Cypher, Gremlin, GraphQL, SPARQL, SQL/PGQ)
 - Vector similarity search via native HNSW indexes
 - Knowledge graph construction from documents
 - 30+ built-in graph algorithms

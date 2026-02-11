@@ -39,6 +39,9 @@ Grafeo is a high-performance graph database with a Rust core and no required C d
 - **HNSW index**: O(log n) approximate nearest neighbor search with tunable recall
 - **Distance functions**: Cosine, Euclidean, Dot Product, Manhattan (SIMD-accelerated: AVX2, SSE, NEON)
 - **Vector quantization**: Scalar (f32 → u8), Binary (1-bit), and Product Quantization (8-32x compression)
+- **BM25 text search**: Full-text inverted index with Unicode tokenizer and stop word removal
+- **Hybrid search**: Combined text + vector search with Reciprocal Rank Fusion (RRF) or weighted fusion
+- **Change data capture**: Before/after property snapshots for audit trails and history tracking
 - **Hybrid graph+vector queries**: Combine graph traversals with vector similarity in GQL and SPARQL
 - **Memory-mapped storage**: Disk-backed vectors with LRU cache for large datasets
 - **Batch operations**: Parallel multi-query search via rayon
@@ -80,10 +83,23 @@ Grafeo uses a modular translator architecture where query languages are parsed i
 cargo add grafeo
 ```
 
-All query languages (GQL, Cypher, Gremlin, GraphQL, SPARQL) are enabled by default. To disable specific languages:
+By default, all query languages and AI features (vector search, text search, hybrid search, CDC) are enabled via the `full` feature. Use feature groups to customize:
 
 ```bash
-cargo add grafeo --no-default-features --features gql,cypher
+# Default: everything (languages + ai)
+cargo add grafeo
+
+# Only query languages, no AI features
+cargo add grafeo --no-default-features --features languages
+
+# Only GQL with AI features
+cargo add grafeo --no-default-features --features gql,ai
+
+# Minimal: GQL only
+cargo add grafeo --no-default-features --features gql
+
+# With ONNX embedding generation (opt-in, ~17MB)
+cargo add grafeo --features embed
 ```
 
 ### Node.js / TypeScript
@@ -303,6 +319,7 @@ grafeo info ./mydb --format table # Human-readable table (default)
 | [**grafeo-langchain**](https://github.com/GrafeoDB/grafeo-langchain) | LangChain integration: graph store, vector store, Graph RAG retrieval |
 | [**grafeo-llamaindex**](https://github.com/GrafeoDB/grafeo-llamaindex) | LlamaIndex integration: PropertyGraphStore, vector search, knowledge graphs |
 | [**grafeo-mcp**](https://github.com/GrafeoDB/grafeo-mcp) | Model Context Protocol server: expose Grafeo as tools for LLM agents |
+| [**grafeo-memory**](https://github.com/GrafeoDB/grafeo-memory) | AI memory layer for LLM applications: fact extraction, deduplication, semantic search |
 | [**anywidget-graph**](https://github.com/GrafeoDB/anywidget-graph) | Interactive graph visualization for Python notebooks (Marimo, Jupyter, VS Code, Colab) |
 | [**anywidget-vector**](https://github.com/GrafeoDB/anywidget-vector) | 3D vector/embedding visualization for Python notebooks |
 | [**graph-bench**](https://github.com/GrafeoDB/graph-bench) | Benchmark suite comparing graph databases across 25+ benchmarks |

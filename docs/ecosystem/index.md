@@ -68,4 +68,12 @@ The GrafeoDB ecosystem extends beyond the core database with AI/LLM integrations
 
     [:octicons-arrow-right-24: Learn more](grafeo-mcp.md)
 
+-   :material-brain:{ .lg .middle } **grafeo-memory**
+
+    ---
+
+    AI memory layer for LLM applications: extract facts, deduplicate, semantic search, change history.
+
+    [:octicons-arrow-right-24: Learn more](grafeo-memory.md)
+
 </div>

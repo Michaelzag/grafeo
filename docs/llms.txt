@@ -12,6 +12,9 @@ Grafeo is designed for applications that need graph database capabilities withou
 - **Multi-Language Bindings**: Python (PyO3), Node.js/TypeScript (napi-rs), Go (CGO), WebAssembly (wasm-bindgen), C (FFI)
 - **ACID Transactions**: MVCC-based snapshot isolation with serializable option
 - **Vector Search**: HNSW index with quantization, filtered search, MMR
+- **Text Search**: BM25 inverted index with Unicode tokenizer
+- **Hybrid Search**: Combined text + vector search with reciprocal rank fusion
+- **Change Data Capture**: Before/after property snapshots for audit trails
 - **6 Query Languages**: GQL, Cypher, Gremlin, GraphQL, SPARQL, SQL/PGQ
 - **CLI**: Interactive shell with transactions, meta-commands, and multi-format output
 
@@ -67,6 +70,15 @@ cargo install grafeo-cli
 # or: pip install grafeo-cli
 # or: npm install -g @grafeo-db/cli
 ```
+
+## Feature Groups (Rust)
+
+| Group | Contents | Description |
+|-------|----------|-------------|
+| `full` | languages + ai | Everything (default) |
+| `languages` | gql, cypher, sparql, gremlin, graphql, sql-pgq | All query language parsers |
+| `ai` | vector-index, text-index, hybrid-search, cdc | AI/RAG search + change tracking |
+| `embed` | ort, tokenizers | ONNX embedding generation (opt-in, ~17MB) |
 
 ## Quick Start (Python)
 
@@ -202,6 +214,10 @@ Methods:
 - `vector_search(label, property, query, k, ef, filters) -> list`: k-NN search
 - `mmr_search(label, property, query, k, fetch_k, lambda_mult, ef, filters) -> list`: MMR search
 - `batch_vector_search(label, property, queries, k, ef, filters) -> list`: Batch search
+- `create_text_index(label, property)`: Create a BM25 text index
+- `text_search(label, property, query, k) -> list`: Full-text search
+- `hybrid_search(label, property, query_text, query_vector, k, fusion) -> list`: Combined text + vector search
+- `history(entity_id) -> list`: Get change history for a node or edge
 
 ### Transaction
 
@@ -268,7 +284,7 @@ SELECT * FROM GRAPH_TABLE (
 ### Crate Structure
 
 - **grafeo-common**: Foundation types, memory allocators, hashing utilities
-- **grafeo-core**: LPG/RDF storage, indexes (hash, btree, trie, adjacency, HNSW), execution engine
+- **grafeo-core**: LPG/RDF storage, indexes (hash, trie, adjacency, HNSW, BM25), execution engine
 - **grafeo-adapters**: Parsers (GQL, Cypher, Gremlin, GraphQL, SPARQL, SQL/PGQ), storage backends
 - **grafeo-engine**: Database facade, sessions, transaction management
 - **grafeo-cli**: Command-line interface with interactive shell
@@ -300,6 +316,7 @@ SELECT * FROM GRAPH_TABLE (
 - **[grafeo-langchain](https://github.com/GrafeoDB/grafeo-langchain)** - LangChain integration
 - **[grafeo-llamaindex](https://github.com/GrafeoDB/grafeo-llamaindex)** - LlamaIndex integration
 - **[grafeo-mcp](https://github.com/GrafeoDB/grafeo-mcp)** - Model Context Protocol server
+- **[grafeo-memory](https://github.com/GrafeoDB/grafeo-memory)** - AI memory layer for LLM applications
 - **[graph-bench](https://github.com/GrafeoDB/graph-bench)** - Benchmark suite
 - **[anywidget-graph](https://github.com/GrafeoDB/anywidget-graph)** - Interactive graph visualization widget
 - **[anywidget-vector](https://github.com/GrafeoDB/anywidget-vector)** - Interactive vector visualization widget
