@@ -2,6 +2,17 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
+## [0.5.1] - Unreleased
+
+All new functionality for the 0.5.x series: hybrid search (BM25 + vector), built-in ONNX embeddings, change data capture, fully supporting the grafeo-memory AI memory package.
+
+### Added
+
+- **BM25 text search** (`text-index` feature): create inverted indexes on string properties with `create_text_index()` and search with BM25 scoring via `text_search()`. Includes a built-in tokenizer with Unicode word boundaries, lowercasing, and English stop word removal
+- **Hybrid search** (`hybrid-search` feature): combine BM25 text scores with HNSW vector similarity via Reciprocal Rank Fusion (RRF) or weighted fusion. Single `hybrid_search()` call across Python and Node.js bindings
+- **Built-in embeddings** (`embed` feature, opt-in): generate embeddings in-process via ONNX Runtime. Load any `.onnx` model + tokenizer, call `embed_text()` or `vector_search_text()` at the Rust API level. Binding exposure coming in a future release. Adds ~17MB to binary size, off by default
+- **Change data capture** (`cdc` feature): track all node and edge mutations (create, update, delete) with before/after property snapshots. Query history via `history()`, `history_since()`, and `changes_between()`. Available in Python and Node.js bindings
+
 ## [0.5.0] - 2026-02-11
 
 Internal engine improvements: ~50% memory savings for vector workloads, safer internals, production-grade error reporting, query timeouts, and automatic MVCC garbage collection.
