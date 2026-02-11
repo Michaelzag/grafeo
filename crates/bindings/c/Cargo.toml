@@ -27,7 +27,12 @@ gremlin = ["grafeo-engine/gremlin"]
 graphql = ["grafeo-engine/graphql"]
 sql-pgq = ["grafeo-engine/sql-pgq"]
 vector-index = ["grafeo-engine/vector-index"]
-full = ["gql", "cypher", "sparql", "gremlin", "graphql", "sql-pgq", "vector-index"]
+text-index = ["grafeo-engine/text-index"]
+hybrid-search = ["grafeo-engine/hybrid-search"]
+cdc = ["grafeo-engine/cdc"]
+languages = ["gql", "cypher", "sparql", "gremlin", "graphql", "sql-pgq"]
+ai = ["vector-index", "text-index", "hybrid-search", "cdc"]
+full = ["languages", "ai"]
 
 [lints]
 workspace = true

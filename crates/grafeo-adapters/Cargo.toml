@@ -58,7 +58,9 @@ sql-pgq = ["gql"]             # SQL/PGQ parser (SQL:2023 GRAPH_TABLE)
 rdf = ["grafeo-core/rdf"]    # RDF graph model support
 wal = ["memmap2", "crc32fast", "tokio", "crossbeam"]  # Write-ahead log storage (requires filesystem)
 parallel = ["rayon", "grafeo-core/parallel"]  # Parallel algorithms (rayon)
-full = ["gql", "cypher", "sparql", "gremlin", "graphql", "sql-pgq", "rdf", "wal", "parallel"]
+# Convenience groups
+languages = ["gql", "cypher", "sparql", "gremlin", "graphql", "sql-pgq"]  # All query language parsers
+full = ["languages", "rdf", "wal", "parallel"]
 
 [lints]
 workspace = true

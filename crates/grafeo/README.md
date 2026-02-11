@@ -3,7 +3,7 @@ A high-performance, embeddable graph database with a Rust core and no required C
 ## Features
 
 - **Dual data model support**: LPG and RDF with optimized storage for each
-- **Multi-language queries**: GQL, Cypher, Gremlin, GraphQL, and SPARQL (all enabled by default)
+- **Multi-language queries**: GQL, Cypher, Gremlin, GraphQL, SPARQL, and SQL/PGQ (all enabled by default)
 - Embeddable with zero external dependencies
 - Multi-language bindings: Python (PyO3), Node.js (napi-rs), Go (CGO), WebAssembly (wasm-bindgen)
 - In-memory and persistent storage modes
@@ -18,6 +18,7 @@ A high-performance, embeddable graph database with a Rust core and no required C
 | Gremlin (Apache TinkerPop) | ✅ | — | Default |
 | GraphQL | ✅ | ✅ | Default |
 | SPARQL (W3C 1.1) | — | ✅ | Default |
+| SQL/PGQ (SQL:2023) | ✅ | — | Default |
 
 Grafeo uses a modular translator architecture where query languages are parsed into ASTs, then translated to a unified logical plan that executes against the appropriate storage backend (LPG or RDF).
 
@@ -32,10 +33,14 @@ Grafeo uses a modular translator architecture where query languages are parsed i
 cargo add grafeo
 ```
 
-All query languages are enabled by default. For a minimal build with specific languages:
+By default, all query languages and AI features are enabled (`full` = `languages` + `ai`). Customize with feature groups:
 
 ```bash
-cargo add grafeo --no-default-features --features gql  # GQL only
+cargo add grafeo                                             # Everything (default)
+cargo add grafeo --no-default-features --features languages  # All languages, no AI
+cargo add grafeo --no-default-features --features gql,ai     # GQL + AI features
+cargo add grafeo --no-default-features --features gql        # Minimal: GQL only
+cargo add grafeo --features embed                            # Add ONNX embeddings (opt-in)
 ```
 
 ## Quick Start
