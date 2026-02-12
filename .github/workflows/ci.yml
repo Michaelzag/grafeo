@@ -82,12 +82,18 @@ jobs:
   miri:
     name: Miri UB Check
     runs-on: ubuntu-latest
+    # Pin nightly due to cargo regression in nightly-2026-02-12+
+    # See: https://github.com/rust-lang/miri/issues/4855
+    # Remove pin once rust-lang/cargo#16631 lands in nightly
+    env:
+      NIGHTLY: nightly-2026-02-11
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust nightly with Miri
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ env.NIGHTLY }}
           components: miri
 
       - name: Cache cargo registry
@@ -96,18 +102,15 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: ${{ runner.os }}-cargo-miri-v2-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-miri-${{ env.NIGHTLY }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-miri-v2-
+            ${{ runner.os }}-cargo-miri-${{ env.NIGHTLY }}-
 
       - name: Setup Miri sysroot
-        run: cargo +nightly miri setup
-
-      - name: Clean target directory
-        run: cargo +nightly clean
+        run: cargo +$NIGHTLY miri setup
 
       - name: Run Miri on grafeo-common
-        run: cargo +nightly miri test --all-features -p grafeo-common
+        run: cargo +$NIGHTLY miri test --all-features -p grafeo-common
         env:
           MIRIFLAGS: "-Zmiri-strict-provenance"
 
