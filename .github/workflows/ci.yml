@@ -100,8 +100,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-miri-v2-
 
-      - name: Clean stale build artifacts
-        run: cargo clean
+      - name: Setup Miri sysroot
+        run: cargo +nightly miri setup
+
+      - name: Clean Miri target directory
+        run: rm -rf target/miri
 
       - name: Run Miri on grafeo-common
         run: cargo +nightly miri test --all-features -p grafeo-common
