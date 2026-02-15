@@ -202,3 +202,82 @@ fn label_filter_on_company() {
     assert_eq!(result.rows.len(), 1);
     assert_eq!(result.rows[0][0], Value::from("Acme"));
 }
+
+// ── MVCC visibility: rolled-back nodes must not leak through pushdown ──
+
+#[test]
+fn rollback_hides_nodes_from_equality_pushdown() {
+    let db = setup();
+    let mut session = db.session();
+
+    // Create a node inside a transaction, then roll back
+    session.begin_tx().unwrap();
+    session
+        .execute("CREATE (:Person {name: 'Ghost', city: 'Nowhere'})")
+        .unwrap();
+    session.rollback().unwrap();
+
+    // Equality pushdown on label+property must NOT return the rolled-back node
+    let result = session
+        .execute("MATCH (n:Person) WHERE n.name = 'Ghost' RETURN n.name")
+        .unwrap();
+    assert!(
+        result.rows.is_empty(),
+        "rolled-back node leaked through equality pushdown"
+    );
+
+    // Original nodes still visible
+    let result = session
+        .execute("MATCH (n:Person) WHERE n.name = 'Alice' RETURN n.name")
+        .unwrap();
+    assert_eq!(result.rows.len(), 1);
+}
+
+#[test]
+fn rollback_hides_nodes_from_range_pushdown() {
+    let db = setup();
+    let mut session = db.session();
+
+    // Create a node inside a transaction, then roll back
+    session.begin_tx().unwrap();
+    session
+        .execute("CREATE (:Person {name: 'Ghost', city: 'Nowhere', age: 99})")
+        .unwrap();
+    session.rollback().unwrap();
+
+    // Range pushdown must NOT return the rolled-back node
+    let result = session
+        .execute("MATCH (n:Person) WHERE n.age > 90 RETURN n.name")
+        .unwrap();
+    assert!(
+        result.rows.is_empty(),
+        "rolled-back node leaked through range pushdown"
+    );
+}
+
+#[test]
+fn committed_tx_nodes_visible_in_pushdown() {
+    let db = setup();
+    let mut session = db.session();
+
+    // Create a node inside a transaction and commit
+    session.begin_tx().unwrap();
+    session
+        .execute("CREATE (:Person {name: 'Frank', city: 'Berlin', age: 50})")
+        .unwrap();
+    session.commit().unwrap();
+
+    // Equality pushdown should find the committed node
+    let result = session
+        .execute("MATCH (n:Person) WHERE n.name = 'Frank' RETURN n.city")
+        .unwrap();
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0][0], Value::from("Berlin"));
+
+    // Range pushdown should also find it
+    let result = session
+        .execute("MATCH (n:Person) WHERE n.age > 45 RETURN n.name")
+        .unwrap();
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0][0], Value::from("Frank"));
+}

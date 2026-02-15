@@ -1118,7 +1118,7 @@ impl Planner {
             return Ok(None);
         }
 
-        let matching_nodes = if has_indexed_condition {
+        let mut matching_nodes = if has_indexed_condition {
             // Use index-based batch lookup
             let conditions_ref: Vec<(&str, Value)> = conditions
                 .iter()
@@ -1151,6 +1151,12 @@ impl Planner {
                 })
                 .collect()
         };
+
+        // MVCC visibility: filter out nodes not visible at the current epoch/tx.
+        // Without this, rolled-back or uncommitted nodes could leak through.
+        let epoch = self.viewing_epoch;
+        let tx = self.tx_id.unwrap_or(TxId::SYSTEM);
+        matching_nodes.retain(|id| self.store.get_node_versioned(*id, epoch, tx).is_some());
 
         let columns = vec![scan_variable.clone()];
         let node_list_op: Box<dyn Operator> = Box::new(NodeListOperator::new(matching_nodes, 2048));
@@ -1390,6 +1396,11 @@ impl Planner {
                 self.store.nodes_by_label(label).into_iter().collect();
             matching_nodes.retain(|n| label_nodes.contains(n));
         }
+
+        // MVCC visibility: filter out nodes not visible at the current epoch/tx.
+        let epoch = self.viewing_epoch;
+        let tx = self.tx_id.unwrap_or(TxId::SYSTEM);
+        matching_nodes.retain(|id| self.store.get_node_versioned(*id, epoch, tx).is_some());
 
         // Create a NodeListOperator with the matching nodes
         let node_list_op = Box::new(NodeListOperator::new(matching_nodes, 2048));
