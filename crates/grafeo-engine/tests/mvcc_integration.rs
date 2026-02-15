@@ -490,3 +490,151 @@ fn test_session_auto_commit_mode() {
         "Auto-committed data should be visible"
     );
 }
+
+// ==================== Edge type visibility after transaction commit ====================
+
+/// Regression test: edges created on transaction-committed nodes must
+/// retain their type label. Previously, the LpgStore epoch counter was not
+/// synced with the TxManager epoch on commit, so `edge_type()` used a stale
+/// epoch and couldn't see the edge record.
+#[test]
+fn edge_type_visible_after_tx_commit_autocommit_edge() {
+    let db = GrafeoDB::new_in_memory();
+    let mut session = db.session();
+
+    // Create nodes inside a transaction
+    session.begin_tx().unwrap();
+    session.execute("INSERT (:Person {id: 'tx_a'})").unwrap();
+    session.execute("INSERT (:Person {id: 'tx_b'})").unwrap();
+    session.commit().unwrap();
+
+    // Create a typed edge in auto-commit (no transaction)
+    session
+        .execute("MATCH (a {id: 'tx_a'}), (b {id: 'tx_b'}) CREATE (a)-[:KNOWS]->(b)")
+        .unwrap();
+
+    // type(r) must return the edge type, not NULL
+    let result = session
+        .execute("MATCH ({id: 'tx_a'})-[r]->() RETURN type(r) AS t")
+        .unwrap();
+    assert_eq!(result.row_count(), 1, "Edge should exist");
+
+    assert_eq!(
+        result.rows[0][0],
+        Value::String("KNOWS".into()),
+        "Edge type must not be NULL after tx-committed nodes"
+    );
+}
+
+/// Same scenario but the edge is also created inside a new transaction.
+#[test]
+fn edge_type_visible_after_tx_commit_tx_edge() {
+    let db = GrafeoDB::new_in_memory();
+    let mut session = db.session();
+
+    // Create nodes in first transaction
+    session.begin_tx().unwrap();
+    session.execute("INSERT (:Person {id: 'tx2_a'})").unwrap();
+    session.execute("INSERT (:Person {id: 'tx2_b'})").unwrap();
+    session.commit().unwrap();
+
+    // Create edge in a second transaction
+    session.begin_tx().unwrap();
+    session
+        .execute("MATCH (a {id: 'tx2_a'}), (b {id: 'tx2_b'}) CREATE (a)-[:FRIENDS]->(b)")
+        .unwrap();
+    session.commit().unwrap();
+
+    let result = session
+        .execute("MATCH ({id: 'tx2_a'})-[r]->() RETURN type(r) AS t")
+        .unwrap();
+    assert_eq!(result.row_count(), 1);
+    assert_eq!(
+        result.rows[0][0],
+        Value::String("FRIENDS".into()),
+        "Edge type must be visible after two sequential transactions"
+    );
+}
+
+/// Nodes and edges created in the same transaction should work.
+#[test]
+fn edge_type_visible_same_tx() {
+    let db = GrafeoDB::new_in_memory();
+    let mut session = db.session();
+
+    session.begin_tx().unwrap();
+    session.execute("INSERT (:Person {id: 'same_a'})").unwrap();
+    session.execute("INSERT (:Person {id: 'same_b'})").unwrap();
+    session
+        .execute("MATCH (a {id: 'same_a'}), (b {id: 'same_b'}) CREATE (a)-[:WORKS_WITH]->(b)")
+        .unwrap();
+    session.commit().unwrap();
+
+    let result = session
+        .execute("MATCH ({id: 'same_a'})-[r]->() RETURN type(r) AS t")
+        .unwrap();
+    assert_eq!(result.row_count(), 1);
+    assert_eq!(result.rows[0][0], Value::String("WORKS_WITH".into()),);
+}
+
+/// Bulk: many nodes in tx, many typed edges after commit.
+#[test]
+fn edge_types_preserved_bulk_after_tx() {
+    let db = GrafeoDB::new_in_memory();
+    let mut session = db.session();
+
+    // Bulk-create nodes in a transaction
+    session.begin_tx().unwrap();
+    for i in 0..20 {
+        session
+            .execute(&format!("INSERT (:Node {{idx: {i}}})"))
+            .unwrap();
+    }
+    session.commit().unwrap();
+
+    // Create typed edges in auto-commit
+    for i in 0..19 {
+        session
+            .execute(&format!(
+                "MATCH (a {{idx: {i}}}), (b {{idx: {next}}}) CREATE (a)-[:NEXT]->(b)",
+                next = i + 1
+            ))
+            .unwrap();
+    }
+
+    // All 19 edges should have type NEXT
+    let result = session
+        .execute("MATCH ()-[r:NEXT]->() RETURN type(r) AS t")
+        .unwrap();
+    assert_eq!(
+        result.row_count(),
+        19,
+        "All 19 typed edges should be found by type filter"
+    );
+}
+
+/// Interleave auto-commit and transaction node creation.
+#[test]
+fn edge_types_interleaved_autocommit_and_tx() {
+    let db = GrafeoDB::new_in_memory();
+    let mut session = db.session();
+
+    // Auto-commit node
+    session.execute("INSERT (:Person {id: 'auto_x'})").unwrap();
+
+    // Transaction node
+    session.begin_tx().unwrap();
+    session.execute("INSERT (:Person {id: 'tx_y'})").unwrap();
+    session.commit().unwrap();
+
+    // Edge between auto-commit and tx nodes
+    session
+        .execute("MATCH (a {id: 'auto_x'}), (b {id: 'tx_y'}) CREATE (a)-[:LINKED]->(b)")
+        .unwrap();
+
+    let result = session
+        .execute("MATCH ({id: 'auto_x'})-[r]->() RETURN type(r) AS t")
+        .unwrap();
+    assert_eq!(result.row_count(), 1);
+    assert_eq!(result.rows[0][0], Value::String("LINKED".into()),);
+}

@@ -151,3 +151,79 @@ class TestGQLTransactionIsolationLevels:
 
         with pytest.raises(ValueError, match="Unknown isolation level"):
             db.begin_transaction(isolation_level="bogus")
+
+
+class TestEdgeTypeVisibilityAfterTransaction:
+    """Regression tests: edge types must survive transaction-committed nodes.
+
+    Previously, the LpgStore epoch counter was not synced with the
+    TxManager epoch on commit, so edge_type() used a stale epoch and
+    couldn't see edge records created at the post-commit epoch.
+    """
+
+    def test_tx_nodes_autocommit_edge_type(self, db):
+        """Nodes in tx, edge in auto-commit: type(r) must not be NULL."""
+        with db.begin_transaction() as tx:
+            tx.execute("INSERT (:Person {id: 'txpy_a'})")
+            tx.execute("INSERT (:Person {id: 'txpy_b'})")
+            tx.commit()
+
+        db.execute(
+            "MATCH (a {id: 'txpy_a'}), (b {id: 'txpy_b'}) CREATE (a)-[:KNOWS]->(b)"
+        )
+
+        rows = list(db.execute("MATCH ({id: 'txpy_a'})-[r]->() RETURN type(r) AS t"))
+        assert len(rows) == 1, "Edge should exist"
+        assert rows[0]["t"] == "KNOWS", (
+            f"Edge type must be 'KNOWS', got {rows[0]['t']!r}"
+        )
+
+    def test_tx_nodes_tx_edge_type(self, db):
+        """Nodes in first tx, edge in second tx: type(r) must be correct."""
+        with db.begin_transaction() as tx:
+            tx.execute("INSERT (:Person {id: 'txpy2_a'})")
+            tx.execute("INSERT (:Person {id: 'txpy2_b'})")
+            tx.commit()
+
+        with db.begin_transaction() as tx:
+            tx.execute(
+                "MATCH (a {id: 'txpy2_a'}), (b {id: 'txpy2_b'}) "
+                "CREATE (a)-[:FRIENDS]->(b)"
+            )
+            tx.commit()
+
+        rows = list(db.execute("MATCH ({id: 'txpy2_a'})-[r]->() RETURN type(r) AS t"))
+        assert len(rows) == 1
+        assert rows[0]["t"] == "FRIENDS"
+
+    def test_interleaved_autocommit_and_tx(self, db):
+        """Auto-commit node + tx node, then typed edge."""
+        db.execute("INSERT (:Person {id: 'pyauto_x'})")
+
+        with db.begin_transaction() as tx:
+            tx.execute("INSERT (:Person {id: 'pytx_y'})")
+            tx.commit()
+
+        db.execute(
+            "MATCH (a {id: 'pyauto_x'}), (b {id: 'pytx_y'}) CREATE (a)-[:LINKED]->(b)"
+        )
+
+        rows = list(db.execute("MATCH ({id: 'pyauto_x'})-[r]->() RETURN type(r) AS t"))
+        assert len(rows) == 1
+        assert rows[0]["t"] == "LINKED"
+
+    def test_edge_type_filter_after_tx(self, db):
+        """Type-filtered MATCH must find edges after tx commit."""
+        with db.begin_transaction() as tx:
+            tx.execute("INSERT (:Person {id: 'filter_a'})")
+            tx.execute("INSERT (:Person {id: 'filter_b'})")
+            tx.commit()
+
+        db.execute(
+            "MATCH (a {id: 'filter_a'}), (b {id: 'filter_b'}) "
+            "CREATE (a)-[:WORKS_AT]->(b)"
+        )
+
+        rows = list(db.execute("MATCH ()-[r:WORKS_AT]->() RETURN type(r) AS t"))
+        assert len(rows) >= 1, "Type-filtered MATCH should find the edge"
+        assert all(r["t"] == "WORKS_AT" for r in rows)

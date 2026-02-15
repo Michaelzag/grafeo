@@ -359,6 +359,15 @@ impl LpgStore {
         EpochId::new(id)
     }
 
+    /// Syncs the store epoch to match an external epoch counter.
+    ///
+    /// Used by the transaction manager to keep the store's epoch in step
+    /// after a transaction commit advances the global epoch.
+    pub fn sync_epoch(&self, epoch: EpochId) {
+        self.current_epoch
+            .fetch_max(epoch.as_u64(), Ordering::AcqRel);
+    }
+
     // === Node Operations ===
 
     /// Creates a new node with the given labels.

@@ -777,6 +777,11 @@ impl Session {
 
         self.tx_manager.commit(tx_id)?;
 
+        // Sync the LpgStore epoch with the TxManager so that
+        // convenience lookups (edge_type, get_edge, get_node) that use
+        // store.current_epoch() can see versions created at the latest epoch.
+        self.store.sync_epoch(self.tx_manager.current_epoch());
+
         // Auto-GC: periodically prune old MVCC versions
         if self.gc_interval > 0 {
             let count = self.commit_counter.fetch_add(1, Ordering::Relaxed) + 1;
