@@ -11,7 +11,9 @@
 
 # Grafeo
 
-Grafeo is a high-performance graph database with a Rust core and no required C dependencies, that can be embedded as a library or run as a standalone database, with optional in-memory or persistent storage. Optional allocators (jemalloc/mimalloc) and TLS use C libraries for performance. Grafeo supports both **Labeled Property Graph (LPG)** and **Resource Description Framework (RDF)** graph data models and all major query languages.
+Grafeo is a high-performance graph database with a Rust core and no required C dependencies, that can be embedded as a library or run as a standalone database, with optional in-memory or persistent storage. 
+
+Grafeo supports both **Labeled Property Graph (LPG)** and **Resource Description Framework (RDF)** graph data models and all major query languages.
 
 ## Features
 
