@@ -235,35 +235,38 @@ impl super::GrafeoDB {
     /// Drops and recreates a vector index, rescanning all matching nodes.
     ///
     /// This is useful after bulk inserts or when the index may be out of sync.
-    /// The previous index configuration (dimensions, metric, M, ef\_construction)
-    /// is preserved.
+    /// When the index still exists, the previous configuration (dimensions,
+    /// metric, M, ef\_construction) is preserved. When it has already been
+    /// dropped, dimensions are inferred from existing data and default
+    /// parameters are used.
     ///
     /// # Errors
     ///
-    /// Returns an error if no vector index exists for this label+property pair,
-    /// or if the rebuild fails (e.g., no matching vectors found).
+    /// Returns an error if the rebuild fails (e.g., no matching vectors found
+    /// and no dimensions can be inferred).
     #[cfg(feature = "vector-index")]
     pub fn rebuild_vector_index(&self, label: &str, property: &str) -> Result<()> {
+        // Preserve config from existing index if available
         let config = self
             .store
             .get_vector_index(label, property)
-            .map(|idx| idx.config().clone())
-            .ok_or_else(|| {
-                grafeo_common::utils::error::Error::Internal(format!(
-                    "No vector index found for :{label}({property}). Cannot rebuild."
-                ))
-            })?;
+            .map(|idx| idx.config().clone());
 
         self.store.remove_vector_index(label, property);
 
-        self.create_vector_index(
-            label,
-            property,
-            Some(config.dimensions),
-            Some(config.metric.name()),
-            Some(config.m),
-            Some(config.ef_construction),
-        )
+        if let Some(config) = config {
+            self.create_vector_index(
+                label,
+                property,
+                Some(config.dimensions),
+                Some(config.metric.name()),
+                Some(config.m),
+                Some(config.ef_construction),
+            )
+        } else {
+            // Index was already dropped – infer dimensions from data
+            self.create_vector_index(label, property, None, None, None, None)
+        }
     }
 
     // =========================================================================

@@ -174,6 +174,12 @@ impl super::Planner {
             );
         }
 
+        // Register all aggregate output columns as scalar (group-by values and
+        // aggregate results are materialized scalar values, not entity references)
+        for col in &output_columns {
+            self.scalar_columns.borrow_mut().insert(col.clone());
+        }
+
         // Choose operator based on whether there are group-by columns
         let mut operator: Box<dyn Operator> = if group_columns.is_empty() {
             Box::new(SimpleAggregateOperator::new(

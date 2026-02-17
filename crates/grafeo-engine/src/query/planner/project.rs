@@ -270,7 +270,6 @@ impl super::Planner {
                 .alias
                 .clone()
                 .unwrap_or_else(|| expression_to_string(&projection.expression));
-            output_columns.push(col_name);
 
             match &projection.expression {
                 LogicalExpression::Variable(name) => {
@@ -279,6 +278,12 @@ impl super::Planner {
                     })?;
                     projections.push(ProjectExpr::Column(col_idx));
                     output_types.push(LogicalType::Node);
+                    // Propagate scalar/edge status from input variable to output alias
+                    if self.scalar_columns.borrow().contains(name) {
+                        self.scalar_columns.borrow_mut().insert(col_name.clone());
+                    } else if self.edge_columns.borrow().contains(name) {
+                        self.edge_columns.borrow_mut().insert(col_name.clone());
+                    }
                 }
                 LogicalExpression::Property { variable, property } => {
                     let col_idx = *variable_columns.get(variable).ok_or_else(|| {
@@ -289,10 +294,14 @@ impl super::Planner {
                         property: property.clone(),
                     });
                     output_types.push(LogicalType::Any);
+                    // Property access produces a scalar value
+                    self.scalar_columns.borrow_mut().insert(col_name.clone());
                 }
                 LogicalExpression::Literal(value) => {
                     projections.push(ProjectExpr::Constant(value.clone()));
                     output_types.push(value_to_logical_type(value));
+                    // Literals are scalar values
+                    self.scalar_columns.borrow_mut().insert(col_name.clone());
                 }
                 _ => {
                     // For complex expressions, use full expression evaluation
@@ -302,8 +311,12 @@ impl super::Planner {
                         variable_columns: variable_columns.clone(),
                     });
                     output_types.push(LogicalType::Any);
+                    // Expression results are scalar values
+                    self.scalar_columns.borrow_mut().insert(col_name.clone());
                 }
             }
+
+            output_columns.push(col_name);
         }
 
         let operator = Box::new(ProjectOperator::with_store(
