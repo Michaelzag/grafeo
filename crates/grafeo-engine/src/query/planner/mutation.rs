@@ -20,18 +20,15 @@ impl super::Planner {
         let output_column = columns.len();
         columns.push(create.variable.clone());
 
-        // Convert properties (with constant-folding for lists and function calls)
+        // Convert properties — resolve variables/property access from input columns
         let properties: Vec<(String, PropertySource)> = create
             .properties
             .iter()
             .map(|(name, expr)| {
-                let source = match Self::try_fold_expression(expr) {
-                    Some(value) => PropertySource::Constant(value),
-                    None => PropertySource::Constant(grafeo_common::types::Value::Null),
-                };
-                (name.clone(), source)
+                let source = self.expression_to_property_source(expr, &columns)?;
+                Ok((name.clone(), source))
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
 
         let output_schema = self.derive_schema_from_columns(&columns);
 
@@ -85,18 +82,15 @@ impl super::Planner {
             idx
         });
 
-        // Convert properties (with constant-folding for function calls like vector())
+        // Convert properties — resolve variables/property access from input columns
         let properties: Vec<(String, PropertySource)> = create
             .properties
             .iter()
             .map(|(name, expr)| {
-                let source = match Self::try_fold_expression(expr) {
-                    Some(value) => PropertySource::Constant(value),
-                    None => PropertySource::Constant(grafeo_common::types::Value::Null),
-                };
-                (name.clone(), source)
+                let source = self.expression_to_property_source(expr, &columns)?;
+                Ok((name.clone(), source))
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
 
         let output_schema = self.derive_schema_from_columns(&columns);
 
@@ -741,6 +735,18 @@ impl super::Planner {
                     Error::Internal(format!("Variable '{}' not found for property source", name))
                 })?;
                 Ok(PropertySource::Column(col_idx))
+            }
+            LogicalExpression::Property { variable, property } => {
+                let col_idx = columns.iter().position(|c| c == variable).ok_or_else(|| {
+                    Error::Internal(format!(
+                        "Variable '{}' not found for property access '{}.{}'",
+                        variable, variable, property
+                    ))
+                })?;
+                Ok(PropertySource::PropertyAccess {
+                    column: col_idx,
+                    property: property.clone(),
+                })
             }
             LogicalExpression::Parameter(name) => {
                 // Parameters should be resolved before planning
