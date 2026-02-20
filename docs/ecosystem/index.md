@@ -36,7 +36,7 @@ The GrafeoDB ecosystem extends beyond the core database with AI/LLM integrations
 
     [:octicons-arrow-right-24: Learn more](anywidget-graph.md)
 
--   :material-web:{ .lg .middle } **grafeo-web** *(coming in 0.4.x)*
+-   :material-web:{ .lg .middle } **grafeo-web**
 
     ---
 

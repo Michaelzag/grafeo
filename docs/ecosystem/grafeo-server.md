@@ -7,10 +7,13 @@ Standalone HTTP server and web UI for the Grafeo graph database.
 
 ## Overview
 
-grafeo-server wraps the Grafeo engine in a REST API, turning it from an embeddable library into a standalone database server. Pure Rust, single binary.
+grafeo-server wraps the Grafeo engine in a REST API and GQL Wire Protocol (gRPC), turning it from an embeddable library into a standalone database server. Pure Rust, single binary.
 
 - **REST API** with auto-commit and explicit transaction modes
+- **GQL Wire Protocol** (gRPC) on port 7687 for binary wire-protocol clients
 - **Multi-language queries**: GQL, Cypher, GraphQL, Gremlin, SPARQL, SQL/PGQ
+- **Admin API**: database stats, WAL management, integrity validation, index management
+- **Search API**: vector (KNN/HNSW), text (BM25), and hybrid search
 - **Batch queries** with atomic rollback
 - **WebSocket streaming** for interactive query execution
 - **Web UI** (Studio) for interactive query exploration
@@ -28,7 +31,7 @@ Three variants are published to Docker Hub on every release:
 | **standard** | `grafeo-server:latest` | All 6 | All + AI/search | Yes | No |
 | **full** | `grafeo-server:full` | All 6 | All + AI + ONNX embed | Yes | Yes |
 
-Versioned tags follow the pattern: `0.3.0`, `0.3.0-lite`, `0.3.0-full`.
+Versioned tags follow the pattern: `0.4.3`, `0.4.3-lite`, `0.4.3-full`.
 
 ### Lite
 
@@ -98,6 +101,7 @@ grafeo-server                        # in-memory
 | `POST /graphql` | GraphQL | `{"query": "{ Person { name age } }"}` |
 | `POST /gremlin` | Gremlin | `{"query": "g.V().hasLabel('Person').values('name')"}` |
 | `POST /sparql` | SPARQL | `{"query": "SELECT ?s WHERE { ?s a foaf:Person }"}` |
+| `POST /sql` | SQL/PGQ | `{"query": "CALL grafeo.procedures() YIELD name"}` |
 | `POST /batch` | Mixed | Multiple queries in one atomic transaction |
 
 ```bash
@@ -131,6 +135,33 @@ Connect to `ws://localhost:7474/ws` for interactive query execution:
 {"type": "query", "id": "q1", "query": "MATCH (n) RETURN n", "language": "gql"}
 ```
 
+### Admin
+
+Database introspection, maintenance, and index management:
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /admin/{db}/stats` | Node/edge/label/property counts, memory, disk usage |
+| `GET /admin/{db}/wal` | WAL status (enabled, path, size, record count) |
+| `POST /admin/{db}/wal/checkpoint` | Force WAL checkpoint |
+| `GET /admin/{db}/validate` | Database integrity validation |
+| `POST /admin/{db}/index` | Create property, vector, or text index |
+| `DELETE /admin/{db}/index` | Drop an index |
+
+### Search
+
+Vector, text, and hybrid search (requires `vector-index`, `text-index`, `hybrid-search` features):
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /search/vector` | KNN vector similarity search via HNSW index |
+| `POST /search/text` | Full-text BM25 search |
+| `POST /search/hybrid` | Combined vector + text search with rank fusion |
+
+### GQL Wire Protocol (GWP)
+
+The lite and full builds include a gRPC-based binary wire protocol on port 7687. All query, transaction, database, admin, and search operations are available over gRPC. Configure with `--gwp-port` or `GRAFEO_GWP_PORT`.
+
 ### Health & Feature Discovery
 
 ```bash
@@ -142,7 +173,7 @@ The health endpoint reports which features are compiled into the running server:
 ```json
 {
   "status": "ok",
-  "version": "0.3.0",
+  "version": "0.4.3",
   "features": {
     "languages": ["gql", "cypher", "sparql", "gremlin", "graphql", "sql-pgq"],
     "engine": ["parallel", "wal", "spill", "mmap", "rdf", "vector-index", "text-index", "hybrid-search", "cdc"],
@@ -165,6 +196,8 @@ Environment variables (prefix `GRAFEO_`), overridden by CLI flags:
 | `GRAFEO_CORS_ORIGINS` | _(none)_ | Comma-separated allowed origins (`*` for all) |
 | `GRAFEO_LOG_LEVEL` | `info` | Tracing log level |
 | `GRAFEO_LOG_FORMAT` | `pretty` | Log format: `pretty` or `json` |
+| `GRAFEO_GWP_PORT` | `7687` | GQL Wire Protocol (gRPC) port |
+| `GRAFEO_GWP_MAX_SESSIONS` | `0` | Max concurrent GWP sessions (0 = unlimited) |
 | `GRAFEO_RATE_LIMIT` | `0` | Max requests per window per IP (0 = disabled) |
 
 ### Authentication (full variant)

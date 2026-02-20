@@ -298,7 +298,7 @@ def execute_with_retry(db, query, max_retries=3):
 db.wal_checkpoint()
 ```
 
-Or configure automatic checkpointing (planned for 0.4.x).
+Or configure automatic checkpointing via `wal_checkpoint()` intervals.
 
 ---
 
@@ -334,14 +334,13 @@ If an issue persists:
 
 ### Can I use Grafeo in production?
 
-Grafeo is currently at version 0.3.x and approaching production readiness. It's suitable for:
+Grafeo is currently at version 0.5.x (beta) and approaching production readiness. It's suitable for:
 
 - Embedded analytics applications
 - Data science workflows
 - Microservices with local graph state
 - Applications with controlled deployment environments
-
-For high-availability or distributed scenarios, wait for 0.5.x (beta).
+- AI/ML workloads with vector and text search
 
 ### How do I migrate from Neo4j?
 
