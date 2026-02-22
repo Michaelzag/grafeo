@@ -35,3 +35,11 @@ Total Cost = CPU_cost * cpu_weight
 | Filter | input_rows * selectivity |
 | Hash Join | build_rows + probe_rows |
 | Sort | rows * log(rows) |
+
+## Statistics-Driven Estimation (0.5.8+)
+
+!!! note "Improved in 0.5.8"
+    As of version 0.5.8, the cost model uses real fanout derived from graph statistics
+    (average degree, label cardinalities, edge-type frequencies) instead of hardcoded
+    defaults. This leads to significantly better plan selection for traversal-heavy queries,
+    especially on graphs with skewed degree distributions.

@@ -28,7 +28,7 @@ let edge_id = EdgeId(100);
 ```rust
 let v = Value::Int64(42);
 let v = Value::String("hello".into());
-let v = Value::List(vec![Value::Int64(1), Value::Int64(2)]);
+let v = Value::List(vec![Value::Int64(1), Value::Int64(2)].into());
 ```
 
 ### LogicalType
@@ -42,10 +42,11 @@ let t = LogicalType::List(Box::new(LogicalType::Int64));
 ## Memory
 
 ```rust
-use grafeo_common::memory::{Arena, Pool};
+use grafeo_common::memory::{Arena, ObjectPool};
+use grafeo_common::types::EpochId;
 
-let arena = Arena::new();
-let data = arena.alloc(MyStruct::new());
+let arena = Arena::new(EpochId(0));
+let data = arena.alloc_value(MyStruct::new());
 ```
 
 ## Utilities

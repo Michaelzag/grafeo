@@ -33,7 +33,7 @@ pub trait StorageBackend: Send + Sync {
 |---------|-------------|
 | `MemoryBackend` | In-memory storage |
 | `FileBackend` | File-based persistent storage |
-| `WalBackend` | Write-ahead log for durability |
+| `WalManager` | Write-ahead log for durability |
 
 ## Custom Backend Example
 
@@ -81,7 +81,7 @@ impl StorageBackend for RedisBackend {
 ## Using Custom Backend
 
 ```rust
-use grafeo::{Database, Config};
+use grafeo::{GrafeoDB, Config};
 
 let backend = Box::new(RedisBackend::new("redis://localhost")?);
 
@@ -89,7 +89,7 @@ let config = Config::builder()
     .storage_backend(backend)
     .build()?;
 
-let db = Database::open_with_config("my_graph", config)?;
+let db = GrafeoDB::with_config(config)?;
 ```
 
 ## Backend Requirements

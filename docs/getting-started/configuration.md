@@ -25,9 +25,9 @@ For temporary data or maximum performance:
 === "Rust"
 
     ```rust
-    use grafeo::Database;
+    use grafeo::GrafeoDB;
 
-    let db = Database::open_in_memory()?;
+    let db = GrafeoDB::new_in_memory()?;
     ```
 
 !!! note "Data Persistence"
@@ -49,9 +49,9 @@ For durable storage:
 === "Rust"
 
     ```rust
-    use grafeo::Database;
+    use grafeo::GrafeoDB;
 
-    let db = Database::open("my_graph.db")?;
+    let db = GrafeoDB::new("my_graph.db")?;
     ```
 
 ## Configuration Options
@@ -72,13 +72,13 @@ Control the maximum memory usage:
 === "Rust"
 
     ```rust
-    use grafeo::{Database, Config};
+    use grafeo::{GrafeoDB, Config};
 
     let config = Config::builder()
         .memory_limit(4 * 1024 * 1024 * 1024)  // 4 GB
         .build()?;
 
-    let db = Database::open_with_config("my_graph.db", config)?;
+    let db = GrafeoDB::with_config(config)?;
     ```
 
 ### Thread Pool Size
@@ -97,13 +97,13 @@ Configure parallelism:
 === "Rust"
 
     ```rust
-    use grafeo::{Database, Config};
+    use grafeo::{GrafeoDB, Config};
 
     let config = Config::builder()
         .threads(8)
         .build()?;
 
-    let db = Database::open_with_config("my_graph.db", config)?;
+    let db = GrafeoDB::with_config(config)?;
     ```
 
 !!! tip "Default Thread Count"

@@ -17,7 +17,7 @@ Transaction management.
 Execute a query within the transaction.
 
 ```python
-def execute(self, query: str) -> QueryResult
+def execute(self, query: str, params: Optional[Dict] = None) -> QueryResult
 ```
 
 ### execute_sparql()
@@ -42,6 +42,26 @@ Rollback the transaction.
 
 ```python
 def rollback(self) -> None
+```
+
+## Properties
+
+### isolation_level
+
+The isolation level of this transaction.
+
+```python
+@property
+def isolation_level(self) -> str
+```
+
+### is_active
+
+Whether the transaction is still active (not yet committed or rolled back).
+
+```python
+@property
+def is_active(self) -> bool
 ```
 
 ## Context Manager

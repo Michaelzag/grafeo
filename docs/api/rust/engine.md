@@ -46,7 +46,7 @@ for row in result.rows {
 
 ```rust
 let mut session = db.session();
-session.begin()?;
+session.begin_tx()?;
 session.execute("...")?;
 session.commit()?;
 // or

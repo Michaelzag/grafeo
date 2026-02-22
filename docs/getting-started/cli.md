@@ -97,7 +97,7 @@ grafeo shell ./mydb
 ```
 
 ```
-Grafeo 0.4.4 - Lpg mode, 42 nodes, 87 edges
+Grafeo 0.5.8 - Lpg mode, 42 nodes, 87 edges
 Type :help for commands, :quit to exit.
 
 grafeo> MATCH (n:Person) RETURN n.name, n.age
@@ -208,7 +208,7 @@ grafeo completions powershell >> $PROFILE
 
 ```bash
 $ grafeo version
-grafeo 0.4.4
+grafeo 0.5.8
 
 Build:
   rustc:    1.91.1
@@ -262,7 +262,7 @@ The Python API provides the same functionality programmatically:
 ```python
 import grafeo
 
-db = grafeo.GrafeoDB.open("./mydb")
+db = grafeo.GrafeoDB("./mydb")
 
 # Equivalent to: grafeo info ./mydb
 print(db.info())
@@ -277,8 +277,7 @@ print(db.schema())
 print(db.validate())
 
 # Equivalent to: grafeo query ./mydb "MATCH (n) RETURN n"
-session = db.session()
-result = session.execute("MATCH (n) RETURN n")
+result = db.execute("MATCH (n) RETURN n")
 ```
 
 ## Migrating from the Python CLI

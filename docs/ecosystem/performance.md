@@ -289,16 +289,16 @@ db.execute("MATCH (n:Person)-[:KNOWS*1..5]->(m) RETURN n, m LIMIT 1000")
 
 ### Memory Configuration
 
-For large graphs, configure memory limits:
+For large graphs, configure memory limits via GQL:
 
 ```python
-from grafeo import Config, GrafeoDB
+from grafeo import GrafeoDB
 
-config = Config.in_memory()
-config.memory_limit = 8 * 1024 * 1024 * 1024  # 8GB
-config.spill_path = "/tmp/grafeo_spill"
+db = GrafeoDB()
 
-db = GrafeoDB.with_config(config)
+# Set memory limit via database configuration
+db.execute("SET DATABASE OPTION memory_limit = 8589934592")   # 8GB
+db.execute("SET DATABASE OPTION spill_path = '/tmp/grafeo_spill'")
 ```
 
 ---

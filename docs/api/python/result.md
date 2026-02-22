@@ -15,6 +15,8 @@ Query result iterator.
 | Property | Type | Description |
 |----------|------|-------------|
 | `columns` | `List[str]` | Column names |
+| `execution_time_ms` | `float` | Query execution time in milliseconds |
+| `rows_scanned` | `int` | Number of rows scanned during query execution |
 
 ## Methods
 
@@ -27,6 +29,22 @@ for row in result:
     print(row['column_name'])
 ```
 
+### __getitem__()
+
+Access a row by index.
+
+```python
+row = result[0]
+```
+
+### __len__()
+
+Get the number of rows in the result.
+
+```python
+count = len(result)
+```
+
 ### to_list()
 
 Convert to list of dicts.
@@ -35,20 +53,28 @@ Convert to list of dicts.
 def to_list(self) -> List[Dict[str, Any]]
 ```
 
-### fetchone()
+### scalar()
 
-Fetch one row.
+Return the first column of the first row as a scalar value.
 
 ```python
-def fetchone(self) -> Optional[Dict[str, Any]]
+def scalar(self) -> Any
 ```
 
-### fetchall()
+### nodes()
 
-Fetch all rows.
+Return all nodes from the result.
 
 ```python
-def fetchall(self) -> List[Dict[str, Any]]
+def nodes(self) -> List[Node]
+```
+
+### edges()
+
+Return all edges from the result.
+
+```python
+def edges(self) -> List[Edge]
 ```
 
 ## Example
@@ -60,6 +86,18 @@ result = db.execute("MATCH (p:Person) RETURN p.name, p.age")
 for row in result:
     print(row['p.name'])
 
-# Or convert to list
-rows = list(result)
+# Length
+print(f"Found {len(result)} rows")
+
+# Index access
+first_row = result[0]
+
+# Convert to list
+rows = result.to_list()
+
+# Scalar value
+count = db.execute("MATCH (n) RETURN count(n)").scalar()
+
+# Get nodes
+nodes = db.execute("MATCH (n:Person) RETURN n").nodes()
 ```

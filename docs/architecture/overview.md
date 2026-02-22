@@ -48,7 +48,7 @@ sequenceDiagram
 
 ### Query Processing
 
-1. **Parser** - GQL/Cypher to AST
+1. **Parser** - GQL/Cypher/SPARQL/Gremlin/GraphQL/SQL-PGQ to AST
 2. **Binder** - Semantic analysis and type checking
 3. **Planner** - AST to logical plan
 4. **Optimizer** - Cost-based optimization
@@ -58,7 +58,7 @@ sequenceDiagram
 
 1. **LPG Store** - Node and edge storage
 2. **Property Store** - Columnar property storage
-3. **Indexes** - Hash, B-tree, adjacency
+3. **Indexes** - Hash, adjacency, trie, vector (HNSW), text (BM25), ring
 4. **WAL** - Durability and recovery
 
 ### Memory

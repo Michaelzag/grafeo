@@ -36,7 +36,7 @@ Operations work on DataChunks:
 
 ```rust
 struct DataChunk {
-    columns: Vec<Vector>,
+    columns: Vec<ValueVector>,
     selection: Option<SelectionVector>,
     count: usize,
 }

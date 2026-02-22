@@ -67,7 +67,7 @@ See each project's CONTRIBUTING.md for specific instructions.
 
 | Layer | Technology |
 |-------|------------|
-| Core | Rust, Arrow, Polars |
+| Core | Rust (custom columnar storage, MVCC) |
 | Python | PyO3, maturin |
 | Server | Axum, Tower, Docker |
 | Browser | WebAssembly, IndexedDB |
@@ -92,7 +92,7 @@ Contributors are recognized in:
 
 ## Current Maintainers
 
-- **S.T. Grond** ([@stgrond](https://github.com/StevenBtw)): Architect
+- **S.T. Grond** ([@StevenBtw](https://github.com/StevenBtw)): Architect
 
 ## License
 

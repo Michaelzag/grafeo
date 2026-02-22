@@ -23,6 +23,18 @@ Grafeo supports multiple query paradigms. This section compares the languages an
 
     Detailed comparison of SPARQL and GQL query languages.
 
+-   **[Gremlin vs GQL](gremlin-vs-gql.md)**
+
+    ---
+
+    Compare Gremlin traversal language with GQL pattern matching.
+
+-   **[GraphQL vs GQL](graphql-vs-gql.md)**
+
+    ---
+
+    Compare GraphQL (API query language) with GQL (graph database query language).
+
 -   **[GQL vs SPARQL Concepts](../user-guide/data-model/gql-vs-sparql.md)**
 
     ---

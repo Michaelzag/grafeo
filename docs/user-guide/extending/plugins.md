@@ -61,13 +61,13 @@ fn my_function_impl(args: &[Value]) -> Result<Value> {
 ## Loading Plugins
 
 ```rust
-use grafeo::{Database, Config};
+use grafeo::{GrafeoDB, Config};
 
 let config = Config::builder()
     .plugin_dir("./plugins")
     .build()?;
 
-let db = Database::open_with_config("my_graph.db", config)?;
+let db = GrafeoDB::with_config(config)?;
 ```
 
 ## Built-in Plugin Types

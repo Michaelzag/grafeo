@@ -211,7 +211,7 @@ Grafeo supports both query languages:
 ```toml
 # Enable both features
 [dependencies]
-grafeo-engine = { version = "0.2", features = ["gql", "sparql"] }
+grafeo = { version = "0.5", features = ["gql", "sparql"] }
 ```
 
 === "SPARQL Query"
@@ -222,7 +222,7 @@ grafeo-engine = { version = "0.2", features = ["gql", "sparql"] }
     db = grafeo.GrafeoDB()
 
     # SPARQL query
-    result = db.sparql("""
+    result = db.execute_sparql("""
         PREFIX foaf: <http://xmlns.com/foaf/0.1/>
         SELECT ?name
         WHERE { ?person foaf:name ?name }
@@ -237,7 +237,7 @@ grafeo-engine = { version = "0.2", features = ["gql", "sparql"] }
     db = grafeo.GrafeoDB()
 
     # GQL query
-    result = db.query("""
+    result = db.execute("""
         MATCH (person:Person)
         RETURN person.name
     """)

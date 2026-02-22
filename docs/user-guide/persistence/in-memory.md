@@ -24,9 +24,9 @@ In-memory mode provides the fastest performance by keeping all data in RAM.
 === "Rust"
 
     ```rust
-    use grafeo::Database;
+    use grafeo::GrafeoDB;
 
-    let db = Database::open_in_memory()?;
+    let db = GrafeoDB::new_in_memory()?;
     ```
 
 ## Characteristics

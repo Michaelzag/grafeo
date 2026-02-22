@@ -14,7 +14,7 @@ Accurate cardinality estimation is crucial for plan selection.
 
 | Statistic | Purpose |
 |-----------|---------|
-| Row count | Base cardinality |
+| Element count | Base cardinality (nodes/edges per label) |
 | Distinct count | Join estimation |
 | Histograms | Range selectivity |
 | Null fraction | Null handling |
@@ -32,8 +32,7 @@ selectivity = (high - low) / (max - min)
 output_rows = (rows_a * rows_b) / max(distinct_a, distinct_b)
 ```
 
-## ANALYZE Command
+## Statistics Collection
 
-```sql
-ANALYZE  -- Collect statistics for all tables
-```
+Statistics are collected automatically by the query engine during graph operations.
+Grafeo tracks per-label and per-property statistics for cardinality estimation.

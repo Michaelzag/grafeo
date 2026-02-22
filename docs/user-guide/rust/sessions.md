@@ -13,7 +13,7 @@ Sessions provide transactional access to the database.
 ## Creating Sessions
 
 ```rust
-let db = Database::open_in_memory()?;
+let db = GrafeoDB::new_in_memory()?;
 
 // Create a session
 let session = db.session()?;
@@ -28,7 +28,7 @@ session.execute("INSERT (:Person {name: 'Alice'})")?;
 let session = db.session()?;
 
 // Begin explicit transaction
-session.begin()?;
+session.begin_tx()?;
 
 session.execute("INSERT (:Person {name: 'Alice'})")?;
 session.execute("INSERT (:Person {name: 'Bob'})")?;
@@ -42,7 +42,7 @@ session.commit()?;
 ```rust
 let session = db.session()?;
 
-session.begin()?;
+session.begin_tx()?;
 session.execute("INSERT (:Person {name: 'Alice'})")?;
 
 // Something went wrong, rollback
@@ -65,13 +65,13 @@ session.transaction(|tx| {
 ## Multiple Sessions
 
 ```rust
-let db = Database::open_in_memory()?;
+let db = GrafeoDB::new_in_memory()?;
 
 // Each session has isolated transactions
 let session1 = db.session()?;
 let session2 = db.session()?;
 
-session1.begin()?;
+session1.begin_tx()?;
 session1.execute("INSERT (:Person {name: 'Alice'})")?;
 // session2 won't see Alice until session1 commits
 

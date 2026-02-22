@@ -16,13 +16,13 @@ Core graph storage and execution engine.
 use grafeo_core::graph::lpg::{LpgStore, NodeRecord, EdgeRecord};
 
 let store = LpgStore::new();
-let node_id = store.create_node(&["Person"], props);
+let node_id = store.create_node(&["Person"]);
 ```
 
 ## Indexes
 
 ```rust
-use grafeo_core::index::{HashIndex, BTreeIndex};
+use grafeo_core::index::HashIndex;
 
 let index: HashIndex<String, NodeId> = HashIndex::new();
 index.insert("Alice".into(), node_id);
@@ -31,9 +31,9 @@ index.insert("Alice".into(), node_id);
 ## Execution
 
 ```rust
-use grafeo_core::execution::{DataChunk, Vector, SelectionVector};
+use grafeo_core::execution::{DataChunk, ValueVector, SelectionVector};
 
-let chunk = DataChunk::new(columns, 1024);
+let chunk = DataChunk::empty();
 ```
 
 ## Note

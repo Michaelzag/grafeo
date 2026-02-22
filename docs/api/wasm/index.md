@@ -66,8 +66,9 @@ db.dropTextIndex("Document", "content");
 Combine BM25 text scores with HNSW vector similarity:
 
 ```javascript
-db.createTextIndex("Document", "content");
-db.createVectorIndex("Document", "embedding", { dimensions: 384 });
+// Create indexes via GQL queries
+db.execute("CREATE TEXT INDEX ON Document(content)");
+db.execute("CREATE VECTOR INDEX ON Document(embedding) OPTIONS {dimensions: 384}");
 
 const results = db.hybridSearch(
     "Document",
@@ -76,6 +77,10 @@ const results = db.hybridSearch(
     10                                // top-k
 );
 ```
+
+!!! note "Vector Index Creation"
+    The `createVectorIndex` method is not available in the WASM bindings.
+    Use a GQL `CREATE VECTOR INDEX` query via `db.execute()` instead.
 
 ## Snapshots (Persistence)
 

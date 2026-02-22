@@ -41,7 +41,7 @@ db = grafeo.GrafeoDB("my_graph.db")
 Execute a GQL query.
 
 ```python
-def execute(self, query: str) -> QueryResult
+def execute(self, query: str, params: Optional[Dict] = None) -> QueryResult
 ```
 
 ### execute_cypher()
@@ -49,7 +49,7 @@ def execute(self, query: str) -> QueryResult
 Execute a Cypher query.
 
 ```python
-def execute_cypher(self, query: str) -> QueryResult
+def execute_cypher(self, query: str, params: Optional[Dict] = None) -> QueryResult
 ```
 
 ### execute_gremlin()
@@ -57,7 +57,7 @@ def execute_cypher(self, query: str) -> QueryResult
 Execute a Gremlin query.
 
 ```python
-def execute_gremlin(self, query: str) -> QueryResult
+def execute_gremlin(self, query: str, params: Optional[Dict] = None) -> QueryResult
 ```
 
 ### execute_graphql()
@@ -65,7 +65,7 @@ def execute_gremlin(self, query: str) -> QueryResult
 Execute a GraphQL query.
 
 ```python
-def execute_graphql(self, query: str) -> QueryResult
+def execute_graphql(self, query: str, params: Optional[Dict] = None) -> QueryResult
 ```
 
 ### execute_sparql()
@@ -73,7 +73,15 @@ def execute_graphql(self, query: str) -> QueryResult
 Execute a SPARQL query.
 
 ```python
-def execute_sparql(self, query: str) -> QueryResult
+def execute_sparql(self, query: str, params: Optional[Dict] = None) -> QueryResult
+```
+
+### execute_sql()
+
+Execute a SQL/PGQ query.
+
+```python
+def execute_sql(self, query: str, params: Optional[Dict] = None) -> QueryResult
 ```
 
 ## Node Operations
@@ -83,7 +91,7 @@ def execute_sparql(self, query: str) -> QueryResult
 Create a node with labels and properties.
 
 ```python
-def create_node(self, labels: List[str], properties: Dict[str, Any]) -> Node
+def create_node(self, labels: List[str], properties: Optional[Dict[str, Any]] = None) -> Node
 ```
 
 ### add_node_label()
@@ -117,7 +125,7 @@ def get_node_labels(self, node_id: int) -> List[str]
 Start a new transaction.
 
 ```python
-def begin_transaction(self) -> Transaction
+def begin_transaction(self, isolation_level: Optional[str] = None) -> Transaction
 ```
 
 ## Admin Methods

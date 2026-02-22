@@ -115,7 +115,7 @@ Or add it manually to `Cargo.toml`:
 
 ```toml
 [dependencies]
-grafeo = "0.4"
+grafeo = "0.5"
 ```
 
 ### Feature Flags
@@ -172,10 +172,10 @@ grafeo = { version = "0.5", features = ["embed"] }
 ### Verify Installation
 
 ```rust
-use grafeo::Database;
+use grafeo::GrafeoDB;
 
-fn main() -> Result<(), grafeo::Error> {
-    let db = Database::open_in_memory()?;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let db = GrafeoDB::new_in_memory()?;
     println!("Grafeo installed successfully!");
     Ok(())
 }

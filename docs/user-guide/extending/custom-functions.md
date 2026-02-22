@@ -15,9 +15,9 @@ Add user-defined functions (UDFs) to extend GQL.
 ### In Rust
 
 ```rust
-use grafeo::{Database, Value};
+use grafeo::{GrafeoDB, Value};
 
-let db = Database::open_in_memory()?;
+let db = GrafeoDB::new_in_memory()?;
 
 // Register a scalar function
 db.register_function("double", |args| {

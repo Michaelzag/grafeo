@@ -23,9 +23,9 @@ Persistent mode stores data durably on disk.
 === "Rust"
 
     ```rust
-    use grafeo::Database;
+    use grafeo::GrafeoDB;
 
-    let db = Database::open("my_graph.db")?;
+    let db = GrafeoDB::new("my_graph.db")?;
     ```
 
 ## File Structure

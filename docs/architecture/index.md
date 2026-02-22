@@ -16,6 +16,9 @@ graph TB
     subgraph "User Interface"
         PY[Python API]
         RS[Rust API]
+        JS[Node.js API]
+        WA[WASM API]
+        CC[C/Go FFI]
     end
 
     subgraph "grafeo-engine"
@@ -45,6 +48,9 @@ graph TB
 
     PY --> DB
     RS --> DB
+    JS --> DB
+    WA --> DB
+    CC --> DB
     DB --> SESS
     SESS --> QP
     SESS --> TXN
@@ -71,7 +77,7 @@ graph TB
 
     ---
 
-    The five crates and their responsibilities.
+    The crates and their responsibilities.
 
 -   **[Storage Model](storage/index.md)**
 

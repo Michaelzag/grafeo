@@ -38,9 +38,10 @@ When build side exceeds memory:
 
 ## Configuration
 
-```python
-db = grafeo.GrafeoDB(
-    memory_limit=4 * 1024 * 1024 * 1024,  # 4 GB
-    spill_directory="/tmp/grafeo_spill"
-)
+```rust
+// Memory limits and spill directories are configured via Rust Config
+use grafeo_engine::Config;
+
+let config = Config::default();
+let db = GrafeoDB::with_config(config);
 ```

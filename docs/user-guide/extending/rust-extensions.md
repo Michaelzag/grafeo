@@ -28,18 +28,18 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-grafeo-core = "0.2"
-grafeo-engine = "0.2"
+grafeo-core = "0.5"
+grafeo-engine = "0.5"
 ```
 
 ### Extension Code
 
 ```rust
 use grafeo_core::graph::LpgStore;
-use grafeo_engine::{Database, Session};
+use grafeo_engine::{GrafeoDB, Session};
 
 /// Custom graph analysis function
-pub fn analyze_connectivity(db: &Database) -> ConnectivityReport {
+pub fn analyze_connectivity(db: &GrafeoDB) -> ConnectivityReport {
     let session = db.session().unwrap();
 
     // Access the underlying graph store
@@ -93,14 +93,14 @@ fn process_graph(store: &LpgStore) {
 ### Index Access
 
 ```rust
-use grafeo_core::index::BTreeIndex;
+use grafeo_core::index::HashIndex;
 
-fn query_index(index: &BTreeIndex<String, NodeId>) {
-    // Range query
-    let results = index.range("A".."B");
-
-    for (key, node_id) in results {
-        println!("{}: {:?}", key, node_id);
+fn query_index(index: &HashIndex<String, NodeId>) {
+    // Point lookup
+    if let Some(node_ids) = index.get("Alice") {
+        for node_id in node_ids {
+            println!("Found: {:?}", node_id);
+        }
     }
 }
 ```
@@ -129,7 +129,7 @@ cargo build --release
 ```rust
 use my_grafeo_extension::analyze_connectivity;
 
-let db = Database::open("my_graph.db")?;
+let db = GrafeoDB::new("my_graph.db")?;
 let report = analyze_connectivity(&db);
 
 println!("Nodes: {}", report.nodes);

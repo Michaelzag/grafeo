@@ -80,7 +80,7 @@ Core data structures and execution engine.
 
 ```rust
 use grafeo_core::graph::LpgStore;
-use grafeo_core::index::BTreeIndex;
+use grafeo_core::index::HashIndex;
 use grafeo_core::execution::DataChunk;
 ```
 
@@ -96,8 +96,8 @@ External interfaces and adapters.
 | `plugins/` | Plugin system |
 
 ```rust
-use grafeo_adapters::query::gql::GqlParser;
-use grafeo_adapters::storage::WalBackend;
+use grafeo_adapters::query::gql::Parser;
+use grafeo_adapters::storage::wal::WalManager;
 ```
 
 ## grafeo-engine

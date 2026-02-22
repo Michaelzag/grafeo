@@ -13,18 +13,19 @@ Parsers, storage backends and plugins.
 ## GQL Parser
 
 ```rust
-use grafeo_adapters::query::gql::GqlParser;
+use grafeo_adapters::query::gql;
 
-let ast = GqlParser::parse("MATCH (n:Person) RETURN n")?;
+let ast = gql::parse("MATCH (n:Person) RETURN n")?;
 ```
 
 ## Storage
 
 ```rust
-use grafeo_adapters::storage::{MemoryBackend, WalBackend};
+use grafeo_adapters::storage::MemoryBackend;
+use grafeo_adapters::storage::wal::WalManager;
 
 let backend = MemoryBackend::new();
-let backend = WalBackend::open("path/to/wal")?;
+let wal = WalManager::open("path/to/wal")?;
 ```
 
 ## Plugins

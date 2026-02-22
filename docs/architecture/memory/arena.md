@@ -31,12 +31,11 @@ Deallocation: Reset entire arena at once
 ## Usage
 
 ```rust
-let arena = Arena::new();
+use grafeo_common::types::EpochId;
+
+let arena = Arena::new(EpochId(0));
 
 // Allocate within arena
-let data = arena.alloc::<Node>(node);
-let more = arena.alloc_slice::<i64>(1000);
-
-// Reset frees everything
-arena.reset();
+let data = arena.alloc_value(node);
+let more = arena.alloc_slice(&values);
 ```
