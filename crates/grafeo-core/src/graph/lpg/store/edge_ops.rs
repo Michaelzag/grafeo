@@ -357,6 +357,139 @@ impl LpgStore {
             .count()
     }
 
+    /// Creates multiple edges in batch, significantly faster than calling
+    /// `create_edge()` in a loop.
+    ///
+    /// Each tuple is `(src, dst, edge_type)`. Returns the assigned `EdgeId`s
+    /// in the same order. Acquires the adjacency write lock once for all
+    /// edges, rather than once per edge.
+    #[cfg(not(feature = "tiered-storage"))]
+    pub fn batch_create_edges(&self, edges: &[(NodeId, NodeId, &str)]) -> Vec<EdgeId> {
+        if edges.is_empty() {
+            return Vec::new();
+        }
+
+        let epoch = self.current_epoch();
+        let base_id = self
+            .next_edge_id
+            .fetch_add(edges.len() as u64, Ordering::Relaxed);
+
+        let mut ids = Vec::with_capacity(edges.len());
+        let mut forward_batch = Vec::with_capacity(edges.len());
+        let mut backward_batch = Vec::with_capacity(edges.len());
+        let mut type_increments: grafeo_common::utils::hash::FxHashMap<u32, i64> =
+            grafeo_common::utils::hash::FxHashMap::default();
+
+        // Create all edge records under a single edges write lock
+        {
+            let mut edge_map = self.edges.write();
+            for (i, &(src, dst, edge_type)) in edges.iter().enumerate() {
+                let id = EdgeId::new(base_id + i as u64);
+                let type_id = self.get_or_create_edge_type_id(edge_type);
+
+                let record = EdgeRecord::new(id, src, dst, type_id, epoch);
+                let chain = VersionChain::with_initial(record, epoch, TxId::SYSTEM);
+                edge_map.insert(id, chain);
+
+                forward_batch.push((src, dst, id));
+                if self.backward_adj.is_some() {
+                    backward_batch.push((dst, src, id));
+                }
+                *type_increments.entry(type_id).or_default() += 1;
+
+                ids.push(id);
+            }
+        }
+
+        // Batch adjacency updates (single lock per direction)
+        self.forward_adj.batch_add_edges(&forward_batch);
+        if let Some(ref backward) = self.backward_adj {
+            backward.batch_add_edges(&backward_batch);
+        }
+
+        // Update live counters
+        self.live_edge_count
+            .fetch_add(edges.len() as i64, Ordering::Relaxed);
+        {
+            let mut counts = self.edge_type_live_counts.write();
+            for (type_id, increment) in type_increments {
+                let idx = type_id as usize;
+                if counts.len() <= idx {
+                    counts.resize(idx + 1, 0);
+                }
+                counts[idx] += increment;
+            }
+        }
+
+        ids
+    }
+
+    /// Creates multiple edges in batch, significantly faster than calling
+    /// `create_edge()` in a loop.
+    /// (Tiered storage version)
+    #[cfg(feature = "tiered-storage")]
+    pub fn batch_create_edges(&self, edges: &[(NodeId, NodeId, &str)]) -> Vec<EdgeId> {
+        if edges.is_empty() {
+            return Vec::new();
+        }
+
+        let epoch = self.current_epoch();
+        let base_id = self
+            .next_edge_id
+            .fetch_add(edges.len() as u64, Ordering::Relaxed);
+        let arena = self.arena_allocator.arena_or_create(epoch);
+
+        let mut ids = Vec::with_capacity(edges.len());
+        let mut forward_batch = Vec::with_capacity(edges.len());
+        let mut backward_batch = Vec::with_capacity(edges.len());
+        let mut type_increments: grafeo_common::utils::hash::FxHashMap<u32, i64> =
+            grafeo_common::utils::hash::FxHashMap::default();
+
+        // Create all edge records under a single versions write lock
+        {
+            let mut versions = self.edge_versions.write();
+            for (i, &(src, dst, edge_type)) in edges.iter().enumerate() {
+                let id = EdgeId::new(base_id + i as u64);
+                let type_id = self.get_or_create_edge_type_id(edge_type);
+
+                let record = EdgeRecord::new(id, src, dst, type_id, epoch);
+                let (offset, _stored) = arena.alloc_value_with_offset(record);
+                let hot_ref = HotVersionRef::new(epoch, offset, TxId::SYSTEM);
+                versions.insert(id, VersionIndex::with_initial(hot_ref));
+
+                forward_batch.push((src, dst, id));
+                if self.backward_adj.is_some() {
+                    backward_batch.push((dst, src, id));
+                }
+                *type_increments.entry(type_id).or_default() += 1;
+
+                ids.push(id);
+            }
+        }
+
+        // Batch adjacency updates (single lock per direction)
+        self.forward_adj.batch_add_edges(&forward_batch);
+        if let Some(ref backward) = self.backward_adj {
+            backward.batch_add_edges(&backward_batch);
+        }
+
+        // Update live counters
+        self.live_edge_count
+            .fetch_add(edges.len() as i64, Ordering::Relaxed);
+        {
+            let mut counts = self.edge_type_live_counts.write();
+            for (type_id, increment) in type_increments {
+                let idx = type_id as usize;
+                if counts.len() <= idx {
+                    counts.resize(idx + 1, 0);
+                }
+                counts[idx] += increment;
+            }
+        }
+
+        ids
+    }
+
     /// Gets the type of an edge by ID.
     #[must_use]
     #[cfg(not(feature = "tiered-storage"))]
