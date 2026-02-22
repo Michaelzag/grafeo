@@ -14,7 +14,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 grafeo-engine = { workspace = true, features = ["gql"] }
 grafeo-common.workspace = true
-grafeo-bindings-common = { path = "../common" }
+grafeo-bindings-common = { path = "../common", default-features = false }
 
 # WASM bindings
 wasm-bindgen = "0.2"
