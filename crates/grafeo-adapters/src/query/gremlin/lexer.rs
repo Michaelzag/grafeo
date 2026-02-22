@@ -11,20 +11,34 @@ use grafeo_common::utils::error::SourceSpan;
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     // Literals
+
+    /// Integer literal.
     Integer(i64),
+    /// Floating-point literal.
     Float(f64),
+    /// String literal.
     String(String),
+    /// Boolean `true` literal.
     True,
+    /// Boolean `false` literal.
     False,
 
     // Identifiers and keywords
+
+    /// An unrecognized identifier.
     Identifier(String),
 
     // Graph source
+
+    /// The `g` graph traversal source.
     G,
+    /// The `V()` vertex step.
     V,
+    /// The `E()` edge step.
     E,
+    /// The `addV()` add-vertex step.
     AddV,
+    /// The `addE()` add-edge step.
     AddE,
 
     // Navigation steps

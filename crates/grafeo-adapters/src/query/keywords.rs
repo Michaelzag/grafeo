@@ -14,25 +14,41 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CommonKeyword {
     // Query structure
+    /// The `MATCH` keyword.
     Match,
+    /// The `RETURN` keyword.
     Return,
+    /// The `WHERE` keyword.
     Where,
+    /// The `AS` keyword.
     As,
+    /// The `DISTINCT` keyword.
     Distinct,
+    /// The `WITH` keyword.
     With,
+    /// The `OPTIONAL` keyword.
     Optional,
 
     // Ordering & pagination
+    /// The `ORDER` keyword.
     Order,
+    /// The `BY` keyword.
     By,
+    /// The `ASC` keyword.
     Asc,
+    /// The `DESC` keyword.
     Desc,
+    /// The `LIMIT` keyword.
     Limit,
+    /// The `SKIP` keyword.
     Skip,
 
     // Logical operators
+    /// The `AND` keyword.
     And,
+    /// The `OR` keyword.
     Or,
+    /// The `NOT` keyword.
     Not,
 
     // Comparison

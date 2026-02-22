@@ -11,7 +11,6 @@
 //! - [`storage`] - Persistence: write-ahead log, memory-mapped files
 //! - [`plugins`] - Extension points for custom functions and algorithms
 
-// TODO(0.5.x): Document all public parser types and remove this allow
 #![warn(missing_docs)]
 
 pub mod plugins;

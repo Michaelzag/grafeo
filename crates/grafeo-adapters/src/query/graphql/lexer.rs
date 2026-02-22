@@ -11,58 +11,98 @@ use grafeo_common::utils::error::SourceSpan;
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     // Punctuation
-    Bang,     // !
-    Dollar,   // $
-    Amp,      // &
-    LParen,   // (
-    RParen,   // )
-    Spread,   // ...
-    Colon,    // :
-    Eq,       // =
-    At,       // @
-    LBracket, // [
-    RBracket, // ]
-    LBrace,   // {
-    RBrace,   // }
-    Pipe,     // |
+    /// Exclamation mark (`!`).
+    Bang,
+    /// Dollar sign (`$`).
+    Dollar,
+    /// Ampersand (`&`).
+    Amp,
+    /// Left parenthesis (`(`).
+    LParen,
+    /// Right parenthesis (`)`).
+    RParen,
+    /// Spread operator (`...`).
+    Spread,
+    /// Colon (`:`).
+    Colon,
+    /// Equals sign (`=`).
+    Eq,
+    /// At sign (`@`).
+    At,
+    /// Left bracket (`[`).
+    LBracket,
+    /// Right bracket (`]`).
+    RBracket,
+    /// Left brace (`{`).
+    LBrace,
+    /// Right brace (`}`).
+    RBrace,
+    /// Pipe (`|`).
+    Pipe,
 
     // Literals
+    /// A name/identifier.
     Name(String),
+    /// Integer literal.
     Int(i64),
+    /// Floating-point literal.
     Float(f64),
+    /// String literal.
     String(String),
+    /// Block string literal (triple-quoted).
     BlockString(String),
 
     // Keywords (these are also valid names in GraphQL)
+    /// The `query` keyword.
     Query,
+    /// The `mutation` keyword.
     Mutation,
+    /// The `subscription` keyword.
     Subscription,
+    /// The `fragment` keyword.
     Fragment,
+    /// The `on` keyword.
     On,
+    /// The `true` keyword.
     True,
+    /// The `false` keyword.
     False,
+    /// The `null` keyword.
     Null,
 
     // Type system keywords (for completeness)
+    /// The `schema` keyword.
     Schema,
+    /// The `extend` keyword.
     Extend,
+    /// The `scalar` keyword.
     Scalar,
+    /// The `type` keyword.
     Type,
+    /// The `interface` keyword.
     Interface,
+    /// The `union` keyword.
     Union,
+    /// The `enum` keyword.
     Enum,
+    /// The `input` keyword.
     Input,
+    /// The `directive` keyword.
     Directive,
+    /// The `implements` keyword.
     Implements,
 
     // End of input
+    /// End of input.
     Eof,
 }
 
 /// A token with its position.
 #[derive(Debug, Clone)]
 pub struct Token {
+    /// The token type.
     pub kind: TokenKind,
+    /// Source location of this token.
     pub span: SourceSpan,
 }
 
