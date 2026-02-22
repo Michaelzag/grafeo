@@ -2,7 +2,7 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
-## [0.5.8] - Unreleased
+## [0.5.8] - 2026-02-22
 
 ### Added
 
