@@ -2,6 +2,17 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
+## [0.5.9] - Unreleased
+
+### Fixed
+
+- **WASM build with `getrandom` 0.4**: added `wasm_js` crate feature for `getrandom` 0.4.x on `wasm32-unknown-unknown` targets. The previous `getrandom_backend` cfg flag only worked for 0.3.x
+- **WASM binary size regression**: `grafeo-bindings-common` was pulling in all engine default features (`wal`, `parallel`, `spill`, `mmap`) into the WASM build via transitive dependencies. Disabled default features on the common crate's engine dependency, reducing WASM gzip size from 974 KB to 744 KB (under the 800 KB target)
+
+### Improved
+
+- **Release workflow**: replaced deprecated `actions/create-release@v1` and `actions/upload-release-asset@v1` with `softprops/action-gh-release@v2`, eliminating `set-output` deprecation warnings
+
 ## [0.5.8] - 2026-02-22
 
 ### Added
