@@ -23,10 +23,9 @@
 //!
 //! # Example
 //!
-//! ```ignore
-//! use grafeo_core::index::ring::TripleRing;
-//! use grafeo_core::graph::rdf::{Triple, Term, TriplePattern};
-//!
+//! ```no_run
+//! # use grafeo_core::index::ring::TripleRing;
+//! # use grafeo_core::graph::rdf::{Triple, Term, TriplePattern};
 //! // Build from triples
 //! let triples = vec![
 //!     Triple::new(Term::iri("s1"), Term::iri("p1"), Term::iri("o1")),
@@ -37,7 +36,7 @@
 //! // Query by pattern
 //! let pattern = TriplePattern::with_subject(Term::iri("s1"));
 //! for triple in ring.find(&pattern) {
-//!     println!("{}", triple);
+//!     println!("{:?}", triple);
 //! }
 //! ```
 //!

@@ -9,11 +9,13 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```rust
+//! use grafeo_core::execution::chunk_state::ChunkState;
+//!
 //! let mut state = ChunkState::unflat(3, 1000);
 //!
 //! // First access computes, subsequent accesses use cache
-//! let mults = state.get_or_compute_multiplicities(|| expensive_compute());
+//! let mults = state.get_or_compute_multiplicities(|| vec![1, 2, 3]);
 //! let mults2 = state.get_or_compute_multiplicities(|| unreachable!());
 //! assert!(std::ptr::eq(mults.as_ptr(), mults2.as_ptr()));
 //! ```
@@ -450,9 +452,11 @@ impl ChunkState {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```rust
+    /// # use grafeo_core::execution::chunk_state::ChunkState;
+    /// # let mut state = ChunkState::unflat(2, 100);
     /// let mults = state.get_or_compute_multiplicities(|| {
-    ///     chunk.compute_path_multiplicities_impl()
+    ///     vec![1; 100] // compute multiplicities
     /// });
     /// ```
     pub fn get_or_compute_multiplicities<F>(&mut self, compute: F) -> Arc<[usize]>

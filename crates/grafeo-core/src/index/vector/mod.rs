@@ -52,18 +52,30 @@
 //!
 //! For larger datasets, use the HNSW approximate nearest neighbor index:
 //!
-//! ```ignore
-//! use grafeo_core::index::vector::{HnswIndex, HnswConfig, DistanceMetric};
+//! ```no_run
+//! # #[cfg(feature = "vector-index")]
+//! # {
+//! use grafeo_core::index::vector::{HnswIndex, HnswConfig, DistanceMetric, VectorAccessor};
 //! use grafeo_common::types::NodeId;
+//! use std::sync::Arc;
+//! use std::collections::HashMap;
 //!
 //! let config = HnswConfig::new(384, DistanceMetric::Cosine);
 //! let index = HnswIndex::new(config);
 //!
-//! // Insert vectors
-//! index.insert(NodeId::new(1), &embedding);
+//! // Build an accessor backed by a HashMap
+//! let mut map: HashMap<NodeId, Arc<[f32]>> = HashMap::new();
+//! let embedding: Arc<[f32]> = vec![0.1f32; 384].into();
+//! map.insert(NodeId::new(1), embedding.clone());
+//! let accessor = |id: NodeId| -> Option<Arc<[f32]>> { map.get(&id).cloned() };
+//!
+//! // Insert vectors (requires accessor for neighbor lookups)
+//! index.insert(NodeId::new(1), &embedding, &accessor);
 //!
 //! // Search (O(log n))
-//! let results = index.search(&query, 10);
+//! let query = vec![0.15f32; 384];
+//! let results = index.search(&query, 10, &accessor);
+//! # }
 //! ```
 
 mod accessor;

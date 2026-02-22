@@ -23,14 +23,14 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```
 //! use grafeo_core::index::vector::{HnswIndex, HnswConfig, DistanceMetric, VectorAccessor};
 //! use grafeo_common::types::NodeId;
 //! use std::sync::Arc;
 //! use std::collections::HashMap;
 //!
 //! let config = HnswConfig::new(384, DistanceMetric::Cosine);
-//! let mut index = HnswIndex::new(config);
+//! let index = HnswIndex::new(config);
 //!
 //! // Build an accessor backed by a HashMap
 //! let mut map: HashMap<NodeId, Arc<[f32]>> = HashMap::new();
@@ -845,18 +845,26 @@ impl HnswIndex {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// use grafeo_core::index::vector::{HnswIndex, HnswConfig, DistanceMetric};
+    /// ```
+    /// use grafeo_core::index::vector::{HnswIndex, HnswConfig, DistanceMetric, VectorAccessor};
     /// use grafeo_common::types::NodeId;
+    /// use std::sync::Arc;
+    /// use std::collections::HashMap;
     ///
     /// let config = HnswConfig::new(384, DistanceMetric::Cosine);
     /// let index = HnswIndex::new(config);
     ///
-    /// let vectors: Vec<(NodeId, Vec<f32>)> = (0..1000)
+    /// let vectors: Vec<(NodeId, Vec<f32>)> = (0..100)
     ///     .map(|i| (NodeId::new(i), vec![0.1f32; 384]))
     ///     .collect();
     ///
-    /// // accessor reads from property storage
+    /// // Build an accessor backed by a HashMap
+    /// let map: HashMap<NodeId, Arc<[f32]>> = vectors
+    ///     .iter()
+    ///     .map(|(id, v)| (*id, Arc::from(v.as_slice())))
+    ///     .collect();
+    /// let accessor = move |id: NodeId| -> Option<Arc<[f32]>> { map.get(&id).cloned() };
+    ///
     /// index.batch_insert(vectors.iter().map(|(id, v)| (*id, v.as_slice())), &accessor);
     /// ```
     pub fn batch_insert<'a, I>(&self, vectors: I, accessor: &impl VectorAccessor)
@@ -890,12 +898,18 @@ impl HnswIndex {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// use grafeo_core::index::vector::{HnswIndex, HnswConfig, DistanceMetric};
+    /// ```
+    /// use grafeo_core::index::vector::{HnswIndex, HnswConfig, DistanceMetric, VectorAccessor};
+    /// use grafeo_common::types::NodeId;
+    /// use std::sync::Arc;
+    /// use std::collections::HashMap;
     ///
     /// let config = HnswConfig::new(384, DistanceMetric::Cosine);
     /// let index = HnswIndex::new(config);
-    /// // ... insert vectors ...
+    ///
+    /// // Build an accessor (empty for this example)
+    /// let map: HashMap<NodeId, Arc<[f32]>> = HashMap::new();
+    /// let accessor = move |id: NodeId| -> Option<Arc<[f32]>> { map.get(&id).cloned() };
     ///
     /// let queries: Vec<Vec<f32>> = vec![
     ///     vec![0.1f32; 384],

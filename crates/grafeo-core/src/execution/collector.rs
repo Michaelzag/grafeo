@@ -12,9 +12,11 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```no_run
 //! use grafeo_core::execution::collector::{Collector, PartitionCollector, CountCollector};
+//! use grafeo_core::execution::DataChunk;
 //!
+//! # fn example(partitions: Vec<Vec<DataChunk>>) -> Result<(), grafeo_core::execution::operators::OperatorError> {
 //! let collector = CountCollector;
 //!
 //! // In parallel execution:
@@ -34,6 +36,8 @@
 //!     .map(|c| c.harvest())
 //!     .collect();
 //! let total = collector.merge(fruits);
+//! # Ok(())
+//! # }
 //! ```
 
 use super::chunk::DataChunk;
@@ -85,9 +89,11 @@ pub trait PartitionCollector: Send {
 ///
 /// # Example
 ///
-/// ```ignore
-/// use grafeo_core::execution::collector::{Collector, CountCollector};
+/// ```no_run
+/// use grafeo_core::execution::collector::{Collector, PartitionCollector, CountCollector};
+/// use grafeo_core::execution::DataChunk;
 ///
+/// # fn example(chunk1: DataChunk, chunk2: DataChunk) -> Result<(), grafeo_core::execution::operators::OperatorError> {
 /// let collector = CountCollector;
 /// let mut pc = collector.for_partition(0);
 ///
@@ -95,6 +101,8 @@ pub trait PartitionCollector: Send {
 /// pc.collect(&chunk2)?;
 ///
 /// let count = pc.harvest();
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CountCollector;

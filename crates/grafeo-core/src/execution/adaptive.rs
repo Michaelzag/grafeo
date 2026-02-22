@@ -27,7 +27,7 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```rust
 //! use grafeo_core::execution::adaptive::{AdaptiveContext, CardinalityCheckpoint};
 //!
 //! // Set up adaptive context with estimated cardinalities
@@ -1028,11 +1028,14 @@ use super::source::OperatorSource;
 ///
 /// # Example
 ///
-/// ```ignore
-/// use grafeo_core::execution::adaptive::AdaptivePipelineExecutor;
-///
+/// ```no_run
+/// # use grafeo_core::execution::adaptive::{AdaptiveContext, AdaptivePipelineExecutor};
+/// # use grafeo_core::execution::operators::Operator;
+/// # fn example(operator: Box<dyn Operator>, adaptive_context: AdaptiveContext) -> Result<(), Box<dyn std::error::Error>> {
 /// let executor = AdaptivePipelineExecutor::new(operator, adaptive_context);
 /// let (chunks, summary) = executor.execute()?;
+/// # Ok(())
+/// # }
 /// ```
 pub struct AdaptivePipelineExecutor {
     source: OperatorSource,
