@@ -11,7 +11,6 @@ use grafeo_common::utils::error::SourceSpan;
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     // Literals
-
     /// Integer literal.
     Integer(i64),
     /// Floating-point literal.
@@ -24,12 +23,10 @@ pub enum TokenKind {
     False,
 
     // Identifiers and keywords
-
     /// An unrecognized identifier.
     Identifier(String),
 
     // Graph source
-
     /// The `g` graph traversal source.
     G,
     /// The `V()` vertex step.
@@ -42,15 +39,26 @@ pub enum TokenKind {
     AddE,
 
     // Navigation steps
+
+    /// The `out()` outgoing-adjacency step.
     Out,
+    /// The `in()` incoming-adjacency step.
     In,
+    /// The `both()` bidirectional-adjacency step.
     Both,
+    /// The `outE()` outgoing-edge step.
     OutE,
+    /// The `inE()` incoming-edge step.
     InE,
+    /// The `bothE()` bidirectional-edge step.
     BothE,
+    /// The `outV()` outgoing-vertex step.
     OutV,
+    /// The `inV()` incoming-vertex step.
     InV,
+    /// The `bothV()` both-vertices step.
     BothV,
+    /// The `otherV()` opposite-vertex step.
     OtherV,
 
     // Filter steps

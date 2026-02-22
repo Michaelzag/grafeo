@@ -52,27 +52,43 @@ pub enum CommonKeyword {
     Not,
 
     // Comparison
+    /// The `IN` keyword.
     In,
+    /// The `IS` keyword.
     Is,
+    /// The `LIKE` keyword.
     Like,
 
     // String predicates
+    /// The `STARTS` keyword.
     Starts,
+    /// The `ENDS` keyword.
     Ends,
+    /// The `CONTAINS` keyword.
     Contains,
 
     // Literals
+    /// The `NULL` keyword.
     Null,
+    /// The `TRUE` keyword.
     True,
+    /// The `FALSE` keyword.
     False,
 
     // Mutation
+    /// The `CREATE` keyword.
     Create,
+    /// The `DELETE` keyword.
     Delete,
+    /// The `SET` keyword.
     Set,
+    /// The `REMOVE` keyword.
     Remove,
+    /// The `MERGE` keyword.
     Merge,
+    /// The `DETACH` keyword.
     Detach,
+    /// The `ON` keyword.
     On,
 
     // Subquery / procedure
