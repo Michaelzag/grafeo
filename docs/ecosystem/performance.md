@@ -212,36 +212,28 @@ Overall storage reduction: **40-60%** compared to uncompressed.
 
 ---
 
-## Comparison with Other Systems
+## LDBC Benchmark Comparisons
 
-!!! warning "Methodology Note"
-    These comparisons use similar hardware and configurations where possible, but exact comparisons depend heavily on workload and tuning. Use as rough guidance only.
+Results from the [LDBC Social Network Benchmark](https://ldbcouncil.org/benchmarks/snb/) (SF0.1) run via [graph-bench](graph-bench.md). Methodology: 3 warmup runs, 10 measured runs, median reported.
 
-### Insert Throughput (1M nodes)
+### Embedded (in-process)
 
-| System | Throughput |
-|--------|------------|
-| Grafeo (in-memory) | 1.2M/s |
-| Neo4j Community (embedded) | 200K/s |
-| NetworkX | 500K/s |
-| DuckDB (relational) | 2M/s |
+| Database | SNB Interactive | Memory | Graph Analytics | Memory | ACID | Memory |
+|----------|---------------:|-------:|----------------:|-------:|-----:|-------:|
+| **Grafeo** | **2,904 ms** | 136 MB | **0.4 ms** | 43 MB | **40 ms** | 67 MB |
+| LadybugDB | 5,333 ms | 4,890 MB | 225 ms | 250 MB | 128 ms | 4,914 MB |
+| FalkorDB Lite | 7,454 ms | 156 MB | 89 ms | 88 MB | 72 ms | 144 MB |
 
-### Query Latency (point lookup)
+### Server (over network)
 
-| System | Latency |
-|--------|---------|
-| Grafeo | <1 μs |
-| Neo4j | 0.1-0.5 ms |
-| NetworkX | 1-5 μs |
+| Database | SNB Interactive | Graph Analytics | ACID |
+|----------|---------------:|----------------:|-----:|
+| **Grafeo Server** | **730 ms** | **15 ms** | 198 ms |
+| Memgraph | 4,113 ms | 19 ms | **107 ms** |
+| Neo4j | 6,788 ms | 253 ms | 369 ms |
+| ArangoDB | 40,043 ms | 22,739 ms | 2,110 ms |
 
-### PageRank (1M nodes, 10M edges)
-
-| System | Time |
-|--------|------|
-| Grafeo | 0.9 s |
-| Neo4j GDS | 4-6 s |
-| NetworkX | 8-12 s |
-| graph-tool | 0.5 s |
+Full results: [embedded](https://github.com/GrafeoDB/graph-bench/blob/main/RESULTS_EMBEDDED.md) | [server](https://github.com/GrafeoDB/graph-bench/blob/main/RESULTS_SERVER.md)
 
 ---
 

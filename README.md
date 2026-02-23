@@ -11,9 +11,11 @@
 
 # Grafeo
 
-Grafeo is a high-performance graph database with a Rust core and no required C dependencies, that can be embedded as a library or run as a standalone database, with optional in-memory or persistent storage. 
+Grafeo is a graph database built in Rust from the ground up for speed and low memory use. It runs embedded as a library or as a standalone server, with in-memory or persistent storage and full ACID transactions.
 
-Grafeo supports both **Labeled Property Graph (LPG)** and **Resource Description Framework (RDF)** graph data models and all major query languages.
+On the [LDBC Social Network Benchmark](https://github.com/GrafeoDB/graph-bench), Grafeo is the fastest tested graph database in both embedded and server configurations, while using a fraction of the memory of some of the alternatives.
+
+Grafeo supports both **Labeled Property Graph (LPG)** and **Resource Description Framework (RDF)** data models and all major query languages.
 
 ## Features
 
@@ -21,7 +23,7 @@ Grafeo supports both **Labeled Property Graph (LPG)** and **Resource Description
 
 - **Dual data model support**: LPG and RDF with optimized storage for each
 - **Multi-language queries**: GQL, Cypher, Gremlin, GraphQL, SPARQL and SQL/PGQ
-- Embeddable with zero external dependencies
+- Embeddable with zero external dependencies — no JVM, no Docker, no external processes
 - **Multi-language bindings**: Python (PyO3), Node.js/TypeScript (napi-rs), Go (CGO), WebAssembly (wasm-bindgen)
 - In-memory and persistent storage modes
 - MVCC transactions with snapshot isolation
@@ -58,6 +60,29 @@ Grafeo supports both **Labeled Property Graph (LPG)** and **Resource Description
 - **Adaptive query execution** with runtime re-optimization
 - **Transparent spilling** for out-of-core processing
 - **Bloom filters** for efficient membership tests
+
+### Benchmarks
+
+Tested with the [LDBC Social Network Benchmark](https://ldbcouncil.org/benchmarks/snb/) via [graph-bench](https://github.com/GrafeoDB/graph-bench):
+
+**Embedded** (SF0.1, in-process):
+
+| Database | SNB Interactive | Memory | Graph Analytics | Memory |
+|----------|---------------:|-------:|----------------:|-------:|
+| **Grafeo** | **2,904 ms** | 136 MB | **0.4 ms** | 43 MB |
+| LadybugDB(Kuzu) | 5,333 ms | 4,890 MB | 225 ms | 250 MB |
+| FalkorDB Lite | 7,454 ms | 156 MB | 89 ms | 88 MB |
+
+**Server** (SF0.1, over network):
+
+| Database | SNB Interactive | Graph Analytics |
+|----------|---------------:|----------------:|
+| **Grafeo Server** | **730 ms** | **15 ms** |
+| Memgraph | 4,113 ms | 19 ms |
+| Neo4j | 6,788 ms | 253 ms |
+| ArangoDB | 40,043 ms | 22,739 ms |
+
+Full results: [embedded](https://github.com/GrafeoDB/graph-bench/blob/main/RESULTS_EMBEDDED.md) | [server](https://github.com/GrafeoDB/graph-bench/blob/main/RESULTS_SERVER.md)
 
 ## Query Language & Data Model Support
 

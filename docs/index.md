@@ -16,7 +16,7 @@ hide:
 
 # **Grafeo**
 
-### A high-performance, embeddable graph database with a Rust core
+### A fast, lean, embeddable graph database built in Rust
 
 [Get Started](getting-started/index.md){ .md-button .md-button--primary }
 [View on GitHub](https://github.com/GrafeoDB/grafeo){ .md-button }
@@ -33,7 +33,7 @@ hide:
 
     ---
 
-    Built from the ground up in Rust for maximum performance with vectorized execution, adaptive chunking and SIMD-optimized operations.
+    Fastest graph database tested on the [LDBC Social Network Benchmark](ecosystem/graph-bench.md) — both embedded and as a server — with a lower memory footprint than other in-memory databases. Built in Rust with vectorized execution, adaptive chunking and SIMD-optimized operations.
 
 -   :material-database-search:{ .lg .middle } **Multi-Language Queries**
 
@@ -53,11 +53,11 @@ hide:
 
     HNSW-based similarity search with quantization (Scalar, Binary, Product). Combine graph traversal with semantic similarity.
 
--   :material-memory:{ .lg .middle } **Embeddable**
+-   :material-memory:{ .lg .middle } **Embedded or Standalone**
 
     ---
 
-    Embed directly into the application with zero external dependencies. Perfect for edge computing, desktop apps and serverless environments.
+    Embed directly into applications with zero external dependencies, or run as a standalone server with REST API and web UI. From edge devices to production clusters.
 
 -   :fontawesome-brands-rust:{ .lg .middle } **Rust Core**
 
@@ -77,11 +77,11 @@ hide:
 
     Python (PyO3), Node.js/TypeScript (napi-rs), Go (CGO) and WebAssembly (wasm-bindgen). Use Grafeo from the language of choice.
 
--   :material-notebook:{ .lg .middle } **Notebook Widgets**
+-   :material-puzzle:{ .lg .middle } **Ecosystem**
 
     ---
 
-    Interactive graph and vector visualizations for Marimo, Jupyter and other notebooks. Explore data visually.
+    AI integrations (LangChain, LlamaIndex, MCP), interactive notebook widgets, browser-based graphs via WebAssembly, standalone server with web UI, and benchmarking tools.
 
 </div>
 
