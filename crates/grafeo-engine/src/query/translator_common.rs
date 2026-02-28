@@ -141,10 +141,10 @@ mod tests {
 
     #[test]
     fn var_gen_increments() {
-        let gen = VarGen::new();
-        assert_eq!(gen.next(), "_v0");
-        assert_eq!(gen.next(), "_v1");
-        assert_eq!(gen.current(), 2);
+        let vg = VarGen::new();
+        assert_eq!(vg.next(), "_v0");
+        assert_eq!(vg.next(), "_v1");
+        assert_eq!(vg.current(), 2);
     }
 
     // --- combine_with_and ---
