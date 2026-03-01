@@ -381,10 +381,26 @@ impl GrafeoDB {
 
     /// Returns the underlying store.
     ///
-    /// This provides direct access to the LPG store for algorithm implementations.
+    /// This provides direct access to the LPG store for algorithm implementations
+    /// and admin operations (index management, schema introspection, MVCC internals).
+    ///
+    /// For code that only needs read/write graph operations, prefer
+    /// [`graph_store()`](Self::graph_store) which returns the trait interface.
     #[must_use]
     pub fn store(&self) -> &Arc<LpgStore> {
         &self.store
+    }
+
+    /// Returns the graph store as a trait object.
+    ///
+    /// This provides the [`GraphStoreMut`] interface for code that should work
+    /// with any storage backend. Use this when you only need graph read/write
+    /// operations and don't need admin methods like index management.
+    ///
+    /// [`GraphStoreMut`]: grafeo_core::graph::GraphStoreMut
+    #[must_use]
+    pub fn graph_store(&self) -> Arc<dyn grafeo_core::graph::GraphStoreMut> {
+        Arc::clone(&self.store) as Arc<dyn grafeo_core::graph::GraphStoreMut>
     }
 
     /// Garbage collects old MVCC versions that are no longer visible.

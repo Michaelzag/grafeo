@@ -736,6 +736,16 @@ impl Binder {
 
         // Add path variables for variable-length paths
         if let Some(ref path_alias) = expand.path_alias {
+            // Register the path variable itself (e.g. p in MATCH p=...)
+            self.context.add_variable(
+                path_alias.clone(),
+                VariableInfo {
+                    name: path_alias.clone(),
+                    data_type: LogicalType::Any,
+                    is_node: false,
+                    is_edge: false,
+                },
+            );
             // length(p) → _path_length_p
             let path_length_var = format!("_path_length_{}", path_alias);
             self.context.add_variable(

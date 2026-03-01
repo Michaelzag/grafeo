@@ -111,22 +111,24 @@ impl super::Planner {
                             }
                             "length" => {
                                 // length(p) returns the path length
-                                // For shortestPath results, the path column already contains the length
                                 if args.len() != 1 {
                                     return Err(Error::Internal(
                                         "length() requires exactly one argument".to_string(),
                                     ));
                                 }
                                 if let LogicalExpression::Variable(var_name) = &args[0] {
-                                    let col_idx =
-                                        *variable_columns.get(var_name).ok_or_else(|| {
+                                    // Try direct column first, then path detail column
+                                    let path_col = format!("_path_length_{var_name}");
+                                    let col_idx = variable_columns
+                                        .get(var_name)
+                                        .or_else(|| variable_columns.get(&path_col))
+                                        .ok_or_else(|| {
                                             Error::Internal(format!(
                                                 "Variable '{}' not found in input",
                                                 var_name
                                             ))
                                         })?;
-                                    // Pass through the column value directly
-                                    projections.push(ProjectExpr::Column(col_idx));
+                                    projections.push(ProjectExpr::Column(*col_idx));
                                     output_types.push(LogicalType::Int64);
                                 } else {
                                     return Err(Error::Internal(
@@ -134,8 +136,9 @@ impl super::Planner {
                                     ));
                                 }
                             }
-                            "nodes" | "edges" => {
-                                // nodes(p) / edges(p) returns the list of nodes/edges in the path
+                            "nodes" | "edges" | "relationships" => {
+                                // nodes(p) / edges(p) / relationships(p) returns path components
+                                let func_name = name.to_lowercase();
                                 if args.len() != 1 {
                                     return Err(Error::Internal(format!(
                                         "{}() requires exactly one argument",
@@ -143,13 +146,23 @@ impl super::Planner {
                                     )));
                                 }
                                 if let LogicalExpression::Variable(var_name) = &args[0] {
-                                    let col_idx =
-                                        *variable_columns.get(var_name).ok_or_else(|| {
+                                    // Map to internal column name
+                                    let suffix = if func_name == "nodes" {
+                                        "nodes"
+                                    } else {
+                                        "edges"
+                                    };
+                                    let path_col =
+                                        format!("_path_{suffix}_{var_name}");
+                                    let col_idx = variable_columns
+                                        .get(var_name)
+                                        .or_else(|| variable_columns.get(&path_col))
+                                        .ok_or_else(|| {
                                             Error::Internal(format!(
                                                 "Variable '{var_name}' not found in input",
                                             ))
                                         })?;
-                                    projections.push(ProjectExpr::Column(col_idx));
+                                    projections.push(ProjectExpr::Column(*col_idx));
                                     output_types.push(LogicalType::Any);
                                 } else {
                                     return Err(Error::Internal(format!(
