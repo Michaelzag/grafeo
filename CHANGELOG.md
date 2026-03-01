@@ -7,6 +7,7 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 ### Added
 
 - **Graph storage traits**: `GraphStore` (29 read methods) and `GraphStoreMut` (14 write methods) traits capturing the query engine's storage interface. Enables future pluggable backends (spillover, disk-backed) without changing operators
+- **`GrafeoDB::graph_store()`**: public accessor returning `Arc<dyn GraphStoreMut>` for code that works against the trait interface rather than the concrete `LpgStore`
 
 ## [0.5.10] - 2026-02-29
 
