@@ -1170,13 +1170,8 @@ impl SparqlTranslator {
                     // Find the matching aggregate by function name
                     for agg in aggregates {
                         let agg_name = format!("{:?}", agg.function).to_uppercase();
-                        if agg_name == upper
-                            || (upper == "AVG" && agg_name == "AVG")
-                            || (upper == "COUNT" && agg_name == "COUNT")
-                        {
-                            if let Some(alias) = &agg.alias {
-                                return LogicalExpression::Variable(alias.clone());
-                            }
+                        if agg_name == upper && agg.alias.is_some() {
+                            return LogicalExpression::Variable(agg.alias.clone().unwrap());
                         }
                     }
                 }

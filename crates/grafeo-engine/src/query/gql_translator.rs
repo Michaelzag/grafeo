@@ -6,8 +6,9 @@ use crate::query::plan::{
     AddLabelOp, AggregateExpr, AggregateFunction, AggregateOp, BinaryOp, CallProcedureOp,
     CreateEdgeOp, CreateNodeOp, DeleteNodeOp, DistinctOp, ExpandDirection, ExpandOp, FilterOp,
     JoinOp, JoinType, LeftJoinOp, LimitOp, LogicalExpression, LogicalOperator, LogicalPlan,
-    MergeOp, NodeScanOp, ProcedureYield, ProjectOp, Projection, RemoveLabelOp, ReturnItem,
-    ReturnOp, SetPropertyOp, ShortestPathOp, SkipOp, SortKey, SortOp, SortOrder, UnaryOp, UnwindOp,
+    MergeOp, MergeRelationshipOp, NodeScanOp, ProcedureYield, ProjectOp, Projection, RemoveLabelOp,
+    ReturnItem, ReturnOp, SetPropertyOp, ShortestPathOp, SkipOp, SortKey, SortOp, SortOrder,
+    UnaryOp, UnwindOp,
 };
 use crate::query::translator_common::{
     combine_with_and, is_aggregate_function, to_aggregate_function,
@@ -680,11 +681,24 @@ impl GqlTranslator {
                     .collect::<Result<_>>()?;
                 (var, labels, props)
             }
-            ast::Pattern::Path(_) => {
-                return Err(Error::Query(QueryError::new(
-                    QueryErrorKind::Semantic,
-                    "MERGE with path patterns is not yet supported",
-                )));
+            ast::Pattern::Path(path) if !path.edges.is_empty() => {
+                return self.translate_merge_relationship(path, merge_clause, input);
+            }
+            ast::Pattern::Path(path) => {
+                // Path with no edges is just a node pattern
+                let var = path
+                    .source
+                    .variable
+                    .clone()
+                    .unwrap_or_else(|| format!("_anon_{}", rand_id()));
+                let labels = path.source.labels.clone();
+                let props: Vec<(String, LogicalExpression)> = path
+                    .source
+                    .properties
+                    .iter()
+                    .map(|(k, v)| Ok((k.clone(), self.translate_expression(v)?)))
+                    .collect::<Result<_>>()?;
+                (var, labels, props)
             }
         };
 
@@ -715,6 +729,88 @@ impl GqlTranslator {
         Ok(LogicalOperator::Merge(MergeOp {
             variable,
             labels,
+            match_properties,
+            on_create,
+            on_match,
+            input: Box::new(input),
+        }))
+    }
+
+    /// Translates a MERGE with a relationship pattern.
+    fn translate_merge_relationship(
+        &self,
+        path: &ast::PathPattern,
+        merge_clause: &ast::MergeClause,
+        input: LogicalOperator,
+    ) -> Result<LogicalOperator> {
+        let source_variable = path.source.variable.clone().ok_or_else(|| {
+            Error::Query(QueryError::new(
+                QueryErrorKind::Semantic,
+                "MERGE relationship pattern requires a source node variable",
+            ))
+        })?;
+
+        let edge = path.edges.first().ok_or_else(|| {
+            Error::Query(QueryError::new(
+                QueryErrorKind::Semantic,
+                "MERGE relationship pattern is empty",
+            ))
+        })?;
+
+        let variable = edge
+            .variable
+            .clone()
+            .unwrap_or_else(|| format!("_merge_rel_{}", rand_id()));
+
+        let edge_type = edge.types.first().cloned().ok_or_else(|| {
+            Error::Query(QueryError::new(
+                QueryErrorKind::Semantic,
+                "MERGE relationship pattern requires an edge type",
+            ))
+        })?;
+
+        let target_variable = edge.target.variable.clone().ok_or_else(|| {
+            Error::Query(QueryError::new(
+                QueryErrorKind::Semantic,
+                "MERGE relationship pattern requires a target node variable",
+            ))
+        })?;
+
+        let match_properties: Vec<(String, LogicalExpression)> = edge
+            .properties
+            .iter()
+            .map(|(k, v)| Ok((k.clone(), self.translate_expression(v)?)))
+            .collect::<Result<Vec<_>>>()?;
+
+        let on_create: Vec<(String, LogicalExpression)> = merge_clause
+            .on_create
+            .as_ref()
+            .map(|assignments| {
+                assignments
+                    .iter()
+                    .map(|a| Ok((a.property.clone(), self.translate_expression(&a.value)?)))
+                    .collect::<Result<Vec<_>>>()
+            })
+            .transpose()?
+            .unwrap_or_default();
+
+        let on_match: Vec<(String, LogicalExpression)> = merge_clause
+            .on_match
+            .as_ref()
+            .map(|assignments| {
+                assignments
+                    .iter()
+                    .map(|a| Ok((a.property.clone(), self.translate_expression(&a.value)?)))
+                    .collect::<Result<Vec<_>>>()
+            })
+            .transpose()?
+            .unwrap_or_default();
+
+        Ok(LogicalOperator::MergeRelationship(MergeRelationshipOp {
+            variable,
+            source_variable,
+            target_variable,
+            edge_type,
             match_properties,
             on_create,
             on_match,

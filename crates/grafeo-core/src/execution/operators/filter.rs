@@ -559,7 +559,7 @@ impl ExpressionPredicate {
 
                 // Build the result list by iterating over source items
                 let mut result = Vec::new();
-                for item in items.iter() {
+                for item in items {
                     // Create a temporary context with the iteration variable bound
                     // For now, we'll do a simplified version that works for literals
                     // A full implementation would need to create a sub-evaluator

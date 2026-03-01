@@ -73,9 +73,8 @@ impl<'a> Parser<'a> {
 
     /// Parses UNION / UNION ALL between query blocks.
     fn parse_union_continuation(&mut self, first_stmt: Statement) -> Result<Statement> {
-        let first_query = match first_stmt {
-            Statement::Query(q) => q,
-            _ => return Err(self.error("UNION requires query statements")),
+        let Statement::Query(first_query) = first_stmt else {
+            return Err(self.error("UNION requires query statements"));
         };
         let mut queries = vec![first_query];
         let mut is_all = false;

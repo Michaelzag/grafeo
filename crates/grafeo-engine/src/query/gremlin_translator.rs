@@ -1864,12 +1864,18 @@ mod tests {
         assert!(result.is_ok());
         let plan = result.unwrap();
 
+        // Id step produces Project(Id), which gets wrapped in Return
         if let LogicalOperator::Return(ret) = &plan.root {
-            if let LogicalExpression::Id(_) = &ret.items[0].expression {
-                // OK
+            if let LogicalOperator::Project(proj) = ret.input.as_ref() {
+                assert!(
+                    matches!(&proj.projections[0].expression, LogicalExpression::Id(_)),
+                    "Expected Id projection"
+                );
             } else {
-                panic!("Expected Id expression");
+                panic!("Expected Project under Return");
             }
+        } else {
+            panic!("Expected Return at root");
         }
     }
 
@@ -1879,12 +1885,21 @@ mod tests {
         assert!(result.is_ok());
         let plan = result.unwrap();
 
+        // Label step produces Project(Labels), which gets wrapped in Return
         if let LogicalOperator::Return(ret) = &plan.root {
-            if let LogicalExpression::Labels(_) = &ret.items[0].expression {
-                // OK
+            if let LogicalOperator::Project(proj) = ret.input.as_ref() {
+                assert!(
+                    matches!(
+                        &proj.projections[0].expression,
+                        LogicalExpression::Labels(_)
+                    ),
+                    "Expected Labels projection"
+                );
             } else {
-                panic!("Expected Labels expression");
+                panic!("Expected Project under Return");
             }
+        } else {
+            panic!("Expected Return at root");
         }
     }
 

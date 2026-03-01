@@ -4,8 +4,6 @@ Each test targets a specific spec element with a minimal query.
 Tests are organized by category: clauses, expressions, functions, patterns, predicates.
 """
 
-import pytest
-
 
 # =============================================================================
 # CLAUSES (sec 13-14)
@@ -258,8 +256,8 @@ class TestGqlClauses:
 
     def test_insert_edge(self, db):
         """INSERT an edge between existing nodes via MATCH + CREATE."""
-        alice = db.create_node(["Person"], {"name": "Alice"})
-        bob = db.create_node(["Person"], {"name": "Bob"})
+        db.create_node(["Person"], {"name": "Alice"})
+        db.create_node(["Person"], {"name": "Bob"})
         db.execute(
             "MATCH (a:Person {name: 'Alice'}), (b:Person {name: 'Bob'}) "
             "CREATE (a)-[:KNOWS {since: 2024}]->(b)"
@@ -374,7 +372,6 @@ class TestGqlClauses:
         result = list(db.execute("MATCH (n:City {name: 'London'}) RETURN n.visited"))
         assert result[0]["n.visited"] is True
 
-    @pytest.mark.xfail(reason="MERGE with path patterns not yet supported in GQL")
     def test_merge_relationship(self, db):
         """MERGE on a relationship pattern."""
         db.create_node(["Person"], {"name": "X"})
@@ -391,7 +388,6 @@ class TestGqlClauses:
         )
         assert len(result) == 1
 
-    @pytest.mark.xfail(reason="MERGE with path patterns not yet supported in GQL")
     def test_merge_relationship_idempotent(self, db):
         """Running MERGE twice should not create duplicate edges."""
         db.create_node(["Person"], {"name": "M1"})

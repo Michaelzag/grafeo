@@ -4,7 +4,6 @@ This module contains base classes that define WHAT to test. Each language
 implementation inherits from these and provides HOW (the query syntax).
 
 Base Test Classes:
-- BaseQueriesTest: Pattern matching, paths, aggregations
 - BaseMutationsTest: CRUD operations
 - BaseTransactionsTest: Transaction handling
 - BaseAlgorithmsTest: Graph algorithms
@@ -20,7 +19,6 @@ Comparison Test Classes:
 - BaseSolvORBenchmarkTest: Benchmark against OR-Tools
 """
 
-from .test_queries import BaseQueriesTest
 from .test_mutations import BaseMutationsTest
 from .test_transactions import BaseTransactionsTest
 from .test_algorithms import BaseAlgorithmsTest
@@ -33,7 +31,6 @@ from .test_solvor import BaseSolvORComparisonTest, BaseSolvORBenchmarkTest
 
 __all__ = [
     # Test base classes
-    "BaseQueriesTest",
     "BaseMutationsTest",
     "BaseTransactionsTest",
     "BaseAlgorithmsTest",
