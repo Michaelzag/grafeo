@@ -399,6 +399,44 @@ impl Binder {
                 );
                 Ok(())
             }
+            LogicalOperator::MergeRelationship(merge_rel) => {
+                self.bind_operator(&merge_rel.input)?;
+                // Validate source and target variables exist
+                if !self.context.contains(&merge_rel.source_variable) {
+                    return Err(undefined_variable_error(
+                        &merge_rel.source_variable,
+                        &self.context,
+                        " in MERGE relationship source",
+                    ));
+                }
+                if !self.context.contains(&merge_rel.target_variable) {
+                    return Err(undefined_variable_error(
+                        &merge_rel.target_variable,
+                        &self.context,
+                        " in MERGE relationship target",
+                    ));
+                }
+                for (_, expr) in &merge_rel.match_properties {
+                    self.validate_expression(expr)?;
+                }
+                for (_, expr) in &merge_rel.on_create {
+                    self.validate_expression(expr)?;
+                }
+                for (_, expr) in &merge_rel.on_match {
+                    self.validate_expression(expr)?;
+                }
+                // MERGE relationship introduces the edge variable
+                self.context.add_variable(
+                    merge_rel.variable.clone(),
+                    VariableInfo {
+                        name: merge_rel.variable.clone(),
+                        data_type: LogicalType::Edge,
+                        is_node: false,
+                        is_edge: true,
+                    },
+                );
+                Ok(())
+            }
             LogicalOperator::AddLabel(add_label) => {
                 self.bind_operator(&add_label.input)?;
                 // Validate that the variable exists
@@ -698,6 +736,16 @@ impl Binder {
 
         // Add path variables for variable-length paths
         if let Some(ref path_alias) = expand.path_alias {
+            // Register the path variable itself (e.g. p in MATCH p=...)
+            self.context.add_variable(
+                path_alias.clone(),
+                VariableInfo {
+                    name: path_alias.clone(),
+                    data_type: LogicalType::Any,
+                    is_node: false,
+                    is_edge: false,
+                },
+            );
             // length(p) → _path_length_p
             let path_length_var = format!("_path_length_{}", path_alias);
             self.context.add_variable(
@@ -752,9 +800,22 @@ impl Binder {
         // First bind the input
         self.bind_operator(&ret.input)?;
 
-        // Validate all return expressions
+        // Validate all return expressions and register aliases
+        // (aliases must be visible to parent Sort for ORDER BY resolution)
         for item in &ret.items {
             self.validate_return_item(item)?;
+            if let Some(ref alias) = item.alias {
+                let data_type = self.infer_expression_type(&item.expression);
+                self.context.add_variable(
+                    alias.clone(),
+                    VariableInfo {
+                        name: alias.clone(),
+                        data_type,
+                        is_node: false,
+                        is_edge: false,
+                    },
+                );
+            }
         }
 
         Ok(())
@@ -865,6 +926,13 @@ impl Binder {
                     self.validate_expression(filter)?;
                 }
                 self.validate_expression(map_expr)?;
+                Ok(())
+            }
+            LogicalExpression::ListPredicate { list_expr, .. } => {
+                // Validate the list expression against the outer context.
+                // The predicate uses the iteration variable which is locally
+                // scoped, so we skip validating it against the outer context.
+                self.validate_expression(list_expr)?;
                 Ok(())
             }
             LogicalExpression::ExistsSubquery(subquery)
@@ -1445,6 +1513,7 @@ mod tests {
                 LogicalExpression::Literal(grafeo_common::types::Value::String("Alice".into())),
             )],
             replace: false,
+            is_edge: false,
             input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
                 variable: "n".to_string(),
                 label: None,

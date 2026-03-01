@@ -1,5 +1,6 @@
 //! WAL recovery.
 
+use super::record::WalEntry;
 use super::{CheckpointMetadata, WalManager, WalRecord};
 use grafeo_common::utils::error::{Error, Result, StorageError};
 use std::fs::File;
@@ -72,9 +73,20 @@ impl WalRecovery {
     ///
     /// Returns an error if recovery fails.
     pub fn recover(&self) -> Result<Vec<WalRecord>> {
-        // Check for checkpoint metadata
+        self.recover_as::<WalRecord>()
+    }
+
+    /// Recovers committed records of a specific type from all WAL files.
+    ///
+    /// This is the generic version of [`recover`](Self::recover). Use it
+    /// when recovering a WAL that stores a custom record type.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if recovery fails.
+    pub fn recover_as<R: WalEntry>(&self) -> Result<Vec<R>> {
         let checkpoint = self.read_checkpoint_metadata()?;
-        self.recover_internal(checkpoint)
+        self.recover_internal_as::<R>(checkpoint)
     }
 
     /// Recovers committed records, starting from a specific checkpoint.
@@ -89,10 +101,13 @@ impl WalRecovery {
         &self,
         checkpoint: Option<&CheckpointMetadata>,
     ) -> Result<Vec<WalRecord>> {
-        self.recover_internal(checkpoint.cloned())
+        self.recover_internal_as::<WalRecord>(checkpoint.cloned())
     }
 
-    fn recover_internal(&self, checkpoint: Option<CheckpointMetadata>) -> Result<Vec<WalRecord>> {
+    fn recover_internal_as<R: WalEntry>(
+        &self,
+        checkpoint: Option<CheckpointMetadata>,
+    ) -> Result<Vec<R>> {
         let mut current_tx_records = Vec::new();
         let mut committed_records = Vec::new();
 
@@ -137,26 +152,18 @@ impl WalRecovery {
 
             // Read all records from this file
             loop {
-                match self.read_record(&mut reader) {
+                match self.read_record_as::<R>(&mut reader) {
                     Ok(Some(record)) => {
-                        match &record {
-                            WalRecord::TxCommit { .. } => {
-                                // Commit current transaction
-                                committed_records.append(&mut current_tx_records);
-                                committed_records.push(record);
-                            }
-                            WalRecord::TxAbort { .. } => {
-                                // Discard current transaction
-                                current_tx_records.clear();
-                            }
-                            WalRecord::Checkpoint { .. } => {
-                                // Checkpoint - clear uncommitted, keep committed
-                                current_tx_records.clear();
-                                committed_records.push(record);
-                            }
-                            _ => {
-                                current_tx_records.push(record);
-                            }
+                        if record.is_commit() {
+                            committed_records.append(&mut current_tx_records);
+                            committed_records.push(record);
+                        } else if record.is_abort() {
+                            current_tx_records.clear();
+                        } else if record.is_checkpoint() {
+                            current_tx_records.clear();
+                            committed_records.push(record);
+                        } else {
+                            current_tx_records.push(record);
                         }
                     }
                     Ok(None) => break, // EOF
@@ -189,6 +196,15 @@ impl WalRecovery {
     ///
     /// Returns an error if recovery fails.
     pub fn recover_file(&self, path: impl AsRef<Path>) -> Result<Vec<WalRecord>> {
+        self.recover_file_as::<WalRecord>(path)
+    }
+
+    /// Recovers committed records of a specific type from a single WAL file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if recovery fails.
+    pub fn recover_file_as<R: WalEntry>(&self, path: impl AsRef<Path>) -> Result<Vec<R>> {
         let file = File::open(path.as_ref())?;
         let mut reader = BufReader::new(file);
 
@@ -196,19 +212,17 @@ impl WalRecovery {
         let mut committed_records = Vec::new();
 
         loop {
-            match self.read_record(&mut reader) {
-                Ok(Some(record)) => match &record {
-                    WalRecord::TxCommit { .. } => {
+            match self.read_record_as::<R>(&mut reader) {
+                Ok(Some(record)) => {
+                    if record.is_commit() {
                         committed_records.append(&mut current_tx_records);
                         committed_records.push(record);
-                    }
-                    WalRecord::TxAbort { .. } => {
+                    } else if record.is_abort() {
                         current_tx_records.clear();
-                    }
-                    _ => {
+                    } else {
                         current_tx_records.push(record);
                     }
-                },
+                }
                 Ok(None) => break,
                 Err(e) => {
                     tracing::warn!("WAL corruption detected: {}", e);
@@ -242,7 +256,7 @@ impl WalRecovery {
         Ok(files)
     }
 
-    fn read_record(&self, reader: &mut BufReader<File>) -> Result<Option<WalRecord>> {
+    fn read_record_as<R: WalEntry>(&self, reader: &mut BufReader<File>) -> Result<Option<R>> {
         // Read length prefix
         let mut len_buf = [0u8; 4];
         match reader.read_exact(&mut len_buf) {
@@ -269,7 +283,7 @@ impl WalRecovery {
         }
 
         // Deserialize
-        let (record, _): (WalRecord, _) =
+        let (record, _): (R, _) =
             bincode::serde::decode_from_slice(&data, bincode::config::standard())
                 .map_err(|e| Error::Serialization(e.to_string()))?;
 
@@ -489,6 +503,39 @@ mod tests {
         // We should get all committed records (checkpoint metadata is used for optimization)
         // The number depends on how many log files were skipped
         assert!(!records.is_empty(), "Should recover some records");
+    }
+
+    #[test]
+    fn test_recover_as_generic() {
+        let dir = tempdir().unwrap();
+
+        // Write records using WalManager
+        {
+            let wal = WalManager::open(dir.path()).unwrap();
+
+            wal.log(&WalRecord::CreateNode {
+                id: NodeId::new(1),
+                labels: vec!["Person".to_string()],
+            })
+            .unwrap();
+
+            wal.log(&WalRecord::TxCommit {
+                tx_id: TxId::new(1),
+            })
+            .unwrap();
+
+            wal.sync().unwrap();
+        }
+
+        // Recover using the generic method
+        let recovery = WalRecovery::new(dir.path());
+        let records: Vec<WalRecord> = recovery.recover_as().unwrap();
+
+        assert_eq!(records.len(), 2);
+
+        // Verify the records are correct via WalEntry trait methods
+        assert!(!records[0].is_commit());
+        assert!(records[1].is_commit());
     }
 }
 

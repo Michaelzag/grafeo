@@ -179,6 +179,20 @@ impl WalManager {
     ///
     /// Returns an error if the record cannot be written.
     pub fn log(&self, record: &WalRecord) -> Result<()> {
+        let data = bincode::serde::encode_to_vec(record, bincode::config::standard())
+            .map_err(|e| Error::Serialization(e.to_string()))?;
+        let force_sync = matches!(record, WalRecord::TxCommit { .. });
+        self.write_frame(&data, force_sync)
+    }
+
+    /// Writes a pre-serialized frame to the active WAL log.
+    ///
+    /// Frame format: `[length: u32 LE][data: bytes][crc32: u32 LE]`.
+    /// Handles durability mode (sync/batch/adaptive/nosync) and log rotation.
+    ///
+    /// `force_sync` controls whether an fsync is performed in Sync durability
+    /// mode. Callers typically set this to `true` for commit markers.
+    pub(crate) fn write_frame(&self, data: &[u8], force_sync: bool) -> Result<()> {
         use grafeo_core::testing::crash::maybe_crash;
 
         self.ensure_active_log()?;
@@ -188,10 +202,6 @@ impl WalManager {
             .as_mut()
             .ok_or_else(|| Error::Internal("WAL writer not available".to_string()))?;
 
-        // Serialize the record
-        let data = bincode::serde::encode_to_vec(record, bincode::config::standard())
-            .map_err(|e| Error::Serialization(e.to_string()))?;
-
         maybe_crash("wal_before_write");
 
         // Write length prefix
@@ -199,10 +209,10 @@ impl WalManager {
         log_file.writer.write_all(&len.to_le_bytes())?;
 
         // Write data
-        log_file.writer.write_all(&data)?;
+        log_file.writer.write_all(data)?;
 
         // Write checksum
-        let checksum = crc32fast::hash(&data);
+        let checksum = crc32fast::hash(data);
         log_file.writer.write_all(&checksum.to_le_bytes())?;
 
         maybe_crash("wal_after_write");
@@ -220,8 +230,7 @@ impl WalManager {
         // Handle durability mode
         match &self.config.durability {
             DurabilityMode::Sync => {
-                // Sync on every commit record
-                if matches!(record, WalRecord::TxCommit { .. }) {
+                if force_sync {
                     maybe_crash("wal_before_flush");
                     log_file.writer.flush()?;
                     log_file.writer.get_ref().sync_all()?;
@@ -245,7 +254,6 @@ impl WalManager {
             }
             DurabilityMode::Adaptive { .. } => {
                 // Adaptive mode: just flush buffer, background thread handles sync
-                // The AdaptiveFlusher calls sync() periodically with self-tuning timing
                 log_file.writer.flush()?;
             }
             DurabilityMode::NoSync => {
@@ -273,9 +281,15 @@ impl WalManager {
     ///
     /// Returns an error if the checkpoint cannot be written.
     pub fn checkpoint(&self, current_tx: TxId, epoch: EpochId) -> Result<()> {
-        // Write checkpoint record to WAL
         self.log(&WalRecord::Checkpoint { tx_id: current_tx })?;
+        self.complete_checkpoint(current_tx, epoch)
+    }
 
+    /// Completes a checkpoint after the checkpoint record has been written.
+    ///
+    /// Syncs the WAL, writes checkpoint metadata atomically, updates the
+    /// in-memory epoch, and truncates old log files.
+    pub(crate) fn complete_checkpoint(&self, tx_id: TxId, epoch: EpochId) -> Result<()> {
         // Force sync on checkpoint
         self.sync()?;
 
@@ -293,7 +307,7 @@ impl WalManager {
             epoch,
             log_sequence,
             timestamp_ms,
-            tx_id: current_tx,
+            tx_id,
         };
 
         // Write checkpoint metadata atomically

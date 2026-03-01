@@ -282,6 +282,7 @@ impl GraphQLTranslator {
             variable: var.clone(),
             properties,
             replace: false, // Merge properties, don't replace all
+            is_edge: false,
             input: Box::new(plan),
         });
 

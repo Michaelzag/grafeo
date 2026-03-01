@@ -19,6 +19,13 @@ pub enum Statement {
     Set(SetClause),
     /// A REMOVE statement.
     Remove(RemoveClause),
+    /// A UNION of multiple queries.
+    Union {
+        /// The queries to union.
+        queries: Vec<Query>,
+        /// Whether to keep duplicates (UNION ALL vs UNION DISTINCT).
+        all: bool,
+    },
 }
 
 /// A complete Cypher query.
@@ -482,10 +489,34 @@ pub enum Expression {
         /// ELSE clause.
         else_clause: Option<Box<Expression>>,
     },
+    /// List predicate: all(x IN list WHERE pred), any(...), none(...), single(...)
+    ListPredicate {
+        /// The kind of list predicate.
+        kind: ListPredicateKind,
+        /// The iteration variable name.
+        variable: String,
+        /// The source list expression.
+        list: Box<Expression>,
+        /// The predicate to test for each element.
+        predicate: Box<Expression>,
+    },
     /// EXISTS subquery.
     Exists(Box<Query>),
     /// COUNT subquery.
     CountSubquery(Box<Query>),
+}
+
+/// The kind of list predicate function.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ListPredicateKind {
+    /// all(x IN list WHERE pred): true if pred holds for every element.
+    All,
+    /// any(x IN list WHERE pred): true if pred holds for at least one element.
+    Any,
+    /// none(x IN list WHERE pred): true if pred holds for no element.
+    None,
+    /// single(x IN list WHERE pred): true if pred holds for exactly one element.
+    Single,
 }
 
 /// A literal value.

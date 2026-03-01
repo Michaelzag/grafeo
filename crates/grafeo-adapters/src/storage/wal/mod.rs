@@ -41,9 +41,11 @@ mod flusher;
 mod log;
 mod record;
 mod recovery;
+mod typed;
 
 pub use async_log::AsyncWalManager;
 pub use flusher::{AdaptiveFlusher, FlusherStats};
 pub use log::{CheckpointMetadata, DurabilityMode, WalConfig, WalManager};
-pub use record::WalRecord;
+pub use record::{WalEntry, WalRecord};
 pub use recovery::WalRecovery;
+pub use typed::{LpgWal, TypedWal};

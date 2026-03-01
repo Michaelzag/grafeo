@@ -61,14 +61,15 @@ pub use factorized_filter::{
     FactorizedPredicate, OrPredicate, PropertyPredicate,
 };
 pub use filter::{
-    BinaryFilterOp, ExpressionPredicate, FilterExpression, FilterOperator, Predicate, UnaryFilterOp,
+    BinaryFilterOp, ExpressionPredicate, FilterExpression, FilterOperator, ListPredicateKind,
+    Predicate, UnaryFilterOp,
 };
 pub use join::{
     EqualityCondition, HashJoinOperator, HashKey, JoinCondition, JoinType, NestedLoopJoinOperator,
 };
 pub use leapfrog_join::LeapfrogJoinOperator;
 pub use limit::{LimitOperator, LimitSkipOperator, SkipOperator};
-pub use merge::MergeOperator;
+pub use merge::{MergeOperator, MergeRelationshipConfig, MergeRelationshipOperator};
 pub use mutation::{
     AddLabelOperator, CreateEdgeOperator, CreateNodeOperator, DeleteEdgeOperator,
     DeleteNodeOperator, PropertySource, RemoveLabelOperator, SetPropertyOperator,

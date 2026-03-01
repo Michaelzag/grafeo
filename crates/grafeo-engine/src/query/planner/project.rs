@@ -5,9 +5,28 @@ use super::*;
 impl super::Planner {
     /// Plans a RETURN clause.
     pub(super) fn plan_return(&self, ret: &ReturnOp) -> Result<(Box<dyn Operator>, Vec<String>)> {
-        // Plan the input operator
-        let (input_op, input_columns) = self.plan_operator(&ret.input)?;
+        // Handle Empty input (standalone RETURN like: RETURN 2 * 3 AS product)
+        let (input_op, input_columns): (Box<dyn Operator>, Vec<String>) =
+            if matches!(ret.input.as_ref(), LogicalOperator::Empty) {
+                let single_row_op: Box<dyn Operator> = Box::new(
+                    grafeo_core::execution::operators::single_row::SingleRowOperator::new(),
+                );
+                (single_row_op, Vec::new())
+            } else {
+                self.plan_operator(&ret.input)?
+            };
 
+        self.plan_return_with_input(ret, input_op, input_columns)
+    }
+
+    /// Plans a RETURN operator with an already-planned input operator.
+    /// This is used by `plan_sort` when ORDER BY needs pre-Return property projections.
+    pub(super) fn plan_return_with_input(
+        &self,
+        ret: &ReturnOp,
+        input_op: Box<dyn Operator>,
+        input_columns: Vec<String>,
+    ) -> Result<(Box<dyn Operator>, Vec<String>)> {
         // Build variable to column index mapping
         let variable_columns: HashMap<String, usize> = input_columns
             .iter()
@@ -103,22 +122,24 @@ impl super::Planner {
                             }
                             "length" => {
                                 // length(p) returns the path length
-                                // For shortestPath results, the path column already contains the length
                                 if args.len() != 1 {
                                     return Err(Error::Internal(
                                         "length() requires exactly one argument".to_string(),
                                     ));
                                 }
                                 if let LogicalExpression::Variable(var_name) = &args[0] {
-                                    let col_idx =
-                                        *variable_columns.get(var_name).ok_or_else(|| {
+                                    // Try direct column first, then path detail column
+                                    let path_col = format!("_path_length_{var_name}");
+                                    let col_idx = variable_columns
+                                        .get(var_name)
+                                        .or_else(|| variable_columns.get(&path_col))
+                                        .ok_or_else(|| {
                                             Error::Internal(format!(
                                                 "Variable '{}' not found in input",
                                                 var_name
                                             ))
                                         })?;
-                                    // Pass through the column value directly
-                                    projections.push(ProjectExpr::Column(col_idx));
+                                    projections.push(ProjectExpr::Column(*col_idx));
                                     output_types.push(LogicalType::Int64);
                                 } else {
                                     return Err(Error::Internal(
@@ -126,8 +147,9 @@ impl super::Planner {
                                     ));
                                 }
                             }
-                            "nodes" | "edges" => {
-                                // nodes(p) / edges(p) returns the list of nodes/edges in the path
+                            "nodes" | "edges" | "relationships" => {
+                                // nodes(p) / edges(p) / relationships(p) returns path components
+                                let func_name = name.to_lowercase();
                                 if args.len() != 1 {
                                     return Err(Error::Internal(format!(
                                         "{}() requires exactly one argument",
@@ -135,13 +157,22 @@ impl super::Planner {
                                     )));
                                 }
                                 if let LogicalExpression::Variable(var_name) = &args[0] {
-                                    let col_idx =
-                                        *variable_columns.get(var_name).ok_or_else(|| {
+                                    // Map to internal column name
+                                    let suffix = if func_name == "nodes" {
+                                        "nodes"
+                                    } else {
+                                        "edges"
+                                    };
+                                    let path_col = format!("_path_{suffix}_{var_name}");
+                                    let col_idx = variable_columns
+                                        .get(var_name)
+                                        .or_else(|| variable_columns.get(&path_col))
+                                        .ok_or_else(|| {
                                             Error::Internal(format!(
                                                 "Variable '{var_name}' not found in input",
                                             ))
                                         })?;
-                                    projections.push(ProjectExpr::Column(col_idx));
+                                    projections.push(ProjectExpr::Column(*col_idx));
                                     output_types.push(LogicalType::Any);
                                 } else {
                                     return Err(Error::Internal(format!(
@@ -169,6 +200,18 @@ impl super::Planner {
                             variable_columns: variable_columns.clone(),
                         });
                         // CASE can return any type - use Any
+                        output_types.push(LogicalType::Any);
+                    }
+                    LogicalExpression::Binary { .. }
+                    | LogicalExpression::Unary { .. }
+                    | LogicalExpression::List(_)
+                    | LogicalExpression::Map(_) => {
+                        // Convert complex expressions to FilterExpression for evaluation
+                        let filter_expr = self.convert_expression(&item.expression)?;
+                        projections.push(ProjectExpr::Expression {
+                            expr: filter_expr,
+                            variable_columns: variable_columns.clone(),
+                        });
                         output_types.push(LogicalType::Any);
                     }
                     _ => {
@@ -346,8 +389,92 @@ impl super::Planner {
     }
 
     /// Plans a SORT (ORDER BY) operator.
+    ///
+    /// When Sort wraps a Return (e.g. `RETURN p.name ORDER BY p.age`), ORDER BY
+    /// may reference entity variables that Return has already projected away. In
+    /// that case we inject a property projection BEFORE the Return so the sort
+    /// key is available in the output columns.
     pub(super) fn plan_sort(&self, sort: &SortOp) -> Result<(Box<dyn Operator>, Vec<String>)> {
-        let (mut input_op, input_columns) = self.plan_operator(&sort.input)?;
+        // Check if we need pre-Return property projections. This is necessary
+        // when ORDER BY references a property on an entity variable (e.g. p.age)
+        // that is not included in the RETURN clause (e.g. RETURN p.name).
+        let needs_pre_return = if let LogicalOperator::Return(ret) = sort.input.as_ref() {
+            sort.keys.iter().any(|key| {
+                if let LogicalExpression::Property { variable, .. } = &key.expression {
+                    // Check if the Return items produce a column matching this variable
+                    !ret.items.iter().any(|item| {
+                        item.alias.as_deref() == Some(variable)
+                            || matches!(
+                                &item.expression,
+                                LogicalExpression::Variable(v) if v == variable
+                            )
+                    })
+                } else {
+                    false
+                }
+            })
+        } else {
+            false
+        };
+
+        // Number of extra sort-key columns appended after Return items
+        let mut sort_extra_count: usize = 0;
+
+        let (mut input_op, input_columns) = if needs_pre_return {
+            // Plan the Return's input, then build a combined projection that
+            // outputs both RETURN items and ORDER BY sort-key properties.
+            let LogicalOperator::Return(ret) = sort.input.as_ref() else {
+                unreachable!()
+            };
+            let (inner_op, inner_columns) = self.plan_operator(&ret.input)?;
+            let inner_vars: HashMap<String, usize> = inner_columns
+                .iter()
+                .enumerate()
+                .map(|(i, n)| (n.clone(), i))
+                .collect();
+
+            // Collect ORDER BY property keys that need extra projection
+            let mut extra_items: Vec<(String, String, String)> = Vec::new();
+            let mut seen = std::collections::HashSet::new();
+            for key in &sort.keys {
+                if let LogicalExpression::Property { variable, property } = &key.expression
+                    && inner_vars.contains_key(variable)
+                {
+                    let col_name = format!("{}_{}", variable, property);
+                    if seen.insert(col_name.clone()) {
+                        extra_items.push((variable.clone(), property.clone(), col_name));
+                    }
+                }
+            }
+
+            // Build an augmented ReturnOp that includes the extra sort-key items
+            let mut augmented_items = ret.items.clone();
+            let mut extra_columns = Vec::new();
+            for (variable, property, col_name) in &extra_items {
+                augmented_items.push(crate::query::plan::ReturnItem {
+                    expression: LogicalExpression::Property {
+                        variable: variable.clone(),
+                        property: property.clone(),
+                    },
+                    alias: Some(col_name.clone()),
+                });
+                extra_columns.push(col_name.clone());
+            }
+
+            let augmented_ret = crate::query::plan::ReturnOp {
+                items: augmented_items,
+                distinct: ret.distinct,
+                input: ret.input.clone(),
+            };
+
+            // Plan the augmented Return with the original inner operator
+            let (op, columns) =
+                self.plan_return_with_input(&augmented_ret, inner_op, inner_columns)?;
+            sort_extra_count = extra_columns.len();
+            (op, columns)
+        } else {
+            self.plan_operator(&sort.input)?
+        };
 
         // Build variable to column index mapping
         let mut variable_columns: HashMap<String, usize> = input_columns
@@ -433,7 +560,23 @@ impl super::Planner {
             .collect::<Result<Vec<_>>>()?;
 
         let output_schema = self.derive_schema_from_columns(&output_columns);
-        let operator = Box::new(SortOperator::new(input_op, physical_keys, output_schema));
+        let mut operator: Box<dyn Operator> =
+            Box::new(SortOperator::new(input_op, physical_keys, output_schema));
+
+        // Strip extra sort-key columns that were injected for ORDER BY resolution
+        if sort_extra_count > 0 {
+            let keep_count = output_columns.len() - sort_extra_count;
+            let strip_projections: Vec<ProjectExpr> =
+                (0..keep_count).map(ProjectExpr::Column).collect();
+            let strip_types: Vec<LogicalType> = (0..keep_count).map(|_| LogicalType::Any).collect();
+            operator = Box::new(ProjectOperator::new(
+                operator,
+                strip_projections,
+                strip_types,
+            ));
+            output_columns.truncate(keep_count);
+        }
+
         Ok((operator, output_columns))
     }
 

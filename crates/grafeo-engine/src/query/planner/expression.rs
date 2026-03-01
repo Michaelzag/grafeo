@@ -136,6 +136,35 @@ impl super::Planner {
                     map_expr: Box::new(map),
                 })
             }
+            LogicalExpression::ListPredicate {
+                kind,
+                variable,
+                list_expr,
+                predicate,
+            } => {
+                let filter_kind = match kind {
+                    crate::query::plan::ListPredicateKind::All => {
+                        grafeo_core::execution::operators::ListPredicateKind::All
+                    }
+                    crate::query::plan::ListPredicateKind::Any => {
+                        grafeo_core::execution::operators::ListPredicateKind::Any
+                    }
+                    crate::query::plan::ListPredicateKind::None => {
+                        grafeo_core::execution::operators::ListPredicateKind::None
+                    }
+                    crate::query::plan::ListPredicateKind::Single => {
+                        grafeo_core::execution::operators::ListPredicateKind::Single
+                    }
+                };
+                let list = self.convert_expression(list_expr)?;
+                let pred = self.convert_expression(predicate)?;
+                Ok(FilterExpression::ListPredicate {
+                    kind: filter_kind,
+                    variable: variable.clone(),
+                    list_expr: Box::new(list),
+                    predicate: Box::new(pred),
+                })
+            }
             LogicalExpression::ExistsSubquery(subplan) => {
                 // Extract the pattern from the subplan
                 // For EXISTS { MATCH (n)-[:TYPE]->() }, we extract start_var, direction, edge_type

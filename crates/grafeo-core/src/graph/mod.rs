@@ -11,9 +11,12 @@
 //! the full performance of whichever model you choose.
 
 pub mod lpg;
+pub mod traits;
 
 #[cfg(feature = "rdf")]
 pub mod rdf;
+
+pub use traits::{GraphStore, GraphStoreMut};
 
 /// Controls which edges to follow during traversal.
 ///

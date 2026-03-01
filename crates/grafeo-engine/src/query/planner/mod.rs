@@ -17,8 +17,8 @@ use crate::query::plan::{
     AddLabelOp, AggregateFunction as LogicalAggregateFunction, AggregateOp, AntiJoinOp, BinaryOp,
     CallProcedureOp, CreateEdgeOp, CreateNodeOp, DeleteEdgeOp, DeleteNodeOp, DistinctOp,
     ExpandDirection, ExpandOp, FilterOp, JoinOp, JoinType, LeftJoinOp, LimitOp, LogicalExpression,
-    LogicalOperator, LogicalPlan, MergeOp, NodeScanOp, RemoveLabelOp, ReturnOp, SetPropertyOp,
-    ShortestPathOp, SkipOp, SortOp, SortOrder, UnaryOp, UnionOp, UnwindOp,
+    LogicalOperator, LogicalPlan, MergeOp, MergeRelationshipOp, NodeScanOp, RemoveLabelOp,
+    ReturnOp, SetPropertyOp, ShortestPathOp, SkipOp, SortOp, SortOrder, UnaryOp, UnionOp, UnwindOp,
 };
 use grafeo_common::types::{EpochId, TxId};
 use grafeo_common::types::{LogicalType, Value};
@@ -31,9 +31,10 @@ use grafeo_core::execution::operators::{
     ExpandOperator, ExpandStep, ExpressionPredicate, FactorizedAggregate,
     FactorizedAggregateOperator, FilterExpression, FilterOperator, HashAggregateOperator,
     HashJoinOperator, JoinType as PhysicalJoinType, LazyFactorizedChainOperator,
-    LeapfrogJoinOperator, LimitOperator, MergeOperator, NestedLoopJoinOperator, NodeListOperator,
-    NullOrder, Operator, ProjectExpr, ProjectOperator, PropertySource, RemoveLabelOperator,
-    ScanOperator, SetPropertyOperator, ShortestPathOperator, SimpleAggregateOperator, SkipOperator,
+    LeapfrogJoinOperator, LimitOperator, MergeOperator, MergeRelationshipConfig,
+    MergeRelationshipOperator, NestedLoopJoinOperator, NodeListOperator, NullOrder, Operator,
+    ProjectExpr, ProjectOperator, PropertySource, RemoveLabelOperator, ScanOperator,
+    SetPropertyOperator, ShortestPathOperator, SimpleAggregateOperator, SkipOperator,
     SortDirection, SortKey as PhysicalSortKey, SortOperator, UnaryFilterOp, UnionOperator,
     UnwindOperator, VariableLengthExpandOperator,
 };
@@ -438,6 +439,9 @@ impl Planner {
             LogicalOperator::AntiJoin(anti_join) => self.plan_anti_join(anti_join),
             LogicalOperator::Unwind(unwind) => self.plan_unwind(unwind),
             LogicalOperator::Merge(merge) => self.plan_merge(merge),
+            LogicalOperator::MergeRelationship(merge_rel) => {
+                self.plan_merge_relationship(merge_rel)
+            }
             LogicalOperator::AddLabel(add_label) => self.plan_add_label(add_label),
             LogicalOperator::RemoveLabel(remove_label) => self.plan_remove_label(remove_label),
             LogicalOperator::SetProperty(set_prop) => self.plan_set_property(set_prop),
@@ -653,6 +657,28 @@ pub fn convert_filter_expression(expr: &LogicalExpression) -> Result<FilterExpre
                 list_expr: Box::new(list),
                 filter_expr: filter,
                 map_expr: Box::new(map),
+            })
+        }
+        LogicalExpression::ListPredicate {
+            kind,
+            variable,
+            list_expr,
+            predicate,
+        } => {
+            use crate::query::plan::ListPredicateKind as LPK;
+            let filter_kind = match kind {
+                LPK::All => grafeo_core::execution::operators::ListPredicateKind::All,
+                LPK::Any => grafeo_core::execution::operators::ListPredicateKind::Any,
+                LPK::None => grafeo_core::execution::operators::ListPredicateKind::None,
+                LPK::Single => grafeo_core::execution::operators::ListPredicateKind::Single,
+            };
+            let list = convert_filter_expression(list_expr)?;
+            let pred = convert_filter_expression(predicate)?;
+            Ok(FilterExpression::ListPredicate {
+                kind: filter_kind,
+                variable: variable.clone(),
+                list_expr: Box::new(list),
+                predicate: Box::new(pred),
             })
         }
         LogicalExpression::ExistsSubquery(_) | LogicalExpression::CountSubquery(_) => Err(

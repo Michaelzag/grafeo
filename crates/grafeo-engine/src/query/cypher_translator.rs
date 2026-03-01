@@ -4,11 +4,12 @@
 //! that can be optimized and executed.
 
 use crate::query::plan::{
-    AggregateExpr, AggregateFunction, AggregateOp, BinaryOp, CallProcedureOp, CreateEdgeOp,
-    CreateNodeOp, DeleteNodeOp, DistinctOp, ExpandDirection, ExpandOp, FilterOp, LeftJoinOp,
-    LimitOp, LogicalExpression, LogicalOperator, LogicalPlan, MergeOp, NodeScanOp, ProcedureYield,
-    ProjectOp, Projection, RemoveLabelOp, ReturnItem, ReturnOp, SetPropertyOp, ShortestPathOp,
-    SkipOp, SortKey, SortOp, SortOrder, UnaryOp, UnwindOp,
+    AddLabelOp, AggregateExpr, AggregateFunction, AggregateOp, BinaryOp, CallProcedureOp,
+    CreateEdgeOp, CreateNodeOp, DeleteNodeOp, DistinctOp, ExpandDirection, ExpandOp, FilterOp,
+    LeftJoinOp, LimitOp, ListPredicateKind, LogicalExpression, LogicalOperator, LogicalPlan,
+    MergeOp, MergeRelationshipOp, NodeScanOp, ProcedureYield, ProjectOp, Projection, RemoveLabelOp,
+    ReturnItem, ReturnOp, SetPropertyOp, ShortestPathOp, SkipOp, SortKey, SortOp, SortOrder,
+    UnaryOp, UnionOp, UnwindOp,
 };
 use crate::query::translator_common::{
     combine_with_and, is_aggregate_function, to_aggregate_function,
@@ -49,6 +50,29 @@ impl CypherTranslator {
                 QueryErrorKind::Semantic,
                 "REMOVE not yet supported",
             ))),
+            ast::Statement::Union { queries, all } => {
+                let inputs: Vec<LogicalOperator> = queries
+                    .iter()
+                    .map(|q| {
+                        let plan = self.translate_query(q)?;
+                        Ok(plan.root)
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+
+                let union_op = LogicalOperator::Union(UnionOp { inputs });
+
+                // UNION (not ALL) removes duplicates
+                let root = if *all {
+                    union_op
+                } else {
+                    LogicalOperator::Distinct(DistinctOp {
+                        input: Box::new(union_op),
+                        columns: None,
+                    })
+                };
+
+                Ok(LogicalPlan::new(root))
+            }
         }
     }
 
@@ -564,12 +588,23 @@ impl CypherTranslator {
         input: Option<LogicalOperator>,
     ) -> Result<LogicalOperator> {
         let input = input.unwrap_or(LogicalOperator::Empty);
-
-        // Extract node information from the pattern
-        // For now, we only support simple single-node patterns: (n:Label {props})
         let pattern = &merge_clause.pattern;
 
-        // Extract node from the pattern
+        // Check if this is a relationship (path) pattern
+        let path = match pattern {
+            ast::Pattern::Path(path) if !path.chain.is_empty() => Some(path),
+            ast::Pattern::NamedPath { pattern: inner, .. } => match inner.as_ref() {
+                ast::Pattern::Path(path) if !path.chain.is_empty() => Some(path),
+                _ => None,
+            },
+            _ => None,
+        };
+
+        if let Some(path) = path {
+            return self.translate_merge_relationship(path, merge_clause, input);
+        }
+
+        // Node-only MERGE
         let node = match pattern {
             ast::Pattern::Node(n) => n,
             ast::Pattern::Path(path) => &path.start,
@@ -579,7 +614,7 @@ impl CypherTranslator {
                 _ => {
                     return Err(Error::Query(QueryError::new(
                         QueryErrorKind::Semantic,
-                        "MERGE NamedPath must contain a node",
+                        "MERGE NamedPath must contain a node or path",
                     )));
                 }
             },
@@ -591,14 +626,12 @@ impl CypherTranslator {
             .unwrap_or_else(|| format!("_merge_{}", 0));
         let labels: Vec<String> = node.labels.clone();
 
-        // Extract properties from the node pattern
         let match_properties: Vec<(String, LogicalExpression)> = node
             .properties
             .iter()
             .map(|(k, v)| Ok((k.clone(), self.translate_expression(v)?)))
             .collect::<Result<Vec<_>>>()?;
 
-        // Extract ON CREATE properties
         let on_create: Vec<(String, LogicalExpression)> =
             if let Some(set_clause) = &merge_clause.on_create {
                 self.extract_set_properties(set_clause)?
@@ -606,7 +639,6 @@ impl CypherTranslator {
                 Vec::new()
             };
 
-        // Extract ON MATCH properties
         let on_match: Vec<(String, LogicalExpression)> =
             if let Some(set_clause) = &merge_clause.on_match {
                 self.extract_set_properties(set_clause)?
@@ -617,6 +649,83 @@ impl CypherTranslator {
         Ok(LogicalOperator::Merge(MergeOp {
             variable,
             labels,
+            match_properties,
+            on_create,
+            on_match,
+            input: Box::new(input),
+        }))
+    }
+
+    fn translate_merge_relationship(
+        &self,
+        path: &ast::PathPattern,
+        merge_clause: &ast::MergeClause,
+        input: LogicalOperator,
+    ) -> Result<LogicalOperator> {
+        // Extract source node variable
+        let source_variable = path.start.variable.clone().ok_or_else(|| {
+            Error::Query(QueryError::new(
+                QueryErrorKind::Semantic,
+                "MERGE relationship pattern requires a source node variable",
+            ))
+        })?;
+
+        // Extract the first (and only) relationship segment
+        let rel = path.chain.first().ok_or_else(|| {
+            Error::Query(QueryError::new(
+                QueryErrorKind::Semantic,
+                "MERGE relationship pattern is empty",
+            ))
+        })?;
+
+        // Extract relationship variable
+        let variable = rel
+            .variable
+            .clone()
+            .unwrap_or_else(|| "_merge_rel_0".to_string());
+
+        // Extract relationship type
+        let edge_type = rel.types.first().cloned().ok_or_else(|| {
+            Error::Query(QueryError::new(
+                QueryErrorKind::Semantic,
+                "MERGE relationship pattern requires a relationship type",
+            ))
+        })?;
+
+        // Extract target node variable
+        let target_variable = rel.target.variable.clone().ok_or_else(|| {
+            Error::Query(QueryError::new(
+                QueryErrorKind::Semantic,
+                "MERGE relationship pattern requires a target node variable",
+            ))
+        })?;
+
+        // Extract relationship properties
+        let match_properties: Vec<(String, LogicalExpression)> = rel
+            .properties
+            .iter()
+            .map(|(k, v)| Ok((k.clone(), self.translate_expression(v)?)))
+            .collect::<Result<Vec<_>>>()?;
+
+        let on_create: Vec<(String, LogicalExpression)> =
+            if let Some(set_clause) = &merge_clause.on_create {
+                self.extract_set_properties(set_clause)?
+            } else {
+                Vec::new()
+            };
+
+        let on_match: Vec<(String, LogicalExpression)> =
+            if let Some(set_clause) = &merge_clause.on_match {
+                self.extract_set_properties(set_clause)?
+            } else {
+                Vec::new()
+            };
+
+        Ok(LogicalOperator::MergeRelationship(MergeRelationshipOp {
+            variable,
+            source_variable,
+            target_variable,
+            edge_type,
             match_properties,
             on_create,
             on_match,
@@ -674,12 +783,8 @@ impl CypherTranslator {
         return_clause: &ast::ReturnClause,
         input: Option<LogicalOperator>,
     ) -> Result<LogicalOperator> {
-        let input = input.ok_or_else(|| {
-            Error::Query(QueryError::new(
-                QueryErrorKind::Semantic,
-                "RETURN requires input",
-            ))
-        })?;
+        // Standalone RETURN (e.g. RETURN 2 * 3) uses Empty as a single-row source
+        let input = input.unwrap_or(LogicalOperator::Empty);
 
         // Check if RETURN contains aggregate functions
         let has_aggregates = match &return_clause.items {
@@ -690,18 +795,31 @@ impl CypherTranslator {
         };
 
         if has_aggregates {
-            // Extract aggregates and group-by expressions
-            let (aggregates, group_by) = self.extract_aggregates_and_groups(return_clause)?;
+            // Extract aggregates and group-by expressions.
+            // When a return item wraps an aggregate in a binary/unary expression
+            // (e.g. `count(n) > 0 AS exists`), we decompose it into:
+            //   1. An aggregate (`count(n)` with synthetic alias)
+            //   2. A post-aggregate projection (`_agg_0 > 0 AS exists`)
+            let (aggregates, group_by, post_return) =
+                self.extract_aggregates_and_groups(return_clause)?;
 
-            Ok(LogicalOperator::Aggregate(AggregateOp {
+            let agg_op = LogicalOperator::Aggregate(AggregateOp {
                 group_by,
                 aggregates,
                 input: Box::new(input),
-                // Note: Cypher doesn't have HAVING syntax. Aggregate filtering is done via
-                // `WITH ... WHERE` pattern (e.g., `WITH n, count(*) AS cnt WHERE cnt > 10`)
-                // which is handled by translate_with() adding a Filter after Project.
                 having: None,
-            }))
+            });
+
+            if let Some(return_items) = post_return {
+                // Wrapped aggregates need a post-projection
+                Ok(LogicalOperator::Return(ReturnOp {
+                    items: return_items,
+                    distinct: return_clause.distinct,
+                    input: Box::new(agg_op),
+                }))
+            } else {
+                Ok(agg_op)
+            }
         } else {
             // Normal return without aggregates
             let items = match &return_clause.items {
@@ -731,12 +849,24 @@ impl CypherTranslator {
     }
 
     /// Extracts aggregate and group-by expressions from RETURN items.
+    ///
+    /// Returns `(aggregates, group_by, post_return)` where `post_return` is
+    /// `Some(...)` when any return item wraps an aggregate in a binary/unary
+    /// expression (e.g. `count(n) > 0 AS exists`). In that case a post-aggregate
+    /// `ReturnOp` must be chained to evaluate the outer expression.
     fn extract_aggregates_and_groups(
         &self,
         return_clause: &ast::ReturnClause,
-    ) -> Result<(Vec<AggregateExpr>, Vec<LogicalExpression>)> {
+    ) -> Result<(
+        Vec<AggregateExpr>,
+        Vec<LogicalExpression>,
+        Option<Vec<ReturnItem>>,
+    )> {
         let mut aggregates = Vec::new();
         let mut group_by = Vec::new();
+        let mut needs_post_return = false;
+        let mut post_return_items = Vec::new();
+        let mut agg_counter: u32 = 0;
 
         let items = match &return_clause.items {
             ast::ReturnItems::All => {
@@ -750,15 +880,114 @@ impl CypherTranslator {
 
         for item in items {
             if let Some(agg_expr) = self.try_extract_aggregate(&item.expression, &item.alias)? {
+                // Direct aggregate (e.g. `count(n) AS cnt`)
                 aggregates.push(agg_expr);
+                // For post-return passthrough: reference the aggregate by its alias
+                let agg_alias = item
+                    .alias
+                    .clone()
+                    .unwrap_or_else(|| format!("_agg_{agg_counter}"));
+                post_return_items.push(ReturnItem {
+                    expression: LogicalExpression::Variable(agg_alias),
+                    alias: item.alias.clone(),
+                });
+                agg_counter += 1;
+            } else if contains_aggregate(&item.expression) {
+                // Wrapped aggregate (e.g. `count(n) > 0 AS exists`)
+                needs_post_return = true;
+                let synthetic_alias = format!("_agg_{agg_counter}");
+                agg_counter += 1;
+
+                // Extract the innermost aggregate and build a substitute expression
+                let (agg_expr, substitute) =
+                    self.extract_wrapped_aggregate(&item.expression, &synthetic_alias)?;
+                aggregates.push(agg_expr);
+                post_return_items.push(ReturnItem {
+                    expression: substitute,
+                    alias: item.alias.clone(),
+                });
             } else {
-                // Non-aggregate expressions become group-by keys
+                // Non-aggregate expression: group-by key
                 let expr = self.translate_expression(&item.expression)?;
-                group_by.push(expr);
+                group_by.push(expr.clone());
+                post_return_items.push(ReturnItem {
+                    expression: expr,
+                    alias: item.alias.clone(),
+                });
             }
         }
 
-        Ok((aggregates, group_by))
+        if needs_post_return {
+            Ok((aggregates, group_by, Some(post_return_items)))
+        } else {
+            Ok((aggregates, group_by, None))
+        }
+    }
+
+    /// Extracts an aggregate from inside a wrapping expression and returns
+    /// both the aggregate and a substitute expression that references the
+    /// aggregate result by `synthetic_alias`.
+    ///
+    /// For `count(n) > 0`, returns:
+    /// - aggregate: `count(n)` with alias `synthetic_alias`
+    /// - substitute: `Variable(synthetic_alias) > Literal(0)`
+    fn extract_wrapped_aggregate(
+        &self,
+        expr: &ast::Expression,
+        synthetic_alias: &str,
+    ) -> Result<(AggregateExpr, LogicalExpression)> {
+        match expr {
+            ast::Expression::FunctionCall { .. } => {
+                // The expression IS an aggregate: extract it directly
+                let agg = self
+                    .try_extract_aggregate(expr, &Some(synthetic_alias.to_string()))?
+                    .expect("contains_aggregate was true but try_extract_aggregate returned None");
+                let substitute = LogicalExpression::Variable(synthetic_alias.to_string());
+                Ok((agg, substitute))
+            }
+            ast::Expression::Binary { left, op, right } => {
+                let binary_op = self.translate_binary_op(*op)?;
+                if contains_aggregate(left) {
+                    let (agg, left_sub) = self.extract_wrapped_aggregate(left, synthetic_alias)?;
+                    let right_expr = self.translate_expression(right)?;
+                    Ok((
+                        agg,
+                        LogicalExpression::Binary {
+                            left: Box::new(left_sub),
+                            op: binary_op,
+                            right: Box::new(right_expr),
+                        },
+                    ))
+                } else {
+                    let (agg, right_sub) =
+                        self.extract_wrapped_aggregate(right, synthetic_alias)?;
+                    let left_expr = self.translate_expression(left)?;
+                    Ok((
+                        agg,
+                        LogicalExpression::Binary {
+                            left: Box::new(left_expr),
+                            op: binary_op,
+                            right: Box::new(right_sub),
+                        },
+                    ))
+                }
+            }
+            ast::Expression::Unary { op, operand } => {
+                let unary_op = self.translate_unary_op(*op)?;
+                let (agg, sub) = self.extract_wrapped_aggregate(operand, synthetic_alias)?;
+                Ok((
+                    agg,
+                    LogicalExpression::Unary {
+                        op: unary_op,
+                        operand: Box::new(sub),
+                    },
+                ))
+            }
+            _ => Err(Error::Query(QueryError::new(
+                QueryErrorKind::Semantic,
+                "Unsupported expression wrapping an aggregate",
+            ))),
+        }
     }
 
     /// Tries to extract an aggregate expression from an AST expression.
@@ -1055,6 +1284,7 @@ impl CypherTranslator {
                         variable: variable.clone(),
                         properties: vec![(property.clone(), value_expr)],
                         replace: false,
+                        is_edge: false,
                         input: Box::new(plan),
                     });
                 }
@@ -1068,6 +1298,7 @@ impl CypherTranslator {
                         variable: variable.clone(),
                         properties: vec![("*".to_string(), value_expr)],
                         replace: true,
+                        is_edge: false,
                         input: Box::new(plan),
                     });
                 }
@@ -1081,14 +1312,17 @@ impl CypherTranslator {
                         variable: variable.clone(),
                         properties: vec![("*".to_string(), value_expr)],
                         replace: false,
+                        is_edge: false,
                         input: Box::new(plan),
                     });
                 }
-                ast::SetItem::Labels { .. } => {
-                    return Err(Error::Query(QueryError::new(
-                        QueryErrorKind::Semantic,
-                        "SET labels not yet supported",
-                    )));
+                ast::SetItem::Labels { variable, labels } => {
+                    // SET n:Label1:Label2 adds labels to the node
+                    plan = LogicalOperator::AddLabel(AddLabelOp {
+                        variable: variable.clone(),
+                        labels: labels.clone(),
+                        input: Box::new(plan),
+                    });
                 }
             }
         }
@@ -1121,6 +1355,7 @@ impl CypherTranslator {
                             LogicalExpression::Literal(Value::Null),
                         )],
                         replace: false,
+                        is_edge: false,
                         input: Box::new(plan),
                     });
                 }
@@ -1301,6 +1536,25 @@ impl CypherTranslator {
                     list_expr: Box::new(list_expr),
                     filter_expr,
                     map_expr: Box::new(map_expr),
+                })
+            }
+            ast::Expression::ListPredicate {
+                kind,
+                variable,
+                list,
+                predicate,
+            } => {
+                let ir_kind = match kind {
+                    ast::ListPredicateKind::All => ListPredicateKind::All,
+                    ast::ListPredicateKind::Any => ListPredicateKind::Any,
+                    ast::ListPredicateKind::None => ListPredicateKind::None,
+                    ast::ListPredicateKind::Single => ListPredicateKind::Single,
+                };
+                Ok(LogicalExpression::ListPredicate {
+                    kind: ir_kind,
+                    variable: variable.clone(),
+                    list_expr: Box::new(self.translate_expression(list)?),
+                    predicate: Box::new(self.translate_expression(predicate)?),
                 })
             }
             ast::Expression::PatternComprehension { .. } => Err(Error::Query(QueryError::new(
@@ -2060,6 +2314,38 @@ mod tests {
             assert!((f - std::f64::consts::PI).abs() < 0.001);
         } else {
             panic!("Expected Float64");
+        }
+    }
+
+    #[test]
+    fn test_translate_multiple_match_clauses() {
+        // Two independent MATCH clauses should produce a valid plan
+        let plan = translate(
+            "MATCH (a:Person) WHERE a.name = 'Alice' MATCH (b:Person) WHERE b.name = 'Bob' RETURN a.name, b.name",
+        )
+        .unwrap();
+
+        // The plan should have a Return at the root
+        assert!(matches!(&plan.root, LogicalOperator::Return(_)));
+    }
+
+    #[test]
+    fn test_translate_merge_with_relationship() {
+        // MERGE with a relationship pattern should produce MergeRelationship operator
+        let plan =
+            translate("MATCH (a {id: 'x'}), (b {id: 'y'}) MERGE (a)-[r:KNOWS]->(b) RETURN r")
+                .unwrap();
+
+        // The plan root should be a Return
+        if let LogicalOperator::Return(ret) = &plan.root {
+            // The input to Return should be MergeRelationship
+            assert!(
+                matches!(ret.input.as_ref(), LogicalOperator::MergeRelationship(_)),
+                "Expected MergeRelationship, got: {:?}",
+                std::mem::discriminant(ret.input.as_ref())
+            );
+        } else {
+            panic!("Expected Return at root");
         }
     }
 }

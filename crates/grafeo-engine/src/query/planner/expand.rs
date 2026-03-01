@@ -33,22 +33,35 @@ impl super::Planner {
         let is_variable_length =
             expand.min_hops != 1 || expand.max_hops.is_none() || expand.max_hops != Some(1);
 
-        let operator: Box<dyn Operator> = if is_variable_length {
-            // Use VariableLengthExpandOperator for multi-hop paths
-            let max_hops = expand.max_hops.unwrap_or(expand.min_hops + 10); // Default max if unlimited
+        // Use VariableLengthExpandOperator when multi-hop OR when a named path
+        // needs path detail columns (length, nodes, edges)
+        let needs_path_details = expand.path_alias.is_some();
+
+        let operator: Box<dyn Operator> = if is_variable_length || needs_path_details {
+            // Use VariableLengthExpandOperator for multi-hop paths or named paths
+            let min_hops = if is_variable_length {
+                expand.min_hops
+            } else {
+                1
+            };
+            let max_hops = if is_variable_length {
+                expand.max_hops.unwrap_or(expand.min_hops + 10)
+            } else {
+                1
+            };
             let mut expand_op = VariableLengthExpandOperator::new(
                 Arc::clone(&self.store),
                 input_op,
                 source_column,
                 direction,
                 expand.edge_type.clone(),
-                expand.min_hops,
+                min_hops,
                 max_hops,
             )
             .with_tx_context(self.viewing_epoch, self.tx_id);
 
             // If a path alias is set, enable path length and detail output
-            if expand.path_alias.is_some() {
+            if needs_path_details {
                 expand_op = expand_op
                     .with_path_length_output()
                     .with_path_detail_output();
@@ -56,7 +69,7 @@ impl super::Planner {
 
             Box::new(expand_op)
         } else {
-            // Use simple ExpandOperator for single-hop paths
+            // Use simple ExpandOperator for single-hop paths without named paths
             let expand_op = ExpandOperator::new(
                 Arc::clone(&self.store),
                 input_op,
@@ -85,9 +98,16 @@ impl super::Planner {
 
         // If a path alias is set, add columns for path length, nodes, and edges
         if let Some(ref path_alias) = expand.path_alias {
-            columns.push(format!("_path_length_{}", path_alias));
-            columns.push(format!("_path_nodes_{}", path_alias));
-            columns.push(format!("_path_edges_{}", path_alias));
+            let length_col = format!("_path_length_{}", path_alias);
+            let nodes_col = format!("_path_nodes_{}", path_alias);
+            let edges_col = format!("_path_edges_{}", path_alias);
+            // Mark as scalar so plan_return uses Column pass-through, not NodeResolve
+            self.scalar_columns.borrow_mut().insert(length_col.clone());
+            self.scalar_columns.borrow_mut().insert(nodes_col.clone());
+            self.scalar_columns.borrow_mut().insert(edges_col.clone());
+            columns.push(length_col);
+            columns.push(nodes_col);
+            columns.push(edges_col);
         }
 
         Ok((operator, columns))

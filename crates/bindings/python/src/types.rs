@@ -7,8 +7,8 @@
 //! | `int` | `Int64` | |
 //! | `float` | `Float64` | |
 //! | `str` | `String` | |
-//! | `list[float]` | `Vector` | All-float lists become vectors |
-//! | `list` | `List` | Mixed-type lists converted recursively |
+//! | `list[float]` | `Vector` | Lists where every element is a Python float (not int) |
+//! | `list` | `List` | All other lists converted recursively |
 //! | `dict` | `Map` | Keys must be strings |
 //! | `bytes` | `Bytes` | |
 //! | `datetime` | `Timestamp` | Converted to/from UTC |
@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDateTime, PyDict, PyList};
+use pyo3::types::{PyBytes, PyDateTime, PyDict, PyFloat, PyList};
 
 use grafeo_common::types::{PropertyKey, Timestamp, Value};
 
@@ -142,14 +142,18 @@ impl PyValue {
             return Ok(Value::String(v.into()));
         }
 
-        // All-float lists → Value::Vector (must come before generic list)
-        if let Ok(v) = obj.extract::<Vec<f32>>()
-            && !v.is_empty()
-        {
-            return Ok(Value::Vector(v.into()));
-        }
-
         if let Ok(v) = obj.extract::<Vec<Bound<'_, PyAny>>>() {
+            // Only convert to Vector when ALL elements are Python floats (not ints
+            // coerced to float). This prevents [1, 2, 3] from being stored as an
+            // embedding vector instead of a general-purpose list.
+            if !v.is_empty() && v.iter().all(|item| item.is_instance_of::<PyFloat>()) {
+                let floats: Result<Vec<f32>, _> =
+                    v.iter().map(|item| item.extract::<f32>()).collect();
+                if let Ok(floats) = floats {
+                    return Ok(Value::Vector(floats.into()));
+                }
+            }
+
             let mut items = Vec::new();
             for item in v {
                 items.push(Self::from_py(&item)?);

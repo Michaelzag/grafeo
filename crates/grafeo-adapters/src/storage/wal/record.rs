@@ -1,7 +1,33 @@
-//! WAL record types.
+//! WAL record types and the [`WalEntry`] trait.
 
 use grafeo_common::types::{EdgeId, NodeId, TxId, Value};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+
+/// Trait for WAL record types, enabling type-safe WAL instances.
+///
+/// Implement this for each storage model's record enum (e.g., [`WalRecord`]
+/// for LPG, a future `RdfWalRecord` for RDF). The [`TypedWal`](super::TypedWal)
+/// wrapper uses these methods to handle durability decisions and transaction
+/// semantics without knowing the concrete record type.
+pub trait WalEntry: Serialize + DeserializeOwned + Send + Sync + std::fmt::Debug + Clone {
+    /// Whether this record should force an immediate fsync in Sync durability mode.
+    ///
+    /// Returns `true` for commit markers.
+    fn requires_sync(&self) -> bool;
+
+    /// Whether this is a transaction commit record.
+    fn is_commit(&self) -> bool;
+
+    /// Whether this is a transaction abort record.
+    fn is_abort(&self) -> bool;
+
+    /// Whether this is a checkpoint record.
+    fn is_checkpoint(&self) -> bool;
+
+    /// Creates a checkpoint record for this WAL type.
+    fn make_checkpoint(tx_id: TxId) -> Self;
+}
 
 /// A record in the Write-Ahead Log.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,6 +117,28 @@ pub enum WalRecord {
         /// Transaction ID at checkpoint.
         tx_id: TxId,
     },
+}
+
+impl WalEntry for WalRecord {
+    fn requires_sync(&self) -> bool {
+        matches!(self, WalRecord::TxCommit { .. })
+    }
+
+    fn is_commit(&self) -> bool {
+        matches!(self, WalRecord::TxCommit { .. })
+    }
+
+    fn is_abort(&self) -> bool {
+        matches!(self, WalRecord::TxAbort { .. })
+    }
+
+    fn is_checkpoint(&self) -> bool {
+        matches!(self, WalRecord::Checkpoint { .. })
+    }
+
+    fn make_checkpoint(tx_id: TxId) -> Self {
+        WalRecord::Checkpoint { tx_id }
+    }
 }
 
 #[cfg(test)]
@@ -281,6 +329,87 @@ mod tests {
         match parsed {
             WalRecord::CreateNode { labels, .. } => assert!(labels.is_empty()),
             _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_wal_entry_requires_sync() {
+        use super::WalEntry;
+
+        // Only TxCommit should require sync
+        assert!(
+            WalRecord::TxCommit {
+                tx_id: TxId::new(1)
+            }
+            .requires_sync()
+        );
+
+        assert!(
+            !WalRecord::CreateNode {
+                id: NodeId::new(1),
+                labels: vec![]
+            }
+            .requires_sync()
+        );
+
+        assert!(
+            !WalRecord::TxAbort {
+                tx_id: TxId::new(1)
+            }
+            .requires_sync()
+        );
+
+        assert!(
+            !WalRecord::Checkpoint {
+                tx_id: TxId::new(1)
+            }
+            .requires_sync()
+        );
+    }
+
+    #[test]
+    fn test_wal_entry_transaction_markers() {
+        use super::WalEntry;
+
+        let commit = WalRecord::TxCommit {
+            tx_id: TxId::new(1),
+        };
+        assert!(commit.is_commit());
+        assert!(!commit.is_abort());
+        assert!(!commit.is_checkpoint());
+
+        let abort = WalRecord::TxAbort {
+            tx_id: TxId::new(2),
+        };
+        assert!(!abort.is_commit());
+        assert!(abort.is_abort());
+        assert!(!abort.is_checkpoint());
+
+        let checkpoint = WalRecord::Checkpoint {
+            tx_id: TxId::new(3),
+        };
+        assert!(!checkpoint.is_commit());
+        assert!(!checkpoint.is_abort());
+        assert!(checkpoint.is_checkpoint());
+
+        // Data records are none of the above
+        let data = WalRecord::CreateNode {
+            id: NodeId::new(1),
+            labels: vec![],
+        };
+        assert!(!data.is_commit());
+        assert!(!data.is_abort());
+        assert!(!data.is_checkpoint());
+    }
+
+    #[test]
+    fn test_wal_entry_make_checkpoint() {
+        use super::WalEntry;
+
+        let record = WalRecord::make_checkpoint(TxId::new(42));
+        match record {
+            WalRecord::Checkpoint { tx_id } => assert_eq!(tx_id, TxId::new(42)),
+            _ => panic!("make_checkpoint should produce Checkpoint variant"),
         }
     }
 }

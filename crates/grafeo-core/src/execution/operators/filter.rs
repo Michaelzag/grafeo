@@ -222,6 +222,17 @@ pub enum FilterExpression {
         /// The mapping expression for each element.
         map_expr: Box<FilterExpression>,
     },
+    /// List predicate: all/any/none/single(x IN list WHERE pred).
+    ListPredicate {
+        /// The kind of list predicate.
+        kind: ListPredicateKind,
+        /// The iteration variable name.
+        variable: String,
+        /// The source list expression.
+        list_expr: Box<FilterExpression>,
+        /// The predicate to test for each element.
+        predicate: Box<FilterExpression>,
+    },
     /// EXISTS subquery - evaluates inner plan and returns true if results exist.
     ExistsSubquery {
         /// The start node variable from outer query.
@@ -237,6 +248,19 @@ pub enum FilterExpression {
         /// Maximum number of hops (for variable-length patterns).
         max_hops: Option<u32>,
     },
+}
+
+/// The kind of list predicate function.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListPredicateKind {
+    /// all(x IN list WHERE pred): true if pred holds for every element.
+    All,
+    /// any(x IN list WHERE pred): true if pred holds for at least one element.
+    Any,
+    /// none(x IN list WHERE pred): true if pred holds for no element.
+    None,
+    /// single(x IN list WHERE pred): true if pred holds for exactly one element.
+    Single,
 }
 
 /// Binary operators for filter expressions.
@@ -521,15 +545,21 @@ impl ExpressionPredicate {
                 filter_expr,
                 map_expr,
             } => {
-                // Evaluate the source list
+                // Evaluate the source list (accept both List and Vector)
                 let list_val = self.eval_expr(list_expr, chunk, row)?;
-                let Value::List(items) = list_val else {
-                    return None; // Not a list
+                let owned_items: Vec<Value>;
+                let items: &[Value] = match &list_val {
+                    Value::List(list) => list,
+                    Value::Vector(vec) => {
+                        owned_items = vec.iter().map(|&f| Value::Float64(f64::from(f))).collect();
+                        &owned_items
+                    }
+                    _ => return None,
                 };
 
                 // Build the result list by iterating over source items
                 let mut result = Vec::new();
-                for item in items.iter() {
+                for item in items {
                     // Create a temporary context with the iteration variable bound
                     // For now, we'll do a simplified version that works for literals
                     // A full implementation would need to create a sub-evaluator
@@ -556,6 +586,44 @@ impl ExpressionPredicate {
                 }
 
                 Some(Value::List(result.into()))
+            }
+            FilterExpression::ListPredicate {
+                kind,
+                variable,
+                list_expr,
+                predicate,
+            } => {
+                let list_val = self.eval_expr(list_expr, chunk, row)?;
+                // Accept both List and Vector as iterable sequences
+                let items: Vec<&Value>;
+                let vec_items: Vec<Value>;
+                match &list_val {
+                    Value::List(list) => {
+                        items = list.iter().collect();
+                    }
+                    Value::Vector(vec) => {
+                        vec_items = vec.iter().map(|&f| Value::Float64(f64::from(f))).collect();
+                        items = vec_items.iter().collect();
+                    }
+                    _ => return None,
+                }
+
+                let mut match_count: u32 = 0;
+                for item in &items {
+                    let result = self.eval_comprehension_expr(predicate, item, variable);
+                    if matches!(result, Some(Value::Bool(true))) {
+                        match_count += 1;
+                    }
+                }
+
+                let result = match kind {
+                    ListPredicateKind::All => match_count == items.len() as u32,
+                    ListPredicateKind::Any => match_count > 0,
+                    ListPredicateKind::None => match_count == 0,
+                    ListPredicateKind::Single => match_count == 1,
+                };
+
+                Some(Value::Bool(result))
             }
             FilterExpression::ExistsSubquery {
                 start_var,
@@ -644,8 +712,8 @@ impl ExpressionPredicate {
                 let r = right.as_bool()?;
                 Some(Value::Bool(l ^ r))
             }
-            BinaryFilterOp::Eq => Some(Value::Bool(self.values_equal(left, right))),
-            BinaryFilterOp::Ne => Some(Value::Bool(!self.values_equal(left, right))),
+            BinaryFilterOp::Eq => Some(Value::Bool(Self::values_equal(left, right))),
+            BinaryFilterOp::Ne => Some(Value::Bool(!Self::values_equal(left, right))),
             BinaryFilterOp::Lt => self.compare_values(left, right).map(|c| Value::Bool(c < 0)),
             BinaryFilterOp::Le => self
                 .compare_values(left, right)
@@ -655,7 +723,31 @@ impl ExpressionPredicate {
                 .compare_values(left, right)
                 .map(|c| Value::Bool(c >= 0)),
             // Arithmetic operators
-            BinaryFilterOp::Add => self.eval_arithmetic(left, right, |a, b| a + b, |a, b| a + b),
+            BinaryFilterOp::Add => {
+                // String concatenation: string + string, or string + other
+                match (left, right) {
+                    (Value::String(a), Value::String(b)) => {
+                        let mut s = String::with_capacity(a.len() + b.len());
+                        s.push_str(a);
+                        s.push_str(b);
+                        Some(Value::String(s.into()))
+                    }
+                    (Value::String(a), other) => {
+                        let b = match other {
+                            Value::Int64(i) => i.to_string(),
+                            Value::Float64(f) => f.to_string(),
+                            Value::Bool(b) => b.to_string(),
+                            Value::Null => return Some(Value::Null),
+                            _ => return None,
+                        };
+                        let mut s = String::with_capacity(a.len() + b.len());
+                        s.push_str(a);
+                        s.push_str(&b);
+                        Some(Value::String(s.into()))
+                    }
+                    _ => self.eval_arithmetic(left, right, |a, b| a + b, |a, b| a + b),
+                }
+            }
             BinaryFilterOp::Sub => self.eval_arithmetic(left, right, |a, b| a - b, |a, b| a - b),
             BinaryFilterOp::Mul => self.eval_arithmetic(left, right, |a, b| a * b, |a, b| a * b),
             BinaryFilterOp::Div => self.eval_arithmetic(left, right, |a, b| a / b, |a, b| a / b),
@@ -755,7 +847,7 @@ impl ExpressionPredicate {
         let right_val = self.eval_expr(right, chunk, row)?;
         match right_val {
             Value::List(items) => {
-                let found = items.iter().any(|item| self.values_equal(left, item));
+                let found = items.iter().any(|item| Self::values_equal(left, item));
                 Some(Value::Bool(found))
             }
             _ => None,
@@ -851,7 +943,15 @@ impl ExpressionPredicate {
                     return None;
                 }
                 let val = self.eval_expr(&args[0], chunk, row)?;
-                Some(Value::String(format!("{:?}", val).into()))
+                let s = match &val {
+                    Value::String(s) => s.to_string(),
+                    Value::Int64(i) => i.to_string(),
+                    Value::Float64(f) => f.to_string(),
+                    Value::Bool(b) => b.to_string(),
+                    Value::Null => return Some(Value::Null),
+                    _ => format!("{val:?}"),
+                };
+                Some(Value::String(s.into()))
             }
             "tointeger" | "toint" => {
                 if args.len() != 1 {
@@ -1058,6 +1158,291 @@ impl ExpressionPredicate {
                     crate::index::vector::manhattan_distance(a, b) as f64,
                 ))
             }
+            // --- String functions ---
+            "keys" => {
+                if args.len() != 1 {
+                    return None;
+                }
+                // keys(n) on a node variable: get property keys from the store
+                if let FilterExpression::Variable(var) = &args[0] {
+                    let col_idx = *self.variable_columns.get(var)?;
+                    let col = chunk.column(col_idx)?;
+                    if let Some(node_id) = col.get_node_id(row) {
+                        let node = self.store.get_node(node_id)?;
+                        let keys: Vec<Value> = node
+                            .properties
+                            .iter()
+                            .map(|(k, _)| Value::String(k.as_str().into()))
+                            .collect();
+                        return Some(Value::List(keys.into()));
+                    }
+                }
+                // keys(map) on a map value
+                let val = self.eval_expr(&args[0], chunk, row)?;
+                match val {
+                    Value::Map(map) => {
+                        let keys: Vec<Value> = map
+                            .keys()
+                            .map(|k| Value::String(k.as_str().into()))
+                            .collect();
+                        Some(Value::List(keys.into()))
+                    }
+                    _ => None,
+                }
+            }
+            "properties" => {
+                if args.len() != 1 {
+                    return None;
+                }
+                if let FilterExpression::Variable(var) = &args[0] {
+                    let col_idx = *self.variable_columns.get(var)?;
+                    let col = chunk.column(col_idx)?;
+                    if let Some(node_id) = col.get_node_id(row) {
+                        let node = self.store.get_node(node_id)?;
+                        let map: std::collections::BTreeMap<PropertyKey, Value> = node
+                            .properties
+                            .iter()
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect();
+                        return Some(Value::Map(Arc::new(map)));
+                    } else if let Some(edge_id) = col.get_edge_id(row) {
+                        let edge = self.store.get_edge(edge_id)?;
+                        let map: std::collections::BTreeMap<PropertyKey, Value> = edge
+                            .properties
+                            .iter()
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect();
+                        return Some(Value::Map(Arc::new(map)));
+                    }
+                }
+                None
+            }
+            "trim" => {
+                if args.len() != 1 {
+                    return None;
+                }
+                let val = self.eval_expr(&args[0], chunk, row)?;
+                match val {
+                    Value::String(s) => Some(Value::String(s.trim().to_string().into())),
+                    _ => None,
+                }
+            }
+            "ltrim" => {
+                if args.len() != 1 {
+                    return None;
+                }
+                let val = self.eval_expr(&args[0], chunk, row)?;
+                match val {
+                    Value::String(s) => Some(Value::String(s.trim_start().to_string().into())),
+                    _ => None,
+                }
+            }
+            "rtrim" => {
+                if args.len() != 1 {
+                    return None;
+                }
+                let val = self.eval_expr(&args[0], chunk, row)?;
+                match val {
+                    Value::String(s) => Some(Value::String(s.trim_end().to_string().into())),
+                    _ => None,
+                }
+            }
+            "replace" => {
+                if args.len() != 3 {
+                    return None;
+                }
+                let val = self.eval_expr(&args[0], chunk, row)?;
+                let search = self.eval_expr(&args[1], chunk, row)?;
+                let replacement = self.eval_expr(&args[2], chunk, row)?;
+                match (&val, &search, &replacement) {
+                    (Value::String(s), Value::String(from), Value::String(to)) => {
+                        Some(Value::String(s.replace(from.as_str(), to.as_str()).into()))
+                    }
+                    _ => None,
+                }
+            }
+            "substring" => {
+                if args.len() < 2 || args.len() > 3 {
+                    return None;
+                }
+                let val = self.eval_expr(&args[0], chunk, row)?;
+                let start = self.eval_expr(&args[1], chunk, row)?;
+                let Value::String(s) = val else {
+                    return None;
+                };
+                let Value::Int64(start_idx) = start else {
+                    return None;
+                };
+                let start_idx = start_idx.max(0) as usize;
+                if args.len() == 3 {
+                    let length = self.eval_expr(&args[2], chunk, row)?;
+                    let Value::Int64(len) = length else {
+                        return None;
+                    };
+                    let len = len.max(0) as usize;
+                    let chars: String = s.chars().skip(start_idx).take(len).collect();
+                    Some(Value::String(chars.into()))
+                } else {
+                    let chars: String = s.chars().skip(start_idx).collect();
+                    Some(Value::String(chars.into()))
+                }
+            }
+            "split" => {
+                if args.len() != 2 {
+                    return None;
+                }
+                let val = self.eval_expr(&args[0], chunk, row)?;
+                let delim = self.eval_expr(&args[1], chunk, row)?;
+                match (&val, &delim) {
+                    (Value::String(s), Value::String(d)) => {
+                        let parts: Vec<Value> = s
+                            .split(d.as_str())
+                            .map(|p| Value::String(p.to_string().into()))
+                            .collect();
+                        Some(Value::List(parts.into()))
+                    }
+                    _ => None,
+                }
+            }
+            "toupper" | "upper" => {
+                if args.len() != 1 {
+                    return None;
+                }
+                let val = self.eval_expr(&args[0], chunk, row)?;
+                match val {
+                    Value::String(s) => Some(Value::String(s.to_uppercase().into())),
+                    _ => None,
+                }
+            }
+            "tolower" | "lower" => {
+                if args.len() != 1 {
+                    return None;
+                }
+                let val = self.eval_expr(&args[0], chunk, row)?;
+                match val {
+                    Value::String(s) => Some(Value::String(s.to_lowercase().into())),
+                    _ => None,
+                }
+            }
+            "char_length" | "charlength" => {
+                if args.len() != 1 {
+                    return None;
+                }
+                let val = self.eval_expr(&args[0], chunk, row)?;
+                match val {
+                    Value::String(s) => Some(Value::Int64(s.chars().count() as i64)),
+                    _ => None,
+                }
+            }
+            // --- Numeric functions ---
+            "abs" => {
+                if args.len() != 1 {
+                    return None;
+                }
+                let val = self.eval_expr(&args[0], chunk, row)?;
+                match val {
+                    Value::Int64(i) => Some(Value::Int64(i.abs())),
+                    Value::Float64(f) => Some(Value::Float64(f.abs())),
+                    _ => None,
+                }
+            }
+            "ceil" | "ceiling" => {
+                if args.len() != 1 {
+                    return None;
+                }
+                let val = self.eval_expr(&args[0], chunk, row)?;
+                match val {
+                    Value::Int64(i) => Some(Value::Int64(i)),
+                    Value::Float64(f) => Some(Value::Int64(f.ceil() as i64)),
+                    _ => None,
+                }
+            }
+            "floor" => {
+                if args.len() != 1 {
+                    return None;
+                }
+                let val = self.eval_expr(&args[0], chunk, row)?;
+                match val {
+                    Value::Int64(i) => Some(Value::Int64(i)),
+                    Value::Float64(f) => Some(Value::Int64(f.floor() as i64)),
+                    _ => None,
+                }
+            }
+            "round" => {
+                if args.len() != 1 {
+                    return None;
+                }
+                let val = self.eval_expr(&args[0], chunk, row)?;
+                match val {
+                    Value::Int64(i) => Some(Value::Int64(i)),
+                    Value::Float64(f) => Some(Value::Int64(f.round() as i64)),
+                    _ => None,
+                }
+            }
+            "sqrt" => {
+                if args.len() != 1 {
+                    return None;
+                }
+                let val = self.eval_expr(&args[0], chunk, row)?;
+                match val {
+                    Value::Int64(i) => Some(Value::Float64((i as f64).sqrt())),
+                    Value::Float64(f) => Some(Value::Float64(f.sqrt())),
+                    _ => None,
+                }
+            }
+            "rand" | "random" => {
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                row.hash(&mut hasher);
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .ok()?
+                    .as_nanos()
+                    .hash(&mut hasher);
+                let hash = hasher.finish();
+                let random = (hash as f64) / (u64::MAX as f64);
+                Some(Value::Float64(random))
+            }
+            // --- Collection functions ---
+            "range" => {
+                if args.len() < 2 || args.len() > 3 {
+                    return None;
+                }
+                let start = self.eval_expr(&args[0], chunk, row)?;
+                let stop = self.eval_expr(&args[1], chunk, row)?;
+                let Value::Int64(start_val) = start else {
+                    return None;
+                };
+                let Value::Int64(end_val) = stop else {
+                    return None;
+                };
+                let step = if args.len() == 3 {
+                    let s = self.eval_expr(&args[2], chunk, row)?;
+                    let Value::Int64(sv) = s else {
+                        return None;
+                    };
+                    if sv == 0 {
+                        return None;
+                    }
+                    sv
+                } else {
+                    1
+                };
+                let mut result = Vec::new();
+                let mut current = start_val;
+                if step > 0 {
+                    while current <= end_val {
+                        result.push(Value::Int64(current));
+                        current += step;
+                    }
+                } else {
+                    while current >= end_val {
+                        result.push(Value::Int64(current));
+                        current += step;
+                    }
+                }
+                Some(Value::List(result.into()))
+            }
             _ => None, // Unknown function
         }
     }
@@ -1075,7 +1460,7 @@ impl ExpressionPredicate {
             let test_val = self.eval_expr(test_expr, chunk, row)?;
             for (when_expr, then_expr) in when_clauses {
                 let when_val = self.eval_expr(when_expr, chunk, row)?;
-                if self.values_equal(&test_val, &when_val) {
+                if Self::values_equal(&test_val, &when_val) {
                     return self.eval_expr(then_expr, chunk, row);
                 }
             }
@@ -1116,7 +1501,7 @@ impl ExpressionPredicate {
         }
     }
 
-    fn values_equal(&self, left: &Value, right: &Value) -> bool {
+    fn values_equal(left: &Value, right: &Value) -> bool {
         match (left, right) {
             (Value::Null, Value::Null) => true,
             (Value::Bool(a), Value::Bool(b)) => a == b,
@@ -1132,6 +1517,18 @@ impl ExpressionPredicate {
             }
             (Value::String(s), Value::Float64(f)) | (Value::Float64(f), Value::String(s)) => {
                 s.parse::<f64>().is_ok_and(|n| (n - f).abs() < f64::EPSILON)
+            }
+            (Value::List(a), Value::List(b)) => {
+                a.len() == b.len()
+                    && a.iter()
+                        .zip(b.iter())
+                        .all(|(x, y)| Self::values_equal(x, y))
+            }
+            (Value::Map(a), Value::Map(b)) => {
+                a.len() == b.len()
+                    && a.iter()
+                        .zip(b.iter())
+                        .all(|((k1, v1), (k2, v2))| k1 == k2 && Self::values_equal(v1, v2))
             }
             _ => false,
         }

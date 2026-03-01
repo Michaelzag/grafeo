@@ -8,7 +8,7 @@
 use super::{Operator, OperatorResult};
 use crate::execution::chunk::DataChunkBuilder;
 use crate::graph::lpg::LpgStore;
-use grafeo_common::types::{LogicalType, NodeId, PropertyKey, Value};
+use grafeo_common::types::{EdgeId, LogicalType, NodeId, PropertyKey, Value};
 use std::sync::Arc;
 
 /// Merge operator for MERGE clause.
@@ -163,6 +163,177 @@ impl Operator for MergeOperator {
 
     fn name(&self) -> &'static str {
         "Merge"
+    }
+}
+
+/// Configuration for a relationship merge operation.
+pub struct MergeRelationshipConfig {
+    /// Column index for the source node ID in the input.
+    pub source_column: usize,
+    /// Column index for the target node ID in the input.
+    pub target_column: usize,
+    /// Relationship type to match/create.
+    pub edge_type: String,
+    /// Properties that must match (also used for creation).
+    pub match_properties: Vec<(String, Value)>,
+    /// Properties to set on CREATE.
+    pub on_create_properties: Vec<(String, Value)>,
+    /// Properties to set on MATCH.
+    pub on_match_properties: Vec<(String, Value)>,
+    /// Output schema (input columns + edge column).
+    pub output_schema: Vec<LogicalType>,
+    /// Column index for the edge variable in the output.
+    pub edge_output_column: usize,
+}
+
+/// Merge operator for relationship patterns.
+///
+/// Takes input rows containing source and target node IDs, then for each row:
+/// 1. Searches for an existing relationship matching the type and properties
+/// 2. If found, applies ON MATCH properties and returns the existing edge
+/// 3. If not found, creates a new relationship and applies ON CREATE properties
+pub struct MergeRelationshipOperator {
+    /// The graph store.
+    store: Arc<LpgStore>,
+    /// Input operator providing rows with source/target node columns.
+    input: Box<dyn Operator>,
+    /// Merge configuration.
+    config: MergeRelationshipConfig,
+}
+
+impl MergeRelationshipOperator {
+    /// Creates a new merge relationship operator.
+    pub fn new(
+        store: Arc<LpgStore>,
+        input: Box<dyn Operator>,
+        config: MergeRelationshipConfig,
+    ) -> Self {
+        Self {
+            store,
+            input,
+            config,
+        }
+    }
+
+    /// Tries to find a matching relationship between source and target.
+    fn find_matching_edge(&self, src: NodeId, dst: NodeId) -> Option<EdgeId> {
+        use crate::graph::Direction;
+
+        for (target, edge_id) in self.store.edges_from(src, Direction::Outgoing) {
+            if target != dst {
+                continue;
+            }
+
+            if let Some(edge) = self.store.get_edge(edge_id) {
+                if edge.edge_type.as_str() != self.config.edge_type {
+                    continue;
+                }
+
+                let has_all_props =
+                    self.config.match_properties.iter().all(|(key, expected)| {
+                        edge.get_property(key).is_some_and(|v| v == expected)
+                    });
+
+                if has_all_props {
+                    return Some(edge_id);
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Creates a new edge with the match properties and on_create properties.
+    fn create_edge(&self, src: NodeId, dst: NodeId) -> EdgeId {
+        let mut all_props: Vec<(PropertyKey, Value)> = self
+            .config
+            .match_properties
+            .iter()
+            .map(|(k, v)| (PropertyKey::new(k.as_str()), v.clone()))
+            .collect();
+
+        for (k, v) in &self.config.on_create_properties {
+            if let Some(existing) = all_props.iter_mut().find(|(key, _)| key.as_str() == k) {
+                existing.1 = v.clone();
+            } else {
+                all_props.push((PropertyKey::new(k.as_str()), v.clone()));
+            }
+        }
+
+        self.store
+            .create_edge_with_props(src, dst, &self.config.edge_type, all_props)
+    }
+
+    /// Applies ON MATCH properties to an existing edge.
+    fn apply_on_match(&self, edge_id: EdgeId) {
+        for (key, value) in &self.config.on_match_properties {
+            self.store
+                .set_edge_property(edge_id, key.as_str(), value.clone());
+        }
+    }
+}
+
+impl Operator for MergeRelationshipOperator {
+    fn next(&mut self) -> OperatorResult {
+        use super::OperatorError;
+
+        if let Some(chunk) = self.input.next()? {
+            let mut builder =
+                DataChunkBuilder::with_capacity(&self.config.output_schema, chunk.row_count());
+
+            for row in chunk.selected_indices() {
+                let src_val = chunk
+                    .column(self.config.source_column)
+                    .and_then(|c| c.get_node_id(row))
+                    .ok_or_else(|| OperatorError::TypeMismatch {
+                        expected: "NodeId (source)".to_string(),
+                        found: "None".to_string(),
+                    })?;
+
+                let dst_val = chunk
+                    .column(self.config.target_column)
+                    .and_then(|c| c.get_node_id(row))
+                    .ok_or_else(|| OperatorError::TypeMismatch {
+                        expected: "NodeId (target)".to_string(),
+                        found: "None".to_string(),
+                    })?;
+
+                let edge_id = if let Some(existing) = self.find_matching_edge(src_val, dst_val) {
+                    self.apply_on_match(existing);
+                    existing
+                } else {
+                    self.create_edge(src_val, dst_val)
+                };
+
+                // Copy input columns to output, then add the edge column
+                for col_idx in 0..self.config.output_schema.len() {
+                    if col_idx == self.config.edge_output_column {
+                        if let Some(dst_col) = builder.column_mut(col_idx) {
+                            dst_col.push_edge_id(edge_id);
+                        }
+                    } else if let (Some(src_col), Some(dst_col)) =
+                        (chunk.column(col_idx), builder.column_mut(col_idx))
+                        && let Some(val) = src_col.get_value(row)
+                    {
+                        dst_col.push_value(val);
+                    }
+                }
+
+                builder.advance_row();
+            }
+
+            return Ok(Some(builder.finish()));
+        }
+
+        Ok(None)
+    }
+
+    fn reset(&mut self) {
+        self.input.reset();
+    }
+
+    fn name(&self) -> &'static str {
+        "MergeRelationship"
     }
 }
 

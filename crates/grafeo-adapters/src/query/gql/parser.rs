@@ -1289,11 +1289,11 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_and_expression(&mut self) -> Result<Expression> {
-        let mut left = self.parse_comparison_expression()?;
+        let mut left = self.parse_not_expression()?;
 
         while self.current.kind == TokenKind::And {
             self.advance();
-            let right = self.parse_comparison_expression()?;
+            let right = self.parse_not_expression()?;
             left = Expression::Binary {
                 left: Box::new(left),
                 op: BinaryOp::And,
@@ -1302,6 +1302,18 @@ impl<'a> Parser<'a> {
         }
 
         Ok(left)
+    }
+
+    fn parse_not_expression(&mut self) -> Result<Expression> {
+        if self.current.kind == TokenKind::Not {
+            self.advance();
+            let operand = self.parse_not_expression()?;
+            return Ok(Expression::Unary {
+                op: UnaryOp::Not,
+                operand: Box::new(operand),
+            });
+        }
+        self.parse_comparison_expression()
     }
 
     fn parse_comparison_expression(&mut self) -> Result<Expression> {
@@ -1368,6 +1380,22 @@ impl<'a> Parser<'a> {
                     right: Box::new(right),
                 });
             }
+            TokenKind::Is => {
+                self.advance(); // consume IS
+                let negated = self.current.kind == TokenKind::Not;
+                if negated {
+                    self.advance(); // consume NOT
+                }
+                self.expect(TokenKind::Null)?;
+                return Ok(Expression::Unary {
+                    op: if negated {
+                        UnaryOp::IsNotNull
+                    } else {
+                        UnaryOp::IsNull
+                    },
+                    operand: Box::new(left),
+                });
+            }
             _ => {}
         }
 
@@ -1418,25 +1446,15 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_unary_expression(&mut self) -> Result<Expression> {
-        match self.current.kind {
-            TokenKind::Not => {
-                self.advance();
-                let operand = self.parse_unary_expression()?;
-                Ok(Expression::Unary {
-                    op: UnaryOp::Not,
-                    operand: Box::new(operand),
-                })
-            }
-            TokenKind::Minus => {
-                self.advance();
-                let operand = self.parse_unary_expression()?;
-                Ok(Expression::Unary {
-                    op: UnaryOp::Neg,
-                    operand: Box::new(operand),
-                })
-            }
-            _ => self.parse_primary_expression(),
+        if self.current.kind == TokenKind::Minus {
+            self.advance();
+            let operand = self.parse_unary_expression()?;
+            return Ok(Expression::Unary {
+                op: UnaryOp::Neg,
+                operand: Box::new(operand),
+            });
         }
+        self.parse_primary_expression()
     }
 
     fn parse_primary_expression(&mut self) -> Result<Expression> {
@@ -1599,12 +1617,25 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Exists => {
                 self.advance();
-                self.expect(TokenKind::LBrace)?;
-                let inner_query = self.parse_exists_inner_query()?;
-                self.expect(TokenKind::RBrace)?;
-                Ok(Expression::ExistsSubquery {
-                    query: Box::new(inner_query),
-                })
+                if self.current.kind == TokenKind::LBrace {
+                    // EXISTS { MATCH ... } subquery form
+                    self.advance(); // consume {
+                    let inner_query = self.parse_exists_inner_query()?;
+                    self.expect(TokenKind::RBrace)?;
+                    Ok(Expression::ExistsSubquery {
+                        query: Box::new(inner_query),
+                    })
+                } else {
+                    // exists(expr) function form
+                    self.expect(TokenKind::LParen)?;
+                    let arg = self.parse_expression()?;
+                    self.expect(TokenKind::RParen)?;
+                    Ok(Expression::FunctionCall {
+                        name: "exists".to_string(),
+                        args: vec![arg],
+                        distinct: false,
+                    })
+                }
             }
             TokenKind::LBrace => {
                 // Map literal: {key: value, ...}

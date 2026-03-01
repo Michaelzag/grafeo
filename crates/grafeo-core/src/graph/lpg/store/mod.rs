@@ -10,6 +10,7 @@
 //! - Forward and backward adjacency indexes
 
 mod edge_ops;
+mod graph_store_impl;
 mod index;
 mod node_ops;
 mod property_ops;

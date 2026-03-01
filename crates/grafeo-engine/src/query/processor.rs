@@ -542,6 +542,18 @@ fn substitute_in_operator(op: &mut LogicalOperator, params: &QueryParams) -> Res
             }
             substitute_in_operator(&mut merge.input, params)?;
         }
+        LogicalOperator::MergeRelationship(merge_rel) => {
+            for (_, expr) in &mut merge_rel.match_properties {
+                substitute_in_expression(expr, params)?;
+            }
+            for (_, expr) in &mut merge_rel.on_create {
+                substitute_in_expression(expr, params)?;
+            }
+            for (_, expr) in &mut merge_rel.on_match {
+                substitute_in_expression(expr, params)?;
+            }
+            substitute_in_operator(&mut merge_rel.input, params)?;
+        }
         LogicalOperator::AddLabel(add_label) => {
             substitute_in_operator(&mut add_label.input, params)?;
         }
@@ -671,6 +683,14 @@ fn substitute_in_expression(expr: &mut LogicalExpression, params: &QueryParams) 
                 substitute_in_expression(filter, params)?;
             }
             substitute_in_expression(map_expr, params)?;
+        }
+        LogicalExpression::ListPredicate {
+            list_expr,
+            predicate,
+            ..
+        } => {
+            substitute_in_expression(list_expr, params)?;
+            substitute_in_expression(predicate, params)?;
         }
         LogicalExpression::ExistsSubquery(_) | LogicalExpression::CountSubquery(_) => {
             // Subqueries would need recursive parameter substitution

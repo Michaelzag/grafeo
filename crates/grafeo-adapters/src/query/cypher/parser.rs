@@ -61,10 +61,45 @@ impl<'a> Parser<'a> {
     /// Parses the query into a statement.
     pub fn parse(&mut self) -> Result<Statement> {
         let stmt = self.parse_statement()?;
+        // Check for UNION continuation
+        if self.current.kind == TokenKind::Union {
+            return self.parse_union_continuation(stmt);
+        }
         if self.current.kind != TokenKind::Eof {
             return Err(self.error("Expected end of query"));
         }
         Ok(stmt)
+    }
+
+    /// Parses UNION / UNION ALL between query blocks.
+    fn parse_union_continuation(&mut self, first_stmt: Statement) -> Result<Statement> {
+        let Statement::Query(first_query) = first_stmt else {
+            return Err(self.error("UNION requires query statements"));
+        };
+        let mut queries = vec![first_query];
+        let mut is_all = false;
+
+        while self.current.kind == TokenKind::Union {
+            self.advance(); // consume UNION
+            is_all = self.current.kind == TokenKind::All;
+            if is_all {
+                self.advance(); // consume ALL
+            }
+            let next_stmt = self.parse_statement()?;
+            match next_stmt {
+                Statement::Query(q) => queries.push(q),
+                _ => return Err(self.error("UNION requires query statements")),
+            }
+        }
+
+        if self.current.kind != TokenKind::Eof {
+            return Err(self.error("Expected end of query"));
+        }
+
+        Ok(Statement::Union {
+            queries,
+            all: is_all,
+        })
     }
 
     fn parse_statement(&mut self) -> Result<Statement> {
@@ -1083,6 +1118,58 @@ impl<'a> Parser<'a> {
             }
             _ if self.can_be_identifier() => {
                 let name = self.get_identifier_text();
+                let lower = name.to_lowercase();
+
+                // Check for list predicate functions: all, any, none, single
+                if matches!(lower.as_str(), "all" | "any" | "none" | "single")
+                    && self.peek_kind() == TokenKind::LParen
+                {
+                    // Tentatively parse as list predicate
+                    // Save state so we can fall back to function call if this is not
+                    // the `var IN list WHERE pred` form.
+                    let saved_lexer = self.lexer.clone();
+                    let saved_current = self.current.clone();
+                    let saved_previous = self.previous.clone();
+
+                    self.advance(); // consume identifier
+                    self.advance(); // consume '('
+
+                    // Expect an identifier (the iteration variable)
+                    if self.can_be_identifier() {
+                        let variable = self.get_identifier_text();
+                        self.advance();
+
+                        if self.current.kind == TokenKind::In {
+                            // This is the list predicate form
+                            self.advance(); // consume IN
+                            let list = self.parse_expression()?;
+                            self.expect(TokenKind::Where)?;
+                            let predicate = self.parse_expression()?;
+                            self.expect(TokenKind::RParen)?;
+
+                            let kind = match lower.as_str() {
+                                "all" => ListPredicateKind::All,
+                                "any" => ListPredicateKind::Any,
+                                "none" => ListPredicateKind::None,
+                                "single" => ListPredicateKind::Single,
+                                _ => unreachable!(),
+                            };
+
+                            return Ok(Expression::ListPredicate {
+                                kind,
+                                variable,
+                                list: Box::new(list),
+                                predicate: Box::new(predicate),
+                            });
+                        }
+                    }
+
+                    // Fall back: restore state and parse as regular identifier/function
+                    self.lexer = saved_lexer;
+                    self.current = saved_current;
+                    self.previous = saved_previous;
+                }
+
                 self.advance();
 
                 // Check if function call
@@ -1278,6 +1365,7 @@ impl<'a> Parser<'a> {
                 | TokenKind::On
                 | TokenKind::Call
                 | TokenKind::Yield
+                | TokenKind::Exists
         )
     }
 
@@ -2211,5 +2299,37 @@ mod tests {
         // This is a valid Cypher query without RETURN (for side effects)
         // so we test something else
         parse_err("RETURN RETURN");
+    }
+
+    // ==================== Cypher Compatibility Tests ====================
+
+    #[test]
+    fn test_parse_exists_as_alias() {
+        // Issue: `exists` should be usable as an alias name
+        parse_ok("MATCH (n) RETURN count(n) as exists");
+    }
+
+    #[test]
+    fn test_parse_multiple_match_clauses() {
+        // Issue: sequential MATCH clauses should parse
+        let stmt = parse_ok("MATCH (a) WHERE a.id = 'x' MATCH (b) WHERE b.id = 'y' RETURN a, b");
+        if let Statement::Query(Query { clauses, .. }) = stmt {
+            assert!(matches!(&clauses[0], Clause::Match(_)));
+            assert!(matches!(&clauses[1], Clause::Where(_)));
+            assert!(matches!(&clauses[2], Clause::Match(_)));
+            assert!(matches!(&clauses[3], Clause::Where(_)));
+            assert!(matches!(&clauses[4], Clause::Return(_)));
+        }
+    }
+
+    #[test]
+    fn test_parse_merge_with_relationship() {
+        // Issue: MERGE with path patterns should parse
+        let stmt = parse_ok("MATCH (a {id: 'x'}), (b {id: 'y'}) MERGE (a)-[r:KNOWS]->(b) RETURN r");
+        if let Statement::Query(Query { clauses, .. }) = stmt {
+            assert!(matches!(&clauses[0], Clause::Match(_)));
+            assert!(matches!(&clauses[1], Clause::Merge(_)));
+            assert!(matches!(&clauses[2], Clause::Return(_)));
+        }
     }
 }

@@ -115,13 +115,16 @@ impl super::Planner {
     }
 
     /// Plans a DELETE NODE operator.
+    ///
+    /// If the variable is tracked as an edge (via `edge_columns`), this
+    /// automatically delegates to [`DeleteEdgeOperator`] instead.
     pub(super) fn plan_delete_node(
         &self,
         delete: &DeleteNodeOp,
     ) -> Result<(Box<dyn Operator>, Vec<String>)> {
         let (input_op, columns) = self.plan_operator(&delete.input)?;
 
-        let node_column = columns
+        let col_idx = columns
             .iter()
             .position(|c| c == &delete.variable)
             .ok_or_else(|| {
@@ -135,18 +138,28 @@ impl super::Planner {
         let output_schema = vec![LogicalType::Int64];
         let output_columns = vec!["deleted_count".to_string()];
 
-        let operator = Box::new(
-            DeleteNodeOperator::new(
-                Arc::clone(&self.store),
-                input_op,
-                node_column,
-                output_schema,
-                delete.detach, // DETACH DELETE deletes connected edges first
-            )
-            .with_tx_context(self.viewing_epoch, self.tx_id),
-        );
+        // Auto-detect edge variables and use the correct operator
+        let is_edge = self.edge_columns.borrow().contains(&delete.variable);
 
-        Ok((operator, output_columns))
+        if is_edge {
+            let operator = Box::new(
+                DeleteEdgeOperator::new(Arc::clone(&self.store), input_op, col_idx, output_schema)
+                    .with_tx_context(self.viewing_epoch, self.tx_id),
+            );
+            Ok((operator, output_columns))
+        } else {
+            let operator = Box::new(
+                DeleteNodeOperator::new(
+                    Arc::clone(&self.store),
+                    input_op,
+                    col_idx,
+                    output_schema,
+                    delete.detach,
+                )
+                .with_tx_context(self.viewing_epoch, self.tx_id),
+            );
+            Ok((operator, output_columns))
+        }
     }
 
     /// Plans a DELETE EDGE operator.
@@ -191,10 +204,6 @@ impl super::Planner {
         let (left_op, left_columns) = self.plan_operator(&left_join.left)?;
         let (right_op, right_columns) = self.plan_operator(&left_join.right)?;
 
-        // Build combined output columns (left + right)
-        let mut columns = left_columns.clone();
-        columns.extend(right_columns.clone());
-
         // Find common variables between left and right for join keys
         let mut probe_keys = Vec::new();
         let mut build_keys = Vec::new();
@@ -206,18 +215,48 @@ impl super::Planner {
             }
         }
 
-        let output_schema = self.derive_schema_from_columns(&columns);
+        // The HashJoin outputs all left columns + all right columns.
+        // Build the full join output columns for the join operator.
+        let mut join_columns = left_columns.clone();
+        join_columns.extend(right_columns.clone());
+        let join_schema = self.derive_schema_from_columns(&join_columns);
 
-        let operator: Box<dyn Operator> = Box::new(HashJoinOperator::new(
+        let join_op: Box<dyn Operator> = Box::new(HashJoinOperator::new(
             left_op,
             right_op,
             probe_keys,
             build_keys,
             PhysicalJoinType::Left,
-            output_schema,
+            join_schema,
         ));
 
-        Ok((operator, columns))
+        // Deduplicate: keep left columns, then only right columns not already
+        // present on the left. This prevents HashMap overwrites in downstream
+        // operators (e.g. RETURN) that map variable names to column indices.
+        let left_set: std::collections::HashSet<&str> =
+            left_columns.iter().map(String::as_str).collect();
+        let mut keep_indices: Vec<usize> = (0..left_columns.len()).collect();
+        let mut output_columns = left_columns.clone();
+        for (right_idx, right_col) in right_columns.iter().enumerate() {
+            if !left_set.contains(right_col.as_str()) {
+                keep_indices.push(left_columns.len() + right_idx);
+                output_columns.push(right_col.clone());
+            }
+        }
+
+        // If there are duplicates, add a ProjectOperator to strip them
+        if keep_indices.len() < join_columns.len() {
+            let proj_exprs: Vec<ProjectExpr> = keep_indices
+                .iter()
+                .map(|&i| ProjectExpr::Column(i))
+                .collect();
+            let proj_types: Vec<LogicalType> =
+                keep_indices.iter().map(|_| LogicalType::Any).collect();
+            let operator = Box::new(ProjectOperator::new(join_op, proj_exprs, proj_types));
+            Ok((operator, output_columns))
+        } else {
+            Ok((join_op, output_columns))
+        }
     }
 
     /// Plans an ANTI JOIN operator (for WHERE NOT EXISTS patterns).
@@ -442,6 +481,103 @@ impl super::Planner {
             match_properties,
             on_create_properties,
             on_match_properties,
+        ));
+
+        Ok((operator, columns))
+    }
+
+    /// Plans a MERGE RELATIONSHIP operator.
+    pub(super) fn plan_merge_relationship(
+        &self,
+        merge_rel: &MergeRelationshipOp,
+    ) -> Result<(Box<dyn Operator>, Vec<String>)> {
+        let (input_op, mut columns) = self.plan_operator(&merge_rel.input)?;
+
+        // Find source and target node columns
+        let source_column = columns
+            .iter()
+            .position(|c| c == &merge_rel.source_variable)
+            .ok_or_else(|| {
+                Error::Internal(format!(
+                    "Source variable '{}' not found for MERGE relationship",
+                    merge_rel.source_variable
+                ))
+            })?;
+
+        let target_column = columns
+            .iter()
+            .position(|c| c == &merge_rel.target_variable)
+            .ok_or_else(|| {
+                Error::Internal(format!(
+                    "Target variable '{}' not found for MERGE relationship",
+                    merge_rel.target_variable
+                ))
+            })?;
+
+        // Convert match properties from LogicalExpression to Value
+        let match_properties: Vec<(String, grafeo_common::types::Value)> = merge_rel
+            .match_properties
+            .iter()
+            .filter_map(|(name, expr)| {
+                if let LogicalExpression::Literal(v) = expr {
+                    Some((name.clone(), v.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let on_create_properties: Vec<(String, grafeo_common::types::Value)> = merge_rel
+            .on_create
+            .iter()
+            .filter_map(|(name, expr)| {
+                if let LogicalExpression::Literal(v) = expr {
+                    Some((name.clone(), v.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let on_match_properties: Vec<(String, grafeo_common::types::Value)> = merge_rel
+            .on_match
+            .iter()
+            .filter_map(|(name, expr)| {
+                if let LogicalExpression::Literal(v) = expr {
+                    Some((name.clone(), v.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Add the edge variable to output columns and track it as an edge
+        let edge_output_column = columns.len();
+        columns.push(merge_rel.variable.clone());
+        self.edge_columns
+            .borrow_mut()
+            .insert(merge_rel.variable.clone());
+
+        // Build output schema: input columns + edge column
+        let mut output_schema: Vec<LogicalType> =
+            columns.iter().map(|_| LogicalType::Node).collect();
+        output_schema[edge_output_column] = LogicalType::Edge;
+
+        let config = MergeRelationshipConfig {
+            source_column,
+            target_column,
+            edge_type: merge_rel.edge_type.clone(),
+            match_properties,
+            on_create_properties,
+            on_match_properties,
+            output_schema,
+            edge_output_column,
+        };
+
+        let operator: Box<dyn Operator> = Box::new(MergeRelationshipOperator::new(
+            Arc::clone(&self.store),
+            input_op,
+            config,
         ));
 
         Ok((operator, columns))
@@ -712,14 +848,25 @@ impl super::Planner {
         let output_schema: Vec<LogicalType> = columns.iter().map(|_| LogicalType::Node).collect();
         let output_columns = columns.clone();
 
-        // Determine if this is a node or edge (for now assume node, edge detection can be added later)
-        let operator = Box::new(SetPropertyOperator::new_for_node(
-            Arc::clone(&self.store),
-            input_op,
-            entity_column,
-            properties,
-            output_schema,
-        ));
+        // Determine if this is a node or edge using tracked edge columns
+        let is_edge = set_prop.is_edge || self.edge_columns.borrow().contains(&set_prop.variable);
+        let operator: Box<dyn Operator> = if is_edge {
+            Box::new(SetPropertyOperator::new_for_edge(
+                Arc::clone(&self.store),
+                input_op,
+                entity_column,
+                properties,
+                output_schema,
+            ))
+        } else {
+            Box::new(SetPropertyOperator::new_for_node(
+                Arc::clone(&self.store),
+                input_op,
+                entity_column,
+                properties,
+                output_schema,
+            ))
+        };
 
         Ok((operator, output_columns))
     }

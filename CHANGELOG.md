@@ -2,7 +2,20 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
-## [0.5.11] - Unreleased
+## [0.5.11] - 2026-03-01
+
+### Added
+
+- **Graph storage traits**: `GraphStore` (read methods) and `GraphStoreMut` (write methods) traits capturing the query engine's storage interface. Enables future pluggable backends (spillover, disk-backed) without changing operators
+- **`GrafeoDB::graph_store()`**: public accessor returning `Arc<dyn GraphStoreMut>` for code that works against the trait interface rather than the concrete `LpgStore`
+- **Type-safe WAL**: `WalEntry` trait and generic `TypedWal<R>` wrapper that constrains WAL record types at compile time. `LpgWal` type alias replaces raw `WalManager` in `GrafeoDB`, preventing accidental cross-model record logging when RDF WAL support is added. On-disk format unchanged
+- **Query language compliance test suites**: spec-level integration tests for all 6 query languages (Cypher, GQL, Gremlin, SPARQL, SQL/PGQ and GraphQL)
+- **Cypher UNION / UNION ALL**: full support for combining query results with duplicate elimination or preservation
+- **GQL MERGE on relationships**: `MERGE (a)-[r:TYPE]->(b)` now works for both GQL and Cypher, with idempotent edge creation
+- **Gremlin traversal steps**: `and()`, `or()`, `not()`, `where()`, `filter()`, `choose()`, `optional()`, `union()`, `coalesce()`, `sideEffect()`, `constant()`, `id()`, `inside()`, `outside()`, `regex()` predicates
+- **SPARQL DISTINCT**: `SELECT DISTINCT` now deduplicates results via a proper `DistinctOperator` in the RDF planner
+- **SPARQL HAVING**: `HAVING` clause filters grouped results correctly by mapping aggregate references to output columns
+- **SPARQL FILTER NOT EXISTS / EXISTS**: translated to anti-join and semi-join operators instead of unsupported subquery expressions
 
 ## [0.5.10] - 2026-02-29
 

@@ -1365,3 +1365,117 @@ fn test_delete_nonexistent_node() {
     let store = LpgStore::new();
     assert!(!store.delete_node(NodeId::new(999)));
 }
+
+// === GraphStore / GraphStoreMut Trait Compliance ===
+
+/// Verifies that LpgStore's trait implementations are object-safe and
+/// produce identical results to the concrete methods.
+mod graph_store_traits {
+    use super::*;
+    use crate::graph::Direction;
+    use crate::graph::traits::{GraphStore, GraphStoreMut};
+
+    #[test]
+    fn trait_object_safety() {
+        // Must compile: Arc<dyn GraphStoreMut> proves object safety
+        let store: Arc<dyn GraphStoreMut> = Arc::new(LpgStore::new());
+        let _read: &dyn GraphStore = &*store;
+    }
+
+    #[test]
+    fn trait_round_trip() {
+        let store = LpgStore::new();
+        let store: &dyn GraphStoreMut = &store;
+
+        // Create nodes via trait
+        let alice = store.create_node(&["Person"]);
+        let bob = store.create_node(&["Person", "Developer"]);
+        store.set_node_property(alice, "name", Value::from("Alice"));
+        store.set_node_property(alice, "age", Value::from(30i64));
+        store.set_node_property(bob, "name", Value::from("Bob"));
+
+        // Create edge via trait
+        let edge = store.create_edge(alice, bob, "KNOWS");
+        store.set_edge_property(edge, "since", Value::from(2020i64));
+
+        // Read back via GraphStore trait
+        let read: &dyn GraphStore = store;
+
+        // Point lookups
+        let alice_node = read.get_node(alice).expect("alice should exist");
+        assert!(alice_node.labels.contains(&arcstr::literal!("Person")));
+
+        let edge_data = read.get_edge(edge).expect("edge should exist");
+        assert_eq!(edge_data.src, alice);
+        assert_eq!(edge_data.dst, bob);
+
+        // Properties
+        assert_eq!(
+            read.get_node_property(alice, &PropertyKey::new("name")),
+            Some(Value::from("Alice"))
+        );
+        assert_eq!(
+            read.get_edge_property(edge, &PropertyKey::new("since")),
+            Some(Value::from(2020i64))
+        );
+
+        // Traversal
+        let neighbors = read.neighbors(alice, Direction::Outgoing);
+        assert_eq!(neighbors, vec![bob]);
+
+        let edges = read.edges_from(alice, Direction::Outgoing);
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0], (bob, edge));
+
+        assert_eq!(read.out_degree(alice), 1);
+        assert_eq!(read.in_degree(bob), 1);
+
+        // Scans
+        assert_eq!(read.node_count(), 2);
+        assert_eq!(read.edge_count(), 1);
+        assert_eq!(read.nodes_by_label("Person").len(), 2);
+        assert_eq!(read.node_ids().len(), 2);
+
+        // Edge type
+        assert_eq!(read.edge_type(edge), Some(arcstr::literal!("KNOWS")));
+
+        // Search
+        let found = read.find_nodes_by_property("name", &Value::from("Alice"));
+        assert_eq!(found, vec![alice]);
+    }
+
+    #[test]
+    fn trait_mutation_operations() {
+        let store = LpgStore::new();
+        let store: &dyn GraphStoreMut = &store;
+
+        let node = store.create_node(&["A"]);
+
+        // Label mutation
+        assert!(store.add_label(node, "B"));
+        assert!(store.remove_label(node, "B"));
+
+        // Property mutation
+        store.set_node_property(node, "key", Value::from("val"));
+        let removed = store.remove_node_property(node, "key");
+        assert_eq!(removed, Some(Value::from("val")));
+
+        // Deletion
+        assert!(store.delete_node(node));
+        assert!(store.get_node(node).is_none());
+    }
+
+    #[test]
+    fn trait_batch_edges() {
+        let store = LpgStore::new();
+        let store: &dyn GraphStoreMut = &store;
+
+        let a = store.create_node(&["N"]);
+        let b = store.create_node(&["N"]);
+        let c = store.create_node(&["N"]);
+
+        let ids = store.batch_create_edges(&[(a, b, "E"), (a, c, "E"), (b, c, "E")]);
+        assert_eq!(ids.len(), 3);
+        assert_eq!(store.edge_count(), 3);
+    }
+}

@@ -6,8 +6,9 @@ use crate::query::plan::{
     AddLabelOp, AggregateExpr, AggregateFunction, AggregateOp, BinaryOp, CallProcedureOp,
     CreateEdgeOp, CreateNodeOp, DeleteNodeOp, DistinctOp, ExpandDirection, ExpandOp, FilterOp,
     JoinOp, JoinType, LeftJoinOp, LimitOp, LogicalExpression, LogicalOperator, LogicalPlan,
-    MergeOp, NodeScanOp, ProcedureYield, ProjectOp, Projection, RemoveLabelOp, ReturnItem,
-    ReturnOp, SetPropertyOp, ShortestPathOp, SkipOp, SortKey, SortOp, SortOrder, UnaryOp, UnwindOp,
+    MergeOp, MergeRelationshipOp, NodeScanOp, ProcedureYield, ProjectOp, Projection, RemoveLabelOp,
+    ReturnItem, ReturnOp, SetPropertyOp, ShortestPathOp, SkipOp, SortKey, SortOp, SortOrder,
+    UnaryOp, UnwindOp,
 };
 use crate::query::translator_common::{
     combine_with_and, is_aggregate_function, to_aggregate_function,
@@ -83,8 +84,30 @@ impl GqlTranslator {
         }
 
         // Apply RETURN clause (with ORDER BY, SKIP, LIMIT)
+        // Order: RETURN first (closest to input), then Sort, Skip, Limit wrap it.
+        // This ensures RETURN aliases are visible to ORDER BY in the binder.
         if let Some(return_clause) = &call.return_clause {
-            // Apply ORDER BY
+            // Apply RETURN projection first (only when explicit items are present)
+            if !return_clause.items.is_empty() {
+                let return_items = return_clause
+                    .items
+                    .iter()
+                    .map(|item| {
+                        Ok(ReturnItem {
+                            expression: self.translate_expression(&item.expression)?,
+                            alias: item.alias.clone(),
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+
+                plan = LogicalOperator::Return(ReturnOp {
+                    items: return_items,
+                    distinct: return_clause.distinct,
+                    input: Box::new(plan),
+                });
+            }
+
+            // Apply ORDER BY (wraps Return so aliases are visible)
             if let Some(order_by) = &return_clause.order_by {
                 let keys = order_by
                     .items
@@ -122,26 +145,6 @@ impl GqlTranslator {
             {
                 plan = LogicalOperator::Limit(LimitOp {
                     count: *n as usize,
-                    input: Box::new(plan),
-                });
-            }
-
-            // Apply RETURN projection (only when explicit items are present)
-            if !return_clause.items.is_empty() {
-                let return_items = return_clause
-                    .items
-                    .iter()
-                    .map(|item| {
-                        Ok(ReturnItem {
-                            expression: self.translate_expression(&item.expression)?,
-                            alias: item.alias.clone(),
-                        })
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-
-                plan = LogicalOperator::Return(ReturnOp {
-                    items: return_items,
-                    distinct: return_clause.distinct,
                     input: Box::new(plan),
                 });
             }
@@ -241,6 +244,7 @@ impl GqlTranslator {
                                 variable: assignment.variable.clone(),
                                 properties: vec![(assignment.property.clone(), value)],
                                 replace: false,
+                                is_edge: false,
                                 input: Box::new(plan),
                             });
                         }
@@ -314,6 +318,7 @@ impl GqlTranslator {
                         variable: assignment.variable.clone(),
                         properties: vec![(assignment.property.clone(), value)],
                         replace: false,
+                        is_edge: false,
                         input: Box::new(plan),
                     });
                 }
@@ -355,6 +360,7 @@ impl GqlTranslator {
                     variable: variable.clone(),
                     properties: vec![(property.clone(), LogicalExpression::Literal(Value::Null))],
                     replace: false,
+                    is_edge: false,
                     input: Box::new(plan),
                 });
             }
@@ -424,8 +430,12 @@ impl GqlTranslator {
             .any(|item| contains_aggregate(&item.expression));
 
         if has_aggregates {
-            // Extract aggregate and group-by expressions
-            let (aggregates, group_by) =
+            // Extract aggregate and group-by expressions.
+            // When a return item wraps an aggregate in a binary/unary expression
+            // (e.g. `count(n) > 0 AS exists`), we decompose it into:
+            //   1. An aggregate (`count(n)` with synthetic alias)
+            //   2. A post-aggregate projection (`_agg_0 > 0 AS exists`)
+            let (aggregates, group_by, post_return) =
                 self.extract_aggregates_and_groups(&query.return_clause.items)?;
 
             // Translate HAVING clause if present
@@ -435,14 +445,22 @@ impl GqlTranslator {
                 None
             };
 
-            // Insert Aggregate operator - this is the final operator for aggregate queries
-            // The aggregate operator produces the output columns directly
-            plan = LogicalOperator::Aggregate(AggregateOp {
+            let agg_op = LogicalOperator::Aggregate(AggregateOp {
                 group_by,
                 aggregates,
                 input: Box::new(plan),
                 having,
             });
+
+            if let Some(return_items) = post_return {
+                plan = LogicalOperator::Return(ReturnOp {
+                    items: return_items,
+                    distinct: query.return_clause.distinct,
+                    input: Box::new(agg_op),
+                });
+            } else {
+                plan = agg_op;
+            }
 
             // Apply ORDER BY for aggregate queries
             // Note: ORDER BY sort keys reference aggregate output columns (aliases)
@@ -470,7 +488,27 @@ impl GqlTranslator {
             // Note: For aggregate queries, we don't add a Return operator
             // because Aggregate already produces the final output
         } else {
-            // Apply ORDER BY
+            // Apply RETURN first (closest to input), then Sort wraps it.
+            // This ensures RETURN aliases are visible to ORDER BY in the binder.
+            let return_items = query
+                .return_clause
+                .items
+                .iter()
+                .map(|item| {
+                    Ok(ReturnItem {
+                        expression: self.translate_expression(&item.expression)?,
+                        alias: item.alias.clone(),
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            plan = LogicalOperator::Return(ReturnOp {
+                items: return_items,
+                distinct: query.return_clause.distinct,
+                input: Box::new(plan),
+            });
+
+            // Apply ORDER BY (wraps Return so aliases are visible)
             if let Some(order_by) = &query.return_clause.order_by {
                 let keys = order_by
                     .items
@@ -491,25 +529,6 @@ impl GqlTranslator {
                     input: Box::new(plan),
                 });
             }
-
-            // Apply RETURN
-            let return_items = query
-                .return_clause
-                .items
-                .iter()
-                .map(|item| {
-                    Ok(ReturnItem {
-                        expression: self.translate_expression(&item.expression)?,
-                        alias: item.alias.clone(),
-                    })
-                })
-                .collect::<Result<Vec<_>>>()?;
-
-            plan = LogicalOperator::Return(ReturnOp {
-                items: return_items,
-                distinct: query.return_clause.distinct,
-                input: Box::new(plan),
-            });
         }
 
         Ok(LogicalPlan::new(plan))
@@ -662,11 +681,24 @@ impl GqlTranslator {
                     .collect::<Result<_>>()?;
                 (var, labels, props)
             }
-            ast::Pattern::Path(_) => {
-                return Err(Error::Query(QueryError::new(
-                    QueryErrorKind::Semantic,
-                    "MERGE with path patterns is not yet supported",
-                )));
+            ast::Pattern::Path(path) if !path.edges.is_empty() => {
+                return self.translate_merge_relationship(path, merge_clause, input);
+            }
+            ast::Pattern::Path(path) => {
+                // Path with no edges is just a node pattern
+                let var = path
+                    .source
+                    .variable
+                    .clone()
+                    .unwrap_or_else(|| format!("_anon_{}", rand_id()));
+                let labels = path.source.labels.clone();
+                let props: Vec<(String, LogicalExpression)> = path
+                    .source
+                    .properties
+                    .iter()
+                    .map(|(k, v)| Ok((k.clone(), self.translate_expression(v)?)))
+                    .collect::<Result<_>>()?;
+                (var, labels, props)
             }
         };
 
@@ -697,6 +729,88 @@ impl GqlTranslator {
         Ok(LogicalOperator::Merge(MergeOp {
             variable,
             labels,
+            match_properties,
+            on_create,
+            on_match,
+            input: Box::new(input),
+        }))
+    }
+
+    /// Translates a MERGE with a relationship pattern.
+    fn translate_merge_relationship(
+        &self,
+        path: &ast::PathPattern,
+        merge_clause: &ast::MergeClause,
+        input: LogicalOperator,
+    ) -> Result<LogicalOperator> {
+        let source_variable = path.source.variable.clone().ok_or_else(|| {
+            Error::Query(QueryError::new(
+                QueryErrorKind::Semantic,
+                "MERGE relationship pattern requires a source node variable",
+            ))
+        })?;
+
+        let edge = path.edges.first().ok_or_else(|| {
+            Error::Query(QueryError::new(
+                QueryErrorKind::Semantic,
+                "MERGE relationship pattern is empty",
+            ))
+        })?;
+
+        let variable = edge
+            .variable
+            .clone()
+            .unwrap_or_else(|| format!("_merge_rel_{}", rand_id()));
+
+        let edge_type = edge.types.first().cloned().ok_or_else(|| {
+            Error::Query(QueryError::new(
+                QueryErrorKind::Semantic,
+                "MERGE relationship pattern requires an edge type",
+            ))
+        })?;
+
+        let target_variable = edge.target.variable.clone().ok_or_else(|| {
+            Error::Query(QueryError::new(
+                QueryErrorKind::Semantic,
+                "MERGE relationship pattern requires a target node variable",
+            ))
+        })?;
+
+        let match_properties: Vec<(String, LogicalExpression)> = edge
+            .properties
+            .iter()
+            .map(|(k, v)| Ok((k.clone(), self.translate_expression(v)?)))
+            .collect::<Result<Vec<_>>>()?;
+
+        let on_create: Vec<(String, LogicalExpression)> = merge_clause
+            .on_create
+            .as_ref()
+            .map(|assignments| {
+                assignments
+                    .iter()
+                    .map(|a| Ok((a.property.clone(), self.translate_expression(&a.value)?)))
+                    .collect::<Result<Vec<_>>>()
+            })
+            .transpose()?
+            .unwrap_or_default();
+
+        let on_match: Vec<(String, LogicalExpression)> = merge_clause
+            .on_match
+            .as_ref()
+            .map(|assignments| {
+                assignments
+                    .iter()
+                    .map(|a| Ok((a.property.clone(), self.translate_expression(&a.value)?)))
+                    .collect::<Result<Vec<_>>>()
+            })
+            .transpose()?
+            .unwrap_or_default();
+
+        Ok(LogicalOperator::MergeRelationship(MergeRelationshipOp {
+            variable,
+            source_variable,
+            target_variable,
+            edge_type,
             match_properties,
             on_create,
             on_match,
@@ -925,11 +1039,8 @@ impl GqlTranslator {
 
             let edge_var_for_filter = edge_var.clone();
 
-            // Only set path_alias on the last edge of a variable-length path
-            let is_variable_length = edge.min_hops.unwrap_or(1) != 1
-                || edge.max_hops.is_none()
-                || edge.max_hops.map_or(false, |m| m != 1);
-            let expand_path_alias = if is_variable_length && idx == edge_count - 1 {
+            // Set path_alias on the last edge of a named path
+            let expand_path_alias = if idx == edge_count - 1 {
                 path_alias.map(String::from)
             } else {
                 None
@@ -942,7 +1053,13 @@ impl GqlTranslator {
                 direction,
                 edge_type,
                 min_hops: edge.min_hops.unwrap_or(1),
-                max_hops: edge.max_hops.or(Some(1)),
+                // Default to single-hop only when no quantifier at all (both None),
+                // preserve None (unbounded) when the quantifier explicitly omits max
+                max_hops: if edge.min_hops.is_none() && edge.max_hops.is_none() {
+                    Some(1)
+                } else {
+                    edge.max_hops
+                },
                 input: Box::new(plan),
                 path_alias: expand_path_alias,
             });
@@ -1077,6 +1194,7 @@ impl GqlTranslator {
             variable: var.clone(),
             properties,
             replace: false,
+            is_edge: false,
             input: Box::new(scan),
         });
 
@@ -1330,24 +1448,126 @@ impl GqlTranslator {
     }
 
     /// Extracts aggregate expressions and group-by expressions from RETURN items.
+    /// Extracts aggregate and group-by expressions from RETURN items.
+    ///
+    /// Returns `(aggregates, group_by, post_return)` where `post_return` is
+    /// `Some(...)` when any return item wraps an aggregate in a binary/unary
+    /// expression (e.g. `count(n) > 0 AS exists`).
     fn extract_aggregates_and_groups(
         &self,
         items: &[ast::ReturnItem],
-    ) -> Result<(Vec<AggregateExpr>, Vec<LogicalExpression>)> {
+    ) -> Result<(
+        Vec<AggregateExpr>,
+        Vec<LogicalExpression>,
+        Option<Vec<ReturnItem>>,
+    )> {
         let mut aggregates = Vec::new();
         let mut group_by = Vec::new();
+        let mut needs_post_return = false;
+        let mut post_return_items = Vec::new();
+        let mut agg_counter: u32 = 0;
 
         for item in items {
             if let Some(agg_expr) = self.try_extract_aggregate(&item.expression, &item.alias)? {
+                // Direct aggregate (e.g. `count(n) AS cnt`)
                 aggregates.push(agg_expr);
+                let agg_alias = item
+                    .alias
+                    .clone()
+                    .unwrap_or_else(|| format!("_agg_{agg_counter}"));
+                post_return_items.push(ReturnItem {
+                    expression: LogicalExpression::Variable(agg_alias),
+                    alias: item.alias.clone(),
+                });
+                agg_counter += 1;
+            } else if contains_aggregate(&item.expression) {
+                // Wrapped aggregate (e.g. `count(n) > 0 AS exists`)
+                needs_post_return = true;
+                let synthetic_alias = format!("_agg_{agg_counter}");
+                agg_counter += 1;
+
+                let (agg_expr, substitute) =
+                    self.extract_wrapped_aggregate(&item.expression, &synthetic_alias)?;
+                aggregates.push(agg_expr);
+                post_return_items.push(ReturnItem {
+                    expression: substitute,
+                    alias: item.alias.clone(),
+                });
             } else {
-                // Non-aggregate expressions become group-by keys
+                // Non-aggregate expression: group-by key
                 let expr = self.translate_expression(&item.expression)?;
-                group_by.push(expr);
+                group_by.push(expr.clone());
+                post_return_items.push(ReturnItem {
+                    expression: expr,
+                    alias: item.alias.clone(),
+                });
             }
         }
 
-        Ok((aggregates, group_by))
+        if needs_post_return {
+            Ok((aggregates, group_by, Some(post_return_items)))
+        } else {
+            Ok((aggregates, group_by, None))
+        }
+    }
+
+    /// Extracts an aggregate from inside a wrapping expression.
+    fn extract_wrapped_aggregate(
+        &self,
+        expr: &ast::Expression,
+        synthetic_alias: &str,
+    ) -> Result<(AggregateExpr, LogicalExpression)> {
+        match expr {
+            ast::Expression::FunctionCall { .. } => {
+                let agg = self
+                    .try_extract_aggregate(expr, &Some(synthetic_alias.to_string()))?
+                    .expect("contains_aggregate was true but try_extract_aggregate returned None");
+                let substitute = LogicalExpression::Variable(synthetic_alias.to_string());
+                Ok((agg, substitute))
+            }
+            ast::Expression::Binary { left, op, right } => {
+                let binary_op = self.translate_binary_op(*op);
+                if contains_aggregate(left) {
+                    let (agg, left_sub) = self.extract_wrapped_aggregate(left, synthetic_alias)?;
+                    let right_expr = self.translate_expression(right)?;
+                    Ok((
+                        agg,
+                        LogicalExpression::Binary {
+                            left: Box::new(left_sub),
+                            op: binary_op,
+                            right: Box::new(right_expr),
+                        },
+                    ))
+                } else {
+                    let (agg, right_sub) =
+                        self.extract_wrapped_aggregate(right, synthetic_alias)?;
+                    let left_expr = self.translate_expression(left)?;
+                    Ok((
+                        agg,
+                        LogicalExpression::Binary {
+                            left: Box::new(left_expr),
+                            op: binary_op,
+                            right: Box::new(right_sub),
+                        },
+                    ))
+                }
+            }
+            ast::Expression::Unary { op, operand } => {
+                let unary_op = self.translate_unary_op(*op);
+                let (agg, sub) = self.extract_wrapped_aggregate(operand, synthetic_alias)?;
+                Ok((
+                    agg,
+                    LogicalExpression::Unary {
+                        op: unary_op,
+                        operand: Box::new(sub),
+                    },
+                ))
+            }
+            _ => Err(Error::Query(QueryError::new(
+                QueryErrorKind::Semantic,
+                "Unsupported expression wrapping an aggregate",
+            ))),
+        }
     }
 
     /// Tries to extract an aggregate expression from an AST expression.
@@ -1720,15 +1940,17 @@ mod tests {
         assert!(result.is_ok());
 
         let plan = result.unwrap();
-        if let LogicalOperator::Return(ret) = &plan.root {
-            if let LogicalOperator::Sort(sort) = ret.input.as_ref() {
-                assert_eq!(sort.keys.len(), 1);
-                assert_eq!(sort.keys[0].order, SortOrder::Ascending);
+        // Sort wraps Return so that RETURN aliases are visible to ORDER BY
+        if let LogicalOperator::Sort(sort) = &plan.root {
+            assert_eq!(sort.keys.len(), 1);
+            assert_eq!(sort.keys[0].order, SortOrder::Ascending);
+            if let LogicalOperator::Return(_ret) = sort.input.as_ref() {
+                // Return is the inner operator, as expected
             } else {
-                panic!("Expected Sort operator");
+                panic!("Expected Return operator inside Sort");
             }
         } else {
-            panic!("Expected Return operator");
+            panic!("Expected Sort operator");
         }
     }
 
