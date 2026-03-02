@@ -88,9 +88,11 @@ mod manager;
 mod mvcc;
 #[cfg(feature = "parallel")]
 pub mod parallel;
+mod prepared;
 
 pub use manager::{EntityId, IsolationLevel, TransactionManager, TxInfo, TxState};
 pub use mvcc::{Version, VersionChain, VersionInfo};
+pub use prepared::{CommitInfo, PreparedCommit};
 
 #[cfg(feature = "parallel")]
 pub use parallel::{BatchRequest, BatchResult, ExecutionStatus, ParallelExecutor};

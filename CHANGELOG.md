@@ -2,6 +2,22 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
+## [0.5.12] - 2026-03-02
+
+### Added
+
+- **PreparedCommit**: two-phase commit with `session.prepare_commit()`, inspect pending mutation counts and attach metadata before finalizing
+- **Atomic snapshot restore**: `db.restore_snapshot(data)` replaces database contents in place, with full pre-validation (store unchanged on error)
+- **LpgStore::clear()**: resets the store to empty state, following documented lock ordering
+
+### Fixed
+
+- **SET on edge variables**: Cypher translator now correctly sets `is_edge: true` when SET targets an edge variable from MATCH or MERGE
+
+### Improved
+
+- **Unit test coverage**: added tests for `with_store()` integration, snapshot round-trips, Cypher aggregate/union translation, and `LpgStore::clear()`
+
 ## [0.5.11] - 2026-03-02
 
 ### Added

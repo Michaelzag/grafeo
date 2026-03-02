@@ -17,6 +17,8 @@ use crate::query::translator_common::{
 use grafeo_adapters::query::cypher::{self, ast};
 use grafeo_common::types::Value;
 use grafeo_common::utils::error::{Error, QueryError, QueryErrorKind, Result};
+use std::cell::RefCell;
+use std::collections::HashSet;
 
 /// Translates a Cypher query string to a logical plan.
 pub fn translate(query: &str) -> Result<LogicalPlan> {
@@ -26,11 +28,29 @@ pub fn translate(query: &str) -> Result<LogicalPlan> {
 }
 
 /// Cypher AST to logical plan translator.
-struct CypherTranslator;
+struct CypherTranslator {
+    /// Variables bound to edges (from MATCH relationship patterns or MERGE relationships).
+    /// Used to set `is_edge: true` on `SetPropertyOp` when the SET target is an edge variable.
+    edge_variables: RefCell<HashSet<String>>,
+}
 
 impl CypherTranslator {
     fn new() -> Self {
-        Self
+        Self {
+            edge_variables: RefCell::new(HashSet::new()),
+        }
+    }
+
+    /// Records a variable as an edge variable.
+    fn register_edge_variable(&self, variable: &str) {
+        self.edge_variables
+            .borrow_mut()
+            .insert(variable.to_string());
+    }
+
+    /// Returns true if the variable was bound to an edge.
+    fn is_edge_variable(&self, variable: &str) -> bool {
+        self.edge_variables.borrow().contains(variable)
     }
 
     fn translate_statement(&self, stmt: &ast::Statement) -> Result<LogicalPlan> {
@@ -446,6 +466,9 @@ impl CypherTranslator {
     ) -> Result<LogicalOperator> {
         let from_variable = Self::get_last_variable(&input)?;
         let edge_variable = rel.variable.clone();
+        if let Some(ref ev) = edge_variable {
+            self.register_edge_variable(ev);
+        }
         let edge_type = rel.types.first().cloned();
         let to_variable = rel
             .target
@@ -683,6 +706,7 @@ impl CypherTranslator {
             .variable
             .clone()
             .unwrap_or_else(|| "_merge_rel_0".to_string());
+        self.register_edge_variable(&variable);
 
         // Extract relationship type
         let edge_type = rel.types.first().cloned().ok_or_else(|| {
@@ -1284,7 +1308,7 @@ impl CypherTranslator {
                         variable: variable.clone(),
                         properties: vec![(property.clone(), value_expr)],
                         replace: false,
-                        is_edge: false,
+                        is_edge: self.is_edge_variable(variable),
                         input: Box::new(plan),
                     });
                 }
@@ -1298,7 +1322,7 @@ impl CypherTranslator {
                         variable: variable.clone(),
                         properties: vec![("*".to_string(), value_expr)],
                         replace: true,
-                        is_edge: false,
+                        is_edge: self.is_edge_variable(variable),
                         input: Box::new(plan),
                     });
                 }
@@ -1312,7 +1336,7 @@ impl CypherTranslator {
                         variable: variable.clone(),
                         properties: vec![("*".to_string(), value_expr)],
                         replace: false,
-                        is_edge: false,
+                        is_edge: self.is_edge_variable(variable),
                         input: Box::new(plan),
                     });
                 }
@@ -1355,7 +1379,7 @@ impl CypherTranslator {
                             LogicalExpression::Literal(Value::Null),
                         )],
                         replace: false,
-                        is_edge: false,
+                        is_edge: self.is_edge_variable(variable),
                         input: Box::new(plan),
                     });
                 }
@@ -2347,5 +2371,98 @@ mod tests {
         } else {
             panic!("Expected Return at root");
         }
+    }
+
+    #[test]
+    fn test_translate_set_edge_property_is_edge_true() {
+        // SET on an edge variable from MATCH should produce is_edge: true
+        let plan = translate("MATCH (a)-[r:KNOWS]->(b) SET r.weight = 1.0 RETURN r").unwrap();
+
+        // Walk the plan tree to find SetProperty
+        fn find_set_property(op: &LogicalOperator) -> Option<&SetPropertyOp> {
+            match op {
+                LogicalOperator::SetProperty(set_op) => Some(set_op),
+                LogicalOperator::Return(ret) => find_set_property(&ret.input),
+                _ => None,
+            }
+        }
+
+        let set_op = find_set_property(&plan.root).expect("Expected SetProperty in plan");
+        assert!(
+            set_op.is_edge,
+            "SET on edge variable 'r' should have is_edge: true"
+        );
+        assert_eq!(set_op.variable, "r");
+    }
+
+    #[test]
+    fn test_translate_set_node_property_is_edge_false() {
+        // SET on a node variable should produce is_edge: false
+        let plan = translate("MATCH (n:Person) SET n.age = 30 RETURN n").unwrap();
+
+        fn find_set_property(op: &LogicalOperator) -> Option<&SetPropertyOp> {
+            match op {
+                LogicalOperator::SetProperty(set_op) => Some(set_op),
+                LogicalOperator::Return(ret) => find_set_property(&ret.input),
+                _ => None,
+            }
+        }
+
+        let set_op = find_set_property(&plan.root).expect("Expected SetProperty in plan");
+        assert!(
+            !set_op.is_edge,
+            "SET on node variable 'n' should have is_edge: false"
+        );
+        assert_eq!(set_op.variable, "n");
+    }
+
+    #[test]
+    fn test_translate_set_edge_after_merge_relationship() {
+        // SET on edge variable from MERGE should also have is_edge: true
+        let plan = translate(
+            "MATCH (a {id: 'x'}), (b {id: 'y'}) MERGE (a)-[r:KNOWS]->(b) SET r.since = '2024' RETURN r",
+        )
+        .unwrap();
+
+        fn find_set_property(op: &LogicalOperator) -> Option<&SetPropertyOp> {
+            match op {
+                LogicalOperator::SetProperty(set_op) => Some(set_op),
+                LogicalOperator::Return(ret) => find_set_property(&ret.input),
+                _ => None,
+            }
+        }
+
+        let set_op = find_set_property(&plan.root).expect("Expected SetProperty in plan");
+        assert!(
+            set_op.is_edge,
+            "SET on MERGE edge variable 'r' should have is_edge: true"
+        );
+        assert_eq!(set_op.variable, "r");
+    }
+
+    #[test]
+    fn test_translate_aggregate_count() {
+        let plan = translate("MATCH (n:Person) RETURN count(n)").unwrap();
+        // Should produce an Aggregate operator
+        fn has_aggregate(op: &LogicalOperator) -> bool {
+            match op {
+                LogicalOperator::Aggregate(_) => true,
+                LogicalOperator::Return(ret) => has_aggregate(&ret.input),
+                _ => false,
+            }
+        }
+        assert!(has_aggregate(&plan.root), "Expected Aggregate operator");
+    }
+
+    #[test]
+    fn test_translate_union() {
+        let plan =
+            translate("MATCH (n:Person) RETURN n.name UNION ALL MATCH (m:Animal) RETURN m.name")
+                .unwrap();
+        assert!(
+            matches!(&plan.root, LogicalOperator::Union(_)),
+            "Expected Union at root, got {:?}",
+            std::mem::discriminant(&plan.root)
+        );
     }
 }

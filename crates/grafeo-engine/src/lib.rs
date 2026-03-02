@@ -43,3 +43,4 @@ pub use config::{Config, ConfigError, DurabilityMode, GraphModel};
 pub use database::GrafeoDB;
 pub use grafeo_core::graph::{GraphStore, GraphStoreMut};
 pub use session::Session;
+pub use transaction::{CommitInfo, PreparedCommit};

@@ -395,6 +395,64 @@ impl LpgStore {
             .fetch_max(epoch.as_u64(), Ordering::AcqRel);
     }
 
+    /// Removes all data from the store, resetting it to an empty state.
+    ///
+    /// Acquires locks in the documented ordering to prevent deadlocks.
+    /// After clearing, the store behaves as if freshly constructed.
+    pub fn clear(&self) {
+        // Level 1: Entity storage
+        #[cfg(not(feature = "tiered-storage"))]
+        {
+            self.nodes.write().clear();
+            self.edges.write().clear();
+        }
+        #[cfg(feature = "tiered-storage")]
+        {
+            self.node_versions.write().clear();
+            self.edge_versions.write().clear();
+            // Arena allocator chunks are leaked; epochs are cleared via epoch_store.
+        }
+
+        // Level 2: Catalogs (acquire as pairs)
+        {
+            self.label_to_id.write().clear();
+            self.id_to_label.write().clear();
+        }
+        {
+            self.edge_type_to_id.write().clear();
+            self.id_to_edge_type.write().clear();
+        }
+
+        // Level 3: Indexes
+        self.label_index.write().clear();
+        self.node_labels.write().clear();
+        self.property_indexes.write().clear();
+        #[cfg(feature = "vector-index")]
+        self.vector_indexes.write().clear();
+        #[cfg(feature = "text-index")]
+        self.text_indexes.write().clear();
+
+        // Nested: Properties and adjacency
+        self.node_properties.clear();
+        self.edge_properties.clear();
+        self.forward_adj.clear();
+        if let Some(ref backward) = self.backward_adj {
+            backward.clear();
+        }
+
+        // Atomics: ID counters
+        self.next_node_id.store(0, Ordering::Release);
+        self.next_edge_id.store(0, Ordering::Release);
+        self.current_epoch.store(0, Ordering::Release);
+
+        // Level 4: Statistics
+        self.live_node_count.store(0, Ordering::Release);
+        self.live_edge_count.store(0, Ordering::Release);
+        self.edge_type_live_counts.write().clear();
+        *self.statistics.write() = Arc::new(Statistics::new());
+        self.needs_stats_recompute.store(false, Ordering::Release);
+    }
+
     /// Returns whether backward adjacency (incoming edge index) is available.
     ///
     /// When backward adjacency is enabled (the default), bidirectional search

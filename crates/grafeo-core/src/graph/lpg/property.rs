@@ -391,6 +391,11 @@ impl<Id: EntityId> PropertyStorage<Id> {
         self.columns.read().keys().cloned().collect()
     }
 
+    /// Removes all property data.
+    pub fn clear(&self) {
+        self.columns.write().clear();
+    }
+
     /// Gets a column by key for bulk access.
     #[must_use]
     pub fn column(&self, key: &PropertyKey) -> Option<PropertyColumnRef<'_, Id>> {

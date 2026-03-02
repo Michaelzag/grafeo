@@ -1111,4 +1111,50 @@ mod tests {
             assert_eq!(changes.len(), 3); // 2 creates + 1 update
         }
     }
+
+    #[test]
+    fn test_with_store_basic() {
+        use grafeo_core::graph::lpg::LpgStore;
+
+        let store = Arc::new(LpgStore::new());
+        let n1 = store.create_node(&["Person"]);
+        store.set_node_property(n1, "name", "Alice".into());
+
+        let graph_store = Arc::clone(&store) as Arc<dyn GraphStoreMut>;
+        let db = GrafeoDB::with_store(graph_store, Config::in_memory()).unwrap();
+
+        let result = db.execute("MATCH (n:Person) RETURN n.name").unwrap();
+        assert_eq!(result.rows.len(), 1);
+    }
+
+    #[test]
+    fn test_with_store_session() {
+        use grafeo_core::graph::lpg::LpgStore;
+
+        let store = Arc::new(LpgStore::new());
+        let graph_store = Arc::clone(&store) as Arc<dyn GraphStoreMut>;
+        let db = GrafeoDB::with_store(graph_store, Config::in_memory()).unwrap();
+
+        let session = db.session();
+        let result = session.execute("MATCH (n) RETURN count(n)").unwrap();
+        assert_eq!(result.rows.len(), 1);
+    }
+
+    #[test]
+    fn test_with_store_mutations() {
+        use grafeo_core::graph::lpg::LpgStore;
+
+        let store = Arc::new(LpgStore::new());
+        let graph_store = Arc::clone(&store) as Arc<dyn GraphStoreMut>;
+        let db = GrafeoDB::with_store(graph_store, Config::in_memory()).unwrap();
+
+        let session = db.session();
+        session.execute("INSERT (:Person {name: 'Alice'})").unwrap();
+
+        let result = session.execute("MATCH (n:Person) RETURN n.name").unwrap();
+        assert_eq!(result.rows.len(), 1);
+
+        // Data should also be visible via the original store
+        assert_eq!(store.node_count(), 1);
+    }
 }

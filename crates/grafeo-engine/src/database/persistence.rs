@@ -314,6 +314,88 @@ impl super::GrafeoDB {
         Ok(db)
     }
 
+    /// Replaces the current database contents with data from a binary snapshot.
+    ///
+    /// The `data` must have been produced by [`export_snapshot()`](Self::export_snapshot).
+    ///
+    /// All validation (duplicate IDs, dangling edge references) is performed
+    /// before any data is modified. If validation fails, the current database
+    /// is left unchanged. If validation passes, the store is cleared and
+    /// rebuilt from the snapshot atomically (from the perspective of
+    /// subsequent queries).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the snapshot is invalid, contains dangling edge
+    /// references, has duplicate IDs, or deserialization fails.
+    pub fn restore_snapshot(&self, data: &[u8]) -> Result<()> {
+        let config = bincode::config::standard();
+        let (snapshot, _): (Snapshot, _) = bincode::serde::decode_from_slice(data, config)
+            .map_err(|e| Error::Internal(format!("snapshot restore failed: {e}")))?;
+
+        if snapshot.version != 1 {
+            return Err(Error::Internal(format!(
+                "unsupported snapshot version: {}",
+                snapshot.version
+            )));
+        }
+
+        // Pre-validate: collect all node IDs and check for duplicates
+        let mut node_ids = HashSet::with_capacity(snapshot.nodes.len());
+        for node in &snapshot.nodes {
+            if !node_ids.insert(node.id) {
+                return Err(Error::Internal(format!(
+                    "snapshot contains duplicate node ID {}",
+                    node.id
+                )));
+            }
+        }
+
+        // Validate edge references and check for duplicate edge IDs
+        let mut edge_ids = HashSet::with_capacity(snapshot.edges.len());
+        for edge in &snapshot.edges {
+            if !edge_ids.insert(edge.id) {
+                return Err(Error::Internal(format!(
+                    "snapshot contains duplicate edge ID {}",
+                    edge.id
+                )));
+            }
+            if !node_ids.contains(&edge.src) {
+                return Err(Error::Internal(format!(
+                    "snapshot edge {} references non-existent source node {}",
+                    edge.id, edge.src
+                )));
+            }
+            if !node_ids.contains(&edge.dst) {
+                return Err(Error::Internal(format!(
+                    "snapshot edge {} references non-existent destination node {}",
+                    edge.id, edge.dst
+                )));
+            }
+        }
+
+        // Validation passed: clear and rebuild
+        self.store.clear();
+
+        for node in snapshot.nodes {
+            let label_refs: Vec<&str> = node.labels.iter().map(|s| s.as_str()).collect();
+            self.store.create_node_with_id(node.id, &label_refs);
+            for (key, value) in node.properties {
+                self.store.set_node_property(node.id, &key, value);
+            }
+        }
+
+        for edge in snapshot.edges {
+            self.store
+                .create_edge_with_id(edge.id, edge.src, edge.dst, &edge.edge_type);
+            for (key, value) in edge.properties {
+                self.store.set_edge_property(edge.id, &key, value);
+            }
+        }
+
+        Ok(())
+    }
+
     // =========================================================================
     // ADMIN API: Iteration
     // =========================================================================
@@ -330,5 +412,128 @@ impl super::GrafeoDB {
     /// Useful for dump/export operations.
     pub fn iter_edges(&self) -> impl Iterator<Item = grafeo_core::graph::lpg::Edge> + '_ {
         self.store.all_edges()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::GrafeoDB;
+
+    #[test]
+    fn test_restore_snapshot_basic() {
+        let db = GrafeoDB::new_in_memory();
+        let session = db.session();
+
+        // Populate
+        session.execute("INSERT (:Person {name: 'Alice'})").unwrap();
+        session.execute("INSERT (:Person {name: 'Bob'})").unwrap();
+
+        let snapshot = db.export_snapshot().unwrap();
+
+        // Modify
+        session
+            .execute("INSERT (:Person {name: 'Charlie'})")
+            .unwrap();
+        assert_eq!(db.store.node_count(), 3);
+
+        // Restore original
+        db.restore_snapshot(&snapshot).unwrap();
+
+        assert_eq!(db.store.node_count(), 2);
+        let result = session.execute("MATCH (n:Person) RETURN n.name").unwrap();
+        assert_eq!(result.rows.len(), 2);
+    }
+
+    #[test]
+    fn test_restore_snapshot_validation_failure() {
+        let db = GrafeoDB::new_in_memory();
+        let session = db.session();
+
+        session.execute("INSERT (:Person {name: 'Alice'})").unwrap();
+
+        // Corrupt snapshot: just garbage bytes
+        let result = db.restore_snapshot(b"garbage");
+        assert!(result.is_err());
+
+        // DB should be unchanged
+        assert_eq!(db.store.node_count(), 1);
+    }
+
+    #[test]
+    fn test_restore_snapshot_empty_db() {
+        let db = GrafeoDB::new_in_memory();
+
+        // Export empty snapshot, then populate, then restore to empty
+        let empty_snapshot = db.export_snapshot().unwrap();
+
+        let session = db.session();
+        session.execute("INSERT (:Person {name: 'Alice'})").unwrap();
+        assert_eq!(db.store.node_count(), 1);
+
+        db.restore_snapshot(&empty_snapshot).unwrap();
+        assert_eq!(db.store.node_count(), 0);
+    }
+
+    #[test]
+    fn test_restore_snapshot_with_edges() {
+        let db = GrafeoDB::new_in_memory();
+        let session = db.session();
+
+        session.execute("INSERT (:Person {name: 'Alice'})").unwrap();
+        session.execute("INSERT (:Person {name: 'Bob'})").unwrap();
+        session
+            .execute(
+                "MATCH (a:Person {name: 'Alice'}), (b:Person {name: 'Bob'}) INSERT (a)-[:KNOWS]->(b)",
+            )
+            .unwrap();
+
+        let snapshot = db.export_snapshot().unwrap();
+        assert_eq!(db.store.edge_count(), 1);
+
+        // Modify: add more data
+        session
+            .execute("INSERT (:Person {name: 'Charlie'})")
+            .unwrap();
+
+        // Restore
+        db.restore_snapshot(&snapshot).unwrap();
+        assert_eq!(db.store.node_count(), 2);
+        assert_eq!(db.store.edge_count(), 1);
+    }
+
+    #[test]
+    fn test_restore_snapshot_preserves_sessions() {
+        let db = GrafeoDB::new_in_memory();
+        let session = db.session();
+
+        session.execute("INSERT (:Person {name: 'Alice'})").unwrap();
+        let snapshot = db.export_snapshot().unwrap();
+
+        // Modify
+        session.execute("INSERT (:Person {name: 'Bob'})").unwrap();
+
+        // Restore
+        db.restore_snapshot(&snapshot).unwrap();
+
+        // Session should still work and see restored data
+        let result = session.execute("MATCH (n:Person) RETURN n.name").unwrap();
+        assert_eq!(result.rows.len(), 1);
+    }
+
+    #[test]
+    fn test_export_import_roundtrip() {
+        let db = GrafeoDB::new_in_memory();
+        let session = db.session();
+
+        session
+            .execute("INSERT (:Person {name: 'Alice', age: 30})")
+            .unwrap();
+
+        let snapshot = db.export_snapshot().unwrap();
+        let db2 = GrafeoDB::import_snapshot(&snapshot).unwrap();
+        let session2 = db2.session();
+
+        let result = session2.execute("MATCH (n:Person) RETURN n.name").unwrap();
+        assert_eq!(result.rows.len(), 1);
     }
 }

@@ -55,6 +55,10 @@ pub struct Session {
     commit_counter: Arc<AtomicUsize>,
     /// GC every N commits (0 = disabled).
     gc_interval: usize,
+    /// Node count at the start of the current transaction (for PreparedCommit stats).
+    tx_start_node_count: usize,
+    /// Edge count at the start of the current transaction (for PreparedCommit stats).
+    tx_start_edge_count: usize,
     /// CDC log for change tracking.
     #[cfg(feature = "cdc")]
     cdc_log: Arc<crate::cdc::CdcLog>,
@@ -90,6 +94,8 @@ impl Session {
             query_timeout,
             commit_counter,
             gc_interval,
+            tx_start_node_count: 0,
+            tx_start_edge_count: 0,
             #[cfg(feature = "cdc")]
             cdc_log: Arc::new(crate::cdc::CdcLog::new()),
         }
@@ -131,6 +137,8 @@ impl Session {
             query_timeout,
             commit_counter,
             gc_interval,
+            tx_start_node_count: 0,
+            tx_start_edge_count: 0,
             #[cfg(feature = "cdc")]
             cdc_log: Arc::new(crate::cdc::CdcLog::new()),
         }
@@ -167,6 +175,8 @@ impl Session {
             query_timeout,
             commit_counter,
             gc_interval,
+            tx_start_node_count: 0,
+            tx_start_edge_count: 0,
             #[cfg(feature = "cdc")]
             cdc_log: Arc::new(crate::cdc::CdcLog::new()),
         }
@@ -862,6 +872,8 @@ impl Session {
             ));
         }
 
+        self.tx_start_node_count = self.store.node_count();
+        self.tx_start_edge_count = self.store.edge_count();
         let tx_id = self.tx_manager.begin();
         self.current_tx = Some(tx_id);
         Ok(())
@@ -886,6 +898,8 @@ impl Session {
             ));
         }
 
+        self.tx_start_node_count = self.store.node_count();
+        self.tx_start_edge_count = self.store.edge_count();
         let tx_id = self.tx_manager.begin_with_isolation(isolation_level);
         self.current_tx = Some(tx_id);
         Ok(())
@@ -978,6 +992,67 @@ impl Session {
     #[must_use]
     pub fn in_transaction(&self) -> bool {
         self.current_tx.is_some()
+    }
+
+    /// Returns the current transaction ID, if any.
+    #[must_use]
+    pub(crate) fn current_tx_id(&self) -> Option<TxId> {
+        self.current_tx
+    }
+
+    /// Returns a reference to the transaction manager.
+    #[must_use]
+    pub(crate) fn tx_manager(&self) -> &TransactionManager {
+        &self.tx_manager
+    }
+
+    /// Returns the store's current node count and the count at transaction start.
+    #[must_use]
+    pub(crate) fn node_count_delta(&self) -> (usize, usize) {
+        (self.tx_start_node_count, self.store.node_count())
+    }
+
+    /// Returns the store's current edge count and the count at transaction start.
+    #[must_use]
+    pub(crate) fn edge_count_delta(&self) -> (usize, usize) {
+        (self.tx_start_edge_count, self.store.edge_count())
+    }
+
+    /// Prepares the current transaction for a two-phase commit.
+    ///
+    /// Returns a [`PreparedCommit`](crate::transaction::PreparedCommit) that
+    /// lets you inspect pending changes and attach metadata before finalizing.
+    /// The mutable borrow prevents concurrent operations while the commit is
+    /// pending.
+    ///
+    /// If the `PreparedCommit` is dropped without calling `commit()` or
+    /// `abort()`, the transaction is automatically rolled back.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no transaction is active.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use grafeo_engine::GrafeoDB;
+    ///
+    /// let db = GrafeoDB::new_in_memory();
+    /// let mut session = db.session();
+    ///
+    /// session.begin_tx()?;
+    /// session.execute("INSERT (:Person {name: 'Alice'})")?;
+    ///
+    /// let mut prepared = session.prepare_commit()?;
+    /// println!("Nodes written: {}", prepared.info().nodes_written);
+    /// prepared.set_metadata("audit_user", "admin");
+    /// prepared.commit()?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn prepare_commit(&mut self) -> Result<crate::transaction::PreparedCommit<'_>> {
+        crate::transaction::PreparedCommit::new(self)
     }
 
     /// Sets auto-commit mode.

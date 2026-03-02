@@ -1479,3 +1479,26 @@ mod graph_store_traits {
         assert_eq!(store.edge_count(), 3);
     }
 }
+
+#[test]
+fn test_clear() {
+    let store = LpgStore::new();
+    let n1 = store.create_node(&["Person"]);
+    let n2 = store.create_node(&["Person"]);
+    store.set_node_property(n1, "name", "Alice".into());
+    let _e = store.create_edge(n1, n2, "KNOWS");
+    store.set_edge_property(_e, "since", 2024.into());
+
+    assert_eq!(store.node_count(), 2);
+    assert_eq!(store.edge_count(), 1);
+
+    store.clear();
+
+    assert_eq!(store.node_count(), 0);
+    assert_eq!(store.edge_count(), 0);
+
+    // Should be able to add new data after clear
+    let n3 = store.create_node(&["Animal"]);
+    assert_eq!(store.node_count(), 1);
+    assert!(store.get_node(n3).is_some());
+}
