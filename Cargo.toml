@@ -83,7 +83,7 @@ regex = "1.12.3"
 # Testing
 proptest = "1.10.0"
 criterion = "0.8.2"
-tempfile = "3.25"
+tempfile = "3.26"
 
 # Allocators (platform-optimized)
 tikv-jemallocator = "0.6"
