@@ -227,7 +227,7 @@ impl super::Planner {
                 input_op,
                 projections,
                 output_types,
-                Arc::clone(&self.store),
+                Arc::clone(&self.store) as Arc<dyn GraphStore>,
             ));
 
             Ok((operator, columns))
@@ -271,7 +271,7 @@ impl super::Planner {
                     input_op,
                     projections,
                     output_types,
-                    Arc::clone(&self.store),
+                    Arc::clone(&self.store) as Arc<dyn GraphStore>,
                 ));
                 Ok((operator, columns))
             }
@@ -366,7 +366,7 @@ impl super::Planner {
             input_op,
             projections,
             output_types,
-            Arc::clone(&self.store),
+            Arc::clone(&self.store) as Arc<dyn GraphStore>,
         ));
 
         Ok((operator, output_columns))
@@ -537,7 +537,7 @@ impl super::Planner {
                 input_op,
                 projections,
                 output_types,
-                Arc::clone(&self.store),
+                Arc::clone(&self.store) as Arc<dyn GraphStore>,
             ));
         }
 

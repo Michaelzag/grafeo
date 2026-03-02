@@ -10,6 +10,8 @@ use grafeo_common::types::{NodeId, Value};
 use grafeo_common::utils::error::Result;
 use grafeo_common::utils::hash::{FxHashMap, FxHashSet};
 use grafeo_core::graph::Direction;
+use grafeo_core::graph::GraphStore;
+#[cfg(test)]
 use grafeo_core::graph::lpg::LpgStore;
 
 use super::super::{AlgorithmResult, ParameterDef, ParameterType, Parameters};
@@ -31,7 +33,7 @@ use super::traits::{Control, GraphAlgorithm, NodeValueResultBuilder, TraversalEv
 /// # Returns
 ///
 /// A vector of node IDs in the order they were discovered.
-pub fn bfs(store: &LpgStore, start: NodeId) -> Vec<NodeId> {
+pub fn bfs(store: &dyn GraphStore, start: NodeId) -> Vec<NodeId> {
     let mut visited = Vec::new();
     bfs_with_visitor(store, start, |event| -> Control<()> {
         if let TraversalEvent::Discover(node) = event {
@@ -56,7 +58,7 @@ pub fn bfs(store: &LpgStore, start: NodeId) -> Vec<NodeId> {
 /// # Returns
 ///
 /// `Some(B)` if the visitor returned `Control::Break(B)`, otherwise `None`.
-pub fn bfs_with_visitor<B, F>(store: &LpgStore, start: NodeId, mut visitor: F) -> Option<B>
+pub fn bfs_with_visitor<B, F>(store: &dyn GraphStore, start: NodeId, mut visitor: F) -> Option<B>
 where
     F: FnMut(TraversalEvent) -> Control<B>,
 {
@@ -137,7 +139,7 @@ where
 /// # Returns
 ///
 /// A vector of vectors, where `result[i]` contains all nodes at distance `i` from start.
-pub fn bfs_layers(store: &LpgStore, start: NodeId) -> Vec<Vec<NodeId>> {
+pub fn bfs_layers(store: &dyn GraphStore, start: NodeId) -> Vec<Vec<NodeId>> {
     let mut layers: Vec<Vec<NodeId>> = Vec::new();
     let mut discovered: FxHashSet<NodeId> = FxHashSet::default();
     let mut current_layer: Vec<NodeId> = Vec::new();
@@ -195,7 +197,7 @@ enum NodeColor {
 /// # Returns
 ///
 /// A vector of node IDs in post-order (finished order).
-pub fn dfs(store: &LpgStore, start: NodeId) -> Vec<NodeId> {
+pub fn dfs(store: &dyn GraphStore, start: NodeId) -> Vec<NodeId> {
     let mut finished = Vec::new();
     dfs_with_visitor(store, start, |event| -> Control<()> {
         if let TraversalEvent::Finish(node) = event {
@@ -219,7 +221,7 @@ pub fn dfs(store: &LpgStore, start: NodeId) -> Vec<NodeId> {
 /// # Returns
 ///
 /// `Some(B)` if the visitor returned `Control::Break(B)`, otherwise `None`.
-pub fn dfs_with_visitor<B, F>(store: &LpgStore, start: NodeId, mut visitor: F) -> Option<B>
+pub fn dfs_with_visitor<B, F>(store: &dyn GraphStore, start: NodeId, mut visitor: F) -> Option<B>
 where
     F: FnMut(TraversalEvent) -> Control<B>,
 {
@@ -246,7 +248,10 @@ where
         Control::Continue => {}
     }
 
-    let neighbors: Vec<_> = store.edges_from(start, Direction::Outgoing).collect();
+    let neighbors: Vec<_> = store
+        .edges_from(start, Direction::Outgoing)
+        .into_iter()
+        .collect();
     stack.push((start, neighbors, 0));
 
     while let Some((node, neighbors, idx)) = stack.last_mut() {
@@ -292,8 +297,10 @@ where
                     Control::Continue => {}
                 }
 
-                let neighbor_neighbors: Vec<_> =
-                    store.edges_from(neighbor, Direction::Outgoing).collect();
+                let neighbor_neighbors: Vec<_> = store
+                    .edges_from(neighbor, Direction::Outgoing)
+                    .into_iter()
+                    .collect();
                 stack.push((neighbor, neighbor_neighbors, 0));
             }
             NodeColor::Gray => {
@@ -327,7 +334,7 @@ where
 /// Performs DFS on all nodes, visiting each connected component.
 ///
 /// Returns nodes in reverse post-order (useful for topological sort).
-pub fn dfs_all(store: &LpgStore) -> Vec<NodeId> {
+pub fn dfs_all(store: &dyn GraphStore) -> Vec<NodeId> {
     let mut finished = Vec::new();
     let mut visited: FxHashSet<NodeId> = FxHashSet::default();
 
@@ -388,7 +395,7 @@ impl GraphAlgorithm for BfsAlgorithm {
         bfs_params()
     }
 
-    fn execute(&self, store: &LpgStore, params: &Parameters) -> Result<AlgorithmResult> {
+    fn execute(&self, store: &dyn GraphStore, params: &Parameters) -> Result<AlgorithmResult> {
         let start_id = params.get_int("start").ok_or_else(|| {
             grafeo_common::utils::error::Error::InvalidValue("start parameter required".to_string())
         })?;
@@ -442,7 +449,7 @@ impl GraphAlgorithm for DfsAlgorithm {
         dfs_params()
     }
 
-    fn execute(&self, store: &LpgStore, params: &Parameters) -> Result<AlgorithmResult> {
+    fn execute(&self, store: &dyn GraphStore, params: &Parameters) -> Result<AlgorithmResult> {
         let start_id = params.get_int("start").ok_or_else(|| {
             grafeo_common::utils::error::Error::InvalidValue("start parameter required".to_string())
         })?;

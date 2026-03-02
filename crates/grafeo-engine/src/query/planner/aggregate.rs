@@ -100,7 +100,7 @@ impl super::Planner {
                 input_op,
                 projections,
                 output_types,
-                Arc::clone(&self.store),
+                Arc::clone(&self.store) as Arc<dyn GraphStore>,
             ));
         }
 
@@ -206,8 +206,11 @@ impl super::Planner {
                 .collect();
 
             let filter_expr = self.convert_expression(having_expr)?;
-            let predicate =
-                ExpressionPredicate::new(filter_expr, having_var_columns, Arc::clone(&self.store));
+            let predicate = ExpressionPredicate::new(
+                filter_expr,
+                having_var_columns,
+                Arc::clone(&self.store) as Arc<dyn GraphStore>,
+            );
             operator = Box::new(FilterOperator::new(operator, Box::new(predicate)));
         }
 
@@ -304,7 +307,11 @@ impl super::Planner {
         }
 
         // Create the lazy factorized chain operator
-        let mut lazy_op = LazyFactorizedChainOperator::new(Arc::clone(&self.store), base_op, steps);
+        let mut lazy_op = LazyFactorizedChainOperator::new(
+            Arc::clone(&self.store) as Arc<dyn GraphStore>,
+            base_op,
+            steps,
+        );
 
         if let Some(tx_id) = self.tx_id {
             lazy_op = lazy_op.with_tx_context(self.viewing_epoch, Some(tx_id));

@@ -121,6 +121,15 @@ pub trait GraphStore: Send + Sync {
     /// Returns the type string of an edge.
     fn edge_type(&self, id: EdgeId) -> Option<ArcStr>;
 
+    // --- Index introspection ---
+
+    /// Returns `true` if a property index exists for the given property.
+    ///
+    /// The default returns `false`, which is correct for stores without indexes.
+    fn has_property_index(&self, _property: &str) -> bool {
+        false
+    }
+
     // --- Filtered search ---
 
     /// Finds all nodes with a specific property value. Uses indexes when available.
@@ -212,11 +221,17 @@ pub trait GraphStoreMut: GraphStore {
     /// Deletes a node. Returns `true` if the node existed.
     fn delete_node(&self, id: NodeId) -> bool;
 
+    /// Deletes a node within a transaction context. Returns `true` if the node existed.
+    fn delete_node_versioned(&self, id: NodeId, epoch: EpochId, tx_id: TxId) -> bool;
+
     /// Deletes all edges connected to a node (DETACH DELETE).
     fn delete_node_edges(&self, node_id: NodeId);
 
     /// Deletes an edge. Returns `true` if the edge existed.
     fn delete_edge(&self, id: EdgeId) -> bool;
+
+    /// Deletes an edge within a transaction context. Returns `true` if the edge existed.
+    fn delete_edge_versioned(&self, id: EdgeId, epoch: EpochId, tx_id: TxId) -> bool;
 
     // --- Property mutation ---
 
@@ -239,4 +254,42 @@ pub trait GraphStoreMut: GraphStore {
 
     /// Removes a label from a node. Returns `true` if the label existed.
     fn remove_label(&self, node_id: NodeId, label: &str) -> bool;
+
+    // --- Convenience (with default implementations) ---
+
+    /// Creates a new node with labels and properties in one call.
+    ///
+    /// The default implementation calls [`create_node`](Self::create_node)
+    /// followed by [`set_node_property`](Self::set_node_property) for each
+    /// property. Implementations may override for atomicity or performance.
+    fn create_node_with_props(
+        &self,
+        labels: &[&str],
+        properties: &[(PropertyKey, Value)],
+    ) -> NodeId {
+        let id = self.create_node(labels);
+        for (key, value) in properties {
+            self.set_node_property(id, key.as_str(), value.clone());
+        }
+        id
+    }
+
+    /// Creates a new edge with properties in one call.
+    ///
+    /// The default implementation calls [`create_edge`](Self::create_edge)
+    /// followed by [`set_edge_property`](Self::set_edge_property) for each
+    /// property. Implementations may override for atomicity or performance.
+    fn create_edge_with_props(
+        &self,
+        src: NodeId,
+        dst: NodeId,
+        edge_type: &str,
+        properties: &[(PropertyKey, Value)],
+    ) -> EdgeId {
+        let id = self.create_edge(src, dst, edge_type);
+        for (key, value) in properties {
+            self.set_edge_property(id, key.as_str(), value.clone());
+        }
+        id
+    }
 }

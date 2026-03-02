@@ -5,7 +5,7 @@
 
 use super::{Operator, OperatorError, OperatorResult};
 use crate::execution::DataChunk;
-use crate::graph::lpg::LpgStore;
+use crate::graph::GraphStore;
 use crate::index::vector::DistanceMetric;
 use grafeo_common::types::{LogicalType, NodeId, PropertyKey, Value};
 use std::sync::Arc;
@@ -52,7 +52,7 @@ use crate::index::vector::HnswIndex;
 /// ```
 pub struct VectorScanOperator {
     /// The store to fetch node properties from (for brute-force).
-    store: Arc<LpgStore>,
+    store: Arc<dyn GraphStore>,
     /// The HNSW index to search (None = brute-force).
     #[cfg(feature = "vector-index")]
     index: Option<Arc<HnswIndex>>,
@@ -96,7 +96,7 @@ impl VectorScanOperator {
     #[cfg(feature = "vector-index")]
     #[must_use]
     pub fn with_index(
-        store: Arc<LpgStore>,
+        store: Arc<dyn GraphStore>,
         index: Arc<HnswIndex>,
         query: Vec<f32>,
         k: usize,
@@ -141,7 +141,7 @@ impl VectorScanOperator {
     /// * `metric` - Distance metric to use
     #[must_use]
     pub fn brute_force(
-        store: Arc<LpgStore>,
+        store: Arc<dyn GraphStore>,
         property: impl Into<String>,
         query: Vec<f32>,
         k: usize,
@@ -221,8 +221,10 @@ impl VectorScanOperator {
         {
             if let Some(ref index) = self.index {
                 // Use HNSW index with property accessor
-                let accessor =
-                    crate::index::vector::PropertyVectorAccessor::new(&self.store, &*self.property);
+                let accessor = crate::index::vector::PropertyVectorAccessor::new(
+                    &*self.store,
+                    &*self.property,
+                );
                 self.results = index.search_with_ef(&self.query, self.k, self.ef, &accessor);
                 self.apply_filters();
                 return;
@@ -356,6 +358,7 @@ impl Operator for VectorScanOperator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::lpg::LpgStore;
 
     #[test]
     fn test_vector_scan_brute_force() {
@@ -375,7 +378,7 @@ mod tests {
         let query = vec![0.1, 0.2, 0.35];
 
         let mut scan = VectorScanOperator::brute_force(
-            Arc::clone(&store),
+            Arc::clone(&store) as Arc<dyn GraphStore>,
             "embedding",
             query,
             2, // k=2
@@ -402,7 +405,7 @@ mod tests {
         store.set_node_property(n1, "vec", Value::Vector(vec![0.1, 0.2].into()));
 
         let mut scan = VectorScanOperator::brute_force(
-            Arc::clone(&store),
+            Arc::clone(&store) as Arc<dyn GraphStore>,
             "vec",
             vec![0.1, 0.2],
             10,
@@ -432,7 +435,7 @@ mod tests {
         store.set_node_property(n2, "vec", Value::Vector(vec![10.0, 10.0].into()));
 
         let mut scan = VectorScanOperator::brute_force(
-            Arc::clone(&store),
+            Arc::clone(&store) as Arc<dyn GraphStore>,
             "vec",
             vec![0.0, 0.0],
             10,
@@ -455,7 +458,7 @@ mod tests {
         store.create_node(&["Doc"]);
 
         let mut scan = VectorScanOperator::brute_force(
-            Arc::clone(&store),
+            Arc::clone(&store) as Arc<dyn GraphStore>,
             "embedding",
             vec![0.1, 0.2],
             10,
@@ -471,7 +474,7 @@ mod tests {
         let store = Arc::new(LpgStore::new());
 
         let brute_scan = VectorScanOperator::brute_force(
-            Arc::clone(&store),
+            Arc::clone(&store) as Arc<dyn GraphStore>,
             "vec",
             vec![0.1],
             10,
@@ -494,7 +497,7 @@ mod tests {
         store.set_node_property(n2, "vec", Value::Vector(vec![0.707, 0.707].into()));
 
         let mut scan = VectorScanOperator::brute_force(
-            Arc::clone(&store),
+            Arc::clone(&store) as Arc<dyn GraphStore>,
             "vec",
             vec![0.0, 1.0], // Query: [0, 1]
             10,
@@ -517,7 +520,7 @@ mod tests {
         store.set_node_property(n1, "vec", Value::Vector(vec![0.1, 0.2].into()));
 
         let mut scan = VectorScanOperator::brute_force(
-            Arc::clone(&store),
+            Arc::clone(&store) as Arc<dyn GraphStore>,
             "vec",
             vec![0.1, 0.2],
             10,
@@ -540,7 +543,7 @@ mod tests {
         }
 
         let mut scan = VectorScanOperator::brute_force(
-            Arc::clone(&store),
+            Arc::clone(&store) as Arc<dyn GraphStore>,
             "vec",
             vec![0.0, 0.0],
             10,
@@ -577,7 +580,7 @@ mod tests {
 
         // Without label filter - should find both
         let mut scan = VectorScanOperator::brute_force(
-            Arc::clone(&store),
+            Arc::clone(&store) as Arc<dyn GraphStore>,
             "vec",
             vec![0.0, 0.0],
             10,
@@ -611,7 +614,7 @@ mod tests {
         // Create HNSW index and insert using accessor
         let config = HnswConfig::new(3, DistanceMetric::Euclidean);
         let index = Arc::new(HnswIndex::new(config));
-        let accessor = PropertyVectorAccessor::new(&store, "vec");
+        let accessor = PropertyVectorAccessor::new(&*store, "vec");
 
         index.insert(n1, &v1, &accessor);
         index.insert(n2, &v2, &accessor);
@@ -619,9 +622,13 @@ mod tests {
 
         // Search using index
         let query = vec![0.1f32, 0.2, 0.35];
-        let mut scan =
-            VectorScanOperator::with_index(Arc::clone(&store), Arc::clone(&index), query, 2)
-                .with_property("vec");
+        let mut scan = VectorScanOperator::with_index(
+            Arc::clone(&store) as Arc<dyn GraphStore>,
+            Arc::clone(&index),
+            query,
+            2,
+        )
+        .with_property("vec");
 
         assert_eq!(scan.name(), "VectorScan(HNSW)");
 

@@ -273,7 +273,7 @@ impl super::GrafeoDB {
             for label in &node.labels {
                 if let Some(index) = self.store.get_vector_index(label.as_str(), key) {
                     let accessor =
-                        grafeo_core::index::vector::PropertyVectorAccessor::new(&self.store, key);
+                        grafeo_core::index::vector::PropertyVectorAccessor::new(&*self.store, key);
                     index.insert(id, &vec, &accessor);
                 }
             }
@@ -346,7 +346,7 @@ impl super::GrafeoDB {
                         node.properties.get(&prop_key)
                     {
                         let accessor = grafeo_core::index::vector::PropertyVectorAccessor::new(
-                            &self.store,
+                            &*self.store,
                             property,
                         );
                         index.insert(id, v, &accessor);
@@ -739,7 +739,7 @@ impl super::GrafeoDB {
         #[cfg(feature = "vector-index")]
         if let Some(index) = self.store.get_vector_index(label, property) {
             let accessor =
-                grafeo_core::index::vector::PropertyVectorAccessor::new(&self.store, property);
+                grafeo_core::index::vector::PropertyVectorAccessor::new(&*self.store, property);
             for &id in &ids {
                 if let Some(node) = self.store.get_node(id) {
                     let pk = grafeo_common::types::PropertyKey::new(property);

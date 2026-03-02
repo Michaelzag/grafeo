@@ -8,6 +8,8 @@ use grafeo_common::types::{NodeId, Value};
 use grafeo_common::utils::error::Result;
 use grafeo_common::utils::hash::{FxHashMap, FxHashSet};
 use grafeo_core::graph::Direction;
+use grafeo_core::graph::GraphStore;
+#[cfg(test)]
 use grafeo_core::graph::lpg::LpgStore;
 
 use super::super::{AlgorithmResult, ParameterDef, ParameterType, Parameters};
@@ -33,7 +35,7 @@ use super::traits::GraphAlgorithm;
 /// # Complexity
 ///
 /// O(V + E)
-pub fn articulation_points(store: &LpgStore) -> FxHashSet<NodeId> {
+pub fn articulation_points(store: &dyn GraphStore) -> FxHashSet<NodeId> {
     let nodes = store.node_ids();
     let n = nodes.len();
 
@@ -147,7 +149,7 @@ pub fn articulation_points(store: &LpgStore) -> FxHashSet<NodeId> {
 /// # Complexity
 ///
 /// O(V + E)
-pub fn bridges(store: &LpgStore) -> Vec<(NodeId, NodeId)> {
+pub fn bridges(store: &dyn GraphStore) -> Vec<(NodeId, NodeId)> {
     let nodes = store.node_ids();
     let n = nodes.len();
 
@@ -279,7 +281,7 @@ impl KCoreResult {
 /// # Complexity
 ///
 /// O(V + E)
-pub fn kcore_decomposition(store: &LpgStore) -> KCoreResult {
+pub fn kcore_decomposition(store: &dyn GraphStore) -> KCoreResult {
     let nodes = store.node_ids();
     let n = nodes.len();
 
@@ -375,7 +377,7 @@ pub fn kcore_decomposition(store: &LpgStore) -> KCoreResult {
 }
 
 /// Extracts the k-core subgraph (nodes with core number >= k).
-pub fn k_core(store: &LpgStore, k: usize) -> Vec<NodeId> {
+pub fn k_core(store: &dyn GraphStore, k: usize) -> Vec<NodeId> {
     let result = kcore_decomposition(store);
     result.k_core(k)
 }
@@ -407,7 +409,7 @@ impl GraphAlgorithm for ArticulationPointsAlgorithm {
         articulation_params()
     }
 
-    fn execute(&self, store: &LpgStore, _params: &Parameters) -> Result<AlgorithmResult> {
+    fn execute(&self, store: &dyn GraphStore, _params: &Parameters) -> Result<AlgorithmResult> {
         let points = articulation_points(store);
 
         let mut result = AlgorithmResult::new(vec!["node_id".to_string()]);
@@ -443,7 +445,7 @@ impl GraphAlgorithm for BridgesAlgorithm {
         bridges_params()
     }
 
-    fn execute(&self, store: &LpgStore, _params: &Parameters) -> Result<AlgorithmResult> {
+    fn execute(&self, store: &dyn GraphStore, _params: &Parameters) -> Result<AlgorithmResult> {
         let bridge_list = bridges(store);
 
         let mut result = AlgorithmResult::new(vec!["source".to_string(), "target".to_string()]);
@@ -488,7 +490,7 @@ impl GraphAlgorithm for KCoreAlgorithm {
         kcore_params()
     }
 
-    fn execute(&self, store: &LpgStore, params: &Parameters) -> Result<AlgorithmResult> {
+    fn execute(&self, store: &dyn GraphStore, params: &Parameters) -> Result<AlgorithmResult> {
         let decomposition = kcore_decomposition(store);
 
         if let Some(k) = params.get_int("k") {

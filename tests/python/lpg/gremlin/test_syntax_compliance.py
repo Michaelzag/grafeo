@@ -154,9 +154,6 @@ class TestGremlinSourceSteps:
         rows = _rows(db, "g.V().has('name', 'Charlie').out('knows')")
         assert len(rows) >= 1
 
-    @pytest.mark.xfail(
-        reason="Edge property set via addE().property() not persisted for query"
-    )
     def test_add_e_with_property(self, social_graph):
         """g.addE with .property(k,v) stores edge properties."""
         db, _ = social_graph
@@ -249,7 +246,6 @@ class TestGremlinNavigation:
         rows = _rows(db, "g.V().has('name', 'Alice').outE('knows').inV()")
         assert len(rows) == 2  # Bob and Charlie
 
-    @pytest.mark.xfail(reason="bothV() returns only one endpoint instead of both")
     def test_both_v(self, social_graph):
         """bothV() returns both endpoints of an edge."""
         db, ids = social_graph
@@ -371,9 +367,6 @@ class TestGremlinFilter:
 
     # -- dedup / limit / skip / range ----------------------------------
 
-    @pytest.mark.xfail(
-        reason="dedup() does not deduplicate vertex traversers correctly"
-    )
     def test_dedup(self, social_graph):
         """dedup() removes duplicate traversers."""
         db, _ = social_graph
@@ -422,7 +415,6 @@ class TestGremlinMap:
         val = rows[0] if not isinstance(rows[0], dict) else next(iter(rows[0].values()))
         assert val == ids["alice"]
 
-    @pytest.mark.xfail(reason="label() map step not supported in RETURN expression")
     def test_label_step(self, social_graph):
         """label() extracts vertex labels."""
         db, _ = social_graph
@@ -439,9 +431,6 @@ class TestGremlinMap:
         val = rows[0] if not isinstance(rows[0], dict) else next(iter(rows[0].values()))
         assert val == 30
 
-    @pytest.mark.xfail(
-        reason="values() with multiple keys returns single row instead of separate traversers"
-    )
     def test_values_multiple_keys(self, social_graph):
         """values('k1','k2') projects several properties as separate traversers."""
         db, _ = social_graph
@@ -516,21 +505,18 @@ class TestGremlinMap:
 
     # -- collection manipulation ---------------------------------------
 
-    @pytest.mark.xfail(
-        reason="fold() after values() fails with 'Variable not found in input'"
-    )
     def test_fold(self, social_graph):
         """fold() collapses all traversers into a single list."""
         db, _ = social_graph
         rows = _rows(db, "g.V().hasLabel('Person').values('name').fold()")
         assert len(rows) == 1
         folded = rows[0]
+        # Result may be a bare list or a single-key dict wrapping a list
+        if isinstance(folded, dict):
+            folded = next(iter(folded.values()))
         assert isinstance(folded, list)
         assert len(folded) == 4
 
-    @pytest.mark.xfail(
-        reason="unfold() after fold() after values() fails with 'Variable not found in input'"
-    )
     def test_unfold(self, social_graph):
         """unfold() expands a collection back into individual traversers."""
         db, _ = social_graph
@@ -548,9 +534,6 @@ class TestGremlinMap:
         grouped = rows[0]
         assert isinstance(grouped, dict)
 
-    @pytest.mark.xfail(
-        reason="groupCount().by() returns raw vertex data instead of count map"
-    )
     def test_group_count(self, social_graph):
         """groupCount().by() counts by key."""
         db, _ = social_graph
@@ -559,7 +542,10 @@ class TestGremlinMap:
             "g.V().hasLabel('Person').groupCount().by('city')",
         )
         assert len(rows) >= 1
-        counts = rows[0]
+        raw = rows[0]
+        assert isinstance(raw, dict)
+        # The engine returns a single-column row; unwrap the inner map.
+        counts = next(iter(raw.values())) if len(raw) == 1 else raw
         assert isinstance(counts, dict)
         # NYC has Alice and Charlie
         assert counts.get("NYC", 0) == 2
@@ -576,9 +562,6 @@ class TestGremlinMap:
         # Alice->Bob->Charlie, Alice->Bob->Diana
         assert len(rows) >= 1
 
-    @pytest.mark.xfail(
-        reason="select() with as() label fails with 'Undefined variable in EXPAND'"
-    )
     def test_select_after_as(self, social_graph):
         """select('a') retrieves a labeled traverser."""
         db, _ = social_graph
@@ -589,9 +572,6 @@ class TestGremlinMap:
         # Two outgoing 'knows' edges, but select('a') always points to Alice
         assert len(rows) == 2
 
-    @pytest.mark.xfail(
-        reason="project().by() returns raw vertex data instead of named projections"
-    )
     def test_project(self, social_graph):
         """project('k1','k2').by().by() creates named projections."""
         db, _ = social_graph
@@ -632,7 +612,6 @@ class TestGremlinMap:
         )
         assert len(rows) >= 1
 
-    @pytest.mark.xfail(reason="union() mid-traversal branches need variable alignment")
     def test_union(self, social_graph):
         """union() merges results from multiple sub-traversals."""
         db, _ = social_graph
@@ -643,9 +622,6 @@ class TestGremlinMap:
         # 2 knows + 1 works_at = 3
         assert len(rows) == 3
 
-    @pytest.mark.xfail(
-        reason="coalesce() mid-traversal branches need variable alignment"
-    )
     def test_coalesce(self, social_graph):
         """coalesce() returns the first non-empty traversal."""
         db, _ = social_graph
@@ -689,9 +665,6 @@ class TestGremlinMap:
 class TestGremlinSideEffects:
     """as, property, drop, sideEffect, aggregate, store."""
 
-    @pytest.mark.xfail(
-        reason="select() with multiple as() labels fails with 'Undefined variable in EXPAND'"
-    )
     def test_as_and_select(self, social_graph):
         """as('label') stores a reference retrievable by select()."""
         db, _ = social_graph
@@ -889,9 +862,6 @@ class TestGremlinPredicates:
         # since=2020 (Alice->Charlie), since=2021 (Bob->Diana)
         assert len(rows) == 2
 
-    @pytest.mark.xfail(
-        reason="Chained edge-to-vertex navigation with predicate loses value projection"
-    )
     def test_predicate_with_navigation(self, social_graph):
         """Predicates compose naturally with navigation steps."""
         db, _ = social_graph

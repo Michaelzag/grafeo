@@ -17,8 +17,9 @@ use crate::query::plan::{
     AddLabelOp, AggregateFunction as LogicalAggregateFunction, AggregateOp, AntiJoinOp, BinaryOp,
     CallProcedureOp, CreateEdgeOp, CreateNodeOp, DeleteEdgeOp, DeleteNodeOp, DistinctOp,
     ExpandDirection, ExpandOp, FilterOp, JoinOp, JoinType, LeftJoinOp, LimitOp, LogicalExpression,
-    LogicalOperator, LogicalPlan, MergeOp, MergeRelationshipOp, NodeScanOp, RemoveLabelOp,
-    ReturnOp, SetPropertyOp, ShortestPathOp, SkipOp, SortOp, SortOrder, UnaryOp, UnionOp, UnwindOp,
+    LogicalOperator, LogicalPlan, MapCollectOp, MergeOp, MergeRelationshipOp, NodeScanOp,
+    RemoveLabelOp, ReturnOp, SetPropertyOp, ShortestPathOp, SkipOp, SortOp, SortOrder, UnaryOp,
+    UnionOp, UnwindOp,
 };
 use grafeo_common::types::{EpochId, TxId};
 use grafeo_common::types::{LogicalType, Value};
@@ -31,14 +32,14 @@ use grafeo_core::execution::operators::{
     ExpandOperator, ExpandStep, ExpressionPredicate, FactorizedAggregate,
     FactorizedAggregateOperator, FilterExpression, FilterOperator, HashAggregateOperator,
     HashJoinOperator, JoinType as PhysicalJoinType, LazyFactorizedChainOperator,
-    LeapfrogJoinOperator, LimitOperator, MergeOperator, MergeRelationshipConfig,
-    MergeRelationshipOperator, NestedLoopJoinOperator, NodeListOperator, NullOrder, Operator,
-    ProjectExpr, ProjectOperator, PropertySource, RemoveLabelOperator, ScanOperator,
-    SetPropertyOperator, ShortestPathOperator, SimpleAggregateOperator, SkipOperator,
+    LeapfrogJoinOperator, LimitOperator, MapCollectOperator, MergeOperator,
+    MergeRelationshipConfig, MergeRelationshipOperator, NestedLoopJoinOperator, NodeListOperator,
+    NullOrder, Operator, ProjectExpr, ProjectOperator, PropertySource, RemoveLabelOperator,
+    ScanOperator, SetPropertyOperator, ShortestPathOperator, SimpleAggregateOperator, SkipOperator,
     SortDirection, SortKey as PhysicalSortKey, SortOperator, UnaryFilterOp, UnionOperator,
     UnwindOperator, VariableLengthExpandOperator,
 };
-use grafeo_core::graph::{Direction, lpg::LpgStore};
+use grafeo_core::graph::{Direction, GraphStore, GraphStoreMut};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -54,8 +55,8 @@ struct RangeBounds<'a> {
 
 /// Converts a logical plan to a physical operator tree.
 pub struct Planner {
-    /// The graph store to scan from.
-    pub(super) store: Arc<LpgStore>,
+    /// The graph store (supports both read and write operations).
+    pub(super) store: Arc<dyn GraphStoreMut>,
     /// Transaction manager for MVCC operations.
     pub(super) tx_manager: Option<Arc<TransactionManager>>,
     /// Current transaction ID (if in a transaction).
@@ -80,7 +81,7 @@ impl Planner {
     /// This creates a planner without transaction context, using the current
     /// epoch from the store for visibility.
     #[must_use]
-    pub fn new(store: Arc<LpgStore>) -> Self {
+    pub fn new(store: Arc<dyn GraphStoreMut>) -> Self {
         let epoch = store.current_epoch();
         Self {
             store,
@@ -104,7 +105,7 @@ impl Planner {
     /// * `viewing_epoch` - Epoch to use for version visibility
     #[must_use]
     pub fn with_context(
-        store: Arc<LpgStore>,
+        store: Arc<dyn GraphStoreMut>,
         tx_manager: Arc<TransactionManager>,
         tx_id: Option<TxId>,
         viewing_epoch: EpochId,
@@ -446,6 +447,7 @@ impl Planner {
             LogicalOperator::RemoveLabel(remove_label) => self.plan_remove_label(remove_label),
             LogicalOperator::SetProperty(set_prop) => self.plan_set_property(set_prop),
             LogicalOperator::ShortestPath(sp) => self.plan_shortest_path(sp),
+            LogicalOperator::MapCollect(mc) => self.plan_map_collect(mc),
             #[cfg(feature = "algos")]
             LogicalOperator::CallProcedure(call) => self.plan_call_procedure(call),
             #[cfg(not(feature = "algos"))]
@@ -464,6 +466,34 @@ impl Planner {
                 std::mem::discriminant(op)
             ))),
         }
+    }
+
+    /// Plans a `MapCollect` operator that collapses grouped rows into a single Map value.
+    fn plan_map_collect(&self, mc: &MapCollectOp) -> Result<(Box<dyn Operator>, Vec<String>)> {
+        let (child_op, child_columns) = self.plan_operator(&mc.input)?;
+        let key_idx = child_columns
+            .iter()
+            .position(|c| c == &mc.key_var)
+            .ok_or_else(|| {
+                Error::Internal(format!(
+                    "MapCollect key '{}' not in columns {:?}",
+                    mc.key_var, child_columns
+                ))
+            })?;
+        let value_idx = child_columns
+            .iter()
+            .position(|c| c == &mc.value_var)
+            .ok_or_else(|| {
+                Error::Internal(format!(
+                    "MapCollect value '{}' not in columns {:?}",
+                    mc.value_var, child_columns
+                ))
+            })?;
+        let operator = Box::new(MapCollectOperator::new(child_op, key_idx, value_idx));
+        // Register the output alias as a scalar column so that the Return
+        // planner emits a plain Column pass-through instead of NodeResolve.
+        self.scalar_columns.borrow_mut().insert(mc.alias.clone());
+        Ok((operator, vec![mc.alias.clone()]))
     }
 }
 
@@ -811,8 +841,10 @@ mod tests {
         SortKey, SortOp,
     };
     use grafeo_common::types::Value;
+    use grafeo_core::graph::GraphStoreMut;
+    use grafeo_core::graph::lpg::LpgStore;
 
-    fn create_test_store() -> Arc<LpgStore> {
+    fn create_test_store() -> Arc<dyn GraphStoreMut> {
         let store = Arc::new(LpgStore::new());
         store.create_node(&["Person"]);
         store.create_node(&["Person"]);
@@ -1339,6 +1371,59 @@ mod tests {
                     input: None,
                 })),
                 columns: None,
+            })),
+        }));
+
+        let physical = planner.plan(&logical).unwrap();
+        assert_eq!(physical.columns(), &["n"]);
+    }
+
+    #[test]
+    fn test_plan_distinct_with_columns() {
+        let store = create_test_store();
+        let planner = Planner::new(store);
+
+        // DISTINCT on specific columns (column-specific dedup)
+        let logical = LogicalPlan::new(LogicalOperator::Return(ReturnOp {
+            items: vec![ReturnItem {
+                expression: LogicalExpression::Variable("n".to_string()),
+                alias: None,
+            }],
+            distinct: false,
+            input: Box::new(LogicalOperator::Distinct(LogicalDistinctOp {
+                input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                    variable: "n".to_string(),
+                    label: None,
+                    input: None,
+                })),
+                columns: Some(vec!["n".to_string()]),
+            })),
+        }));
+
+        let physical = planner.plan(&logical).unwrap();
+        assert_eq!(physical.columns(), &["n"]);
+    }
+
+    #[test]
+    fn test_plan_distinct_with_nonexistent_columns() {
+        let store = create_test_store();
+        let planner = Planner::new(store);
+
+        // When distinct columns don't match any output columns,
+        // it falls back to full-row distinct.
+        let logical = LogicalPlan::new(LogicalOperator::Return(ReturnOp {
+            items: vec![ReturnItem {
+                expression: LogicalExpression::Variable("n".to_string()),
+                alias: None,
+            }],
+            distinct: false,
+            input: Box::new(LogicalOperator::Distinct(LogicalDistinctOp {
+                input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                    variable: "n".to_string(),
+                    label: None,
+                    input: None,
+                })),
+                columns: Some(vec!["nonexistent".to_string()]),
             })),
         }));
 

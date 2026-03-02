@@ -111,7 +111,24 @@ impl super::Planner {
     ) -> Result<(Box<dyn Operator>, Vec<String>)> {
         let (input_op, columns) = self.plan_operator(&distinct.input)?;
         let output_schema = self.derive_schema_from_columns(&columns);
-        let operator = Box::new(DistinctOperator::new(input_op, output_schema));
+        let operator: Box<dyn Operator> = if let Some(ref dist_cols) = distinct.columns {
+            // Resolve column names to indices for column-specific dedup
+            let col_indices: Vec<usize> = dist_cols
+                .iter()
+                .filter_map(|name| columns.iter().position(|c| c == name))
+                .collect();
+            if col_indices.is_empty() {
+                Box::new(DistinctOperator::new(input_op, output_schema))
+            } else {
+                Box::new(DistinctOperator::on_columns(
+                    input_op,
+                    col_indices,
+                    output_schema,
+                ))
+            }
+        } else {
+            Box::new(DistinctOperator::new(input_op, output_schema))
+        };
         Ok((operator, columns))
     }
 }

@@ -7,6 +7,8 @@ use grafeo_common::types::{NodeId, Value};
 use grafeo_common::utils::error::Result;
 use grafeo_common::utils::hash::{FxHashMap, FxHashSet};
 use grafeo_core::graph::Direction;
+use grafeo_core::graph::GraphStore;
+#[cfg(test)]
 use grafeo_core::graph::lpg::LpgStore;
 
 use super::super::{AlgorithmResult, ParameterDef, Parameters};
@@ -92,7 +94,7 @@ impl UnionFind {
 /// # Returns
 ///
 /// A map from node ID to component ID.
-pub fn connected_components(store: &LpgStore) -> FxHashMap<NodeId, u64> {
+pub fn connected_components(store: &dyn GraphStore) -> FxHashMap<NodeId, u64> {
     let node_ids = store.node_ids();
     let n = node_ids.len();
 
@@ -146,7 +148,7 @@ pub fn connected_components(store: &LpgStore) -> FxHashMap<NodeId, u64> {
 }
 
 /// Returns the number of connected components.
-pub fn connected_component_count(store: &LpgStore) -> usize {
+pub fn connected_component_count(store: &dyn GraphStore) -> usize {
     let components = connected_components(store);
     let unique: FxHashSet<u64> = components.values().copied().collect();
     unique.len()
@@ -168,7 +170,7 @@ struct TarjanState {
 /// # Returns
 ///
 /// A map from node ID to SCC ID.
-pub fn strongly_connected_components(store: &LpgStore) -> FxHashMap<NodeId, u64> {
+pub fn strongly_connected_components(store: &dyn GraphStore) -> FxHashMap<NodeId, u64> {
     let node_ids = store.node_ids();
 
     if node_ids.is_empty() {
@@ -206,6 +208,7 @@ pub fn strongly_connected_components(store: &LpgStore) -> FxHashMap<NodeId, u64>
 
         let neighbors: Vec<NodeId> = store
             .edges_from(start, Direction::Outgoing)
+            .into_iter()
             .map(|(n, _)| n)
             .collect();
         dfs_stack.push((start, neighbors, 0, true));
@@ -276,6 +279,7 @@ pub fn strongly_connected_components(store: &LpgStore) -> FxHashMap<NodeId, u64>
 
                 let neighbor_neighbors: Vec<NodeId> = store
                     .edges_from(neighbor, Direction::Outgoing)
+                    .into_iter()
                     .map(|(n, _)| n)
                     .collect();
                 dfs_stack.push((neighbor, neighbor_neighbors, 0, true));
@@ -287,7 +291,7 @@ pub fn strongly_connected_components(store: &LpgStore) -> FxHashMap<NodeId, u64>
 }
 
 /// Returns the number of strongly connected components.
-pub fn strongly_connected_component_count(store: &LpgStore) -> usize {
+pub fn strongly_connected_component_count(store: &dyn GraphStore) -> usize {
     let components = strongly_connected_components(store);
     let unique: FxHashSet<u64> = components.values().copied().collect();
     unique.len()
@@ -302,7 +306,7 @@ pub fn strongly_connected_component_count(store: &LpgStore) -> usize {
 /// # Returns
 ///
 /// `Some(order)` if the graph is a DAG, `None` if there's a cycle.
-pub fn topological_sort(store: &LpgStore) -> Option<Vec<NodeId>> {
+pub fn topological_sort(store: &dyn GraphStore) -> Option<Vec<NodeId>> {
     let node_ids = store.node_ids();
 
     if node_ids.is_empty() {
@@ -352,7 +356,7 @@ pub fn topological_sort(store: &LpgStore) -> Option<Vec<NodeId>> {
 }
 
 /// Checks if the graph is a DAG (Directed Acyclic Graph).
-pub fn is_dag(store: &LpgStore) -> bool {
+pub fn is_dag(store: &dyn GraphStore) -> bool {
     topological_sort(store).is_some()
 }
 
@@ -376,7 +380,7 @@ impl GraphAlgorithm for ConnectedComponentsAlgorithm {
         &[]
     }
 
-    fn execute(&self, store: &LpgStore, _params: &Parameters) -> Result<AlgorithmResult> {
+    fn execute(&self, store: &dyn GraphStore, _params: &Parameters) -> Result<AlgorithmResult> {
         let components = connected_components(store);
 
         let mut builder = ComponentResultBuilder::with_capacity(components.len());
@@ -404,7 +408,7 @@ impl GraphAlgorithm for StronglyConnectedComponentsAlgorithm {
         &[]
     }
 
-    fn execute(&self, store: &LpgStore, _params: &Parameters) -> Result<AlgorithmResult> {
+    fn execute(&self, store: &dyn GraphStore, _params: &Parameters) -> Result<AlgorithmResult> {
         let components = strongly_connected_components(store);
 
         let mut builder = ComponentResultBuilder::with_capacity(components.len());
@@ -432,7 +436,7 @@ impl GraphAlgorithm for TopologicalSortAlgorithm {
         &[]
     }
 
-    fn execute(&self, store: &LpgStore, _params: &Parameters) -> Result<AlgorithmResult> {
+    fn execute(&self, store: &dyn GraphStore, _params: &Parameters) -> Result<AlgorithmResult> {
         match topological_sort(store) {
             Some(order) => {
                 let mut result =

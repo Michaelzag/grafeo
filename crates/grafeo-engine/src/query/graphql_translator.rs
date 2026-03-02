@@ -559,14 +559,14 @@ impl GraphQLTranslator {
                 ast::Selection::InlineFragment(inline) => {
                     // Inline fragment with type condition
                     if let Some(type_cond) = &inline.type_condition {
-                        // Add type check filter
+                        // Add type check filter: type_cond IN labels(var)
                         plan = LogicalOperator::Filter(FilterOp {
                             predicate: LogicalExpression::Binary {
-                                left: Box::new(LogicalExpression::Labels(current_var.to_string())),
-                                op: BinaryOp::Eq,
-                                right: Box::new(LogicalExpression::Literal(
+                                left: Box::new(LogicalExpression::Literal(
                                     grafeo_common::types::Value::String(type_cond.clone().into()),
                                 )),
+                                op: BinaryOp::In,
+                                right: Box::new(LogicalExpression::Labels(current_var.to_string())),
                             },
                             input: Box::new(plan),
                         });
@@ -1493,6 +1493,51 @@ mod tests {
             result.is_ok(),
             "Nested field with _gt suffix should work: {:?}",
             result.err()
+        );
+    }
+
+    // ==================== Inline Fragment Tests ====================
+
+    #[test]
+    fn test_inline_fragment_type_condition() {
+        let query = r#"
+            query {
+                person {
+                    ... on Person {
+                        name
+                    }
+                }
+            }
+        "#;
+        let result = translate(query);
+        assert!(
+            result.is_ok(),
+            "Inline fragment translation failed: {:?}",
+            result.err()
+        );
+        let plan = result.unwrap();
+
+        // The inline fragment with a type condition should produce a Filter
+        // with a BinaryOp::In checking the type against labels.
+        fn find_in_filter(op: &LogicalOperator) -> bool {
+            match op {
+                LogicalOperator::Filter(f) => {
+                    if let LogicalExpression::Binary { op, .. } = &f.predicate
+                        && *op == BinaryOp::In
+                    {
+                        return true;
+                    }
+                    find_in_filter(&f.input)
+                }
+                LogicalOperator::Return(r) => find_in_filter(&r.input),
+                LogicalOperator::Limit(l) => find_in_filter(&l.input),
+                LogicalOperator::Skip(s) => find_in_filter(&s.input),
+                _ => false,
+            }
+        }
+        assert!(
+            find_in_filter(&plan.root),
+            "Expected Filter with In operator for inline fragment type condition"
         );
     }
 }

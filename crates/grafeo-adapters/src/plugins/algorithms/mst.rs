@@ -10,6 +10,8 @@ use grafeo_common::types::{EdgeId, NodeId, Value};
 use grafeo_common::utils::error::Result;
 use grafeo_common::utils::hash::FxHashMap;
 use grafeo_core::graph::Direction;
+use grafeo_core::graph::GraphStore;
+#[cfg(test)]
 use grafeo_core::graph::lpg::LpgStore;
 
 use super::super::{AlgorithmResult, ParameterDef, ParameterType, Parameters};
@@ -21,7 +23,7 @@ use super::traits::{GraphAlgorithm, MinScored};
 // ============================================================================
 
 /// Extracts edge weight from a property value.
-fn extract_weight(store: &LpgStore, edge_id: EdgeId, weight_prop: Option<&str>) -> f64 {
+fn extract_weight(store: &dyn GraphStore, edge_id: EdgeId, weight_prop: Option<&str>) -> f64 {
     if let Some(prop_name) = weight_prop
         && let Some(edge) = store.get_edge(edge_id)
         && let Some(value) = edge.get_property(prop_name)
@@ -84,7 +86,7 @@ impl MstResult {
 /// # Complexity
 ///
 /// O(E log E) for sorting edges
-pub fn kruskal(store: &LpgStore, weight_property: Option<&str>) -> MstResult {
+pub fn kruskal(store: &dyn GraphStore, weight_property: Option<&str>) -> MstResult {
     let nodes = store.node_ids();
     let n = nodes.len();
 
@@ -174,7 +176,11 @@ pub fn kruskal(store: &LpgStore, weight_property: Option<&str>) -> MstResult {
 /// # Complexity
 ///
 /// O(E log V) using a binary heap
-pub fn prim(store: &LpgStore, weight_property: Option<&str>, start: Option<NodeId>) -> MstResult {
+pub fn prim(
+    store: &dyn GraphStore,
+    weight_property: Option<&str>,
+    start: Option<NodeId>,
+) -> MstResult {
     let nodes = store.node_ids();
     let n = nodes.len();
 
@@ -300,7 +306,7 @@ impl GraphAlgorithm for KruskalAlgorithm {
         kruskal_params()
     }
 
-    fn execute(&self, store: &LpgStore, params: &Parameters) -> Result<AlgorithmResult> {
+    fn execute(&self, store: &dyn GraphStore, params: &Parameters) -> Result<AlgorithmResult> {
         let weight_prop = params.get_string("weight");
 
         let result = kruskal(store, weight_prop);
@@ -365,7 +371,7 @@ impl GraphAlgorithm for PrimAlgorithm {
         prim_params()
     }
 
-    fn execute(&self, store: &LpgStore, params: &Parameters) -> Result<AlgorithmResult> {
+    fn execute(&self, store: &dyn GraphStore, params: &Parameters) -> Result<AlgorithmResult> {
         let weight_prop = params.get_string("weight");
         let start = params.get_int("start").map(|id| NodeId::new(id as u64));
 

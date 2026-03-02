@@ -10,6 +10,8 @@ use grafeo_common::types::{EdgeId, NodeId, Value};
 use grafeo_common::utils::error::{Error, Result};
 use grafeo_common::utils::hash::FxHashMap;
 use grafeo_core::graph::Direction;
+use grafeo_core::graph::GraphStore;
+#[cfg(test)]
 use grafeo_core::graph::lpg::LpgStore;
 
 use super::super::{AlgorithmResult, ParameterDef, ParameterType, Parameters};
@@ -20,7 +22,7 @@ use super::traits::GraphAlgorithm;
 // ============================================================================
 
 /// Extracts capacity from an edge property.
-fn extract_capacity(store: &LpgStore, edge_id: EdgeId, capacity_prop: Option<&str>) -> f64 {
+fn extract_capacity(store: &dyn GraphStore, edge_id: EdgeId, capacity_prop: Option<&str>) -> f64 {
     if let Some(prop_name) = capacity_prop
         && let Some(edge) = store.get_edge(edge_id)
         && let Some(value) = edge.get_property(prop_name)
@@ -35,7 +37,7 @@ fn extract_capacity(store: &LpgStore, edge_id: EdgeId, capacity_prop: Option<&st
 }
 
 /// Extracts cost from an edge property.
-fn extract_cost(store: &LpgStore, edge_id: EdgeId, cost_prop: Option<&str>) -> f64 {
+fn extract_cost(store: &dyn GraphStore, edge_id: EdgeId, cost_prop: Option<&str>) -> f64 {
     if let Some(prop_name) = cost_prop
         && let Some(edge) = store.get_edge(edge_id)
         && let Some(value) = edge.get_property(prop_name)
@@ -86,7 +88,7 @@ pub struct MaxFlowResult {
 ///
 /// O(V × E²)
 pub fn max_flow(
-    store: &LpgStore,
+    store: &dyn GraphStore,
     source: NodeId,
     sink: NodeId,
     capacity_property: Option<&str>,
@@ -252,7 +254,7 @@ pub struct MinCostFlowResult {
 ///
 /// O(V² × E × max_flow)
 pub fn min_cost_max_flow(
-    store: &LpgStore,
+    store: &dyn GraphStore,
     source: NodeId,
     sink: NodeId,
     capacity_property: Option<&str>,
@@ -446,7 +448,7 @@ impl GraphAlgorithm for MaxFlowAlgorithm {
         max_flow_params()
     }
 
-    fn execute(&self, store: &LpgStore, params: &Parameters) -> Result<AlgorithmResult> {
+    fn execute(&self, store: &dyn GraphStore, params: &Parameters) -> Result<AlgorithmResult> {
         let source_id = params
             .get_int("source")
             .ok_or_else(|| Error::InvalidValue("source parameter required".to_string()))?;
@@ -545,7 +547,7 @@ impl GraphAlgorithm for MinCostFlowAlgorithm {
         min_cost_flow_params()
     }
 
-    fn execute(&self, store: &LpgStore, params: &Parameters) -> Result<AlgorithmResult> {
+    fn execute(&self, store: &dyn GraphStore, params: &Parameters) -> Result<AlgorithmResult> {
         let source_id = params
             .get_int("source")
             .ok_or_else(|| Error::InvalidValue("source parameter required".to_string()))?;

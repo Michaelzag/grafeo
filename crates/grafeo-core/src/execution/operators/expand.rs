@@ -3,7 +3,7 @@
 use super::{Operator, OperatorError, OperatorResult};
 use crate::execution::DataChunk;
 use crate::graph::Direction;
-use crate::graph::lpg::LpgStore;
+use crate::graph::GraphStore;
 use grafeo_common::types::{EdgeId, EpochId, LogicalType, NodeId, TxId};
 use std::sync::Arc;
 
@@ -13,7 +13,7 @@ use std::sync::Arc;
 /// output rows for each neighbor connected via matching edges.
 pub struct ExpandOperator {
     /// The store to traverse.
-    store: Arc<LpgStore>,
+    store: Arc<dyn GraphStore>,
     /// Input operator providing source nodes.
     input: Box<dyn Operator>,
     /// Index of the source node column in input.
@@ -43,7 +43,7 @@ pub struct ExpandOperator {
 impl ExpandOperator {
     /// Creates a new expand operator.
     pub fn new(
-        store: Arc<LpgStore>,
+        store: Arc<dyn GraphStore>,
         input: Box<dyn Operator>,
         source_column: usize,
         direction: Direction,
@@ -127,6 +127,7 @@ impl ExpandOperator {
         let edges: Vec<(NodeId, EdgeId)> = self
             .store
             .edges_from(source_id, self.direction)
+            .into_iter()
             .filter(|(target_id, edge_id)| {
                 // Filter by edge type if specified
                 let type_matches = if let Some(ref filter_type) = self.edge_type {
@@ -280,10 +281,19 @@ impl Operator for ExpandOperator {
 mod tests {
     use super::*;
     use crate::execution::operators::ScanOperator;
+    use crate::graph::lpg::LpgStore;
+
+    /// Creates a new `LpgStore` wrapped in an `Arc` and returns both the
+    /// concrete handle (for mutation) and a trait-object handle (for operators).
+    fn test_store() -> (Arc<LpgStore>, Arc<dyn GraphStore>) {
+        let store = Arc::new(LpgStore::new());
+        let dyn_store: Arc<dyn GraphStore> = Arc::clone(&store) as Arc<dyn GraphStore>;
+        (store, dyn_store)
+    }
 
     #[test]
     fn test_expand_outgoing() {
-        let store = Arc::new(LpgStore::new());
+        let (store, dyn_store) = test_store();
 
         // Create nodes
         let alice = store.create_node(&["Person"]);
@@ -295,10 +305,10 @@ mod tests {
         store.create_edge(alice, charlie, "KNOWS");
 
         // Scan Alice only
-        let scan = Box::new(ScanOperator::with_label(Arc::clone(&store), "Person"));
+        let scan = Box::new(ScanOperator::with_label(Arc::clone(&dyn_store), "Person"));
 
         let mut expand = ExpandOperator::new(
-            Arc::clone(&store),
+            Arc::clone(&dyn_store),
             scan,
             0, // source column
             Direction::Outgoing,
@@ -332,7 +342,7 @@ mod tests {
 
     #[test]
     fn test_expand_with_edge_type_filter() {
-        let store = Arc::new(LpgStore::new());
+        let (store, dyn_store) = test_store();
 
         let alice = store.create_node(&["Person"]);
         let bob = store.create_node(&["Person"]);
@@ -341,10 +351,10 @@ mod tests {
         store.create_edge(alice, bob, "KNOWS");
         store.create_edge(alice, company, "WORKS_AT");
 
-        let scan = Box::new(ScanOperator::with_label(Arc::clone(&store), "Person"));
+        let scan = Box::new(ScanOperator::with_label(Arc::clone(&dyn_store), "Person"));
 
         let mut expand = ExpandOperator::new(
-            Arc::clone(&store),
+            Arc::clone(&dyn_store),
             scan,
             0,
             Direction::Outgoing,
@@ -366,7 +376,7 @@ mod tests {
 
     #[test]
     fn test_expand_incoming() {
-        let store = Arc::new(LpgStore::new());
+        let (store, dyn_store) = test_store();
 
         let alice = store.create_node(&["Person"]);
         let bob = store.create_node(&["Person"]);
@@ -374,10 +384,10 @@ mod tests {
         store.create_edge(alice, bob, "KNOWS");
 
         // Scan Bob
-        let scan = Box::new(ScanOperator::with_label(Arc::clone(&store), "Person"));
+        let scan = Box::new(ScanOperator::with_label(Arc::clone(&dyn_store), "Person"));
 
         let mut expand =
-            ExpandOperator::new(Arc::clone(&store), scan, 0, Direction::Incoming, None);
+            ExpandOperator::new(Arc::clone(&dyn_store), scan, 0, Direction::Incoming, None);
 
         let mut results = Vec::new();
         while let Ok(Some(chunk)) = expand.next() {
@@ -396,14 +406,14 @@ mod tests {
 
     #[test]
     fn test_expand_no_edges() {
-        let store = Arc::new(LpgStore::new());
+        let (store, dyn_store) = test_store();
 
         store.create_node(&["Person"]);
 
-        let scan = Box::new(ScanOperator::with_label(Arc::clone(&store), "Person"));
+        let scan = Box::new(ScanOperator::with_label(Arc::clone(&dyn_store), "Person"));
 
         let mut expand =
-            ExpandOperator::new(Arc::clone(&store), scan, 0, Direction::Outgoing, None);
+            ExpandOperator::new(Arc::clone(&dyn_store), scan, 0, Direction::Outgoing, None);
 
         let result = expand.next().unwrap();
         assert!(result.is_none());
@@ -411,15 +421,15 @@ mod tests {
 
     #[test]
     fn test_expand_reset() {
-        let store = Arc::new(LpgStore::new());
+        let (store, dyn_store) = test_store();
 
         let a = store.create_node(&["Person"]);
         let b = store.create_node(&["Person"]);
         store.create_edge(a, b, "KNOWS");
 
-        let scan = Box::new(ScanOperator::with_label(Arc::clone(&store), "Person"));
+        let scan = Box::new(ScanOperator::with_label(Arc::clone(&dyn_store), "Person"));
         let mut expand =
-            ExpandOperator::new(Arc::clone(&store), scan, 0, Direction::Outgoing, None);
+            ExpandOperator::new(Arc::clone(&dyn_store), scan, 0, Direction::Outgoing, None);
 
         // First pass
         let mut count1 = 0;
@@ -440,15 +450,16 @@ mod tests {
 
     #[test]
     fn test_expand_name() {
-        let store = Arc::new(LpgStore::new());
-        let scan = Box::new(ScanOperator::with_label(Arc::clone(&store), "Person"));
-        let expand = ExpandOperator::new(Arc::clone(&store), scan, 0, Direction::Outgoing, None);
+        let (_store, dyn_store) = test_store();
+        let scan = Box::new(ScanOperator::with_label(Arc::clone(&dyn_store), "Person"));
+        let expand =
+            ExpandOperator::new(Arc::clone(&dyn_store), scan, 0, Direction::Outgoing, None);
         assert_eq!(expand.name(), "Expand");
     }
 
     #[test]
     fn test_expand_with_chunk_capacity() {
-        let store = Arc::new(LpgStore::new());
+        let (store, dyn_store) = test_store();
 
         let a = store.create_node(&["Person"]);
         for _ in 0..5 {
@@ -456,9 +467,9 @@ mod tests {
             store.create_edge(a, b, "KNOWS");
         }
 
-        let scan = Box::new(ScanOperator::with_label(Arc::clone(&store), "Person"));
+        let scan = Box::new(ScanOperator::with_label(Arc::clone(&dyn_store), "Person"));
         let mut expand =
-            ExpandOperator::new(Arc::clone(&store), scan, 0, Direction::Outgoing, None)
+            ExpandOperator::new(Arc::clone(&dyn_store), scan, 0, Direction::Outgoing, None)
                 .with_chunk_capacity(2);
 
         // With capacity 2 and 5 edges from node a, we should get multiple chunks
@@ -478,15 +489,15 @@ mod tests {
 
     #[test]
     fn test_expand_edge_type_case_insensitive() {
-        let store = Arc::new(LpgStore::new());
+        let (store, dyn_store) = test_store();
 
         let a = store.create_node(&["Person"]);
         let b = store.create_node(&["Person"]);
         store.create_edge(a, b, "KNOWS");
 
-        let scan = Box::new(ScanOperator::with_label(Arc::clone(&store), "Person"));
+        let scan = Box::new(ScanOperator::with_label(Arc::clone(&dyn_store), "Person"));
         let mut expand = ExpandOperator::new(
-            Arc::clone(&store),
+            Arc::clone(&dyn_store),
             scan,
             0,
             Direction::Outgoing,
@@ -504,7 +515,7 @@ mod tests {
 
     #[test]
     fn test_expand_multiple_source_nodes() {
-        let store = Arc::new(LpgStore::new());
+        let (store, dyn_store) = test_store();
 
         let a = store.create_node(&["Person"]);
         let b = store.create_node(&["Person"]);
@@ -513,9 +524,9 @@ mod tests {
         store.create_edge(a, c, "KNOWS");
         store.create_edge(b, c, "KNOWS");
 
-        let scan = Box::new(ScanOperator::with_label(Arc::clone(&store), "Person"));
+        let scan = Box::new(ScanOperator::with_label(Arc::clone(&dyn_store), "Person"));
         let mut expand =
-            ExpandOperator::new(Arc::clone(&store), scan, 0, Direction::Outgoing, None);
+            ExpandOperator::new(Arc::clone(&dyn_store), scan, 0, Direction::Outgoing, None);
 
         let mut results = Vec::new();
         while let Ok(Some(chunk)) = expand.next() {
@@ -532,12 +543,15 @@ mod tests {
 
     #[test]
     fn test_expand_empty_input() {
-        let store = Arc::new(LpgStore::new());
+        let (_store, dyn_store) = test_store();
 
         // No nodes with this label
-        let scan = Box::new(ScanOperator::with_label(Arc::clone(&store), "Nonexistent"));
+        let scan = Box::new(ScanOperator::with_label(
+            Arc::clone(&dyn_store),
+            "Nonexistent",
+        ));
         let mut expand =
-            ExpandOperator::new(Arc::clone(&store), scan, 0, Direction::Outgoing, None);
+            ExpandOperator::new(Arc::clone(&dyn_store), scan, 0, Direction::Outgoing, None);
 
         let result = expand.next().unwrap();
         assert!(result.is_none());

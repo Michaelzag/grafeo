@@ -3,7 +3,8 @@
 use super::filter::{ExpressionPredicate, FilterExpression};
 use super::{Operator, OperatorError, OperatorResult};
 use crate::execution::DataChunk;
-use crate::graph::lpg::{Edge, LpgStore, Node};
+use crate::graph::GraphStore;
+use crate::graph::lpg::{Edge, Node};
 use grafeo_common::types::{LogicalType, PropertyKey, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -54,7 +55,7 @@ pub struct ProjectOperator {
     /// Output column types.
     output_types: Vec<LogicalType>,
     /// Optional store for property access.
-    store: Option<Arc<LpgStore>>,
+    store: Option<Arc<dyn GraphStore>>,
 }
 
 impl ProjectOperator {
@@ -78,7 +79,7 @@ impl ProjectOperator {
         child: Box<dyn Operator>,
         projections: Vec<ProjectExpr>,
         output_types: Vec<LogicalType>,
-        store: Arc<LpgStore>,
+        store: Arc<dyn GraphStore>,
     ) -> Self {
         assert_eq!(projections.len(), output_types.len());
         Self {
@@ -342,6 +343,7 @@ fn edge_to_map(edge: &Edge) -> Value {
 mod tests {
     use super::*;
     use crate::execution::chunk::DataChunkBuilder;
+    use crate::graph::lpg::LpgStore;
     use grafeo_common::types::Value;
 
     struct MockScanOperator {

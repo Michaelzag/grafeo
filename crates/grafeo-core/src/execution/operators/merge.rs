@@ -7,7 +7,7 @@
 
 use super::{Operator, OperatorResult};
 use crate::execution::chunk::DataChunkBuilder;
-use crate::graph::lpg::LpgStore;
+use crate::graph::GraphStoreMut;
 use grafeo_common::types::{EdgeId, LogicalType, NodeId, PropertyKey, Value};
 use std::sync::Arc;
 
@@ -17,7 +17,7 @@ use std::sync::Arc;
 /// If found, returns the existing node. If not found, creates a new node.
 pub struct MergeOperator {
     /// The graph store.
-    store: Arc<LpgStore>,
+    store: Arc<dyn GraphStoreMut>,
     /// Variable name for the merged node.
     variable: String,
     /// Labels to match/create.
@@ -35,7 +35,7 @@ pub struct MergeOperator {
 impl MergeOperator {
     /// Creates a new merge operator.
     pub fn new(
-        store: Arc<LpgStore>,
+        store: Arc<dyn GraphStoreMut>,
         variable: String,
         labels: Vec<String>,
         match_properties: Vec<(String, Value)>,
@@ -113,7 +113,7 @@ impl MergeOperator {
         }
 
         let labels: Vec<&str> = self.labels.iter().map(String::as_str).collect();
-        self.store.create_node_with_props(&labels, all_props)
+        self.store.create_node_with_props(&labels, &all_props)
     }
 
     /// Applies ON MATCH properties to an existing node.
@@ -194,7 +194,7 @@ pub struct MergeRelationshipConfig {
 /// 3. If not found, creates a new relationship and applies ON CREATE properties
 pub struct MergeRelationshipOperator {
     /// The graph store.
-    store: Arc<LpgStore>,
+    store: Arc<dyn GraphStoreMut>,
     /// Input operator providing rows with source/target node columns.
     input: Box<dyn Operator>,
     /// Merge configuration.
@@ -204,7 +204,7 @@ pub struct MergeRelationshipOperator {
 impl MergeRelationshipOperator {
     /// Creates a new merge relationship operator.
     pub fn new(
-        store: Arc<LpgStore>,
+        store: Arc<dyn GraphStoreMut>,
         input: Box<dyn Operator>,
         config: MergeRelationshipConfig,
     ) -> Self {
@@ -261,7 +261,7 @@ impl MergeRelationshipOperator {
         }
 
         self.store
-            .create_edge_with_props(src, dst, &self.config.edge_type, all_props)
+            .create_edge_with_props(src, dst, &self.config.edge_type, &all_props)
     }
 
     /// Applies ON MATCH properties to an existing edge.
@@ -340,10 +340,11 @@ impl Operator for MergeRelationshipOperator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::lpg::LpgStore;
 
     #[test]
     fn test_merge_creates_new_node() {
-        let store = Arc::new(LpgStore::new());
+        let store: Arc<dyn GraphStoreMut> = Arc::new(LpgStore::new());
 
         // MERGE should create a new node since none exists
         let mut merge = MergeOperator::new(
@@ -372,12 +373,12 @@ mod tests {
 
     #[test]
     fn test_merge_matches_existing_node() {
-        let store = Arc::new(LpgStore::new());
+        let store: Arc<dyn GraphStoreMut> = Arc::new(LpgStore::new());
 
         // Create an existing node
         store.create_node_with_props(
             &["Person"],
-            vec![(PropertyKey::new("name"), Value::String("Bob".into()))],
+            &[(PropertyKey::new("name"), Value::String("Bob".into()))],
         );
 
         // MERGE should find the existing node
@@ -400,7 +401,7 @@ mod tests {
 
     #[test]
     fn test_merge_with_on_create() {
-        let store = Arc::new(LpgStore::new());
+        let store: Arc<dyn GraphStoreMut> = Arc::new(LpgStore::new());
 
         // MERGE with ON CREATE SET
         let mut merge = MergeOperator::new(
@@ -429,12 +430,12 @@ mod tests {
 
     #[test]
     fn test_merge_with_on_match() {
-        let store = Arc::new(LpgStore::new());
+        let store: Arc<dyn GraphStoreMut> = Arc::new(LpgStore::new());
 
         // Create an existing node
         let node_id = store.create_node_with_props(
             &["Person"],
-            vec![(PropertyKey::new("name"), Value::String("Diana".into()))],
+            &[(PropertyKey::new("name"), Value::String("Diana".into()))],
         );
 
         // MERGE with ON MATCH SET

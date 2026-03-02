@@ -196,7 +196,7 @@ impl super::GrafeoDB {
 
             let index = HnswIndex::with_capacity(config, vectors.len());
             let accessor =
-                grafeo_core::index::vector::PropertyVectorAccessor::new(&self.store, property);
+                grafeo_core::index::vector::PropertyVectorAccessor::new(&*self.store, property);
             for (node_id, vec) in &vectors {
                 index.insert(*node_id, vec, &accessor);
             }

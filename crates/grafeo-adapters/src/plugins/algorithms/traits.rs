@@ -5,7 +5,7 @@
 
 use grafeo_common::types::{EdgeId, NodeId, Value};
 use grafeo_common::utils::error::Result;
-use grafeo_core::graph::lpg::LpgStore;
+use grafeo_core::graph::GraphStore;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
@@ -190,7 +190,7 @@ impl<K: PartialOrd, T> Ord for MinScored<K, T> {
 // Graph Algorithm Traits
 // ============================================================================
 
-/// A graph algorithm that can be executed on an LPG store.
+/// A graph algorithm that can be executed on any graph store.
 ///
 /// This trait extends the base `Algorithm` trait with graph-specific
 /// functionality, providing direct access to the graph store.
@@ -205,7 +205,7 @@ pub trait GraphAlgorithm: Send + Sync {
     fn parameters(&self) -> &[ParameterDef];
 
     /// Executes the algorithm on the given graph store.
-    fn execute(&self, store: &LpgStore, params: &Parameters) -> Result<AlgorithmResult>;
+    fn execute(&self, store: &dyn GraphStore, params: &Parameters) -> Result<AlgorithmResult>;
 }
 
 /// A graph algorithm that supports parallel execution.
@@ -224,7 +224,7 @@ pub trait ParallelGraphAlgorithm: GraphAlgorithm {
     /// Executes the algorithm with explicit parallelism control.
     fn execute_parallel(
         &self,
-        store: &LpgStore,
+        store: &dyn GraphStore,
         params: &Parameters,
         num_threads: usize,
     ) -> Result<AlgorithmResult>;

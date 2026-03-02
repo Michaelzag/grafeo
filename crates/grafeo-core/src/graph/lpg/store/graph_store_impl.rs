@@ -104,6 +104,10 @@ impl GraphStore for LpgStore {
         LpgStore::edge_type(self, id)
     }
 
+    fn has_property_index(&self, property: &str) -> bool {
+        LpgStore::has_property_index(self, property)
+    }
+
     fn find_nodes_by_property(&self, property: &str, value: &Value) -> Vec<NodeId> {
         LpgStore::find_nodes_by_property(self, property, value)
     }
@@ -190,12 +194,20 @@ impl GraphStoreMut for LpgStore {
         LpgStore::delete_node(self, id)
     }
 
+    fn delete_node_versioned(&self, id: NodeId, epoch: EpochId, _tx_id: TxId) -> bool {
+        LpgStore::delete_node_at_epoch(self, id, epoch)
+    }
+
     fn delete_node_edges(&self, node_id: NodeId) {
         LpgStore::delete_node_edges(self, node_id);
     }
 
     fn delete_edge(&self, id: EdgeId) -> bool {
         LpgStore::delete_edge(self, id)
+    }
+
+    fn delete_edge_versioned(&self, id: EdgeId, epoch: EpochId, _tx_id: TxId) -> bool {
+        LpgStore::delete_edge_at_epoch(self, id, epoch)
     }
 
     fn set_node_property(&self, id: NodeId, key: &str, value: Value) {
@@ -220,5 +232,34 @@ impl GraphStoreMut for LpgStore {
 
     fn remove_label(&self, node_id: NodeId, label: &str) -> bool {
         LpgStore::remove_label(self, node_id, label)
+    }
+
+    fn create_node_with_props(
+        &self,
+        labels: &[&str],
+        properties: &[(PropertyKey, Value)],
+    ) -> NodeId {
+        // Delegate to LpgStore's optimized version that sets props under a single lock.
+        LpgStore::create_node_with_props(
+            self,
+            labels,
+            properties.iter().map(|(k, v)| (k.clone(), v.clone())),
+        )
+    }
+
+    fn create_edge_with_props(
+        &self,
+        src: NodeId,
+        dst: NodeId,
+        edge_type: &str,
+        properties: &[(PropertyKey, Value)],
+    ) -> EdgeId {
+        LpgStore::create_edge_with_props(
+            self,
+            src,
+            dst,
+            edge_type,
+            properties.iter().map(|(k, v)| (k.clone(), v.clone())),
+        )
     }
 }

@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 use grafeo_common::types::{NodeId, PropertyKey, Value};
 
-use crate::graph::lpg::LpgStore;
+use crate::graph::GraphStore;
 
 /// Trait for reading vectors by node ID.
 ///
@@ -35,20 +35,20 @@ pub trait VectorAccessor: Send + Sync {
     fn get_vector(&self, id: NodeId) -> Option<Arc<[f32]>>;
 }
 
-/// Reads vectors from [`LpgStore`]'s property storage for a given property key.
+/// Reads vectors from a graph store's property storage for a given property key.
 ///
 /// This is the primary accessor used by the engine when performing vector
 /// operations. It reads directly from the property store, avoiding any
 /// duplication.
 pub struct PropertyVectorAccessor<'a> {
-    store: &'a LpgStore,
+    store: &'a dyn GraphStore,
     property: PropertyKey,
 }
 
 impl<'a> PropertyVectorAccessor<'a> {
     /// Creates a new accessor for the given store and property key.
     #[must_use]
-    pub fn new(store: &'a LpgStore, property: impl Into<PropertyKey>) -> Self {
+    pub fn new(store: &'a dyn GraphStore, property: impl Into<PropertyKey>) -> Self {
         Self {
             store,
             property: property.into(),
@@ -78,6 +78,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::lpg::LpgStore;
 
     #[test]
     fn test_closure_accessor() {

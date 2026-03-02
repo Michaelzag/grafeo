@@ -600,7 +600,7 @@ impl Source for PartitionedTripleScanSource {
 // Parallel Node Scan Source (LPG)
 // ---------------------------------------------------------------------------
 
-use crate::graph::lpg::LpgStore;
+use crate::graph::GraphStore;
 use grafeo_common::types::NodeId;
 
 /// Parallel source for scanning nodes from the LPG store.
@@ -625,7 +625,7 @@ use grafeo_common::types::NodeId;
 /// ```
 pub struct ParallelNodeScanSource {
     /// The store to scan from.
-    store: Arc<LpgStore>,
+    store: Arc<dyn GraphStore>,
     /// Cached node IDs for the scan.
     node_ids: Arc<Vec<NodeId>>,
     /// Current read position.
@@ -635,7 +635,7 @@ pub struct ParallelNodeScanSource {
 impl ParallelNodeScanSource {
     /// Creates a parallel source for all nodes in the store.
     #[must_use]
-    pub fn new(store: Arc<LpgStore>) -> Self {
+    pub fn new(store: Arc<dyn GraphStore>) -> Self {
         let node_ids = Arc::new(store.node_ids());
         Self {
             store,
@@ -646,7 +646,7 @@ impl ParallelNodeScanSource {
 
     /// Creates a parallel source for nodes with a specific label.
     #[must_use]
-    pub fn with_label(store: Arc<LpgStore>, label: &str) -> Self {
+    pub fn with_label(store: Arc<dyn GraphStore>, label: &str) -> Self {
         let node_ids = Arc::new(store.nodes_by_label(label));
         Self {
             store,
@@ -659,7 +659,7 @@ impl ParallelNodeScanSource {
     ///
     /// Useful when node IDs are already available from a previous operation.
     #[must_use]
-    pub fn from_node_ids(store: Arc<LpgStore>, node_ids: Vec<NodeId>) -> Self {
+    pub fn from_node_ids(store: Arc<dyn GraphStore>, node_ids: Vec<NodeId>) -> Self {
         Self {
             store,
             node_ids: Arc::new(node_ids),
@@ -669,7 +669,7 @@ impl ParallelNodeScanSource {
 
     /// Returns the underlying store reference.
     #[must_use]
-    pub fn store(&self) -> &Arc<LpgStore> {
+    pub fn store(&self) -> &Arc<dyn GraphStore> {
         &self.store
     }
 }
@@ -772,6 +772,8 @@ impl Source for PartitionedNodeScanSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::GraphStoreMut;
+    use crate::graph::lpg::LpgStore;
 
     #[test]
     fn test_parallel_vector_source() {
@@ -950,7 +952,7 @@ mod tests {
 
     #[test]
     fn test_parallel_node_scan_source() {
-        let store = Arc::new(LpgStore::new());
+        let store: Arc<dyn GraphStoreMut> = Arc::new(LpgStore::new());
 
         // Add some nodes with labels
         for i in 0..100 {
@@ -962,29 +964,33 @@ mod tests {
         }
 
         // Test scan all nodes
-        let source = ParallelNodeScanSource::new(Arc::clone(&store));
+        let source = ParallelNodeScanSource::new(Arc::clone(&store) as Arc<dyn GraphStore>);
         assert_eq!(source.total_rows(), Some(100));
         assert!(source.is_partitionable());
         assert_eq!(source.num_columns(), 1);
 
         // Test scan by label
-        let source_person = ParallelNodeScanSource::with_label(Arc::clone(&store), "Person");
+        let source_person =
+            ParallelNodeScanSource::with_label(Arc::clone(&store) as Arc<dyn GraphStore>, "Person");
         assert_eq!(source_person.total_rows(), Some(100));
 
-        let source_employee = ParallelNodeScanSource::with_label(Arc::clone(&store), "Employee");
+        let source_employee = ParallelNodeScanSource::with_label(
+            Arc::clone(&store) as Arc<dyn GraphStore>,
+            "Employee",
+        );
         assert_eq!(source_employee.total_rows(), Some(50));
     }
 
     #[test]
     fn test_parallel_node_scan_partition() {
-        let store = Arc::new(LpgStore::new());
+        let store: Arc<dyn GraphStoreMut> = Arc::new(LpgStore::new());
 
         // Add 100 nodes
         for _ in 0..100 {
             store.create_node(&[]);
         }
 
-        let source = ParallelNodeScanSource::new(Arc::clone(&store));
+        let source = ParallelNodeScanSource::new(Arc::clone(&store) as Arc<dyn GraphStore>);
 
         // Create partition for rows 20-50
         let morsel = Morsel::new(0, 0, 20, 50);
@@ -1000,14 +1006,14 @@ mod tests {
 
     #[test]
     fn test_parallel_node_scan_morsels() {
-        let store = Arc::new(LpgStore::new());
+        let store: Arc<dyn GraphStoreMut> = Arc::new(LpgStore::new());
 
         // Add 1000 nodes
         for _ in 0..1000 {
             store.create_node(&[]);
         }
 
-        let source = ParallelNodeScanSource::new(Arc::clone(&store));
+        let source = ParallelNodeScanSource::new(Arc::clone(&store) as Arc<dyn GraphStore>);
 
         // Generate morsels with size 256
         let morsels = source.generate_morsels(256, 0);

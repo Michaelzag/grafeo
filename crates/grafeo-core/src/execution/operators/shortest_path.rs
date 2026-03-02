@@ -6,7 +6,7 @@
 use super::{Operator, OperatorResult};
 use crate::execution::chunk::DataChunkBuilder;
 use crate::graph::Direction;
-use crate::graph::lpg::LpgStore;
+use crate::graph::GraphStore;
 use grafeo_common::types::{LogicalType, NodeId, Value};
 use grafeo_common::utils::hash::FxHashMap;
 use std::collections::VecDeque;
@@ -18,7 +18,7 @@ use std::sync::Arc;
 /// computes the shortest path and outputs the path as a value.
 pub struct ShortestPathOperator {
     /// The graph store.
-    store: Arc<LpgStore>,
+    store: Arc<dyn GraphStore>,
     /// Input operator providing source/target node pairs.
     input: Box<dyn Operator>,
     /// Column index of the source node.
@@ -38,7 +38,7 @@ pub struct ShortestPathOperator {
 impl ShortestPathOperator {
     /// Creates a new shortest path operator.
     pub fn new(
-        store: Arc<LpgStore>,
+        store: Arc<dyn GraphStore>,
         input: Box<dyn Operator>,
         source_column: usize,
         target_column: usize,
@@ -177,6 +177,7 @@ impl ShortestPathOperator {
     fn get_neighbors_directed(&self, node: NodeId, direction: Direction) -> Vec<NodeId> {
         self.store
             .edges_from(node, direction)
+            .into_iter()
             .filter(|(_target, edge_id)| {
                 if let Some(ref filter_type) = self.edge_type {
                     if let Some(edge_type) = self.store.edge_type(*edge_id) {
@@ -420,6 +421,7 @@ impl Operator for ShortestPathOperator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::lpg::LpgStore;
 
     /// A mock operator that returns a single chunk with source/target node pairs.
     struct MockPairOperator {
@@ -475,7 +477,7 @@ mod tests {
 
         let input = Box::new(MockPairOperator::new(vec![(a, b)]));
         let mut op = ShortestPathOperator::new(
-            Arc::clone(&store),
+            store.clone() as Arc<dyn GraphStore>,
             input,
             0, // source column
             1, // target column
@@ -498,8 +500,14 @@ mod tests {
         let a = store.create_node(&["Node"]);
 
         let input = Box::new(MockPairOperator::new(vec![(a, a)]));
-        let mut op =
-            ShortestPathOperator::new(Arc::clone(&store), input, 0, 1, None, Direction::Outgoing);
+        let mut op = ShortestPathOperator::new(
+            store.clone() as Arc<dyn GraphStore>,
+            input,
+            0,
+            1,
+            None,
+            Direction::Outgoing,
+        );
 
         let chunk = op.next().unwrap().unwrap();
         assert_eq!(chunk.row_count(), 1);
@@ -522,8 +530,14 @@ mod tests {
         store.create_edge(b, c, "KNOWS");
 
         let input = Box::new(MockPairOperator::new(vec![(a, c)]));
-        let mut op =
-            ShortestPathOperator::new(Arc::clone(&store), input, 0, 1, None, Direction::Outgoing);
+        let mut op = ShortestPathOperator::new(
+            store.clone() as Arc<dyn GraphStore>,
+            input,
+            0,
+            1,
+            None,
+            Direction::Outgoing,
+        );
 
         let chunk = op.next().unwrap().unwrap();
         assert_eq!(chunk.row_count(), 1);
@@ -542,8 +556,14 @@ mod tests {
         let b = store.create_node(&["Node"]);
 
         let input = Box::new(MockPairOperator::new(vec![(a, b)]));
-        let mut op =
-            ShortestPathOperator::new(Arc::clone(&store), input, 0, 1, None, Direction::Outgoing);
+        let mut op = ShortestPathOperator::new(
+            store.clone() as Arc<dyn GraphStore>,
+            input,
+            0,
+            1,
+            None,
+            Direction::Outgoing,
+        );
 
         let chunk = op.next().unwrap().unwrap();
         assert_eq!(chunk.row_count(), 1);
@@ -573,8 +593,14 @@ mod tests {
         store.create_edge(a, d, "KNOWS");
 
         let input = Box::new(MockPairOperator::new(vec![(a, d)]));
-        let mut op =
-            ShortestPathOperator::new(Arc::clone(&store), input, 0, 1, None, Direction::Outgoing);
+        let mut op = ShortestPathOperator::new(
+            store.clone() as Arc<dyn GraphStore>,
+            input,
+            0,
+            1,
+            None,
+            Direction::Outgoing,
+        );
 
         let chunk = op.next().unwrap().unwrap();
         let path_col = chunk.column(2).unwrap();
@@ -596,7 +622,7 @@ mod tests {
         // Path with KNOWS filter should only reach b, not c
         let input = Box::new(MockPairOperator::new(vec![(a, c)]));
         let mut op = ShortestPathOperator::new(
-            Arc::clone(&store),
+            store.clone() as Arc<dyn GraphStore>,
             input,
             0,
             1,
@@ -620,9 +646,15 @@ mod tests {
         store.create_edge(a, b, "KNOWS");
 
         let input = Box::new(MockPairOperator::new(vec![(a, b)]));
-        let mut op =
-            ShortestPathOperator::new(Arc::clone(&store), input, 0, 1, None, Direction::Outgoing)
-                .with_all_paths(true);
+        let mut op = ShortestPathOperator::new(
+            store.clone() as Arc<dyn GraphStore>,
+            input,
+            0,
+            1,
+            None,
+            Direction::Outgoing,
+        )
+        .with_all_paths(true);
 
         let chunk = op.next().unwrap().unwrap();
         assert_eq!(chunk.row_count(), 1); // Only one path exists
@@ -644,9 +676,15 @@ mod tests {
         store.create_edge(c, d, "KNOWS");
 
         let input = Box::new(MockPairOperator::new(vec![(a, d)]));
-        let mut op =
-            ShortestPathOperator::new(Arc::clone(&store), input, 0, 1, None, Direction::Outgoing)
-                .with_all_paths(true);
+        let mut op = ShortestPathOperator::new(
+            store.clone() as Arc<dyn GraphStore>,
+            input,
+            0,
+            1,
+            None,
+            Direction::Outgoing,
+        )
+        .with_all_paths(true);
 
         let chunk = op.next().unwrap().unwrap();
         // Should return 2 rows (two paths of length 2)
@@ -673,8 +711,14 @@ mod tests {
 
         // Test multiple pairs at once
         let input = Box::new(MockPairOperator::new(vec![(a, b), (c, d), (a, d)]));
-        let mut op =
-            ShortestPathOperator::new(Arc::clone(&store), input, 0, 1, None, Direction::Outgoing);
+        let mut op = ShortestPathOperator::new(
+            store.clone() as Arc<dyn GraphStore>,
+            input,
+            0,
+            1,
+            None,
+            Direction::Outgoing,
+        );
 
         let chunk = op.next().unwrap().unwrap();
         assert_eq!(chunk.row_count(), 3);
@@ -693,8 +737,14 @@ mod tests {
         store.create_edge(a, b, "KNOWS");
 
         let input = Box::new(MockPairOperator::new(vec![(a, b)]));
-        let mut op =
-            ShortestPathOperator::new(Arc::clone(&store), input, 0, 1, None, Direction::Outgoing);
+        let mut op = ShortestPathOperator::new(
+            store.clone() as Arc<dyn GraphStore>,
+            input,
+            0,
+            1,
+            None,
+            Direction::Outgoing,
+        );
 
         // First iteration
         let chunk = op.next().unwrap();
@@ -712,8 +762,14 @@ mod tests {
     fn test_operator_name() {
         let store = Arc::new(LpgStore::new());
         let input = Box::new(MockPairOperator::new(vec![]));
-        let op =
-            ShortestPathOperator::new(Arc::clone(&store), input, 0, 1, None, Direction::Outgoing);
+        let op = ShortestPathOperator::new(
+            store.clone() as Arc<dyn GraphStore>,
+            input,
+            0,
+            1,
+            None,
+            Direction::Outgoing,
+        );
 
         assert_eq!(op.name(), "ShortestPath");
     }
@@ -722,8 +778,14 @@ mod tests {
     fn test_empty_input() {
         let store = Arc::new(LpgStore::new());
         let input = Box::new(MockPairOperator::new(vec![]));
-        let mut op =
-            ShortestPathOperator::new(Arc::clone(&store), input, 0, 1, None, Direction::Outgoing);
+        let mut op = ShortestPathOperator::new(
+            store.clone() as Arc<dyn GraphStore>,
+            input,
+            0,
+            1,
+            None,
+            Direction::Outgoing,
+        );
 
         // Empty input should return None
         let chunk = op.next().unwrap();
@@ -739,9 +801,15 @@ mod tests {
         let b = store.create_node(&["Node"]);
 
         let input = Box::new(MockPairOperator::new(vec![(a, b)]));
-        let mut op =
-            ShortestPathOperator::new(Arc::clone(&store), input, 0, 1, None, Direction::Outgoing)
-                .with_all_paths(true);
+        let mut op = ShortestPathOperator::new(
+            store.clone() as Arc<dyn GraphStore>,
+            input,
+            0,
+            1,
+            None,
+            Direction::Outgoing,
+        )
+        .with_all_paths(true);
 
         let chunk = op.next().unwrap().unwrap();
         assert_eq!(chunk.row_count(), 1); // Still returns one row with null
@@ -756,9 +824,15 @@ mod tests {
         let a = store.create_node(&["Node"]);
 
         let input = Box::new(MockPairOperator::new(vec![(a, a)]));
-        let mut op =
-            ShortestPathOperator::new(Arc::clone(&store), input, 0, 1, None, Direction::Outgoing)
-                .with_all_paths(true);
+        let mut op = ShortestPathOperator::new(
+            store.clone() as Arc<dyn GraphStore>,
+            input,
+            0,
+            1,
+            None,
+            Direction::Outgoing,
+        )
+        .with_all_paths(true);
 
         let chunk = op.next().unwrap().unwrap();
         assert_eq!(chunk.row_count(), 1);
@@ -780,8 +854,14 @@ mod tests {
         }
 
         let input = Box::new(MockPairOperator::new(vec![(nodes[0], nodes[9])]));
-        let mut op =
-            ShortestPathOperator::new(Arc::clone(&store), input, 0, 1, None, Direction::Outgoing);
+        let mut op = ShortestPathOperator::new(
+            store.clone() as Arc<dyn GraphStore>,
+            input,
+            0,
+            1,
+            None,
+            Direction::Outgoing,
+        );
 
         let chunk = op.next().unwrap().unwrap();
         let path_col = chunk.column(2).unwrap();
@@ -804,8 +884,14 @@ mod tests {
         store.create_edge(c, d, "KNOWS");
 
         let input = Box::new(MockPairOperator::new(vec![(a, d)]));
-        let mut op =
-            ShortestPathOperator::new(Arc::clone(&store), input, 0, 1, None, Direction::Outgoing);
+        let mut op = ShortestPathOperator::new(
+            store.clone() as Arc<dyn GraphStore>,
+            input,
+            0,
+            1,
+            None,
+            Direction::Outgoing,
+        );
 
         let chunk = op.next().unwrap().unwrap();
         let path_col = chunk.column(2).unwrap();
@@ -821,8 +907,14 @@ mod tests {
         // No edges between a and b
 
         let input = Box::new(MockPairOperator::new(vec![(a, b)]));
-        let mut op =
-            ShortestPathOperator::new(Arc::clone(&store), input, 0, 1, None, Direction::Outgoing);
+        let mut op = ShortestPathOperator::new(
+            store.clone() as Arc<dyn GraphStore>,
+            input,
+            0,
+            1,
+            None,
+            Direction::Outgoing,
+        );
 
         let chunk = op.next().unwrap().unwrap();
         let path_col = chunk.column(2).unwrap();
@@ -835,8 +927,14 @@ mod tests {
         let a = store.create_node(&["Node"]);
 
         let input = Box::new(MockPairOperator::new(vec![(a, a)]));
-        let mut op =
-            ShortestPathOperator::new(Arc::clone(&store), input, 0, 1, None, Direction::Outgoing);
+        let mut op = ShortestPathOperator::new(
+            store.clone() as Arc<dyn GraphStore>,
+            input,
+            0,
+            1,
+            None,
+            Direction::Outgoing,
+        );
 
         let chunk = op.next().unwrap().unwrap();
         let path_col = chunk.column(2).unwrap();
@@ -860,8 +958,14 @@ mod tests {
         store.create_edge(a, d, "KNOWS");
 
         let input = Box::new(MockPairOperator::new(vec![(a, d)]));
-        let mut op =
-            ShortestPathOperator::new(Arc::clone(&store), input, 0, 1, None, Direction::Outgoing);
+        let mut op = ShortestPathOperator::new(
+            store.clone() as Arc<dyn GraphStore>,
+            input,
+            0,
+            1,
+            None,
+            Direction::Outgoing,
+        );
 
         let chunk = op.next().unwrap().unwrap();
         let path_col = chunk.column(2).unwrap();
@@ -882,7 +986,7 @@ mod tests {
         // Only KNOWS edges: a can reach b but not c
         let input = Box::new(MockPairOperator::new(vec![(a, c)]));
         let mut op = ShortestPathOperator::new(
-            Arc::clone(&store),
+            store.clone() as Arc<dyn GraphStore>,
             input,
             0,
             1,
@@ -909,8 +1013,14 @@ mod tests {
 
         // Bidirectional BFS should work and find shortest path
         let input = Box::new(MockPairOperator::new(vec![(a, c)]));
-        let mut op =
-            ShortestPathOperator::new(Arc::clone(&store), input, 0, 1, None, Direction::Outgoing);
+        let mut op = ShortestPathOperator::new(
+            store.clone() as Arc<dyn GraphStore>,
+            input,
+            0,
+            1,
+            None,
+            Direction::Outgoing,
+        );
 
         let chunk = op.next().unwrap().unwrap();
         let path_col = chunk.column(2).unwrap();

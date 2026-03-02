@@ -11,6 +11,8 @@ use grafeo_common::types::{NodeId, Value};
 use grafeo_common::utils::error::Result;
 use grafeo_common::utils::hash::{FxHashMap, FxHashSet};
 use grafeo_core::graph::Direction;
+use grafeo_core::graph::GraphStore;
+#[cfg(test)]
 use grafeo_core::graph::lpg::LpgStore;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
@@ -44,7 +46,7 @@ pub struct ClusteringCoefficientResult {
 /// Builds undirected neighbor sets for all nodes.
 ///
 /// Treats the graph as undirected by combining both outgoing and incoming edges.
-fn build_undirected_neighbors(store: &LpgStore) -> FxHashMap<NodeId, FxHashSet<NodeId>> {
+fn build_undirected_neighbors(store: &dyn GraphStore) -> FxHashMap<NodeId, FxHashSet<NodeId>> {
     let nodes = store.node_ids();
     let mut neighbors: FxHashMap<NodeId, FxHashSet<NodeId>> = FxHashMap::default();
 
@@ -127,7 +129,7 @@ fn count_node_triangles(
 /// # Complexity
 ///
 /// O(V * d^2) where d is the average degree
-pub fn triangle_count(store: &LpgStore) -> FxHashMap<NodeId, u64> {
+pub fn triangle_count(store: &dyn GraphStore) -> FxHashMap<NodeId, u64> {
     let neighbors = build_undirected_neighbors(store);
     let mut counts: FxHashMap<NodeId, u64> = FxHashMap::default();
 
@@ -159,7 +161,7 @@ pub fn triangle_count(store: &LpgStore) -> FxHashMap<NodeId, u64> {
 /// # Complexity
 ///
 /// O(V * d^2) where d is the average degree
-pub fn local_clustering_coefficient(store: &LpgStore) -> FxHashMap<NodeId, f64> {
+pub fn local_clustering_coefficient(store: &dyn GraphStore) -> FxHashMap<NodeId, f64> {
     let neighbors = build_undirected_neighbors(store);
     let mut coefficients: FxHashMap<NodeId, f64> = FxHashMap::default();
 
@@ -196,7 +198,7 @@ pub fn local_clustering_coefficient(store: &LpgStore) -> FxHashMap<NodeId, f64> 
 /// # Complexity
 ///
 /// O(V * d^2) where d is the average degree
-pub fn global_clustering_coefficient(store: &LpgStore) -> f64 {
+pub fn global_clustering_coefficient(store: &dyn GraphStore) -> f64 {
     let local = local_clustering_coefficient(store);
 
     if local.is_empty() {
@@ -222,7 +224,7 @@ pub fn global_clustering_coefficient(store: &LpgStore) -> f64 {
 /// # Complexity
 ///
 /// O(V * d^2) where d is the average degree
-pub fn total_triangles(store: &LpgStore) -> u64 {
+pub fn total_triangles(store: &dyn GraphStore) -> u64 {
     let per_node = triangle_count(store);
     // Each triangle is counted 3 times (once per vertex), so divide by 3
     per_node.values().sum::<u64>() / 3
@@ -245,7 +247,7 @@ pub fn total_triangles(store: &LpgStore) -> u64 {
 /// # Complexity
 ///
 /// O(V * d^2) where d is the average degree
-pub fn clustering_coefficient(store: &LpgStore) -> ClusteringCoefficientResult {
+pub fn clustering_coefficient(store: &dyn GraphStore) -> ClusteringCoefficientResult {
     let neighbors = build_undirected_neighbors(store);
     let n = neighbors.len();
 
@@ -305,7 +307,7 @@ pub fn clustering_coefficient(store: &LpgStore) -> ClusteringCoefficientResult {
 /// O(V * d^2 / threads) where d is the average degree
 #[cfg(feature = "parallel")]
 pub fn clustering_coefficient_parallel(
-    store: &LpgStore,
+    store: &dyn GraphStore,
     parallel_threshold: usize,
 ) -> ClusteringCoefficientResult {
     let neighbors = build_undirected_neighbors(store);
@@ -412,7 +414,7 @@ impl GraphAlgorithm for ClusteringCoefficientAlgorithm {
         clustering_params()
     }
 
-    fn execute(&self, store: &LpgStore, params: &Parameters) -> Result<AlgorithmResult> {
+    fn execute(&self, store: &dyn GraphStore, params: &Parameters) -> Result<AlgorithmResult> {
         #[cfg(feature = "parallel")]
         let result = {
             let parallel = params.get_bool("parallel").unwrap_or(true);
@@ -458,7 +460,7 @@ impl ParallelGraphAlgorithm for ClusteringCoefficientAlgorithm {
 
     fn execute_parallel(
         &self,
-        store: &LpgStore,
+        store: &dyn GraphStore,
         _params: &Parameters,
         _num_threads: usize,
     ) -> Result<AlgorithmResult> {

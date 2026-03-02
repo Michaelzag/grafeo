@@ -2,12 +2,15 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
-## [0.5.11] - 2026-03-01
+## [0.5.11] - 2026-03-02
 
 ### Added
 
 - **Graph storage traits**: `GraphStore` (read methods) and `GraphStoreMut` (write methods) traits capturing the query engine's storage interface. Enables future pluggable backends (spillover, disk-backed) without changing operators
 - **`GrafeoDB::graph_store()`**: public accessor returning `Arc<dyn GraphStoreMut>` for code that works against the trait interface rather than the concrete `LpgStore`
+- **Operator trait migration**: all query operators now use `Arc<dyn GraphStore>` (read) or `Arc<dyn GraphStoreMut>` (write) instead of the concrete `Arc<LpgStore>`, enabling pluggable storage backends without operator changes
+- **Algorithm trait migration**: `GraphAlgorithm::execute` and all standalone algorithm functions now accept `&dyn GraphStore` instead of `&LpgStore`, making graph algorithms backend-agnostic
+- **Pluggable storage**: `GrafeoDB::with_store(Arc<dyn GraphStoreMut>, Config)` constructor accepts any storage backend for full query execution (all 6 languages, optimizer, planner) without WAL, CDC, or built-in index management
 - **Type-safe WAL**: `WalEntry` trait and generic `TypedWal<R>` wrapper that constrains WAL record types at compile time. `LpgWal` type alias replaces raw `WalManager` in `GrafeoDB`, preventing accidental cross-model record logging when RDF WAL support is added. On-disk format unchanged
 - **Query language compliance test suites**: spec-level integration tests for all 6 query languages (Cypher, GQL, Gremlin, SPARQL, SQL/PGQ and GraphQL)
 - **Cypher UNION / UNION ALL**: full support for combining query results with duplicate elimination or preservation

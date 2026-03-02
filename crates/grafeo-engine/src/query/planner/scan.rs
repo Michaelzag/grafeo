@@ -9,9 +9,9 @@ impl super::Planner {
         scan: &NodeScanOp,
     ) -> Result<(Box<dyn Operator>, Vec<String>)> {
         let scan_op = if let Some(label) = &scan.label {
-            ScanOperator::with_label(Arc::clone(&self.store), label)
+            ScanOperator::with_label(Arc::clone(&self.store) as Arc<dyn GraphStore>, label)
         } else {
-            ScanOperator::new(Arc::clone(&self.store))
+            ScanOperator::new(Arc::clone(&self.store) as Arc<dyn GraphStore>)
         };
 
         // Apply MVCC context if available

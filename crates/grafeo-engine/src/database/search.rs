@@ -97,7 +97,7 @@ impl super::GrafeoDB {
         })?;
 
         let accessor =
-            grafeo_core::index::vector::PropertyVectorAccessor::new(&self.store, property);
+            grafeo_core::index::vector::PropertyVectorAccessor::new(&*self.store, property);
 
         let results = match self.compute_filter_allowlist(label, filters) {
             Some(allowlist) => match ef {
@@ -144,7 +144,7 @@ impl super::GrafeoDB {
         })?;
 
         let accessor =
-            grafeo_core::index::vector::PropertyVectorAccessor::new(&self.store, property);
+            grafeo_core::index::vector::PropertyVectorAccessor::new(&*self.store, property);
 
         let results = match self.compute_filter_allowlist(label, filters) {
             Some(allowlist) => match ef {
@@ -206,7 +206,7 @@ impl super::GrafeoDB {
         })?;
 
         let accessor =
-            grafeo_core::index::vector::PropertyVectorAccessor::new(&self.store, property);
+            grafeo_core::index::vector::PropertyVectorAccessor::new(&*self.store, property);
 
         let fetch_k = fetch_k.unwrap_or(k.saturating_mul(4).max(k));
         let lambda = lambda.unwrap_or(0.5);
@@ -321,7 +321,7 @@ impl super::GrafeoDB {
             && let Some(vector_index) = self.store.get_vector_index(label, vector_property)
         {
             let accessor = grafeo_core::index::vector::PropertyVectorAccessor::new(
-                &self.store,
+                &*self.store,
                 vector_property,
             );
             let vector_results = vector_index.search(query_vec, k * 2, &accessor);

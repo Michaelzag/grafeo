@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use grafeo_common::types::{EpochId, TxId, Value};
 use grafeo_common::utils::error::{Error, Result};
+use grafeo_core::graph::GraphStoreMut;
 use grafeo_core::graph::lpg::LpgStore;
 
 use crate::catalog::Catalog;
@@ -96,6 +97,8 @@ pub type QueryParams = HashMap<String, Value>;
 pub struct QueryProcessor {
     /// LPG store for property graph queries.
     lpg_store: Arc<LpgStore>,
+    /// Graph store trait object for pluggable storage backends.
+    graph_store: Arc<dyn GraphStoreMut>,
     /// Transaction manager for MVCC operations.
     tx_manager: Arc<TransactionManager>,
     /// Catalog for schema and index metadata.
@@ -114,8 +117,10 @@ impl QueryProcessor {
     #[must_use]
     pub fn for_lpg(store: Arc<LpgStore>) -> Self {
         let optimizer = Optimizer::from_store(&store);
+        let graph_store = Arc::clone(&store) as Arc<dyn GraphStoreMut>;
         Self {
             lpg_store: store,
+            graph_store,
             tx_manager: Arc::new(TransactionManager::new()),
             catalog: Arc::new(Catalog::new()),
             optimizer,
@@ -129,8 +134,29 @@ impl QueryProcessor {
     #[must_use]
     pub fn for_lpg_with_tx(store: Arc<LpgStore>, tx_manager: Arc<TransactionManager>) -> Self {
         let optimizer = Optimizer::from_store(&store);
+        let graph_store = Arc::clone(&store) as Arc<dyn GraphStoreMut>;
         Self {
             lpg_store: store,
+            graph_store,
+            tx_manager,
+            catalog: Arc::new(Catalog::new()),
+            optimizer,
+            tx_context: None,
+            #[cfg(feature = "rdf")]
+            rdf_store: None,
+        }
+    }
+
+    /// Creates a query processor backed by any GraphStoreMut implementation.
+    #[must_use]
+    pub fn for_graph_store_with_tx(
+        store: Arc<dyn GraphStoreMut>,
+        tx_manager: Arc<TransactionManager>,
+    ) -> Self {
+        let optimizer = Optimizer::from_graph_store(&*store);
+        Self {
+            lpg_store: Arc::new(LpgStore::new()), // dummy, not used
+            graph_store: store,
             tx_manager,
             catalog: Arc::new(Catalog::new()),
             optimizer,
@@ -148,8 +174,10 @@ impl QueryProcessor {
         rdf_store: Arc<grafeo_core::graph::rdf::RdfStore>,
     ) -> Self {
         let optimizer = Optimizer::from_store(&lpg_store);
+        let graph_store = Arc::clone(&lpg_store) as Arc<dyn GraphStoreMut>;
         Self {
             lpg_store,
+            graph_store,
             tx_manager: Arc::new(TransactionManager::new()),
             catalog: Arc::new(Catalog::new()),
             optimizer,
@@ -249,14 +277,14 @@ impl QueryProcessor {
         // 5. Convert to physical plan with transaction context
         let planner = if let Some((epoch, tx_id)) = self.tx_context {
             Planner::with_context(
-                Arc::clone(&self.lpg_store),
+                Arc::clone(&self.graph_store),
                 Arc::clone(&self.tx_manager),
                 Some(tx_id),
                 epoch,
             )
         } else {
             Planner::with_context(
-                Arc::clone(&self.lpg_store),
+                Arc::clone(&self.graph_store),
                 Arc::clone(&self.tx_manager),
                 None,
                 self.tx_manager.current_epoch(),
@@ -529,6 +557,9 @@ fn substitute_in_operator(op: &mut LogicalOperator, params: &QueryParams) -> Res
         LogicalOperator::Unwind(unwind) => {
             substitute_in_expression(&mut unwind.expression, params)?;
             substitute_in_operator(&mut unwind.input, params)?;
+        }
+        LogicalOperator::MapCollect(mc) => {
+            substitute_in_operator(&mut mc.input, params)?;
         }
         LogicalOperator::Merge(merge) => {
             for (_, expr) in &mut merge.match_properties {

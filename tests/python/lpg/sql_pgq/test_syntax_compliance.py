@@ -391,10 +391,6 @@ class TestAggregatesInColumns:
             pytest.skip("SQL/PGQ not implemented")
             return None
 
-    @pytest.mark.xfail(
-        reason="Outer SQL aggregates on GRAPH_TABLE not yet supported",
-        strict=False,
-    )
     def test_count_in_outer_select(self):
         """SQL/PGQ: COUNT(*) in outer SQL SELECT on GRAPH_TABLE."""
         result = self._execute_sql(

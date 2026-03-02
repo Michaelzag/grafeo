@@ -10,6 +10,8 @@ use grafeo_common::types::{NodeId, Value};
 use grafeo_common::utils::error::Result;
 use grafeo_common::utils::hash::FxHashMap;
 use grafeo_core::graph::Direction;
+use grafeo_core::graph::GraphStore;
+#[cfg(test)]
 use grafeo_core::graph::lpg::LpgStore;
 
 use super::super::{AlgorithmResult, ParameterDef, ParameterType, Parameters};
@@ -46,7 +48,7 @@ pub struct DegreeCentralityResult {
 /// # Complexity
 ///
 /// O(V + E)
-pub fn degree_centrality(store: &LpgStore) -> DegreeCentralityResult {
+pub fn degree_centrality(store: &dyn GraphStore) -> DegreeCentralityResult {
     let mut in_degree: FxHashMap<NodeId, usize> = FxHashMap::default();
     let mut out_degree: FxHashMap<NodeId, usize> = FxHashMap::default();
 
@@ -60,7 +62,7 @@ pub fn degree_centrality(store: &LpgStore) -> DegreeCentralityResult {
 
     // Count degrees
     for &node in &nodes {
-        let out_count = store.edges_from(node, Direction::Outgoing).count();
+        let out_count = store.edges_from(node, Direction::Outgoing).len();
         out_degree.insert(node, out_count);
 
         // For incoming edges, we count edges targeting this node
@@ -89,7 +91,7 @@ pub fn degree_centrality(store: &LpgStore) -> DegreeCentralityResult {
 /// Computes normalized degree centrality.
 ///
 /// Normalizes by dividing by (n-1) where n is the node count.
-pub fn degree_centrality_normalized(store: &LpgStore) -> FxHashMap<NodeId, f64> {
+pub fn degree_centrality_normalized(store: &dyn GraphStore) -> FxHashMap<NodeId, f64> {
     let result = degree_centrality(store);
     let n = result.total_degree.len();
 
@@ -133,7 +135,7 @@ pub fn degree_centrality_normalized(store: &LpgStore) -> FxHashMap<NodeId, f64> 
 ///
 /// O(iterations × (V + E))
 pub fn pagerank(
-    store: &LpgStore,
+    store: &dyn GraphStore,
     damping: f64,
     max_iterations: usize,
     tolerance: f64,
@@ -158,6 +160,7 @@ pub fn pagerank(
     for (idx, &node) in nodes.iter().enumerate() {
         let edges: Vec<usize> = store
             .edges_from(node, Direction::Outgoing)
+            .into_iter()
             .filter_map(|(neighbor, _)| node_to_idx.get(&neighbor).copied())
             .collect();
         out_degree[idx] = edges.len();
@@ -237,7 +240,7 @@ pub fn pagerank(
 /// # Complexity
 ///
 /// O(V × E) for unweighted graphs
-pub fn betweenness_centrality(store: &LpgStore, normalized: bool) -> FxHashMap<NodeId, f64> {
+pub fn betweenness_centrality(store: &dyn GraphStore, normalized: bool) -> FxHashMap<NodeId, f64> {
     let nodes = store.node_ids();
     let n = nodes.len();
 
@@ -353,7 +356,7 @@ pub fn betweenness_centrality(store: &LpgStore, normalized: bool) -> FxHashMap<N
 /// # Complexity
 ///
 /// O(V × (V + E))
-pub fn closeness_centrality(store: &LpgStore, wf_improved: bool) -> FxHashMap<NodeId, f64> {
+pub fn closeness_centrality(store: &dyn GraphStore, wf_improved: bool) -> FxHashMap<NodeId, f64> {
     let nodes = store.node_ids();
     let n = nodes.len();
 
@@ -460,7 +463,7 @@ impl GraphAlgorithm for PageRankAlgorithm {
         pagerank_params()
     }
 
-    fn execute(&self, store: &LpgStore, params: &Parameters) -> Result<AlgorithmResult> {
+    fn execute(&self, store: &dyn GraphStore, params: &Parameters) -> Result<AlgorithmResult> {
         let damping = params.get_float("damping").unwrap_or(0.85);
         let max_iter = params.get_int("max_iterations").unwrap_or(100) as usize;
         let tolerance = params.get_float("tolerance").unwrap_or(1e-6);
@@ -507,7 +510,7 @@ impl GraphAlgorithm for BetweennessCentralityAlgorithm {
         betweenness_params()
     }
 
-    fn execute(&self, store: &LpgStore, params: &Parameters) -> Result<AlgorithmResult> {
+    fn execute(&self, store: &dyn GraphStore, params: &Parameters) -> Result<AlgorithmResult> {
         let normalized = params.get_bool("normalized").unwrap_or(true);
 
         let scores = betweenness_centrality(store, normalized);
@@ -553,7 +556,7 @@ impl GraphAlgorithm for ClosenessCentralityAlgorithm {
         closeness_params()
     }
 
-    fn execute(&self, store: &LpgStore, params: &Parameters) -> Result<AlgorithmResult> {
+    fn execute(&self, store: &dyn GraphStore, params: &Parameters) -> Result<AlgorithmResult> {
         let wf_improved = params.get_bool("wf_improved").unwrap_or(false);
 
         let scores = closeness_centrality(store, wf_improved);
@@ -598,7 +601,7 @@ impl GraphAlgorithm for DegreeCentralityAlgorithm {
         degree_params()
     }
 
-    fn execute(&self, store: &LpgStore, params: &Parameters) -> Result<AlgorithmResult> {
+    fn execute(&self, store: &dyn GraphStore, params: &Parameters) -> Result<AlgorithmResult> {
         let normalized = params.get_bool("normalized").unwrap_or(false);
 
         if normalized {

@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use grafeo_common::types::{EdgeId, EpochId, NodeId, TxId, Value};
 use grafeo_common::utils::error::Result;
 use grafeo_core::graph::Direction;
+use grafeo_core::graph::GraphStoreMut;
 use grafeo_core::graph::lpg::{Edge, LpgStore, Node};
 #[cfg(feature = "rdf")]
 use grafeo_core::graph::rdf::RdfStore;
@@ -28,6 +29,8 @@ use crate::transaction::TransactionManager;
 pub struct Session {
     /// The underlying store.
     store: Arc<LpgStore>,
+    /// Graph store trait object for pluggable storage backends.
+    graph_store: Arc<dyn GraphStoreMut>,
     /// RDF triple store (if RDF feature is enabled).
     #[cfg(feature = "rdf")]
     rdf_store: Arc<RdfStore>,
@@ -71,8 +74,10 @@ impl Session {
         commit_counter: Arc<AtomicUsize>,
         gc_interval: usize,
     ) -> Self {
+        let graph_store = Arc::clone(&store) as Arc<dyn GraphStoreMut>;
         Self {
             store,
+            graph_store,
             #[cfg(feature = "rdf")]
             rdf_store: Arc::new(RdfStore::new()),
             tx_manager,
@@ -111,9 +116,47 @@ impl Session {
         commit_counter: Arc<AtomicUsize>,
         gc_interval: usize,
     ) -> Self {
+        let graph_store = Arc::clone(&store) as Arc<dyn GraphStoreMut>;
         Self {
             store,
+            graph_store,
             rdf_store,
+            tx_manager,
+            query_cache,
+            current_tx: None,
+            auto_commit: true,
+            adaptive_config,
+            factorized_execution,
+            graph_model,
+            query_timeout,
+            commit_counter,
+            gc_interval,
+            #[cfg(feature = "cdc")]
+            cdc_log: Arc::new(crate::cdc::CdcLog::new()),
+        }
+    }
+
+    /// Creates a session backed by an external graph store.
+    ///
+    /// The external store handles all data operations. Transaction management
+    /// (begin/commit/rollback) is not supported for external stores.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn with_external_store(
+        store: Arc<dyn GraphStoreMut>,
+        tx_manager: Arc<TransactionManager>,
+        query_cache: Arc<QueryCache>,
+        adaptive_config: AdaptiveConfig,
+        factorized_execution: bool,
+        graph_model: GraphModel,
+        query_timeout: Option<Duration>,
+        commit_counter: Arc<AtomicUsize>,
+        gc_interval: usize,
+    ) -> Self {
+        Self {
+            store: Arc::new(LpgStore::new()), // dummy for LpgStore-specific ops
+            graph_store: store,
+            #[cfg(feature = "rdf")]
+            rdf_store: Arc::new(RdfStore::new()),
             tx_manager,
             query_cache,
             current_tx: None,
@@ -200,7 +243,7 @@ impl Session {
             let _binding_context = binder.bind(&logical_plan)?;
 
             // Optimize the plan
-            let optimizer = Optimizer::from_store(&self.store);
+            let optimizer = Optimizer::from_graph_store(&*self.graph_store);
             let plan = optimizer.optimize(logical_plan)?;
 
             // Cache the optimized plan for future use
@@ -215,7 +258,7 @@ impl Session {
         // Convert to physical plan with transaction context
         // (Physical planning cannot be cached as it depends on transaction state)
         let planner = Planner::with_context(
-            Arc::clone(&self.store),
+            Arc::clone(&self.graph_store),
             Arc::clone(&self.tx_manager),
             tx_id,
             viewing_epoch,
@@ -256,8 +299,10 @@ impl Session {
         let (viewing_epoch, tx_id) = self.get_transaction_context();
 
         // Create processor with transaction context
-        let processor =
-            QueryProcessor::for_lpg_with_tx(Arc::clone(&self.store), Arc::clone(&self.tx_manager));
+        let processor = QueryProcessor::for_graph_store_with_tx(
+            Arc::clone(&self.graph_store),
+            Arc::clone(&self.tx_manager),
+        );
 
         // Apply transaction context if in a transaction
         let processor = if let Some(tx_id) = tx_id {
@@ -324,7 +369,7 @@ impl Session {
             let _binding_context = binder.bind(&logical_plan)?;
 
             // Optimize the plan
-            let optimizer = Optimizer::from_store(&self.store);
+            let optimizer = Optimizer::from_graph_store(&*self.graph_store);
             let plan = optimizer.optimize(logical_plan)?;
 
             // Cache the optimized plan
@@ -338,7 +383,7 @@ impl Session {
 
         // Convert to physical plan with transaction context
         let planner = Planner::with_context(
-            Arc::clone(&self.store),
+            Arc::clone(&self.graph_store),
             Arc::clone(&self.tx_manager),
             tx_id,
             viewing_epoch,
@@ -390,7 +435,7 @@ impl Session {
         let _binding_context = binder.bind(&logical_plan)?;
 
         // Optimize the plan
-        let optimizer = Optimizer::from_store(&self.store);
+        let optimizer = Optimizer::from_graph_store(&*self.graph_store);
         let optimized_plan = optimizer.optimize(logical_plan)?;
 
         // Get transaction context for MVCC visibility
@@ -398,7 +443,7 @@ impl Session {
 
         // Convert to physical plan with transaction context
         let planner = Planner::with_context(
-            Arc::clone(&self.store),
+            Arc::clone(&self.graph_store),
             Arc::clone(&self.tx_manager),
             tx_id,
             viewing_epoch,
@@ -430,8 +475,10 @@ impl Session {
         let (viewing_epoch, tx_id) = self.get_transaction_context();
 
         // Create processor with transaction context
-        let processor =
-            QueryProcessor::for_lpg_with_tx(Arc::clone(&self.store), Arc::clone(&self.tx_manager));
+        let processor = QueryProcessor::for_graph_store_with_tx(
+            Arc::clone(&self.graph_store),
+            Arc::clone(&self.tx_manager),
+        );
 
         // Apply transaction context if in a transaction
         let processor = if let Some(tx_id) = tx_id {
@@ -480,7 +527,7 @@ impl Session {
         let _binding_context = binder.bind(&logical_plan)?;
 
         // Optimize the plan
-        let optimizer = Optimizer::from_store(&self.store);
+        let optimizer = Optimizer::from_graph_store(&*self.graph_store);
         let optimized_plan = optimizer.optimize(logical_plan)?;
 
         // Get transaction context for MVCC visibility
@@ -488,7 +535,7 @@ impl Session {
 
         // Convert to physical plan with transaction context
         let planner = Planner::with_context(
-            Arc::clone(&self.store),
+            Arc::clone(&self.graph_store),
             Arc::clone(&self.tx_manager),
             tx_id,
             viewing_epoch,
@@ -520,8 +567,10 @@ impl Session {
         let (viewing_epoch, tx_id) = self.get_transaction_context();
 
         // Create processor with transaction context
-        let processor =
-            QueryProcessor::for_lpg_with_tx(Arc::clone(&self.store), Arc::clone(&self.tx_manager));
+        let processor = QueryProcessor::for_graph_store_with_tx(
+            Arc::clone(&self.graph_store),
+            Arc::clone(&self.tx_manager),
+        );
 
         // Apply transaction context if in a transaction
         let processor = if let Some(tx_id) = tx_id {
@@ -595,7 +644,7 @@ impl Session {
             let _binding_context = binder.bind(&logical_plan)?;
 
             // Optimize the plan
-            let optimizer = Optimizer::from_store(&self.store);
+            let optimizer = Optimizer::from_graph_store(&*self.graph_store);
             let plan = optimizer.optimize(logical_plan)?;
 
             // Cache the optimized plan
@@ -609,7 +658,7 @@ impl Session {
 
         // Convert to physical plan with transaction context
         let planner = Planner::with_context(
-            Arc::clone(&self.store),
+            Arc::clone(&self.graph_store),
             Arc::clone(&self.tx_manager),
             tx_id,
             viewing_epoch,
@@ -641,8 +690,10 @@ impl Session {
         let (viewing_epoch, tx_id) = self.get_transaction_context();
 
         // Create processor with transaction context
-        let processor =
-            QueryProcessor::for_lpg_with_tx(Arc::clone(&self.store), Arc::clone(&self.tx_manager));
+        let processor = QueryProcessor::for_graph_store_with_tx(
+            Arc::clone(&self.graph_store),
+            Arc::clone(&self.tx_manager),
+        );
 
         // Apply transaction context if in a transaction
         let processor = if let Some(tx_id) = tx_id {
@@ -669,7 +720,7 @@ impl Session {
         let logical_plan = sparql_translator::translate(query)?;
 
         // Optimize the plan
-        let optimizer = Optimizer::from_store(&self.store);
+        let optimizer = Optimizer::from_graph_store(&*self.graph_store);
         let optimized_plan = optimizer.optimize(logical_plan)?;
 
         // Convert to physical plan using RDF planner
@@ -724,8 +775,8 @@ impl Session {
             "cypher" => {
                 if let Some(p) = params {
                     use crate::query::processor::{QueryLanguage, QueryProcessor};
-                    let processor = QueryProcessor::for_lpg_with_tx(
-                        Arc::clone(&self.store),
+                    let processor = QueryProcessor::for_graph_store_with_tx(
+                        Arc::clone(&self.graph_store),
                         Arc::clone(&self.tx_manager),
                     );
                     let (viewing_epoch, tx_id) = self.get_transaction_context();

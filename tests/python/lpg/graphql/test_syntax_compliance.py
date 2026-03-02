@@ -281,10 +281,6 @@ class TestGraphQLQueryOperations:
         rows = list(result)
         assert len(rows) >= 1
 
-    @pytest.mark.xfail(
-        reason="Inline fragments not yet supported in property-graph GraphQL mapping",
-        strict=False,
-    )
     def test_inline_fragment(self):
         """GraphQL: Inline fragment on type."""
         result = self._execute_graphql("""

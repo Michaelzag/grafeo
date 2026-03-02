@@ -3,7 +3,7 @@
 use super::{Operator, OperatorError, OperatorResult};
 use crate::execution::DataChunk;
 use crate::graph::Direction;
-use crate::graph::lpg::LpgStore;
+use crate::graph::GraphStore;
 use grafeo_common::types::{EdgeId, EpochId, LogicalType, NodeId, TxId};
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -14,7 +14,7 @@ use std::sync::Arc;
 /// output rows for each neighbor reachable within the hop range.
 pub struct VariableLengthExpandOperator {
     /// The store to traverse.
-    store: Arc<LpgStore>,
+    store: Arc<dyn GraphStore>,
     /// Input operator providing source nodes.
     input: Box<dyn Operator>,
     /// Index of the source node column in input.
@@ -82,7 +82,7 @@ struct OutputRow {
 impl VariableLengthExpandOperator {
     /// Creates a new variable-length expand operator.
     pub fn new(
-        store: Arc<LpgStore>,
+        store: Arc<dyn GraphStore>,
         input: Box<dyn Operator>,
         source_column: usize,
         direction: Direction,
@@ -192,6 +192,7 @@ impl VariableLengthExpandOperator {
 
         self.store
             .edges_from(node_id, self.direction)
+            .into_iter()
             .filter(|(target_id, edge_id)| {
                 // Filter by edge type if specified
                 let type_matches = if let Some(ref filter_type) = self.edge_type {
@@ -452,6 +453,7 @@ impl Operator for VariableLengthExpandOperator {
 mod tests {
     use super::*;
     use crate::execution::operators::ScanOperator;
+    use crate::graph::lpg::LpgStore;
 
     #[test]
     fn test_variable_length_expand_chain() {
@@ -473,11 +475,14 @@ mod tests {
         store.create_edge(c, d, "NEXT");
 
         // Create scan for all nodes
-        let scan = Box::new(ScanOperator::with_label(Arc::clone(&store), "Node"));
+        let scan = Box::new(ScanOperator::with_label(
+            Arc::clone(&store) as Arc<dyn GraphStore>,
+            "Node",
+        ));
 
         // Expand 1-3 hops from all nodes
         let mut expand = VariableLengthExpandOperator::new(
-            Arc::clone(&store),
+            Arc::clone(&store) as Arc<dyn GraphStore>,
             scan,
             0,
             Direction::Outgoing,
@@ -519,11 +524,14 @@ mod tests {
         store.create_edge(a, b, "NEXT");
         store.create_edge(b, c, "NEXT");
 
-        let scan = Box::new(ScanOperator::with_label(Arc::clone(&store), "Node"));
+        let scan = Box::new(ScanOperator::with_label(
+            Arc::clone(&store) as Arc<dyn GraphStore>,
+            "Node",
+        ));
 
         // Expand 2-3 hops only (skip 1 hop)
         let mut expand = VariableLengthExpandOperator::new(
-            Arc::clone(&store),
+            Arc::clone(&store) as Arc<dyn GraphStore>,
             scan,
             0,
             Direction::Outgoing,
@@ -573,9 +581,12 @@ mod tests {
         store.create_edge(b, d, "EDGE");
         store.create_edge(c, d, "EDGE");
 
-        let scan = Box::new(ScanOperator::with_label(Arc::clone(&store), "Node"));
+        let scan = Box::new(ScanOperator::with_label(
+            Arc::clone(&store) as Arc<dyn GraphStore>,
+            "Node",
+        ));
         let mut expand = VariableLengthExpandOperator::new(
-            Arc::clone(&store),
+            Arc::clone(&store) as Arc<dyn GraphStore>,
             scan,
             0,
             Direction::Outgoing,
@@ -614,10 +625,13 @@ mod tests {
         let b = store.create_node(&["Node"]);
         store.create_edge(a, b, "KNOWS");
 
-        let scan = Box::new(ScanOperator::with_label(Arc::clone(&store), "Node"));
+        let scan = Box::new(ScanOperator::with_label(
+            Arc::clone(&store) as Arc<dyn GraphStore>,
+            "Node",
+        ));
         // Filter for LIKES edges (which don't exist)
         let mut expand = VariableLengthExpandOperator::new(
-            Arc::clone(&store),
+            Arc::clone(&store) as Arc<dyn GraphStore>,
             scan,
             0,
             Direction::Outgoing,
@@ -638,10 +652,13 @@ mod tests {
         let b = store.create_node(&["Node"]);
         store.create_edge(a, b, "EDGE");
 
-        let scan = Box::new(ScanOperator::with_label(Arc::clone(&store), "Node"));
+        let scan = Box::new(ScanOperator::with_label(
+            Arc::clone(&store) as Arc<dyn GraphStore>,
+            "Node",
+        ));
         // Exactly 1 hop
         let mut expand = VariableLengthExpandOperator::new(
-            Arc::clone(&store),
+            Arc::clone(&store) as Arc<dyn GraphStore>,
             scan,
             0,
             Direction::Outgoing,
@@ -675,9 +692,12 @@ mod tests {
         store.create_edge(a, b, "EDGE");
         store.create_edge(b, c, "EDGE");
 
-        let scan = Box::new(ScanOperator::with_label(Arc::clone(&store), "Node"));
+        let scan = Box::new(ScanOperator::with_label(
+            Arc::clone(&store) as Arc<dyn GraphStore>,
+            "Node",
+        ));
         let mut expand = VariableLengthExpandOperator::new(
-            Arc::clone(&store),
+            Arc::clone(&store) as Arc<dyn GraphStore>,
             scan,
             0,
             Direction::Outgoing,
@@ -704,9 +724,12 @@ mod tests {
         let b = store.create_node(&["Node"]);
         store.create_edge(a, b, "EDGE");
 
-        let scan = Box::new(ScanOperator::with_label(Arc::clone(&store), "Node"));
+        let scan = Box::new(ScanOperator::with_label(
+            Arc::clone(&store) as Arc<dyn GraphStore>,
+            "Node",
+        ));
         let mut expand = VariableLengthExpandOperator::new(
-            Arc::clone(&store),
+            Arc::clone(&store) as Arc<dyn GraphStore>,
             scan,
             0,
             Direction::Outgoing,
@@ -735,9 +758,12 @@ mod tests {
     #[test]
     fn test_variable_length_expand_name() {
         let store = Arc::new(LpgStore::new());
-        let scan = Box::new(ScanOperator::with_label(Arc::clone(&store), "Node"));
+        let scan = Box::new(ScanOperator::with_label(
+            Arc::clone(&store) as Arc<dyn GraphStore>,
+            "Node",
+        ));
         let expand = VariableLengthExpandOperator::new(
-            Arc::clone(&store),
+            Arc::clone(&store) as Arc<dyn GraphStore>,
             scan,
             0,
             Direction::Outgoing,
@@ -751,9 +777,12 @@ mod tests {
     #[test]
     fn test_variable_length_expand_empty_input() {
         let store = Arc::new(LpgStore::new());
-        let scan = Box::new(ScanOperator::with_label(Arc::clone(&store), "Nonexistent"));
+        let scan = Box::new(ScanOperator::with_label(
+            Arc::clone(&store) as Arc<dyn GraphStore>,
+            "Nonexistent",
+        ));
         let mut expand = VariableLengthExpandOperator::new(
-            Arc::clone(&store),
+            Arc::clone(&store) as Arc<dyn GraphStore>,
             scan,
             0,
             Direction::Outgoing,
@@ -777,9 +806,12 @@ mod tests {
             store.create_edge(center, outer, "EDGE");
         }
 
-        let scan = Box::new(ScanOperator::with_label(Arc::clone(&store), "Node"));
+        let scan = Box::new(ScanOperator::with_label(
+            Arc::clone(&store) as Arc<dyn GraphStore>,
+            "Node",
+        ));
         let mut expand = VariableLengthExpandOperator::new(
-            Arc::clone(&store),
+            Arc::clone(&store) as Arc<dyn GraphStore>,
             scan,
             0,
             Direction::Outgoing,

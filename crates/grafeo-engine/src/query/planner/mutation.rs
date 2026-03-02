@@ -321,7 +321,7 @@ impl super::Planner {
                         variable_columns: HashMap::new(),
                     }],
                     vec![LogicalType::Any],
-                    Arc::clone(&self.store),
+                    Arc::clone(&self.store) as Arc<dyn GraphStore>,
                 ));
 
                 (project_op, vec!["__list__".to_string()])
@@ -369,7 +369,7 @@ impl super::Planner {
                 input_op,
                 proj_exprs,
                 proj_schema,
-                Arc::clone(&self.store),
+                Arc::clone(&self.store) as Arc<dyn GraphStore>,
             ));
             let list_col = input_columns.len();
             let mut cols = input_columns;
@@ -622,7 +622,7 @@ impl super::Planner {
         // Create the shortest path operator
         let operator: Box<dyn Operator> = Box::new(
             ShortestPathOperator::new(
-                Arc::clone(&self.store),
+                Arc::clone(&self.store) as Arc<dyn GraphStore>,
                 input_op,
                 source_column,
                 target_column,
@@ -694,7 +694,7 @@ impl super::Planner {
 
         let operator = Box::new(
             crate::query::executor::procedure_call::ProcedureCallOperator::new(
-                Arc::clone(&self.store),
+                Arc::clone(&self.store) as Arc<dyn GraphStore>,
                 algorithm,
                 params,
                 yield_columns,

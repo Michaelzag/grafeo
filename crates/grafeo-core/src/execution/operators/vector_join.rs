@@ -18,7 +18,7 @@
 
 use super::{Operator, OperatorError, OperatorResult};
 use crate::execution::DataChunk;
-use crate::graph::lpg::LpgStore;
+use crate::graph::GraphStore;
 use crate::index::vector::{DistanceMetric, brute_force_knn};
 use grafeo_common::types::{LogicalType, NodeId, PropertyKey, Value};
 use std::sync::Arc;
@@ -46,7 +46,7 @@ pub struct VectorJoinOperator {
     /// Left input operator providing entities.
     left: Box<dyn Operator>,
     /// The store to search vectors from.
-    store: Arc<LpgStore>,
+    store: Arc<dyn GraphStore>,
     /// The HNSW index for right side (None = brute-force).
     #[cfg(feature = "vector-index")]
     index: Option<Arc<HnswIndex>>,
@@ -103,7 +103,7 @@ impl VectorJoinOperator {
     #[must_use]
     pub fn with_static_query(
         left: Box<dyn Operator>,
-        store: Arc<LpgStore>,
+        store: Arc<dyn GraphStore>,
         query_vector: Vec<f32>,
         right_property: impl Into<String>,
         k: usize,
@@ -151,7 +151,7 @@ impl VectorJoinOperator {
     #[must_use]
     pub fn entity_to_entity(
         left: Box<dyn Operator>,
-        store: Arc<LpgStore>,
+        store: Arc<dyn GraphStore>,
         left_node_column: usize,
         left_property: impl Into<String>,
         right_property: impl Into<String>,
@@ -257,7 +257,7 @@ impl VectorJoinOperator {
         {
             if let Some(ref index) = self.index {
                 let accessor = crate::index::vector::PropertyVectorAccessor::new(
-                    &self.store,
+                    &*self.store,
                     &*self.right_property,
                 );
                 return index.search_with_ef(query, self.k, self.ef, &accessor);
@@ -464,11 +464,13 @@ impl Operator for VectorJoinOperator {
 mod tests {
     use super::*;
     use crate::execution::operators::single_row::NodeListOperator;
+    use crate::graph::GraphStoreMut;
+    use crate::graph::lpg::LpgStore;
     use std::sync::Arc as StdArc;
 
     #[test]
     fn test_vector_join_static_query() {
-        let store = StdArc::new(LpgStore::new());
+        let store: StdArc<dyn GraphStoreMut> = StdArc::new(LpgStore::new());
 
         // Create nodes with vector embeddings
         let n1 = store.create_node(&["Item"]);
@@ -486,7 +488,7 @@ mod tests {
         let query = vec![1.0, 0.0, 0.0];
         let mut join = VectorJoinOperator::with_static_query(
             left,
-            StdArc::clone(&store),
+            StdArc::clone(&store) as StdArc<dyn GraphStore>,
             query,
             "embedding",
             3,
@@ -504,7 +506,7 @@ mod tests {
 
     #[test]
     fn test_vector_join_entity_to_entity() {
-        let store = StdArc::new(LpgStore::new());
+        let store: StdArc<dyn GraphStoreMut> = StdArc::new(LpgStore::new());
 
         // Create source nodes
         let src1 = store.create_node(&["Source"]);
@@ -522,7 +524,7 @@ mod tests {
         // Entity-to-entity join: find targets similar to source
         let mut join = VectorJoinOperator::entity_to_entity(
             left,
-            StdArc::clone(&store),
+            StdArc::clone(&store) as StdArc<dyn GraphStore>,
             0, // node column
             "embedding",
             "embedding",
@@ -548,7 +550,7 @@ mod tests {
 
     #[test]
     fn test_vector_join_with_distance_filter() {
-        let store = StdArc::new(LpgStore::new());
+        let store: StdArc<dyn GraphStoreMut> = StdArc::new(LpgStore::new());
 
         // Create nodes with embeddings
         let n1 = store.create_node(&["Item"]);
@@ -561,7 +563,7 @@ mod tests {
 
         let mut join = VectorJoinOperator::with_static_query(
             left,
-            StdArc::clone(&store),
+            StdArc::clone(&store) as StdArc<dyn GraphStore>,
             query,
             "vec",
             10,
@@ -584,12 +586,12 @@ mod tests {
 
     #[test]
     fn test_vector_join_name() {
-        let store = StdArc::new(LpgStore::new());
+        let store: StdArc<dyn GraphStoreMut> = StdArc::new(LpgStore::new());
         let left = Box::new(NodeListOperator::new(vec![], 1024));
 
         let join = VectorJoinOperator::with_static_query(
             left,
-            store,
+            store as StdArc<dyn GraphStore>,
             vec![1.0],
             "embedding",
             5,

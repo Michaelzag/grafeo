@@ -32,6 +32,7 @@ use grafeo_adapters::storage::wal::{
 };
 use grafeo_common::memory::buffer::{BufferManager, BufferManagerConfig};
 use grafeo_common::utils::error::Result;
+use grafeo_core::graph::GraphStoreMut;
 use grafeo_core::graph::lpg::LpgStore;
 #[cfg(feature = "rdf")]
 use grafeo_core::graph::rdf::RdfStore;
@@ -91,6 +92,9 @@ pub struct GrafeoDB {
     #[cfg(feature = "embed")]
     pub(super) embedding_models:
         RwLock<hashbrown::HashMap<String, Arc<dyn crate::embedding::EmbeddingModel>>>,
+    /// External graph store (when using with_store()).
+    /// When set, sessions route queries through this store instead of the built-in LpgStore.
+    pub(super) external_store: Option<Arc<dyn GraphStoreMut>>,
 }
 
 impl GrafeoDB {
@@ -247,6 +251,70 @@ impl GrafeoDB {
             cdc_log: Arc::new(crate::cdc::CdcLog::new()),
             #[cfg(feature = "embed")]
             embedding_models: RwLock::new(hashbrown::HashMap::new()),
+            external_store: None,
+        })
+    }
+
+    /// Creates a database backed by a custom [`GraphStoreMut`] implementation.
+    ///
+    /// The external store handles all data persistence. WAL, CDC, and index
+    /// management are the responsibility of the store implementation.
+    ///
+    /// Query execution (all 6 languages, optimizer, planner) works through the
+    /// provided store. Admin operations (schema introspection, persistence,
+    /// vector/text indexes) are not available on external stores.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::sync::Arc;
+    /// use grafeo_engine::{GrafeoDB, Config};
+    /// use grafeo_core::graph::GraphStoreMut;
+    ///
+    /// fn example(store: Arc<dyn GraphStoreMut>) -> grafeo_common::utils::error::Result<()> {
+    ///     let db = GrafeoDB::with_store(store, Config::in_memory())?;
+    ///     let result = db.execute("MATCH (n) RETURN count(n)")?;
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// [`GraphStoreMut`]: grafeo_core::graph::GraphStoreMut
+    pub fn with_store(store: Arc<dyn GraphStoreMut>, config: Config) -> Result<Self> {
+        config
+            .validate()
+            .map_err(|e| grafeo_common::utils::error::Error::Internal(e.to_string()))?;
+
+        let dummy_store = Arc::new(LpgStore::new());
+        let tx_manager = Arc::new(TransactionManager::new());
+
+        let buffer_config = BufferManagerConfig {
+            budget: config.memory_limit.unwrap_or_else(|| {
+                (BufferManagerConfig::detect_system_memory() as f64 * 0.75) as usize
+            }),
+            spill_path: None,
+            ..BufferManagerConfig::default()
+        };
+        let buffer_manager = BufferManager::new(buffer_config);
+
+        let query_cache = Arc::new(QueryCache::default());
+
+        Ok(Self {
+            config,
+            store: dummy_store,
+            #[cfg(feature = "rdf")]
+            rdf_store: Arc::new(RdfStore::new()),
+            tx_manager,
+            buffer_manager,
+            #[cfg(feature = "wal")]
+            wal: None,
+            query_cache,
+            commit_counter: Arc::new(AtomicUsize::new(0)),
+            is_open: RwLock::new(true),
+            #[cfg(feature = "cdc")]
+            cdc_log: Arc::new(crate::cdc::CdcLog::new()),
+            #[cfg(feature = "embed")]
+            embedding_models: RwLock::new(hashbrown::HashMap::new()),
+            external_store: Some(store),
         })
     }
 
@@ -320,6 +388,20 @@ impl GrafeoDB {
     /// ```
     #[must_use]
     pub fn session(&self) -> Session {
+        if let Some(ref ext_store) = self.external_store {
+            return Session::with_external_store(
+                Arc::clone(ext_store),
+                Arc::clone(&self.tx_manager),
+                Arc::clone(&self.query_cache),
+                self.config.adaptive.clone(),
+                self.config.factorized_execution,
+                self.config.graph_model,
+                self.config.query_timeout,
+                Arc::clone(&self.commit_counter),
+                self.config.gc_interval,
+            );
+        }
+
         #[cfg(feature = "rdf")]
         let mut session = Session::with_rdf_store_and_adaptive(
             Arc::clone(&self.store),
@@ -399,8 +481,12 @@ impl GrafeoDB {
     ///
     /// [`GraphStoreMut`]: grafeo_core::graph::GraphStoreMut
     #[must_use]
-    pub fn graph_store(&self) -> Arc<dyn grafeo_core::graph::GraphStoreMut> {
-        Arc::clone(&self.store) as Arc<dyn grafeo_core::graph::GraphStoreMut>
+    pub fn graph_store(&self) -> Arc<dyn GraphStoreMut> {
+        if let Some(ref ext_store) = self.external_store {
+            Arc::clone(ext_store)
+        } else {
+            Arc::clone(&self.store) as Arc<dyn GraphStoreMut>
+        }
     }
 
     /// Garbage collects old MVCC versions that are no longer visible.

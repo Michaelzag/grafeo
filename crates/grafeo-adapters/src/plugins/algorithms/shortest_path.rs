@@ -10,6 +10,8 @@ use grafeo_common::types::{NodeId, Value};
 use grafeo_common::utils::error::{Error, Result};
 use grafeo_common::utils::hash::FxHashMap;
 use grafeo_core::graph::Direction;
+use grafeo_core::graph::GraphStore;
+#[cfg(test)]
 use grafeo_core::graph::lpg::LpgStore;
 
 use super::super::{AlgorithmResult, ParameterDef, ParameterType, Parameters};
@@ -23,7 +25,7 @@ use super::traits::{GraphAlgorithm, MinScored};
 ///
 /// Supports Int64 and Float64 values, defaulting to 1.0 if no weight property.
 fn extract_weight(
-    store: &LpgStore,
+    store: &dyn GraphStore,
     edge_id: grafeo_common::types::EdgeId,
     weight_prop: Option<&str>,
 ) -> f64 {
@@ -96,7 +98,11 @@ impl DijkstraResult {
 /// # Complexity
 ///
 /// O((V + E) log V) using a binary heap.
-pub fn dijkstra(store: &LpgStore, source: NodeId, weight_property: Option<&str>) -> DijkstraResult {
+pub fn dijkstra(
+    store: &dyn GraphStore,
+    source: NodeId,
+    weight_property: Option<&str>,
+) -> DijkstraResult {
     let mut distances: FxHashMap<NodeId, f64> = FxHashMap::default();
     let mut predecessors: FxHashMap<NodeId, NodeId> = FxHashMap::default();
     let mut heap: BinaryHeap<MinScored<f64, NodeId>> = BinaryHeap::new();
@@ -147,7 +153,7 @@ pub fn dijkstra(store: &LpgStore, source: NodeId, weight_property: Option<&str>)
 ///
 /// Early terminates when target is reached.
 pub fn dijkstra_path(
-    store: &LpgStore,
+    store: &dyn GraphStore,
     source: NodeId,
     target: NodeId,
     weight_property: Option<&str>,
@@ -228,7 +234,7 @@ pub fn dijkstra_path(
 ///
 /// O(E) in the best case with a good heuristic, O((V + E) log V) in the worst case.
 pub fn astar<H>(
-    store: &LpgStore,
+    store: &dyn GraphStore,
     source: NodeId,
     target: NodeId,
     weight_property: Option<&str>,
@@ -344,7 +350,7 @@ impl BellmanFordResult {
 ///
 /// O(V × E)
 pub fn bellman_ford(
-    store: &LpgStore,
+    store: &dyn GraphStore,
     source: NodeId,
     weight_property: Option<&str>,
 ) -> BellmanFordResult {
@@ -368,6 +374,7 @@ pub fn bellman_ford(
         .flat_map(|&node| {
             store
                 .edges_from(node, Direction::Outgoing)
+                .into_iter()
                 .map(move |(neighbor, edge_id)| (node, neighbor, edge_id))
         })
         .collect();
@@ -503,7 +510,10 @@ impl FloydWarshallResult {
 /// # Complexity
 ///
 /// O(V³)
-pub fn floyd_warshall(store: &LpgStore, weight_property: Option<&str>) -> FloydWarshallResult {
+pub fn floyd_warshall(
+    store: &dyn GraphStore,
+    weight_property: Option<&str>,
+) -> FloydWarshallResult {
     let nodes: Vec<NodeId> = store.node_ids();
     let n = nodes.len();
 
@@ -607,7 +617,7 @@ impl GraphAlgorithm for DijkstraAlgorithm {
         dijkstra_params()
     }
 
-    fn execute(&self, store: &LpgStore, params: &Parameters) -> Result<AlgorithmResult> {
+    fn execute(&self, store: &dyn GraphStore, params: &Parameters) -> Result<AlgorithmResult> {
         let source_id = params
             .get_int("source")
             .ok_or_else(|| Error::InvalidValue("source parameter required".to_string()))?;
@@ -718,7 +728,7 @@ impl GraphAlgorithm for SsspAlgorithm {
         sssp_params()
     }
 
-    fn execute(&self, store: &LpgStore, params: &Parameters) -> Result<AlgorithmResult> {
+    fn execute(&self, store: &dyn GraphStore, params: &Parameters) -> Result<AlgorithmResult> {
         let source_str = params
             .get_string("source")
             .ok_or_else(|| Error::InvalidValue("source parameter required".to_string()))?;
@@ -796,7 +806,7 @@ impl GraphAlgorithm for BellmanFordAlgorithm {
         bellman_ford_params()
     }
 
-    fn execute(&self, store: &LpgStore, params: &Parameters) -> Result<AlgorithmResult> {
+    fn execute(&self, store: &dyn GraphStore, params: &Parameters) -> Result<AlgorithmResult> {
         let source_id = params
             .get_int("source")
             .ok_or_else(|| Error::InvalidValue("source parameter required".to_string()))?;
@@ -855,7 +865,7 @@ impl GraphAlgorithm for FloydWarshallAlgorithm {
         floyd_warshall_params()
     }
 
-    fn execute(&self, store: &LpgStore, params: &Parameters) -> Result<AlgorithmResult> {
+    fn execute(&self, store: &dyn GraphStore, params: &Parameters) -> Result<AlgorithmResult> {
         let weight_prop = params.get_string("weight");
 
         let fw_result = floyd_warshall(store, weight_prop.as_deref());

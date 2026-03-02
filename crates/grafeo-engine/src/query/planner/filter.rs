@@ -46,8 +46,11 @@ impl super::Planner {
         let filter_expr = self.convert_expression(&filter.predicate)?;
 
         // Create the predicate
-        let predicate =
-            ExpressionPredicate::new(filter_expr, variable_columns, Arc::clone(&self.store));
+        let predicate = ExpressionPredicate::new(
+            filter_expr,
+            variable_columns,
+            Arc::clone(&self.store) as Arc<dyn GraphStore>,
+        );
 
         // Create the filter operator
         let operator = Box::new(FilterOperator::new(input_op, Box::new(predicate)));
@@ -241,8 +244,11 @@ impl super::Planner {
                 .map(|(i, name)| (name.clone(), i))
                 .collect();
             let filter_expr = self.convert_expression(&remaining)?;
-            let predicate =
-                ExpressionPredicate::new(filter_expr, variable_columns, Arc::clone(&self.store));
+            let predicate = ExpressionPredicate::new(
+                filter_expr,
+                variable_columns,
+                Arc::clone(&self.store) as Arc<dyn GraphStore>,
+            );
             let filtered = Box::new(FilterOperator::new(node_list_op, Box::new(predicate)));
             Ok(Some((filtered, columns)))
         } else {

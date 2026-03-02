@@ -19,7 +19,7 @@ use crate::execution::DataChunk;
 use crate::execution::factorized_chunk::FactorizedChunk;
 use crate::execution::vector::ValueVector;
 use crate::graph::Direction;
-use crate::graph::lpg::LpgStore;
+use crate::graph::GraphStore;
 use grafeo_common::types::{EdgeId, EpochId, LogicalType, NodeId, TxId};
 
 /// Result type for factorized operations.
@@ -49,7 +49,7 @@ pub type FactorizedResult = Result<Option<FactorizedChunk>, OperatorError>;
 /// - Memory: ~11,100 values (no duplication)
 pub struct FactorizedExpandOperator {
     /// The store to traverse.
-    store: Arc<LpgStore>,
+    store: Arc<dyn GraphStore>,
     /// Input operator providing source nodes.
     input: Box<dyn Operator>,
     /// Index of the source node column in input.
@@ -71,7 +71,7 @@ pub struct FactorizedExpandOperator {
 impl FactorizedExpandOperator {
     /// Creates a new factorized expand operator.
     pub fn new(
-        store: Arc<LpgStore>,
+        store: Arc<dyn GraphStore>,
         input: Box<dyn Operator>,
         source_column: usize,
         direction: Direction,
@@ -110,6 +110,7 @@ impl FactorizedExpandOperator {
 
         self.store
             .edges_from(source_id, self.direction)
+            .into_iter()
             .filter(|(target_id, edge_id)| {
                 // Filter by edge type if specified
                 let type_matches = if let Some(ref filter_type) = self.edge_type {
@@ -254,7 +255,7 @@ impl FactorizedOperator for FactorizedExpandOperator {
 /// factorized across multiple expansion steps.
 pub struct FactorizedExpandChain {
     /// The store to traverse.
-    store: Arc<LpgStore>,
+    store: Arc<dyn GraphStore>,
     /// The source operator for the first expansion.
     source: Option<Box<dyn Operator>>,
     /// Accumulated factorized result.
@@ -266,7 +267,7 @@ pub struct FactorizedExpandChain {
 
 impl FactorizedExpandChain {
     /// Creates a new chain starting from a source operator.
-    pub fn new(store: Arc<LpgStore>, source: Box<dyn Operator>) -> Self {
+    pub fn new(store: Arc<dyn GraphStore>, source: Box<dyn Operator>) -> Self {
         Self {
             store,
             source: Some(source),
@@ -436,6 +437,7 @@ impl FactorizedExpandChain {
             let neighbors: Vec<(NodeId, EdgeId)> = self
                 .store
                 .edges_from(source_id, direction)
+                .into_iter()
                 .filter(|(target_id, edge_id)| {
                     // Filter by edge type if specified
                     let type_matches = if let Some(ref filter_type) = edge_type {
@@ -544,7 +546,7 @@ pub struct ExpandStep {
 /// aggregation), this avoids flattening and provides massive speedups.
 pub struct LazyFactorizedChainOperator {
     /// The graph store.
-    store: Arc<LpgStore>,
+    store: Arc<dyn GraphStore>,
     /// The source operator (filter, scan, etc).
     source: Option<Box<dyn Operator>>,
     /// The expand steps to execute.
@@ -563,7 +565,11 @@ pub struct LazyFactorizedChainOperator {
 
 impl LazyFactorizedChainOperator {
     /// Creates a new lazy factorized chain operator.
-    pub fn new(store: Arc<LpgStore>, source: Box<dyn Operator>, steps: Vec<ExpandStep>) -> Self {
+    pub fn new(
+        store: Arc<dyn GraphStore>,
+        source: Box<dyn Operator>,
+        steps: Vec<ExpandStep>,
+    ) -> Self {
         Self {
             store,
             source: Some(source),
@@ -667,6 +673,7 @@ impl Operator for LazyFactorizedChainOperator {
 mod tests {
     use super::*;
     use crate::execution::operators::ScanOperator;
+    use crate::graph::lpg::LpgStore;
 
     #[test]
     fn test_factorized_expand_basic() {
@@ -681,10 +688,10 @@ mod tests {
         store.create_edge(alice, bob, "KNOWS");
         store.create_edge(alice, charlie, "KNOWS");
 
-        let scan = Box::new(ScanOperator::with_label(Arc::clone(&store), "Person"));
+        let scan = Box::new(ScanOperator::with_label(store.clone(), "Person"));
 
         let mut expand = FactorizedExpandOperator::new(
-            Arc::clone(&store),
+            store.clone(),
             scan,
             0,
             Direction::Outgoing,
@@ -722,17 +729,17 @@ mod tests {
         store.create_edge(bob, charlie, "KNOWS");
 
         // Run factorized expand
-        let scan1 = Box::new(ScanOperator::with_label(Arc::clone(&store), "Person"));
+        let scan1 = Box::new(ScanOperator::with_label(store.clone(), "Person"));
         let mut factorized_expand =
-            FactorizedExpandOperator::new(Arc::clone(&store), scan1, 0, Direction::Outgoing, None);
+            FactorizedExpandOperator::new(store.clone(), scan1, 0, Direction::Outgoing, None);
 
         let factorized_result = factorized_expand.next_factorized().unwrap().unwrap();
         let flat_from_factorized = factorized_result.flatten();
 
         // Run regular expand (using the factorized operator's flat interface)
-        let scan2 = Box::new(ScanOperator::with_label(Arc::clone(&store), "Person"));
+        let scan2 = Box::new(ScanOperator::with_label(store.clone(), "Person"));
         let mut regular_expand =
-            FactorizedExpandOperator::new(Arc::clone(&store), scan2, 0, Direction::Outgoing, None);
+            FactorizedExpandOperator::new(store.clone(), scan2, 0, Direction::Outgoing, None);
 
         let flat_result = regular_expand.next().unwrap().unwrap();
 
@@ -752,10 +759,10 @@ mod tests {
         store.create_node(&["Person"]);
         store.create_node(&["Person"]);
 
-        let scan = Box::new(ScanOperator::with_label(Arc::clone(&store), "Person"));
+        let scan = Box::new(ScanOperator::with_label(store.clone(), "Person"));
 
         let mut expand =
-            FactorizedExpandOperator::new(Arc::clone(&store), scan, 0, Direction::Outgoing, None);
+            FactorizedExpandOperator::new(store.clone(), scan, 0, Direction::Outgoing, None);
 
         let result = expand.next_factorized().unwrap();
         assert!(result.is_some());
@@ -798,7 +805,7 @@ mod tests {
         let source = Box::new(SingleChunkOperator::new(source_chunk));
 
         // Build 2-hop chain
-        let chain = FactorizedExpandChain::new(Arc::clone(&store), source)
+        let chain = FactorizedExpandChain::new(store.clone(), source)
             .expand(0, Direction::Outgoing, Some("KNOWS".to_string()))
             .unwrap()
             .expand(1, Direction::Outgoing, Some("KNOWS".to_string())) // column 1 is target from first expand
@@ -842,7 +849,7 @@ mod tests {
         let single = Box::new(SingleChunkOperator::new(source_chunk));
 
         let mut expand =
-            FactorizedExpandOperator::new(Arc::clone(&store), single, 0, Direction::Outgoing, None);
+            FactorizedExpandOperator::new(store.clone(), single, 0, Direction::Outgoing, None);
 
         let factorized = expand.next_factorized().unwrap().unwrap();
 

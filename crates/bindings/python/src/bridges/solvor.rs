@@ -79,11 +79,14 @@ impl PySolvORAdapter {
         let store = db.store();
 
         let result = match method {
-            "dijkstra" => {
-                algorithms::dijkstra_path(store, NodeId::new(source), NodeId::new(target), weight)
-            }
+            "dijkstra" => algorithms::dijkstra_path(
+                &**store,
+                NodeId::new(source),
+                NodeId::new(target),
+                weight,
+            ),
             "bellman_ford" => {
-                let bf_result = algorithms::bellman_ford(store, NodeId::new(source), weight);
+                let bf_result = algorithms::bellman_ford(&**store, NodeId::new(source), weight);
                 if bf_result.has_negative_cycle {
                     return Err(PyGrafeoError::InvalidArgument(
                         "Graph contains negative cycle".into(),
@@ -102,7 +105,7 @@ impl PySolvORAdapter {
             "astar" => {
                 // A* with zero heuristic (same as Dijkstra)
                 algorithms::astar(
-                    store,
+                    &**store,
                     NodeId::new(source),
                     NodeId::new(target),
                     weight,
@@ -147,7 +150,7 @@ impl PySolvORAdapter {
         let db = self.db.read();
         let store = db.store();
 
-        let result = algorithms::floyd_warshall(store, weight);
+        let result = algorithms::floyd_warshall(&**store, weight);
 
         let dict = PyDict::new(py);
         let nodes = result.nodes();
@@ -192,7 +195,7 @@ impl PySolvORAdapter {
         let db = self.db.read();
         let store = db.store();
 
-        match algorithms::max_flow(store, NodeId::new(source), NodeId::new(sink), capacity) {
+        match algorithms::max_flow(&**store, NodeId::new(source), NodeId::new(sink), capacity) {
             Some(result) => {
                 let flow_edges: Vec<(u64, u64, f64)> = result
                     .flow_edges
@@ -238,7 +241,7 @@ impl PySolvORAdapter {
         let store = db.store();
 
         match algorithms::min_cost_max_flow(
-            store,
+            &**store,
             NodeId::new(source),
             NodeId::new(sink),
             capacity,
@@ -290,8 +293,8 @@ impl PySolvORAdapter {
         let store = db.store();
 
         let result = match method {
-            "kruskal" => algorithms::kruskal(store, weight),
-            "prim" => algorithms::prim(store, weight, None),
+            "kruskal" => algorithms::kruskal(&**store, weight),
+            "prim" => algorithms::prim(&**store, weight, None),
             _ => {
                 return Err(PyGrafeoError::InvalidArgument(format!(
                     "Unknown method: {}. Use 'kruskal' or 'prim'",
@@ -327,7 +330,7 @@ impl PySolvORAdapter {
 
         let db = self.db.read();
         let store = db.store();
-        let result = algorithms::connected_components(store);
+        let result = algorithms::connected_components(&**store);
         Ok(result.into_iter().map(|(n, c)| (n.0, c)).collect())
     }
 
@@ -340,7 +343,7 @@ impl PySolvORAdapter {
 
         let db = self.db.read();
         let store = db.store();
-        let result = algorithms::strongly_connected_components(store);
+        let result = algorithms::strongly_connected_components(&**store);
         Ok(result.into_iter().map(|(n, c)| (n.0, c)).collect())
     }
 
@@ -353,7 +356,7 @@ impl PySolvORAdapter {
 
         let db = self.db.read();
         let store = db.store();
-        Ok(algorithms::topological_sort(store).map(|v| v.into_iter().map(|n| n.0).collect()))
+        Ok(algorithms::topological_sort(&**store).map(|v| v.into_iter().map(|n| n.0).collect()))
     }
 
     // ==========================================================================
@@ -375,7 +378,7 @@ impl PySolvORAdapter {
 
         let db = self.db.read();
         let store = db.store();
-        let result = algorithms::pagerank(store, damping, max_iter, tol);
+        let result = algorithms::pagerank(&**store, damping, max_iter, tol);
         Ok(result.into_iter().map(|(n, s)| (n.0, s)).collect())
     }
 
@@ -392,7 +395,7 @@ impl PySolvORAdapter {
 
         let db = self.db.read();
         let store = db.store();
-        let result = algorithms::betweenness_centrality(store, normalized);
+        let result = algorithms::betweenness_centrality(&**store, normalized);
         Ok(result.into_iter().map(|(n, s)| (n.0, s)).collect())
     }
 
@@ -413,7 +416,7 @@ impl PySolvORAdapter {
 
         let db = self.db.read();
         let store = db.store();
-        let result = algorithms::louvain(store, resolution);
+        let result = algorithms::louvain(&**store, resolution);
 
         let communities: HashMap<u64, u64> = result
             .communities
@@ -442,7 +445,7 @@ impl PySolvORAdapter {
 
         let db = self.db.read();
         let store = db.store();
-        let result = algorithms::articulation_points(store);
+        let result = algorithms::articulation_points(&**store);
         Ok(result.into_iter().map(|n| n.0).collect())
     }
 
@@ -455,7 +458,7 @@ impl PySolvORAdapter {
 
         let db = self.db.read();
         let store = db.store();
-        let result = algorithms::bridges(store);
+        let result = algorithms::bridges(&**store);
         Ok(result.into_iter().map(|(s, t)| (s.0, t.0)).collect())
     }
 
@@ -476,7 +479,7 @@ impl PySolvORAdapter {
         } else {
             0.0
         };
-        let components = algorithms::connected_component_count(store);
+        let components = algorithms::connected_component_count(&**store);
 
         let dict = PyDict::new(py);
         dict.set_item("nodes", n)?;

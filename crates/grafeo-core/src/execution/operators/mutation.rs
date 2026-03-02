@@ -12,7 +12,7 @@ use grafeo_common::types::{EdgeId, EpochId, LogicalType, NodeId, PropertyKey, Tx
 
 use super::{Operator, OperatorError, OperatorResult};
 use crate::execution::chunk::DataChunkBuilder;
-use crate::graph::lpg::LpgStore;
+use crate::graph::{GraphStore, GraphStoreMut};
 
 /// Operator that creates new nodes.
 ///
@@ -20,7 +20,7 @@ use crate::graph::lpg::LpgStore;
 /// and properties, then outputs the row with the new node.
 pub struct CreateNodeOperator {
     /// The graph store to modify.
-    store: Arc<LpgStore>,
+    store: Arc<dyn GraphStoreMut>,
     /// Input operator.
     input: Option<Box<dyn Operator>>,
     /// Labels for the new nodes.
@@ -61,7 +61,7 @@ impl PropertySource {
         &self,
         chunk: &crate::execution::chunk::DataChunk,
         row: usize,
-        store: &LpgStore,
+        store: &dyn GraphStore,
     ) -> Value {
         match self {
             PropertySource::Column(col_idx) => chunk
@@ -106,7 +106,7 @@ impl CreateNodeOperator {
     /// * `output_schema` - Schema of the output.
     /// * `output_column` - Column index where the created node ID goes.
     pub fn new(
-        store: Arc<LpgStore>,
+        store: Arc<dyn GraphStoreMut>,
         input: Option<Box<dyn Operator>>,
         labels: Vec<String>,
         properties: Vec<(String, PropertySource)>,
@@ -155,7 +155,8 @@ impl Operator for CreateNodeOperator {
 
                     // Set properties
                     for (prop_name, source) in &self.properties {
-                        let value = source.resolve(&chunk, row, &self.store);
+                        let value =
+                            source.resolve(&chunk, row, self.store.as_ref() as &dyn GraphStore);
                         self.store.set_node_property(node_id, prop_name, value);
                     }
 
@@ -229,7 +230,7 @@ impl Operator for CreateNodeOperator {
 /// Operator that creates new edges.
 pub struct CreateEdgeOperator {
     /// The graph store to modify.
-    store: Arc<LpgStore>,
+    store: Arc<dyn GraphStoreMut>,
     /// Input operator.
     input: Box<dyn Operator>,
     /// Column index for the source node.
@@ -258,7 +259,7 @@ impl CreateEdgeOperator {
     /// - [`with_output_column`](Self::with_output_column) - output the created edge ID
     /// - [`with_tx_context`](Self::with_tx_context) - set transaction context
     pub fn new(
-        store: Arc<LpgStore>,
+        store: Arc<dyn GraphStoreMut>,
         input: Box<dyn Operator>,
         from_column: usize,
         to_column: usize,
@@ -359,7 +360,7 @@ impl Operator for CreateEdgeOperator {
 
                 // Set properties
                 for (prop_name, source) in &self.properties {
-                    let value = source.resolve(&chunk, row, &self.store);
+                    let value = source.resolve(&chunk, row, self.store.as_ref() as &dyn GraphStore);
                     self.store.set_edge_property(edge_id, prop_name, value);
                 }
 
@@ -403,7 +404,7 @@ impl Operator for CreateEdgeOperator {
 /// Operator that deletes nodes.
 pub struct DeleteNodeOperator {
     /// The graph store to modify.
-    store: Arc<LpgStore>,
+    store: Arc<dyn GraphStoreMut>,
     /// Input operator.
     input: Box<dyn Operator>,
     /// Column index for the node to delete.
@@ -414,12 +415,14 @@ pub struct DeleteNodeOperator {
     detach: bool,
     /// Epoch for MVCC versioning.
     viewing_epoch: Option<EpochId>,
+    /// Transaction ID for MVCC versioning.
+    tx_id: Option<TxId>,
 }
 
 impl DeleteNodeOperator {
     /// Creates a new node deletion operator.
     pub fn new(
-        store: Arc<LpgStore>,
+        store: Arc<dyn GraphStoreMut>,
         input: Box<dyn Operator>,
         node_column: usize,
         output_schema: Vec<LogicalType>,
@@ -432,12 +435,14 @@ impl DeleteNodeOperator {
             output_schema,
             detach,
             viewing_epoch: None,
+            tx_id: None,
         }
     }
 
     /// Sets the transaction context for MVCC versioning.
-    pub fn with_tx_context(mut self, epoch: EpochId, _tx_id: Option<TxId>) -> Self {
+    pub fn with_tx_context(mut self, epoch: EpochId, tx_id: Option<TxId>) -> Self {
         self.viewing_epoch = Some(epoch);
+        self.tx_id = tx_id;
         self
     }
 }
@@ -448,6 +453,7 @@ impl Operator for DeleteNodeOperator {
         let epoch = self
             .viewing_epoch
             .unwrap_or_else(|| self.store.current_epoch());
+        let tx = self.tx_id.unwrap_or(TxId::SYSTEM);
 
         if let Some(chunk) = self.input.next()? {
             let mut deleted_count = 0;
@@ -472,12 +478,11 @@ impl Operator for DeleteNodeOperator {
 
                 if self.detach {
                     // Delete all connected edges first
-                    // Note: Edge deletion will use epoch internally
                     self.store.delete_node_edges(node_id);
                 }
 
                 // Delete the node with MVCC versioning
-                if self.store.delete_node_at_epoch(node_id, epoch) {
+                if self.store.delete_node_versioned(node_id, epoch, tx) {
                     deleted_count += 1;
                 }
             }
@@ -506,7 +511,7 @@ impl Operator for DeleteNodeOperator {
 /// Operator that deletes edges.
 pub struct DeleteEdgeOperator {
     /// The graph store to modify.
-    store: Arc<LpgStore>,
+    store: Arc<dyn GraphStoreMut>,
     /// Input operator.
     input: Box<dyn Operator>,
     /// Column index for the edge to delete.
@@ -515,12 +520,14 @@ pub struct DeleteEdgeOperator {
     output_schema: Vec<LogicalType>,
     /// Epoch for MVCC versioning.
     viewing_epoch: Option<EpochId>,
+    /// Transaction ID for MVCC versioning.
+    tx_id: Option<TxId>,
 }
 
 impl DeleteEdgeOperator {
     /// Creates a new edge deletion operator.
     pub fn new(
-        store: Arc<LpgStore>,
+        store: Arc<dyn GraphStoreMut>,
         input: Box<dyn Operator>,
         edge_column: usize,
         output_schema: Vec<LogicalType>,
@@ -531,12 +538,14 @@ impl DeleteEdgeOperator {
             edge_column,
             output_schema,
             viewing_epoch: None,
+            tx_id: None,
         }
     }
 
     /// Sets the transaction context for MVCC versioning.
-    pub fn with_tx_context(mut self, epoch: EpochId, _tx_id: Option<TxId>) -> Self {
+    pub fn with_tx_context(mut self, epoch: EpochId, tx_id: Option<TxId>) -> Self {
         self.viewing_epoch = Some(epoch);
+        self.tx_id = tx_id;
         self
     }
 }
@@ -547,6 +556,7 @@ impl Operator for DeleteEdgeOperator {
         let epoch = self
             .viewing_epoch
             .unwrap_or_else(|| self.store.current_epoch());
+        let tx = self.tx_id.unwrap_or(TxId::SYSTEM);
 
         if let Some(chunk) = self.input.next()? {
             let mut deleted_count = 0;
@@ -570,7 +580,7 @@ impl Operator for DeleteEdgeOperator {
                 };
 
                 // Delete the edge with MVCC versioning
-                if self.store.delete_edge_at_epoch(edge_id, epoch) {
+                if self.store.delete_edge_versioned(edge_id, epoch, tx) {
                     deleted_count += 1;
                 }
             }
@@ -599,7 +609,7 @@ impl Operator for DeleteEdgeOperator {
 /// Operator that adds labels to nodes.
 pub struct AddLabelOperator {
     /// The graph store.
-    store: Arc<LpgStore>,
+    store: Arc<dyn GraphStoreMut>,
     /// Child operator providing nodes.
     input: Box<dyn Operator>,
     /// Column index containing node IDs.
@@ -613,7 +623,7 @@ pub struct AddLabelOperator {
 impl AddLabelOperator {
     /// Creates a new add label operator.
     pub fn new(
-        store: Arc<LpgStore>,
+        store: Arc<dyn GraphStoreMut>,
         input: Box<dyn Operator>,
         node_column: usize,
         labels: Vec<String>,
@@ -684,7 +694,7 @@ impl Operator for AddLabelOperator {
 /// Operator that removes labels from nodes.
 pub struct RemoveLabelOperator {
     /// The graph store.
-    store: Arc<LpgStore>,
+    store: Arc<dyn GraphStoreMut>,
     /// Child operator providing nodes.
     input: Box<dyn Operator>,
     /// Column index containing node IDs.
@@ -698,7 +708,7 @@ pub struct RemoveLabelOperator {
 impl RemoveLabelOperator {
     /// Creates a new remove label operator.
     pub fn new(
-        store: Arc<LpgStore>,
+        store: Arc<dyn GraphStoreMut>,
         input: Box<dyn Operator>,
         node_column: usize,
         labels: Vec<String>,
@@ -772,7 +782,7 @@ impl Operator for RemoveLabelOperator {
 /// specified properties on each entity.
 pub struct SetPropertyOperator {
     /// The graph store.
-    store: Arc<LpgStore>,
+    store: Arc<dyn GraphStoreMut>,
     /// Child operator providing entities.
     input: Box<dyn Operator>,
     /// Column index containing entity IDs (node or edge).
@@ -788,7 +798,7 @@ pub struct SetPropertyOperator {
 impl SetPropertyOperator {
     /// Creates a new set property operator for nodes.
     pub fn new_for_node(
-        store: Arc<LpgStore>,
+        store: Arc<dyn GraphStoreMut>,
         input: Box<dyn Operator>,
         node_column: usize,
         properties: Vec<(String, PropertySource)>,
@@ -806,7 +816,7 @@ impl SetPropertyOperator {
 
     /// Creates a new set property operator for edges.
     pub fn new_for_edge(
-        store: Arc<LpgStore>,
+        store: Arc<dyn GraphStoreMut>,
         input: Box<dyn Operator>,
         edge_column: usize,
         properties: Vec<(String, PropertySource)>,
@@ -852,7 +862,7 @@ impl Operator for SetPropertyOperator {
 
                 // Set all properties
                 for (prop_name, source) in &self.properties {
-                    let value = source.resolve(&chunk, row, &self.store);
+                    let value = source.resolve(&chunk, row, self.store.as_ref() as &dyn GraphStore);
 
                     if self.is_edge {
                         self.store
@@ -898,8 +908,9 @@ mod tests {
     use super::*;
     use crate::execution::DataChunk;
     use crate::execution::chunk::DataChunkBuilder;
+    use crate::graph::lpg::LpgStore;
 
-    fn create_test_store() -> Arc<LpgStore> {
+    fn create_test_store() -> Arc<dyn GraphStoreMut> {
         Arc::new(LpgStore::new())
     }
 

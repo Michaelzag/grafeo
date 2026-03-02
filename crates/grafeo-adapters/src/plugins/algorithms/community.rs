@@ -9,6 +9,8 @@ use grafeo_common::types::{NodeId, Value};
 use grafeo_common::utils::error::Result;
 use grafeo_common::utils::hash::{FxHashMap, FxHashSet};
 use grafeo_core::graph::Direction;
+use grafeo_core::graph::GraphStore;
+#[cfg(test)]
 use grafeo_core::graph::lpg::LpgStore;
 
 use super::super::{AlgorithmResult, ParameterDef, ParameterType, Parameters};
@@ -36,7 +38,7 @@ use super::traits::{ComponentResultBuilder, GraphAlgorithm};
 /// # Complexity
 ///
 /// O(iterations × E)
-pub fn label_propagation(store: &LpgStore, max_iterations: usize) -> FxHashMap<NodeId, u64> {
+pub fn label_propagation(store: &dyn GraphStore, max_iterations: usize) -> FxHashMap<NodeId, u64> {
     let nodes = store.node_ids();
     let n = nodes.len();
 
@@ -157,7 +159,7 @@ pub struct LouvainResult {
 /// # Complexity
 ///
 /// O(V log V) on average for sparse graphs
-pub fn louvain(store: &LpgStore, resolution: f64) -> LouvainResult {
+pub fn louvain(store: &dyn GraphStore, resolution: f64) -> LouvainResult {
     let nodes = store.node_ids();
     let n = nodes.len();
 
@@ -383,7 +385,7 @@ impl GraphAlgorithm for LabelPropagationAlgorithm {
         label_prop_params()
     }
 
-    fn execute(&self, store: &LpgStore, params: &Parameters) -> Result<AlgorithmResult> {
+    fn execute(&self, store: &dyn GraphStore, params: &Parameters) -> Result<AlgorithmResult> {
         let max_iter = params.get_int("max_iterations").unwrap_or(100) as usize;
 
         let communities = label_propagation(store, max_iter);
@@ -428,7 +430,7 @@ impl GraphAlgorithm for LouvainAlgorithm {
         louvain_params()
     }
 
-    fn execute(&self, store: &LpgStore, params: &Parameters) -> Result<AlgorithmResult> {
+    fn execute(&self, store: &dyn GraphStore, params: &Parameters) -> Result<AlgorithmResult> {
         let resolution = params.get_float("resolution").unwrap_or(1.0);
 
         let result = louvain(store, resolution);

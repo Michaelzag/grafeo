@@ -10,7 +10,7 @@ use grafeo_adapters::plugins::{AlgorithmResult, Parameters};
 use grafeo_common::types::{LogicalType, Value};
 use grafeo_core::execution::DataChunk;
 use grafeo_core::execution::operators::{Operator, OperatorError, OperatorResult};
-use grafeo_core::graph::lpg::LpgStore;
+use grafeo_core::graph::GraphStore;
 
 /// Physical operator that executes a graph algorithm and yields its results.
 ///
@@ -18,7 +18,7 @@ use grafeo_core::graph::lpg::LpgStore;
 /// the full result is cached. Subsequent calls yield rows in chunks of
 /// `CHUNK_SIZE` until exhausted.
 pub struct ProcedureCallOperator {
-    store: Arc<LpgStore>,
+    store: Arc<dyn GraphStore>,
     algorithm: Arc<dyn GraphAlgorithm>,
     params: Parameters,
     /// YIELD items: (original_column, alias). `None` means yield all columns.
@@ -43,7 +43,7 @@ const CHUNK_SIZE: usize = 1024;
 impl ProcedureCallOperator {
     /// Creates a new procedure call operator.
     pub fn new(
-        store: Arc<LpgStore>,
+        store: Arc<dyn GraphStore>,
         algorithm: Arc<dyn GraphAlgorithm>,
         params: Parameters,
         yield_columns: Option<Vec<(String, Option<String>)>>,
@@ -66,7 +66,7 @@ impl ProcedureCallOperator {
     fn execute_algorithm(&mut self) -> Result<(), OperatorError> {
         let result = self
             .algorithm
-            .execute(&self.store, &self.params)
+            .execute(&*self.store, &self.params)
             .map_err(|e| OperatorError::Execution(format!("Procedure execution failed: {e}")))?;
 
         // Use canonical column names if available (same length as result columns),
