@@ -863,7 +863,8 @@ impl super::Planner {
                 entity_column,
                 properties,
                 output_schema,
-            );
+            )
+            .with_replace(set_prop.replace);
             if let Some(ref validator) = self.validator {
                 op = op.with_validator(Arc::clone(validator));
             }
@@ -875,7 +876,8 @@ impl super::Planner {
                 entity_column,
                 properties,
                 output_schema,
-            );
+            )
+            .with_replace(set_prop.replace);
             if let Some(ref validator) = self.validator {
                 op = op.with_validator(Arc::clone(validator));
             }
@@ -992,6 +994,19 @@ impl super::Planner {
                     }
                     _ => None,
                 }
+            }
+            LogicalExpression::Map(entries) => {
+                let folded: Option<Vec<(String, Value)>> = entries
+                    .iter()
+                    .map(|(k, v)| Self::try_fold_expression(v).map(|val| (k.clone(), val)))
+                    .collect();
+                let folded = folded?;
+                let map: std::collections::BTreeMap<grafeo_common::types::PropertyKey, Value> =
+                    folded
+                        .into_iter()
+                        .map(|(k, v)| (grafeo_common::types::PropertyKey::from(k), v))
+                        .collect();
+                Some(Value::Map(std::sync::Arc::new(map)))
             }
             _ => None,
         }

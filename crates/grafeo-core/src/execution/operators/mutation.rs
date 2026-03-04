@@ -605,6 +605,15 @@ impl Operator for DeleteNodeOperator {
                 if self.detach {
                     // Delete all connected edges first
                     self.store.delete_node_edges(node_id);
+                } else {
+                    // NODETACH: check that node has no connected edges
+                    let degree = self.store.out_degree(node_id) + self.store.in_degree(node_id);
+                    if degree > 0 {
+                        return Err(OperatorError::ConstraintViolation(format!(
+                            "Cannot delete node with {} connected edge(s). Use DETACH DELETE.",
+                            degree
+                        )));
+                    }
                 }
 
                 // Delete the node with MVCC versioning
@@ -919,6 +928,8 @@ pub struct SetPropertyOperator {
     properties: Vec<(String, PropertySource)>,
     /// Output schema.
     output_schema: Vec<LogicalType>,
+    /// Whether to replace all properties (true) or merge (false) for map assignments.
+    replace: bool,
     /// Optional constraint validator for schema enforcement.
     validator: Option<Arc<dyn ConstraintValidator>>,
     /// Entity labels (for node constraint validation).
@@ -943,6 +954,7 @@ impl SetPropertyOperator {
             is_edge: false,
             properties,
             output_schema,
+            replace: false,
             validator: None,
             labels: Vec::new(),
             edge_type_name: None,
@@ -964,10 +976,17 @@ impl SetPropertyOperator {
             is_edge: true,
             properties,
             output_schema,
+            replace: false,
             validator: None,
             labels: Vec::new(),
             edge_type_name: None,
         }
+    }
+
+    /// Sets whether this operator replaces all properties (for map assignment).
+    pub fn with_replace(mut self, replace: bool) -> Self {
+        self.replace = replace;
+        self
     }
 
     /// Sets the constraint validator for schema enforcement.
@@ -1045,7 +1064,52 @@ impl Operator for SetPropertyOperator {
 
                 // Write all properties
                 for (prop_name, value) in resolved_props {
-                    if self.is_edge {
+                    if prop_name == "*" {
+                        // Map assignment: value should be a Map
+                        if let Value::Map(map) = value {
+                            if self.replace {
+                                // Replace: remove all existing properties first
+                                if self.is_edge {
+                                    if let Some(edge) = self.store.get_edge(EdgeId(entity_id)) {
+                                        let keys: Vec<String> = edge
+                                            .properties
+                                            .iter()
+                                            .map(|(k, _)| k.as_str().to_string())
+                                            .collect();
+                                        for key in keys {
+                                            self.store
+                                                .remove_edge_property(EdgeId(entity_id), &key);
+                                        }
+                                    }
+                                } else if let Some(node) = self.store.get_node(NodeId(entity_id)) {
+                                    let keys: Vec<String> = node
+                                        .properties
+                                        .iter()
+                                        .map(|(k, _)| k.as_str().to_string())
+                                        .collect();
+                                    for key in keys {
+                                        self.store.remove_node_property(NodeId(entity_id), &key);
+                                    }
+                                }
+                            }
+                            // Set each map entry
+                            for (key, val) in map.iter() {
+                                if self.is_edge {
+                                    self.store.set_edge_property(
+                                        EdgeId(entity_id),
+                                        key.as_str(),
+                                        val.clone(),
+                                    );
+                                } else {
+                                    self.store.set_node_property(
+                                        NodeId(entity_id),
+                                        key.as_str(),
+                                        val.clone(),
+                                    );
+                                }
+                            }
+                        }
+                    } else if self.is_edge {
                         self.store
                             .set_edge_property(EdgeId(entity_id), &prop_name, value);
                     } else {

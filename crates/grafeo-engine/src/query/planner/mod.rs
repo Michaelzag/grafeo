@@ -13,13 +13,15 @@ mod mutation;
 mod project;
 mod scan;
 
+#[cfg(feature = "algos")]
+use crate::query::plan::CallProcedureOp;
 use crate::query::plan::{
     AddLabelOp, AggregateFunction as LogicalAggregateFunction, AggregateOp, AntiJoinOp, ApplyOp,
-    BinaryOp, CallProcedureOp, CreateEdgeOp, CreateNodeOp, DeleteEdgeOp, DeleteNodeOp, DistinctOp,
-    ExceptOp, ExpandDirection, ExpandOp, FilterOp, IntersectOp, JoinOp, JoinType, LeftJoinOp,
-    LimitOp, LogicalExpression, LogicalOperator, LogicalPlan, MapCollectOp, MergeOp,
-    MergeRelationshipOp, NodeScanOp, OtherwiseOp, PathMode, RemoveLabelOp, ReturnOp, SetPropertyOp,
-    ShortestPathOp, SkipOp, SortOp, SortOrder, UnaryOp, UnionOp, UnwindOp,
+    BinaryOp, CreateEdgeOp, CreateNodeOp, DeleteEdgeOp, DeleteNodeOp, DistinctOp, ExceptOp,
+    ExpandDirection, ExpandOp, FilterOp, IntersectOp, JoinOp, JoinType, LeftJoinOp, LimitOp,
+    LogicalExpression, LogicalOperator, LogicalPlan, MapCollectOp, MergeOp, MergeRelationshipOp,
+    NodeScanOp, OtherwiseOp, PathMode, RemoveLabelOp, ReturnOp, SetPropertyOp, ShortestPathOp,
+    SkipOp, SortOp, SortOrder, UnaryOp, UnionOp, UnwindOp,
 };
 use grafeo_common::types::{EpochId, TxId};
 use grafeo_common::types::{LogicalType, Value};
@@ -870,12 +872,14 @@ impl PhysicalPlan {
 }
 
 /// An operator that yields a static set of rows (for `grafeo.procedures()` etc.).
+#[cfg(feature = "algos")]
 struct StaticResultOperator {
     rows: Vec<Vec<Value>>,
     column_indices: Vec<usize>,
     row_index: usize,
 }
 
+#[cfg(feature = "algos")]
 impl Operator for StaticResultOperator {
     fn next(&mut self) -> grafeo_core::execution::operators::OperatorResult {
         use grafeo_core::execution::DataChunk;

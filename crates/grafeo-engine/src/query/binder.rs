@@ -869,6 +869,10 @@ impl Binder {
     fn validate_expression(&mut self, expr: &LogicalExpression) -> Result<()> {
         match expr {
             LogicalExpression::Variable(name) => {
+                // "*" is a wildcard marker for RETURN *, expanded by the planner
+                if name == "*" {
+                    return Ok(());
+                }
                 if !self.context.contains(name) && !name.starts_with("_anon_") {
                     return Err(undefined_variable_error(name, &self.context, ""));
                 }
@@ -950,21 +954,11 @@ impl Binder {
                 }
                 Ok(())
             }
-            LogicalExpression::ListComprehension {
-                list_expr,
-                filter_expr,
-                map_expr,
-                ..
-            } => {
-                // Validate the list expression
+            LogicalExpression::ListComprehension { list_expr, .. } => {
+                // Validate the list expression against the outer context.
+                // The filter and map expressions use the iteration variable
+                // which is locally scoped, so we skip validating them here.
                 self.validate_expression(list_expr)?;
-                // Note: filter_expr and map_expr use the comprehension variable
-                // which is defined within the comprehension scope, so we don't
-                // need to validate it against the outer context
-                if let Some(filter) = filter_expr {
-                    self.validate_expression(filter)?;
-                }
-                self.validate_expression(map_expr)?;
                 Ok(())
             }
             LogicalExpression::ListPredicate { list_expr, .. } => {

@@ -1,5 +1,6 @@
 //! Persistence, snapshots, and data export for GrafeoDB.
 
+#[cfg(feature = "wal")]
 use std::path::Path;
 
 use grafeo_common::types::{EdgeId, NodeId, Value};

@@ -2322,6 +2322,15 @@ impl<'a> Parser<'a> {
                     right: Box::new(right),
                 });
             }
+            TokenKind::Like => {
+                self.advance(); // consume LIKE
+                let right = self.parse_additive_expression()?;
+                return Ok(Expression::Binary {
+                    left: Box::new(left),
+                    op: BinaryOp::Like,
+                    right: Box::new(right),
+                });
+            }
             TokenKind::Is => {
                 self.advance(); // consume IS
                 let negated = self.current.kind == TokenKind::Not;
@@ -2900,6 +2909,11 @@ impl<'a> Parser<'a> {
                     "FLOAT" | "DOUBLE" | "FLOAT64" | "REAL" => "toFloat",
                     "STRING" | "VARCHAR" | "TEXT" => "toString",
                     "BOOLEAN" | "BOOL" => "toBoolean",
+                    "DATE" => "toDate",
+                    "TIME" | "LOCALTIME" => "toTime",
+                    "DATETIME" | "TIMESTAMP" | "LOCALDATETIME" => "toDatetime",
+                    "DURATION" => "toDuration",
+                    "LIST" => "toList",
                     _ => return Err(self.error(&format!("Unsupported CAST type: {type_name}"))),
                 };
                 Ok(Expression::FunctionCall {

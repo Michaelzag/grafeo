@@ -2,13 +2,13 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
-## [0.5.13] - Unreleased (dont know when this has been a huge undertaking so far)
+## [0.5.13] - 2026-03-04
 
 ### Completed
 
 - **GQL**: full compliance with ISO/IEC 39075:2024 (Graph Query Language), covering all features practical for a graph database
-- **Cypher**: full openCypher v9 specification, plus common additions (e.g., pattern comprehension, CALL subqueries, FOREACH)
-- **SPARQL**: full W3C SPARQL 1.1 implementation, no 1.2 features (e.g., SPARQL Star)
+- **Cypher**: improved compliance with openCypher v9 specification, plus common additions (e.g., pattern comprehension, CALL subqueries, FOREACH)
+- **SPARQL**: improved compliance with W3C SPARQL 1.1 implementation, but no 1.2 features (e.g., SPARQL Star)
 
 #### Infrastructure
 
@@ -42,9 +42,23 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 - **Version history**: `get_node_history(id)` and `get_edge_history(id)` return all versions with creation/deletion epochs, newest first
 - **ValidityTs type**: reverse-ordered validity timestamp for future disk-backed key encoding (newest versions sort first in key order)
 
+#### GQL Spec Compliance (78% to 93%)
+
+- **LIKE operator**: SQL pattern matching with `%` and `_` wildcards now works in WHERE clauses
+- **CAST to temporal types**: `CAST(expr AS DATE/TIME/DATETIME/DURATION/LIST)` desugars to conversion functions
+- **Temporal conversion functions**: `toDate()`, `toTime()`, `toDatetime()`, `toDuration()`, `toList()` aliases
+- **SET map operations**: `SET n = {map}` (replace all properties) and `SET n += {map}` (merge) now execute correctly
+- **NODETACH DELETE**: bare `DELETE n` now errors if the node has connected edges (ISO default), use `DETACH DELETE` instead
+- **RETURN * / WITH ***: wildcard return and pass-through now work correctly in the binder and planner
+- **List comprehensions in RETURN**: `[x IN list WHERE pred | transform]` now works in RETURN clauses
+- **List predicates in RETURN**: `all()`, `any()`, `none()`, `single()` now work in RETURN clauses
+
 ### Fixed
 
 - **Epoch-only visibility in scan/expand operators**: time-travel queries now use pure epoch-based visibility (`get_node_at_epoch`) instead of transaction-aware checks that bypassed epoch filtering when both sides used `TxId::SYSTEM`
+- **LIKE parser bug**: `LIKE` token existed but was never consumed as an infix operator in the GQL parser
+- **RETURN * binder rejection**: binder incorrectly rejected `*` as an undefined variable instead of passing it to the planner for expansion
+- **ListComprehension/ListPredicate in projections**: planner now handles these expression types in RETURN clauses instead of erroring
 
 - **Cypher standalone DELETE/SET/REMOVE errors**: error messages now correctly indicate a preceding MATCH clause is required
 - **Cypher power operator**: `^` no longer returns an error in the translator

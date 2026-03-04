@@ -2058,7 +2058,7 @@ impl ExpressionPredicate {
                 }
             }
             // Temporal constructors and accessors
-            "date" => {
+            "date" | "todate" => {
                 if args.is_empty() {
                     return Some(Value::Date(grafeo_common::types::Date::today()));
                 }
@@ -2070,7 +2070,7 @@ impl ExpressionPredicate {
                     _ => None,
                 }
             }
-            "time" => {
+            "time" | "totime" => {
                 if args.is_empty() {
                     return Some(Value::Time(grafeo_common::types::Time::now()));
                 }
@@ -2082,7 +2082,7 @@ impl ExpressionPredicate {
                     _ => None,
                 }
             }
-            "datetime" | "localdatetime" => {
+            "datetime" | "localdatetime" | "todatetime" => {
                 if args.is_empty() {
                     return Some(Value::Timestamp(grafeo_common::types::Timestamp::now()));
                 }
@@ -2112,7 +2112,7 @@ impl ExpressionPredicate {
                     _ => None,
                 }
             }
-            "duration" => {
+            "duration" | "toduration" => {
                 if args.len() != 1 {
                     return None;
                 }
@@ -2350,6 +2350,18 @@ impl ExpressionPredicate {
                     Value::String(s) => Some(Value::Int64(s.len() as i64)),
                     Value::Null => Some(Value::Null),
                     _ => None,
+                }
+            }
+            "tolist" => {
+                // toList(value) - wraps a scalar in a single-element list, or returns list as-is
+                if args.len() != 1 {
+                    return None;
+                }
+                let val = self.eval_expr(&args[0], chunk, row)?;
+                match val {
+                    Value::List(_) => Some(val),
+                    Value::Null => Some(Value::Null),
+                    other => Some(Value::List(vec![other].into())),
                 }
             }
             _ => None, // Unknown function

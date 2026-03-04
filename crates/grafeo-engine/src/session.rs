@@ -419,9 +419,8 @@ impl Session {
     }
 
     /// Logs a WAL record for a schema change (no-op if WAL is not enabled).
-    #[allow(unused_variables)]
+    #[cfg(feature = "wal")]
     fn log_schema_wal(&self, record: &grafeo_adapters::storage::wal::WalRecord) {
-        #[cfg(feature = "wal")]
         if let Some(ref wal) = self.wal
             && let Err(e) = wal.log(record)
         {
@@ -439,11 +438,21 @@ impl Session {
             EdgeTypeDefinition, NodeTypeDefinition, PropertyDataType, TypedProperty,
         };
         use grafeo_adapters::query::gql::ast::SchemaStatement;
+        #[cfg(feature = "wal")]
         use grafeo_adapters::storage::wal::WalRecord;
         use grafeo_common::utils::error::{Error, QueryError, QueryErrorKind};
 
+        /// Logs a WAL record for schema changes. Compiles to nothing without `wal`.
+        macro_rules! wal_log {
+            ($self:expr, $record:expr) => {
+                #[cfg(feature = "wal")]
+                $self.log_schema_wal(&$record);
+            };
+        }
+
         match cmd {
             SchemaStatement::CreateNodeType(stmt) => {
+                #[cfg(feature = "wal")]
                 let props_for_wal: Vec<(String, String, bool)> = stmt
                     .properties
                     .iter()
@@ -471,11 +480,14 @@ impl Session {
                 };
                 match result {
                     Ok(()) => {
-                        self.log_schema_wal(&WalRecord::CreateNodeType {
-                            name: stmt.name.clone(),
-                            properties: props_for_wal,
-                            constraints: Vec::new(),
-                        });
+                        wal_log!(
+                            self,
+                            WalRecord::CreateNodeType {
+                                name: stmt.name.clone(),
+                                properties: props_for_wal,
+                                constraints: Vec::new(),
+                            }
+                        );
                         Ok(QueryResult::status(format!(
                             "Created node type '{}'",
                             stmt.name
@@ -492,6 +504,7 @@ impl Session {
                 }
             }
             SchemaStatement::CreateEdgeType(stmt) => {
+                #[cfg(feature = "wal")]
                 let props_for_wal: Vec<(String, String, bool)> = stmt
                     .properties
                     .iter()
@@ -519,11 +532,14 @@ impl Session {
                 };
                 match result {
                     Ok(()) => {
-                        self.log_schema_wal(&WalRecord::CreateEdgeType {
-                            name: stmt.name.clone(),
-                            properties: props_for_wal,
-                            constraints: Vec::new(),
-                        });
+                        wal_log!(
+                            self,
+                            WalRecord::CreateEdgeType {
+                                name: stmt.name.clone(),
+                                properties: props_for_wal,
+                                constraints: Vec::new(),
+                            }
+                        );
                         Ok(QueryResult::status(format!(
                             "Created edge type '{}'",
                             stmt.name
@@ -547,12 +563,15 @@ impl Session {
                     stmt.dimensions,
                     stmt.metric.as_deref(),
                 )?;
-                self.log_schema_wal(&WalRecord::CreateIndex {
-                    name: stmt.name.clone(),
-                    label: stmt.node_label.clone(),
-                    property: stmt.property.clone(),
-                    index_type: "vector".to_string(),
-                });
+                wal_log!(
+                    self,
+                    WalRecord::CreateIndex {
+                        name: stmt.name.clone(),
+                        label: stmt.node_label.clone(),
+                        property: stmt.property.clone(),
+                        index_type: "vector".to_string(),
+                    }
+                );
                 Ok(QueryResult::status(format!(
                     "Created vector index '{}'",
                     stmt.name
@@ -561,7 +580,7 @@ impl Session {
             SchemaStatement::DropNodeType { name, if_exists } => {
                 match self.catalog.drop_node_type(&name) {
                     Ok(()) => {
-                        self.log_schema_wal(&WalRecord::DropNodeType { name: name.clone() });
+                        wal_log!(self, WalRecord::DropNodeType { name: name.clone() });
                         Ok(QueryResult::status(format!("Dropped node type '{name}'")))
                     }
                     Err(e) if if_exists => {
@@ -577,7 +596,7 @@ impl Session {
             SchemaStatement::DropEdgeType { name, if_exists } => {
                 match self.catalog.drop_edge_type_def(&name) {
                     Ok(()) => {
-                        self.log_schema_wal(&WalRecord::DropEdgeType { name: name.clone() });
+                        wal_log!(self, WalRecord::DropEdgeType { name: name.clone() });
                         Ok(QueryResult::status(format!("Dropped edge type '{name}'")))
                     }
                     Err(e) if if_exists => {
@@ -621,13 +640,17 @@ impl Session {
                         }
                     }
                 }
+                #[cfg(feature = "wal")]
                 for prop in &stmt.properties {
-                    self.log_schema_wal(&WalRecord::CreateIndex {
-                        name: stmt.name.clone(),
-                        label: stmt.label.clone(),
-                        property: prop.clone(),
-                        index_type: index_type_str.to_string(),
-                    });
+                    wal_log!(
+                        self,
+                        WalRecord::CreateIndex {
+                            name: stmt.name.clone(),
+                            label: stmt.label.clone(),
+                            property: prop.clone(),
+                            index_type: index_type_str.to_string(),
+                        }
+                    );
                 }
                 Ok(QueryResult::status(format!(
                     "Created {} index '{}'",
@@ -639,7 +662,7 @@ impl Session {
                 let dropped = self.store.drop_property_index(&name);
                 if dropped || if_exists {
                     if dropped {
-                        self.log_schema_wal(&WalRecord::DropIndex { name: name.clone() });
+                        wal_log!(self, WalRecord::DropIndex { name: name.clone() });
                     }
                     Ok(QueryResult::status(if dropped {
                         format!("Dropped index '{name}'")
@@ -665,19 +688,22 @@ impl Session {
                     .name
                     .clone()
                     .unwrap_or_else(|| format!("{}_{kind_str}", stmt.label));
-                self.log_schema_wal(&WalRecord::CreateConstraint {
-                    name: constraint_name.clone(),
-                    label: stmt.label.clone(),
-                    properties: stmt.properties.clone(),
-                    kind: kind_str.to_string(),
-                });
+                wal_log!(
+                    self,
+                    WalRecord::CreateConstraint {
+                        name: constraint_name.clone(),
+                        label: stmt.label.clone(),
+                        properties: stmt.properties.clone(),
+                        kind: kind_str.to_string(),
+                    }
+                );
                 Ok(QueryResult::status(format!(
                     "Created {kind_str} constraint '{constraint_name}'"
                 )))
             }
             SchemaStatement::DropConstraint { name, if_exists } => {
                 let _ = if_exists;
-                self.log_schema_wal(&WalRecord::DropConstraint { name: name.clone() });
+                wal_log!(self, WalRecord::DropConstraint { name: name.clone() });
                 Ok(QueryResult::status(format!("Dropped constraint '{name}'")))
             }
             SchemaStatement::CreateGraphType(stmt) => {
@@ -697,12 +723,15 @@ impl Session {
                 };
                 match result {
                     Ok(()) => {
-                        self.log_schema_wal(&WalRecord::CreateGraphType {
-                            name: stmt.name.clone(),
-                            node_types: stmt.node_types,
-                            edge_types: stmt.edge_types,
-                            open: stmt.open,
-                        });
+                        wal_log!(
+                            self,
+                            WalRecord::CreateGraphType {
+                                name: stmt.name.clone(),
+                                node_types: stmt.node_types,
+                                edge_types: stmt.edge_types,
+                                open: stmt.open,
+                            }
+                        );
                         Ok(QueryResult::status(format!(
                             "Created graph type '{}'",
                             stmt.name
@@ -721,7 +750,7 @@ impl Session {
             SchemaStatement::DropGraphType { name, if_exists } => {
                 match self.catalog.drop_graph_type(&name) {
                     Ok(()) => {
-                        self.log_schema_wal(&WalRecord::DropGraphType { name: name.clone() });
+                        wal_log!(self, WalRecord::DropGraphType { name: name.clone() });
                         Ok(QueryResult::status(format!("Dropped graph type '{name}'")))
                     }
                     Err(e) if if_exists => {
@@ -739,7 +768,7 @@ impl Session {
                 if_not_exists,
             } => match self.catalog.register_schema_namespace(name.clone()) {
                 Ok(()) => {
-                    self.log_schema_wal(&WalRecord::CreateSchema { name: name.clone() });
+                    wal_log!(self, WalRecord::CreateSchema { name: name.clone() });
                     Ok(QueryResult::status(format!("Created schema '{name}'")))
                 }
                 Err(e) if if_not_exists => {
@@ -754,7 +783,7 @@ impl Session {
             SchemaStatement::DropSchema { name, if_exists } => {
                 match self.catalog.drop_schema_namespace(&name) {
                     Ok(()) => {
-                        self.log_schema_wal(&WalRecord::DropSchema { name: name.clone() });
+                        wal_log!(self, WalRecord::DropSchema { name: name.clone() });
                         Ok(QueryResult::status(format!("Dropped schema '{name}'")))
                     }
                     Err(e) if if_exists => {
