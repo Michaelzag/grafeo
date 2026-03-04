@@ -21,6 +21,7 @@ pub fn value_to_js(value: &Value) -> JsValue {
         Value::Date(d) => JsValue::from_str(&d.to_string()),
         Value::Time(t) => JsValue::from_str(&t.to_string()),
         Value::Duration(d) => JsValue::from_str(&d.to_string()),
+        Value::ZonedDatetime(zdt) => JsValue::from_str(&zdt.to_string()),
         Value::List(items) => {
             let arr = Array::new_with_length(items.len() as u32);
             for (i, item) in items.iter().enumerate() {

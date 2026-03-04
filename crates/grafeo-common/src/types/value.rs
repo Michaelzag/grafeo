@@ -11,7 +11,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use super::{Date, Duration, Time, Timestamp};
+use super::{Date, Duration, Time, Timestamp, ZonedDatetime};
 
 /// An interned property name - cheap to clone and compare.
 ///
@@ -114,6 +114,9 @@ pub enum Value {
 
     /// ISO 8601 duration (months, days, nanos)
     Duration(Duration),
+
+    /// Datetime with a fixed UTC offset
+    ZonedDatetime(ZonedDatetime),
 
     /// Ordered list of values
     List(Arc<[Value]>),
@@ -238,6 +241,16 @@ impl Value {
         }
     }
 
+    /// Returns the zoned datetime value if this is a ZonedDatetime, otherwise None.
+    #[inline]
+    #[must_use]
+    pub const fn as_zoned_datetime(&self) -> Option<ZonedDatetime> {
+        match self {
+            Value::ZonedDatetime(zdt) => Some(*zdt),
+            _ => None,
+        }
+    }
+
     /// Returns the list value if this is a List, otherwise None.
     #[inline]
     #[must_use]
@@ -309,6 +322,7 @@ impl Value {
             Value::Date(_) => "DATE",
             Value::Time(_) => "TIME",
             Value::Duration(_) => "DURATION",
+            Value::ZonedDatetime(_) => "ZONED DATETIME",
             Value::List(_) => "LIST",
             Value::Map(_) => "MAP",
             Value::Vector(_) => "VECTOR",
@@ -349,6 +363,7 @@ impl fmt::Debug for Value {
             Value::Date(d) => write!(f, "Date({d})"),
             Value::Time(t) => write!(f, "Time({t})"),
             Value::Duration(d) => write!(f, "Duration({d})"),
+            Value::ZonedDatetime(zdt) => write!(f, "ZonedDatetime({zdt})"),
             Value::List(l) => write!(f, "List({l:?})"),
             Value::Map(m) => write!(f, "Map({m:?})"),
             Value::Vector(v) => write!(
@@ -377,6 +392,7 @@ impl fmt::Display for Value {
             Value::Date(d) => write!(f, "{d}"),
             Value::Time(t) => write!(f, "{t}"),
             Value::Duration(d) => write!(f, "{d}"),
+            Value::ZonedDatetime(zdt) => write!(f, "{zdt}"),
             Value::List(l) => {
                 write!(f, "[")?;
                 for (i, v) in l.iter().enumerate() {
@@ -513,6 +529,12 @@ impl From<Duration> for Value {
     }
 }
 
+impl From<ZonedDatetime> for Value {
+    fn from(zdt: ZonedDatetime) -> Self {
+        Value::ZonedDatetime(zdt)
+    }
+}
+
 impl<T: Into<Value>> From<Vec<T>> for Value {
     fn from(v: Vec<T>) -> Self {
         Value::List(v.into_iter().map(Into::into).collect())
@@ -601,6 +623,8 @@ pub enum OrderableValue {
     Date(Date),
     /// Time of day with optional offset
     Time(Time),
+    /// Datetime with a fixed UTC offset
+    ZonedDatetime(ZonedDatetime),
 }
 
 /// A wrapper around `f64` that implements `Ord` with total ordering.
@@ -688,6 +712,7 @@ impl TryFrom<&Value> for OrderableValue {
             Value::Timestamp(t) => Ok(Self::Timestamp(*t)),
             Value::Date(d) => Ok(Self::Date(*d)),
             Value::Time(t) => Ok(Self::Time(*t)),
+            Value::ZonedDatetime(zdt) => Ok(Self::ZonedDatetime(*zdt)),
             Value::Null
             | Value::Bytes(_)
             | Value::Duration(_)
@@ -711,6 +736,7 @@ impl OrderableValue {
             Self::Timestamp(t) => Value::Timestamp(t),
             Self::Date(d) => Value::Date(d),
             Self::Time(t) => Value::Time(t),
+            Self::ZonedDatetime(zdt) => Value::ZonedDatetime(zdt),
         }
     }
 
@@ -752,6 +778,7 @@ impl PartialEq for OrderableValue {
             (Self::Timestamp(a), Self::Timestamp(b)) => a == b,
             (Self::Date(a), Self::Date(b)) => a == b,
             (Self::Time(a), Self::Time(b)) => a == b,
+            (Self::ZonedDatetime(a), Self::ZonedDatetime(b)) => a == b,
             // Cross-type numeric comparison
             (Self::Int64(a), Self::Float64(b)) => (*a as f64) == b.0,
             (Self::Float64(a), Self::Int64(b)) => a.0 == (*b as f64),
@@ -778,11 +805,12 @@ impl Ord for OrderableValue {
             (Self::Timestamp(a), Self::Timestamp(b)) => a.cmp(b),
             (Self::Date(a), Self::Date(b)) => a.cmp(b),
             (Self::Time(a), Self::Time(b)) => a.cmp(b),
+            (Self::ZonedDatetime(a), Self::ZonedDatetime(b)) => a.cmp(b),
             // Cross-type numeric comparison
             (Self::Int64(a), Self::Float64(b)) => OrderedFloat64(*a as f64).cmp(b),
             (Self::Float64(a), Self::Int64(b)) => a.cmp(&OrderedFloat64(*b as f64)),
             // Different types: order by type ordinal for consistency
-            // Order: Bool < Int64 < Float64 < String < Timestamp < Date < Time
+            // Order: Bool < Int64 < Float64 < String < Timestamp < Date < Time < ZonedDatetime
             _ => self.type_ordinal().cmp(&other.type_ordinal()),
         }
     }
@@ -799,6 +827,7 @@ impl OrderableValue {
             Self::Timestamp(_) => 4,
             Self::Date(_) => 5,
             Self::Time(_) => 6,
+            Self::ZonedDatetime(_) => 7,
         }
     }
 }
@@ -814,6 +843,7 @@ impl Hash for OrderableValue {
             Self::Timestamp(t) => t.hash(state),
             Self::Date(d) => d.hash(state),
             Self::Time(t) => t.hash(state),
+            Self::ZonedDatetime(zdt) => zdt.hash(state),
         }
     }
 }
@@ -853,6 +883,7 @@ fn hash_value<H: Hasher>(value: &Value, state: &mut H) {
         Value::Date(d) => d.hash(state),
         Value::Time(t) => t.hash(state),
         Value::Duration(d) => d.hash(state),
+        Value::ZonedDatetime(zdt) => zdt.hash(state),
         Value::List(l) => {
             l.len().hash(state);
             for v in l.iter() {

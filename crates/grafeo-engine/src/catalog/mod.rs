@@ -353,6 +353,166 @@ impl Catalog {
             None => Err(CatalogError::SchemaNotEnabled),
         }
     }
+
+    /// Adds a property to a node type.
+    pub fn alter_node_type_add_property(
+        &self,
+        type_name: &str,
+        property: TypedProperty,
+    ) -> Result<(), CatalogError> {
+        match &self.schema {
+            Some(schema) => schema.alter_node_type_add_property(type_name, property),
+            None => Err(CatalogError::SchemaNotEnabled),
+        }
+    }
+
+    /// Drops a property from a node type.
+    pub fn alter_node_type_drop_property(
+        &self,
+        type_name: &str,
+        property_name: &str,
+    ) -> Result<(), CatalogError> {
+        match &self.schema {
+            Some(schema) => schema.alter_node_type_drop_property(type_name, property_name),
+            None => Err(CatalogError::SchemaNotEnabled),
+        }
+    }
+
+    /// Adds a property to an edge type.
+    pub fn alter_edge_type_add_property(
+        &self,
+        type_name: &str,
+        property: TypedProperty,
+    ) -> Result<(), CatalogError> {
+        match &self.schema {
+            Some(schema) => schema.alter_edge_type_add_property(type_name, property),
+            None => Err(CatalogError::SchemaNotEnabled),
+        }
+    }
+
+    /// Drops a property from an edge type.
+    pub fn alter_edge_type_drop_property(
+        &self,
+        type_name: &str,
+        property_name: &str,
+    ) -> Result<(), CatalogError> {
+        match &self.schema {
+            Some(schema) => schema.alter_edge_type_drop_property(type_name, property_name),
+            None => Err(CatalogError::SchemaNotEnabled),
+        }
+    }
+
+    /// Adds a node type to a graph type.
+    pub fn alter_graph_type_add_node_type(
+        &self,
+        graph_type_name: &str,
+        node_type: String,
+    ) -> Result<(), CatalogError> {
+        match &self.schema {
+            Some(schema) => schema.alter_graph_type_add_node_type(graph_type_name, node_type),
+            None => Err(CatalogError::SchemaNotEnabled),
+        }
+    }
+
+    /// Drops a node type from a graph type.
+    pub fn alter_graph_type_drop_node_type(
+        &self,
+        graph_type_name: &str,
+        node_type: &str,
+    ) -> Result<(), CatalogError> {
+        match &self.schema {
+            Some(schema) => schema.alter_graph_type_drop_node_type(graph_type_name, node_type),
+            None => Err(CatalogError::SchemaNotEnabled),
+        }
+    }
+
+    /// Adds an edge type to a graph type.
+    pub fn alter_graph_type_add_edge_type(
+        &self,
+        graph_type_name: &str,
+        edge_type: String,
+    ) -> Result<(), CatalogError> {
+        match &self.schema {
+            Some(schema) => schema.alter_graph_type_add_edge_type(graph_type_name, edge_type),
+            None => Err(CatalogError::SchemaNotEnabled),
+        }
+    }
+
+    /// Drops an edge type from a graph type.
+    pub fn alter_graph_type_drop_edge_type(
+        &self,
+        graph_type_name: &str,
+        edge_type: &str,
+    ) -> Result<(), CatalogError> {
+        match &self.schema {
+            Some(schema) => schema.alter_graph_type_drop_edge_type(graph_type_name, edge_type),
+            None => Err(CatalogError::SchemaNotEnabled),
+        }
+    }
+
+    /// Binds a graph instance to a graph type.
+    pub fn bind_graph_type(
+        &self,
+        graph_name: &str,
+        graph_type: String,
+    ) -> Result<(), CatalogError> {
+        match &self.schema {
+            Some(schema) => {
+                // Verify the graph type exists
+                if schema.get_graph_type(&graph_type).is_none() {
+                    return Err(CatalogError::TypeNotFound(graph_type));
+                }
+                schema
+                    .graph_type_bindings
+                    .write()
+                    .insert(graph_name.to_string(), graph_type);
+                Ok(())
+            }
+            None => Err(CatalogError::SchemaNotEnabled),
+        }
+    }
+
+    /// Gets the graph type binding for a graph instance.
+    pub fn get_graph_type_binding(&self, graph_name: &str) -> Option<String> {
+        self.schema
+            .as_ref()?
+            .graph_type_bindings
+            .read()
+            .get(graph_name)
+            .cloned()
+    }
+
+    /// Registers a stored procedure.
+    pub fn register_procedure(&self, def: ProcedureDefinition) -> Result<(), CatalogError> {
+        match &self.schema {
+            Some(schema) => schema.register_procedure(def),
+            None => Err(CatalogError::SchemaNotEnabled),
+        }
+    }
+
+    /// Replaces or creates a stored procedure.
+    pub fn replace_procedure(&self, def: ProcedureDefinition) -> Result<(), CatalogError> {
+        match &self.schema {
+            Some(schema) => {
+                schema.replace_procedure(def);
+                Ok(())
+            }
+            None => Err(CatalogError::SchemaNotEnabled),
+        }
+    }
+
+    /// Drops a stored procedure.
+    pub fn drop_procedure(&self, name: &str) -> Result<(), CatalogError> {
+        match &self.schema {
+            Some(schema) => schema.drop_procedure(name),
+            None => Err(CatalogError::SchemaNotEnabled),
+        }
+    }
+
+    /// Gets a stored procedure by name.
+    pub fn get_procedure(&self, name: &str) -> Option<ProcedureDefinition> {
+        self.schema.as_ref()?.get_procedure(name)
+    }
 }
 
 impl Default for Catalog {
@@ -817,6 +977,19 @@ pub struct GraphTypeDefinition {
     pub open: bool,
 }
 
+/// Definition of a stored procedure.
+#[derive(Debug, Clone)]
+pub struct ProcedureDefinition {
+    /// Procedure name.
+    pub name: String,
+    /// Parameter definitions: (name, type).
+    pub params: Vec<(String, String)>,
+    /// Return column definitions: (name, type).
+    pub returns: Vec<(String, String)>,
+    /// Raw GQL query body.
+    pub body: String,
+}
+
 // === Schema Catalog ===
 
 /// Schema constraints and type definitions.
@@ -833,6 +1006,10 @@ pub struct SchemaCatalog {
     graph_types: RwLock<HashMap<String, GraphTypeDefinition>>,
     /// Schema namespaces.
     schemas: RwLock<Vec<String>>,
+    /// Graph instance to graph type bindings.
+    graph_type_bindings: RwLock<HashMap<String, String>>,
+    /// Stored procedure definitions.
+    procedures: RwLock<HashMap<String, ProcedureDefinition>>,
 }
 
 impl SchemaCatalog {
@@ -844,6 +1021,8 @@ impl SchemaCatalog {
             edge_types: RwLock::new(HashMap::new()),
             graph_types: RwLock::new(HashMap::new()),
             schemas: RwLock::new(Vec::new()),
+            graph_type_bindings: RwLock::new(HashMap::new()),
+            procedures: RwLock::new(HashMap::new()),
         }
     }
 
@@ -971,6 +1150,181 @@ impl SchemaCatalog {
         } else {
             Err(CatalogError::SchemaNotFound(name.to_string()))
         }
+    }
+
+    // --- ALTER operations ---
+
+    /// Adds a property to an existing node type.
+    pub fn alter_node_type_add_property(
+        &self,
+        type_name: &str,
+        property: TypedProperty,
+    ) -> Result<(), CatalogError> {
+        let mut types = self.node_types.write();
+        let def = types
+            .get_mut(type_name)
+            .ok_or_else(|| CatalogError::TypeNotFound(type_name.to_string()))?;
+        if def.properties.iter().any(|p| p.name == property.name) {
+            return Err(CatalogError::TypeAlreadyExists(format!(
+                "property {} on {}",
+                property.name, type_name
+            )));
+        }
+        def.properties.push(property);
+        Ok(())
+    }
+
+    /// Drops a property from an existing node type.
+    pub fn alter_node_type_drop_property(
+        &self,
+        type_name: &str,
+        property_name: &str,
+    ) -> Result<(), CatalogError> {
+        let mut types = self.node_types.write();
+        let def = types
+            .get_mut(type_name)
+            .ok_or_else(|| CatalogError::TypeNotFound(type_name.to_string()))?;
+        let len_before = def.properties.len();
+        def.properties.retain(|p| p.name != property_name);
+        if def.properties.len() == len_before {
+            return Err(CatalogError::TypeNotFound(format!(
+                "property {} on {}",
+                property_name, type_name
+            )));
+        }
+        Ok(())
+    }
+
+    /// Adds a property to an existing edge type.
+    pub fn alter_edge_type_add_property(
+        &self,
+        type_name: &str,
+        property: TypedProperty,
+    ) -> Result<(), CatalogError> {
+        let mut types = self.edge_types.write();
+        let def = types
+            .get_mut(type_name)
+            .ok_or_else(|| CatalogError::TypeNotFound(type_name.to_string()))?;
+        if def.properties.iter().any(|p| p.name == property.name) {
+            return Err(CatalogError::TypeAlreadyExists(format!(
+                "property {} on {}",
+                property.name, type_name
+            )));
+        }
+        def.properties.push(property);
+        Ok(())
+    }
+
+    /// Drops a property from an existing edge type.
+    pub fn alter_edge_type_drop_property(
+        &self,
+        type_name: &str,
+        property_name: &str,
+    ) -> Result<(), CatalogError> {
+        let mut types = self.edge_types.write();
+        let def = types
+            .get_mut(type_name)
+            .ok_or_else(|| CatalogError::TypeNotFound(type_name.to_string()))?;
+        let len_before = def.properties.len();
+        def.properties.retain(|p| p.name != property_name);
+        if def.properties.len() == len_before {
+            return Err(CatalogError::TypeNotFound(format!(
+                "property {} on {}",
+                property_name, type_name
+            )));
+        }
+        Ok(())
+    }
+
+    /// Adds a node type to a graph type.
+    pub fn alter_graph_type_add_node_type(
+        &self,
+        graph_type_name: &str,
+        node_type: String,
+    ) -> Result<(), CatalogError> {
+        let mut types = self.graph_types.write();
+        let def = types
+            .get_mut(graph_type_name)
+            .ok_or_else(|| CatalogError::TypeNotFound(graph_type_name.to_string()))?;
+        if !def.allowed_node_types.contains(&node_type) {
+            def.allowed_node_types.push(node_type);
+        }
+        Ok(())
+    }
+
+    /// Drops a node type from a graph type.
+    pub fn alter_graph_type_drop_node_type(
+        &self,
+        graph_type_name: &str,
+        node_type: &str,
+    ) -> Result<(), CatalogError> {
+        let mut types = self.graph_types.write();
+        let def = types
+            .get_mut(graph_type_name)
+            .ok_or_else(|| CatalogError::TypeNotFound(graph_type_name.to_string()))?;
+        def.allowed_node_types.retain(|t| t != node_type);
+        Ok(())
+    }
+
+    /// Adds an edge type to a graph type.
+    pub fn alter_graph_type_add_edge_type(
+        &self,
+        graph_type_name: &str,
+        edge_type: String,
+    ) -> Result<(), CatalogError> {
+        let mut types = self.graph_types.write();
+        let def = types
+            .get_mut(graph_type_name)
+            .ok_or_else(|| CatalogError::TypeNotFound(graph_type_name.to_string()))?;
+        if !def.allowed_edge_types.contains(&edge_type) {
+            def.allowed_edge_types.push(edge_type);
+        }
+        Ok(())
+    }
+
+    /// Drops an edge type from a graph type.
+    pub fn alter_graph_type_drop_edge_type(
+        &self,
+        graph_type_name: &str,
+        edge_type: &str,
+    ) -> Result<(), CatalogError> {
+        let mut types = self.graph_types.write();
+        let def = types
+            .get_mut(graph_type_name)
+            .ok_or_else(|| CatalogError::TypeNotFound(graph_type_name.to_string()))?;
+        def.allowed_edge_types.retain(|t| t != edge_type);
+        Ok(())
+    }
+
+    // --- Procedure operations ---
+
+    /// Registers a stored procedure.
+    pub fn register_procedure(&self, def: ProcedureDefinition) -> Result<(), CatalogError> {
+        let mut procs = self.procedures.write();
+        if procs.contains_key(&def.name) {
+            return Err(CatalogError::TypeAlreadyExists(def.name.clone()));
+        }
+        procs.insert(def.name.clone(), def);
+        Ok(())
+    }
+
+    /// Replaces or creates a stored procedure.
+    pub fn replace_procedure(&self, def: ProcedureDefinition) {
+        self.procedures.write().insert(def.name.clone(), def);
+    }
+
+    /// Drops a stored procedure.
+    pub fn drop_procedure(&self, name: &str) -> Result<(), CatalogError> {
+        let mut procs = self.procedures.write();
+        if procs.remove(name).is_none() {
+            return Err(CatalogError::TypeNotFound(name.to_string()));
+        }
+        Ok(())
+    }
+
+    /// Gets a stored procedure by name.
+    pub fn get_procedure(&self, name: &str) -> Option<ProcedureDefinition> {
+        self.procedures.read().get(name).cloned()
     }
 
     fn add_unique_constraint(

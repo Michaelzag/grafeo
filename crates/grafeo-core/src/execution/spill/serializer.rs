@@ -27,6 +27,7 @@ const TAG_DATE: u8 = 10;
 const TAG_TIME: u8 = 11;
 const TAG_DURATION: u8 = 12;
 const TAG_PATH: u8 = 13;
+const TAG_ZONED_DATETIME: u8 = 14;
 
 /// Serializes a Value to bytes.
 ///
@@ -125,6 +126,12 @@ pub fn serialize_value<W: Write + ?Sized>(value: &Value, w: &mut W) -> std::io::
             w.write_all(&d.days().to_le_bytes())?;
             w.write_all(&d.nanos().to_le_bytes())?;
             Ok(25)
+        }
+        Value::ZonedDatetime(zdt) => {
+            w.write_all(&[TAG_ZONED_DATETIME])?;
+            w.write_all(&zdt.as_timestamp().as_micros().to_le_bytes())?;
+            w.write_all(&zdt.offset_seconds().to_le_bytes())?;
+            Ok(13)
         }
         Value::Path { nodes, edges } => {
             w.write_all(&[TAG_PATH])?;
@@ -272,6 +279,20 @@ pub fn deserialize_value<R: Read + ?Sized>(r: &mut R) -> std::io::Result<Value> 
             Ok(Value::Duration(grafeo_common::types::Duration::new(
                 months, days, nanos,
             )))
+        }
+        TAG_ZONED_DATETIME => {
+            let mut micros_buf = [0u8; 8];
+            r.read_exact(&mut micros_buf)?;
+            let micros = i64::from_le_bytes(micros_buf);
+            let mut offset_buf = [0u8; 4];
+            r.read_exact(&mut offset_buf)?;
+            let offset = i32::from_le_bytes(offset_buf);
+            Ok(Value::ZonedDatetime(
+                grafeo_common::types::ZonedDatetime::from_timestamp_offset(
+                    grafeo_common::types::Timestamp::from_micros(micros),
+                    offset,
+                ),
+            ))
         }
         TAG_PATH => {
             let mut len_buf = [0u8; 8];

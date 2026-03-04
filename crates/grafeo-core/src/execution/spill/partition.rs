@@ -512,6 +512,10 @@ fn hash_key(key: &[Value]) -> u64 {
                 12u8.hash(&mut hasher);
                 d.hash(&mut hasher);
             }
+            Value::ZonedDatetime(zdt) => {
+                14u8.hash(&mut hasher);
+                zdt.hash(&mut hasher);
+            }
             Value::List(l) => {
                 7u8.hash(&mut hasher);
                 l.len().hash(&mut hasher);

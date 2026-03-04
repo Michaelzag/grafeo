@@ -183,6 +183,69 @@ pub enum LogicalOperator {
     CallProcedure(CallProcedureOp),
 }
 
+impl LogicalOperator {
+    /// Returns `true` if this operator or any of its children perform mutations.
+    #[must_use]
+    pub fn has_mutations(&self) -> bool {
+        match self {
+            // Direct mutation operators
+            Self::CreateNode(_)
+            | Self::CreateEdge(_)
+            | Self::DeleteNode(_)
+            | Self::DeleteEdge(_)
+            | Self::SetProperty(_)
+            | Self::AddLabel(_)
+            | Self::RemoveLabel(_)
+            | Self::Merge(_)
+            | Self::MergeRelationship(_)
+            | Self::InsertTriple(_)
+            | Self::DeleteTriple(_)
+            | Self::Modify(_)
+            | Self::ClearGraph(_)
+            | Self::CreateGraph(_)
+            | Self::DropGraph(_)
+            | Self::LoadGraph(_)
+            | Self::CopyGraph(_)
+            | Self::MoveGraph(_)
+            | Self::AddGraph(_)
+            | Self::CreatePropertyGraph(_) => true,
+
+            // Operators with an `input` child
+            Self::Filter(op) => op.input.has_mutations(),
+            Self::Project(op) => op.input.has_mutations(),
+            Self::Aggregate(op) => op.input.has_mutations(),
+            Self::Limit(op) => op.input.has_mutations(),
+            Self::Skip(op) => op.input.has_mutations(),
+            Self::Sort(op) => op.input.has_mutations(),
+            Self::Distinct(op) => op.input.has_mutations(),
+            Self::Unwind(op) => op.input.has_mutations(),
+            Self::Bind(op) => op.input.has_mutations(),
+            Self::MapCollect(op) => op.input.has_mutations(),
+            Self::Return(op) => op.input.has_mutations(),
+            Self::VectorScan(_) | Self::VectorJoin(_) => false,
+
+            // Operators with two children
+            Self::Join(op) => op.left.has_mutations() || op.right.has_mutations(),
+            Self::LeftJoin(op) => op.left.has_mutations() || op.right.has_mutations(),
+            Self::AntiJoin(op) => op.left.has_mutations() || op.right.has_mutations(),
+            Self::Except(op) => op.left.has_mutations() || op.right.has_mutations(),
+            Self::Intersect(op) => op.left.has_mutations() || op.right.has_mutations(),
+            Self::Otherwise(op) => op.left.has_mutations() || op.right.has_mutations(),
+            Self::Union(op) => op.inputs.iter().any(|i| i.has_mutations()),
+            Self::Apply(op) => op.input.has_mutations() || op.subplan.has_mutations(),
+
+            // Leaf operators (read-only)
+            Self::NodeScan(_)
+            | Self::EdgeScan(_)
+            | Self::Expand(_)
+            | Self::TripleScan(_)
+            | Self::ShortestPath(_)
+            | Self::Empty
+            | Self::CallProcedure(_) => false,
+        }
+    }
+}
+
 /// Scan nodes from the graph.
 #[derive(Debug, Clone)]
 pub struct NodeScanOp {

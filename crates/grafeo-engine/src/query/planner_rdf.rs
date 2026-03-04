@@ -3051,6 +3051,7 @@ fn value_to_string(value: &Value) -> String {
             let parts: Vec<String> = v.iter().map(|f| f.to_string()).collect();
             format!("vector([{}])", parts.join(", "))
         }
+        Value::ZonedDatetime(zdt) => zdt.to_string(),
         Value::Path { nodes, edges } => {
             format!("<path: {} nodes, {} edges>", nodes.len(), edges.len())
         }

@@ -297,6 +297,44 @@ impl PyValue {
                 dict.into_py_any(py)
                     .expect("dict to Python conversion cannot fail")
             }
+            Value::ZonedDatetime(zdt) => {
+                // Convert to Python datetime with fixed-offset timezone
+                let datetime_mod = py.import("datetime").expect("datetime module is built-in");
+                let local_date = zdt.to_local_date();
+                let local_time = zdt.to_local_time();
+                let micros = local_time.nanosecond() / 1000;
+                let offset_secs = zdt.offset_seconds();
+
+                // Build timezone using timedelta
+                let td_class = datetime_mod
+                    .getattr("timedelta")
+                    .expect("datetime.timedelta should exist");
+                let tz_class = datetime_mod
+                    .getattr("timezone")
+                    .expect("datetime.timezone should exist");
+                let dt_class = datetime_mod
+                    .getattr("datetime")
+                    .expect("datetime.datetime should exist");
+
+                let td = td_class
+                    .call1((0, offset_secs))
+                    .unwrap_or_else(|_| py.None().bind(py).clone());
+                let tz = tz_class
+                    .call1((td,))
+                    .unwrap_or_else(|_| py.None().bind(py).clone());
+                dt_class
+                    .call1((
+                        local_date.year(),
+                        local_date.month(),
+                        local_date.day(),
+                        local_time.hour(),
+                        local_time.minute(),
+                        local_time.second(),
+                        micros,
+                        tz,
+                    ))
+                    .map_or_else(|_| py.None(), |dt| dt.unbind().into_any())
+            }
             Value::Vector(v) => {
                 // Convert vector to Python list of floats
                 let py_floats: Vec<f32> = v.iter().copied().collect();

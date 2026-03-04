@@ -54,6 +54,14 @@ pub fn json_to_value(v: &serde_json::Value) -> Value {
             {
                 return Value::Duration(d);
             }
+            // Check for $zoned_datetime encoding
+            if let Some(s) = obj
+                .get("$zoned_datetime")
+                .and_then(serde_json::Value::as_str)
+                && let Some(zdt) = grafeo_common::types::ZonedDatetime::parse(s)
+            {
+                return Value::ZonedDatetime(zdt);
+            }
             let mut map = BTreeMap::new();
             for (k, v) in obj {
                 map.insert(PropertyKey::new(k.clone()), json_to_value(v));
@@ -84,6 +92,7 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
         Value::Date(d) => serde_json::json!({ "$date": d.to_string() }),
         Value::Time(t) => serde_json::json!({ "$time": t.to_string() }),
         Value::Duration(d) => serde_json::json!({ "$duration": d.to_string() }),
+        Value::ZonedDatetime(zdt) => serde_json::json!({ "$zoned_datetime": zdt.to_string() }),
         Value::List(items) => serde_json::Value::Array(items.iter().map(value_to_json).collect()),
         Value::Map(map) => {
             let obj: serde_json::Map<String, serde_json::Value> = map

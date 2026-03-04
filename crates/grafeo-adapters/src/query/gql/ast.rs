@@ -26,17 +26,30 @@ pub enum Statement {
     SessionCommand(SessionCommand),
 }
 
+/// GQL transaction isolation level (ISO/IEC 39075 Section 19).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransactionIsolationLevel {
+    /// READ COMMITTED
+    ReadCommitted,
+    /// SNAPSHOT ISOLATION (also matches REPEATABLE READ)
+    SnapshotIsolation,
+    /// SERIALIZABLE
+    Serializable,
+}
+
 /// Session and transaction commands.
 #[derive(Debug, Clone)]
 pub enum SessionCommand {
     /// `USE GRAPH name`
     UseGraph(String),
-    /// `CREATE [PROPERTY] GRAPH name [IF NOT EXISTS]`
+    /// `CREATE [PROPERTY] GRAPH name [IF NOT EXISTS] [TYPED type_name]`
     CreateGraph {
         /// Graph name.
         name: String,
         /// IF NOT EXISTS flag.
         if_not_exists: bool,
+        /// Optional graph type binding.
+        typed: Option<String>,
     },
     /// `DROP [PROPERTY] GRAPH [IF EXISTS] name`
     DropGraph {
@@ -55,8 +68,13 @@ pub enum SessionCommand {
     SessionReset,
     /// `SESSION CLOSE`
     SessionClose,
-    /// `START TRANSACTION`
-    StartTransaction,
+    /// `START TRANSACTION [READ ONLY | READ WRITE] [ISOLATION LEVEL <level>]`
+    StartTransaction {
+        /// Whether the transaction is read-only (default: false = read-write).
+        read_only: bool,
+        /// Optional isolation level override.
+        isolation_level: Option<TransactionIsolationLevel>,
+    },
     /// `COMMIT`
     Commit,
     /// `ROLLBACK`
@@ -640,6 +658,21 @@ pub enum SchemaStatement {
         /// IF EXISTS flag.
         if_exists: bool,
     },
+    /// ALTER NODE TYPE.
+    AlterNodeType(AlterTypeStatement),
+    /// ALTER EDGE TYPE.
+    AlterEdgeType(AlterTypeStatement),
+    /// ALTER GRAPH TYPE.
+    AlterGraphType(AlterGraphTypeStatement),
+    /// CREATE PROCEDURE.
+    CreateProcedure(CreateProcedureStatement),
+    /// DROP PROCEDURE.
+    DropProcedure {
+        /// Procedure name.
+        name: String,
+        /// IF EXISTS flag.
+        if_exists: bool,
+    },
 }
 
 /// A CREATE NODE TYPE statement.
@@ -820,6 +853,95 @@ pub struct PropertyDefinition {
     pub nullable: bool,
 }
 
+/// An ALTER NODE TYPE or ALTER EDGE TYPE statement.
+#[derive(Debug, Clone)]
+pub struct AlterTypeStatement {
+    /// Type name to alter.
+    pub name: String,
+    /// Changes to apply.
+    pub alterations: Vec<TypeAlteration>,
+    /// Source span.
+    pub span: Option<SourceSpan>,
+}
+
+/// A single alteration to a node or edge type.
+#[derive(Debug, Clone)]
+pub enum TypeAlteration {
+    /// Add a property to the type.
+    AddProperty(PropertyDefinition),
+    /// Remove a property from the type.
+    DropProperty(String),
+}
+
+/// An ALTER GRAPH TYPE statement.
+#[derive(Debug, Clone)]
+pub struct AlterGraphTypeStatement {
+    /// Graph type name to alter.
+    pub name: String,
+    /// Changes to apply.
+    pub alterations: Vec<GraphTypeAlteration>,
+    /// Source span.
+    pub span: Option<SourceSpan>,
+}
+
+/// A single alteration to a graph type.
+#[derive(Debug, Clone)]
+pub enum GraphTypeAlteration {
+    /// Add a node type to the graph type.
+    AddNodeType(String),
+    /// Remove a node type from the graph type.
+    DropNodeType(String),
+    /// Add an edge type to the graph type.
+    AddEdgeType(String),
+    /// Remove an edge type from the graph type.
+    DropEdgeType(String),
+}
+
+/// A CREATE PROCEDURE statement.
+///
+/// # Syntax
+///
+/// ```text
+/// CREATE [OR REPLACE] PROCEDURE name(param1 type, ...)
+///   RETURNS (col1 type, ...)
+///   AS { <GQL query body> }
+/// ```
+#[derive(Debug, Clone)]
+pub struct CreateProcedureStatement {
+    /// Procedure name.
+    pub name: String,
+    /// Parameter definitions.
+    pub params: Vec<ProcedureParam>,
+    /// Return column definitions.
+    pub returns: Vec<ProcedureReturn>,
+    /// Raw GQL query body.
+    pub body: String,
+    /// IF NOT EXISTS flag.
+    pub if_not_exists: bool,
+    /// OR REPLACE flag.
+    pub or_replace: bool,
+    /// Source span.
+    pub span: Option<SourceSpan>,
+}
+
+/// A stored procedure parameter.
+#[derive(Debug, Clone)]
+pub struct ProcedureParam {
+    /// Parameter name.
+    pub name: String,
+    /// Type name (e.g. "INT64", "STRING").
+    pub param_type: String,
+}
+
+/// A stored procedure return column.
+#[derive(Debug, Clone)]
+pub struct ProcedureReturn {
+    /// Column name.
+    pub name: String,
+    /// Type name.
+    pub return_type: String,
+}
+
 /// An expression.
 #[derive(Debug, Clone)]
 pub enum Expression {
@@ -974,6 +1096,10 @@ pub enum Literal {
     Duration(String),
     /// Typed datetime literal: `DATETIME '2024-01-15T14:30:00Z'`
     Datetime(String),
+    /// Typed zoned datetime literal: `ZONED DATETIME '2024-01-15T14:30:00+05:30'`
+    ZonedDatetime(String),
+    /// Typed zoned time literal: `ZONED TIME '14:30:00+05:30'`
+    ZonedTime(String),
 }
 
 /// A binary operator.

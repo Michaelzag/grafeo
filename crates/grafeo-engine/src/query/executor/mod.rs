@@ -4,6 +4,8 @@
 
 #[cfg(feature = "algos")]
 pub mod procedure_call;
+#[cfg(feature = "algos")]
+pub mod user_procedure;
 
 use std::time::Instant;
 

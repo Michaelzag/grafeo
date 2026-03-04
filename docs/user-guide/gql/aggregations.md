@@ -97,3 +97,76 @@ WITH p, count(friend) AS friend_count
 WHERE friend_count > 5
 RETURN p.name, friend_count
 ```
+
+## Standard Deviation
+
+```sql
+-- Sample standard deviation
+MATCH (p:Person)
+RETURN stdev(p.age) AS age_stdev
+
+-- stddev() is an alias
+MATCH (p:Person)
+RETURN stddev(p.age)
+
+-- Population standard deviation
+MATCH (p:Person)
+RETURN stdevp(p.age) AS age_stdevp
+```
+
+## Percentiles
+
+```sql
+-- Discrete percentile (returns the nearest actual value)
+MATCH (p:Person)
+RETURN percentile_disc(p.salary, 0.5) AS median_salary
+
+-- Continuous percentile (interpolates between values)
+MATCH (p:Person)
+RETURN percentile_cont(p.salary, 0.5) AS median_salary
+
+-- Multiple percentiles
+MATCH (p:Person)
+RETURN
+    percentile_cont(p.salary, 0.25) AS p25,
+    percentile_cont(p.salary, 0.50) AS median,
+    percentile_cont(p.salary, 0.75) AS p75,
+    percentile_cont(p.salary, 0.90) AS p90
+```
+
+## Explicit GROUP BY
+
+GQL supports explicit `GROUP BY` as an alternative to implicit grouping via non-aggregated columns in `RETURN`:
+
+```sql
+-- Explicit GROUP BY
+MATCH (p:Person)-[:LIVES_IN]->(c:City)
+RETURN c.name, count(p) AS population
+GROUP BY c.name
+
+-- Multiple GROUP BY keys
+MATCH (p:Person)-[:WORKS_AT]->(c:Company)
+RETURN c.name, p.department, count(p) AS headcount
+GROUP BY c.name, p.department
+```
+
+## HAVING
+
+Filter on aggregated results using `HAVING`. This applies after grouping, unlike `WHERE` which filters before grouping:
+
+```sql
+-- Cities with more than 100 people
+MATCH (p:Person)-[:LIVES_IN]->(c:City)
+RETURN c.name, count(p) AS population
+GROUP BY c.name
+HAVING count(p) > 100
+
+-- Departments with above-average salary
+MATCH (p:Person)
+RETURN p.department,
+    avg(p.salary) AS avg_salary,
+    count(p) AS headcount
+GROUP BY p.department
+HAVING avg(p.salary) > 80000
+ORDER BY avg_salary DESC
+```

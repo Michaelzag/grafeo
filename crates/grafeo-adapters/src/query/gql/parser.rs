@@ -294,9 +294,10 @@ impl<'a> Parser<'a> {
                         self.advance();
                         Ok(Statement::SessionCommand(SessionCommand::Rollback))
                     }
+                    "ALTER" => self.parse_alter(),
                     _ => Err(self.error(
                         "Expected MATCH, INSERT, DELETE, MERGE, UNWIND, FOR, CREATE, CALL, \
-                         DROP, USE, SESSION, START, COMMIT, or ROLLBACK",
+                         DROP, ALTER, USE, SESSION, START, COMMIT, or ROLLBACK",
                     )),
                 }
             }
@@ -2773,6 +2774,25 @@ impl<'a> Parser<'a> {
                     }
                 }
 
+                // Compound typed literals: ZONED DATETIME 'str', ZONED TIME 'str'
+                if name.eq_ignore_ascii_case("ZONED") && self.is_identifier() {
+                    let sub = self.get_identifier_name().to_uppercase();
+                    if sub == "DATETIME" || sub == "TIME" {
+                        self.advance(); // consume DATETIME/TIME
+                        if self.current.kind == TokenKind::String {
+                            let text = &self.current.text;
+                            let inner = &text[1..text.len() - 1];
+                            let val = unescape_string(inner);
+                            self.advance();
+                            return Ok(Expression::Literal(if sub == "DATETIME" {
+                                Literal::ZonedDatetime(val)
+                            } else {
+                                Literal::ZonedTime(val)
+                            }));
+                        }
+                    }
+                }
+
                 if self.current.kind == TokenKind::Dot {
                     self.advance();
                     if !self.is_identifier() {
@@ -2897,8 +2917,16 @@ impl<'a> Parser<'a> {
                 let expr = self.parse_expression()?;
                 self.expect(TokenKind::As)?;
                 let type_name = if self.is_identifier() {
-                    let name = self.get_identifier_name().to_uppercase();
+                    let mut name = self.get_identifier_name().to_uppercase();
                     self.advance();
+                    // Handle compound type names: ZONED DATETIME, ZONED TIME
+                    if name == "ZONED" && self.is_identifier() {
+                        let sub = self.get_identifier_name().to_uppercase();
+                        if sub == "DATETIME" || sub == "TIME" {
+                            name = format!("ZONED {sub}");
+                            self.advance();
+                        }
+                    }
                     name
                 } else {
                     return Err(self.error("Expected type name after AS"));
@@ -2913,6 +2941,8 @@ impl<'a> Parser<'a> {
                     "TIME" | "LOCALTIME" => "toTime",
                     "DATETIME" | "TIMESTAMP" | "LOCALDATETIME" => "toDatetime",
                     "DURATION" => "toDuration",
+                    "ZONED DATETIME" => "toZonedDatetime",
+                    "ZONED TIME" => "toZonedTime",
                     "LIST" => "toList",
                     _ => return Err(self.error(&format!("Unsupported CAST type: {type_name}"))),
                 };
@@ -3406,8 +3436,14 @@ impl<'a> Parser<'a> {
                     if_not_exists,
                 })
             }
+            _ if self.is_identifier()
+                && self.get_identifier_name().eq_ignore_ascii_case("PROCEDURE") =>
+            {
+                self.advance(); // consume PROCEDURE
+                self.parse_create_procedure(or_replace)
+            }
             _ => Err(self.error(
-                "Expected NODE, EDGE, VECTOR, INDEX, CONSTRAINT, GRAPH, or SCHEMA after CREATE",
+                "Expected NODE, EDGE, VECTOR, INDEX, CONSTRAINT, GRAPH, SCHEMA, or PROCEDURE after CREATE",
             )),
         }
     }
@@ -3876,6 +3912,22 @@ impl<'a> Parser<'a> {
                 }))
             }
             _ if self.is_identifier()
+                && self.get_identifier_name().eq_ignore_ascii_case("PROCEDURE") =>
+            {
+                // DROP PROCEDURE [IF EXISTS] name
+                self.advance(); // consume PROCEDURE
+                let if_exists = self.try_parse_if_exists();
+                if !self.is_identifier() {
+                    return Err(self.error("Expected procedure name"));
+                }
+                let name = self.get_identifier_name();
+                self.advance();
+                Ok(Statement::Schema(SchemaStatement::DropProcedure {
+                    name,
+                    if_exists,
+                }))
+            }
+            _ if self.is_identifier()
                 && self.get_identifier_name().eq_ignore_ascii_case("GRAPH") =>
             {
                 // Could be DROP GRAPH TYPE or DROP GRAPH <name>
@@ -3904,6 +3956,198 @@ impl<'a> Parser<'a> {
                 self.parse_drop_graph_body().map(Statement::SessionCommand)
             }
         }
+    }
+
+    /// Parses ALTER NODE TYPE, ALTER EDGE TYPE, ALTER GRAPH TYPE.
+    fn parse_alter(&mut self) -> Result<Statement> {
+        let span_start = self.current.span.start;
+        self.advance(); // consume ALTER
+
+        match self.current.kind {
+            TokenKind::Node => {
+                // ALTER NODE TYPE name ADD/DROP ...
+                self.advance();
+                self.expect(TokenKind::Type)?;
+                self.parse_alter_type(true, span_start)
+            }
+            TokenKind::Edge => {
+                // ALTER EDGE TYPE name ADD/DROP ...
+                self.advance();
+                self.expect(TokenKind::Type)?;
+                self.parse_alter_type(false, span_start)
+            }
+            _ if self.is_identifier()
+                && self.get_identifier_name().eq_ignore_ascii_case("GRAPH") =>
+            {
+                // ALTER GRAPH TYPE name ADD/DROP ...
+                self.advance(); // consume GRAPH
+                self.expect(TokenKind::Type)?;
+                self.parse_alter_graph_type(span_start)
+            }
+            _ => Err(self.error("Expected NODE, EDGE, or GRAPH after ALTER")),
+        }
+    }
+
+    /// Parses ALTER NODE TYPE name / ALTER EDGE TYPE name alterations.
+    fn parse_alter_type(&mut self, is_node: bool, span_start: usize) -> Result<Statement> {
+        if !self.is_identifier() {
+            return Err(self.error("Expected type name"));
+        }
+        let name = self.get_identifier_name();
+        self.advance();
+
+        let mut alterations = Vec::new();
+        loop {
+            if !self.is_identifier() {
+                break;
+            }
+            let action = self.get_identifier_name().to_uppercase();
+            match action.as_str() {
+                "ADD" => {
+                    self.advance();
+                    // ADD property_name type [NOT NULL]
+                    if !self.is_identifier() {
+                        return Err(self.error("Expected property name after ADD"));
+                    }
+                    let prop_name = self.get_identifier_name();
+                    self.advance();
+                    if !self.is_identifier() {
+                        return Err(self.error("Expected type name"));
+                    }
+                    let data_type = self.get_identifier_name();
+                    self.advance();
+                    let nullable = if self.current.kind == TokenKind::Not {
+                        self.advance();
+                        if self.current.kind != TokenKind::Null {
+                            return Err(self.error("Expected NULL after NOT"));
+                        }
+                        self.advance();
+                        false
+                    } else {
+                        true
+                    };
+                    alterations.push(TypeAlteration::AddProperty(PropertyDefinition {
+                        name: prop_name,
+                        data_type,
+                        nullable,
+                    }));
+                }
+                "DROP" => {
+                    self.advance();
+                    if !self.is_identifier() {
+                        return Err(self.error("Expected property name after DROP"));
+                    }
+                    let prop_name = self.get_identifier_name();
+                    self.advance();
+                    alterations.push(TypeAlteration::DropProperty(prop_name));
+                }
+                _ => break,
+            }
+        }
+
+        if alterations.is_empty() {
+            return Err(self.error("Expected ADD or DROP alteration"));
+        }
+
+        let span = Some(SourceSpan::new(span_start, self.current.span.end, 1, 1));
+        let stmt = AlterTypeStatement {
+            name,
+            alterations,
+            span,
+        };
+        if is_node {
+            Ok(Statement::Schema(SchemaStatement::AlterNodeType(stmt)))
+        } else {
+            Ok(Statement::Schema(SchemaStatement::AlterEdgeType(stmt)))
+        }
+    }
+
+    /// Parses ALTER GRAPH TYPE name alterations.
+    fn parse_alter_graph_type(&mut self, span_start: usize) -> Result<Statement> {
+        if !self.is_identifier() {
+            return Err(self.error("Expected graph type name"));
+        }
+        let name = self.get_identifier_name();
+        self.advance();
+
+        let mut alterations = Vec::new();
+        loop {
+            if !self.is_identifier() {
+                break;
+            }
+            let action = self.get_identifier_name().to_uppercase();
+            match action.as_str() {
+                "ADD" => {
+                    self.advance();
+                    // ADD NODE TYPE name or ADD EDGE TYPE name
+                    let kind = self.current.kind;
+                    match kind {
+                        TokenKind::Node => {
+                            self.advance();
+                            self.expect(TokenKind::Type)?;
+                            if !self.is_identifier() {
+                                return Err(self.error("Expected node type name"));
+                            }
+                            let type_name = self.get_identifier_name();
+                            self.advance();
+                            alterations.push(GraphTypeAlteration::AddNodeType(type_name));
+                        }
+                        TokenKind::Edge => {
+                            self.advance();
+                            self.expect(TokenKind::Type)?;
+                            if !self.is_identifier() {
+                                return Err(self.error("Expected edge type name"));
+                            }
+                            let type_name = self.get_identifier_name();
+                            self.advance();
+                            alterations.push(GraphTypeAlteration::AddEdgeType(type_name));
+                        }
+                        _ => return Err(self.error("Expected NODE or EDGE after ADD")),
+                    }
+                }
+                "DROP" => {
+                    self.advance();
+                    let kind = self.current.kind;
+                    match kind {
+                        TokenKind::Node => {
+                            self.advance();
+                            self.expect(TokenKind::Type)?;
+                            if !self.is_identifier() {
+                                return Err(self.error("Expected node type name"));
+                            }
+                            let type_name = self.get_identifier_name();
+                            self.advance();
+                            alterations.push(GraphTypeAlteration::DropNodeType(type_name));
+                        }
+                        TokenKind::Edge => {
+                            self.advance();
+                            self.expect(TokenKind::Type)?;
+                            if !self.is_identifier() {
+                                return Err(self.error("Expected edge type name"));
+                            }
+                            let type_name = self.get_identifier_name();
+                            self.advance();
+                            alterations.push(GraphTypeAlteration::DropEdgeType(type_name));
+                        }
+                        _ => return Err(self.error("Expected NODE or EDGE after DROP")),
+                    }
+                }
+                _ => break,
+            }
+        }
+
+        if alterations.is_empty() {
+            return Err(self.error("Expected ADD or DROP alteration"));
+        }
+
+        let span = Some(SourceSpan::new(span_start, self.current.span.end, 1, 1));
+        Ok(Statement::Schema(SchemaStatement::AlterGraphType(
+            AlterGraphTypeStatement {
+                name,
+                alterations,
+                span,
+            },
+        )))
     }
 
     fn parse_property_definitions(&mut self) -> Result<Vec<PropertyDefinition>> {
@@ -4012,6 +4256,115 @@ impl<'a> Parser<'a> {
         false
     }
 
+    /// Parses `CREATE [OR REPLACE] PROCEDURE name(params) RETURNS (cols) AS { body }`.
+    fn parse_create_procedure(&mut self, or_replace: bool) -> Result<SchemaStatement> {
+        let if_not_exists = self.try_parse_if_not_exists();
+
+        if !self.is_identifier() {
+            return Err(self.error("Expected procedure name"));
+        }
+        let name = self.get_identifier_name();
+        self.advance();
+
+        // Parse parameter list
+        self.expect(TokenKind::LParen)?;
+        let mut params = Vec::new();
+        if self.current.kind != TokenKind::RParen {
+            loop {
+                if !self.is_identifier() {
+                    return Err(self.error("Expected parameter name"));
+                }
+                let param_name = self.get_identifier_name();
+                self.advance();
+
+                if !self.is_identifier() {
+                    return Err(self.error("Expected parameter type"));
+                }
+                let param_type = self.get_identifier_name().to_uppercase();
+                self.advance();
+
+                params.push(ProcedureParam {
+                    name: param_name,
+                    param_type,
+                });
+
+                if self.current.kind != TokenKind::Comma {
+                    break;
+                }
+                self.advance();
+            }
+        }
+        self.expect(TokenKind::RParen)?;
+
+        // Parse RETURNS (col1 type, ...)
+        let mut returns = Vec::new();
+        if self.is_identifier() && self.get_identifier_name().eq_ignore_ascii_case("RETURNS") {
+            self.advance();
+            self.expect(TokenKind::LParen)?;
+            if self.current.kind != TokenKind::RParen {
+                loop {
+                    if !self.is_identifier() {
+                        return Err(self.error("Expected return column name"));
+                    }
+                    let col_name = self.get_identifier_name();
+                    self.advance();
+
+                    if !self.is_identifier() {
+                        return Err(self.error("Expected return column type"));
+                    }
+                    let col_type = self.get_identifier_name().to_uppercase();
+                    self.advance();
+
+                    returns.push(ProcedureReturn {
+                        name: col_name,
+                        return_type: col_type,
+                    });
+
+                    if self.current.kind != TokenKind::Comma {
+                        break;
+                    }
+                    self.advance();
+                }
+            }
+            self.expect(TokenKind::RParen)?;
+        }
+
+        // Expect AS
+        if !self.is_identifier() || !self.get_identifier_name().eq_ignore_ascii_case("AS") {
+            return Err(self.error("Expected AS before procedure body"));
+        }
+        self.advance();
+
+        // Parse body: { ... } with brace nesting
+        self.expect(TokenKind::LBrace)?;
+        let body_start = self.current.span.start;
+        let mut depth = 1u32;
+        while depth > 0 && self.current.kind != TokenKind::Eof {
+            if self.current.kind == TokenKind::LBrace {
+                depth += 1;
+            } else if self.current.kind == TokenKind::RBrace {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            self.advance();
+        }
+        let body_end = self.current.span.start;
+        let body = self.source[body_start..body_end].trim().to_string();
+        self.expect(TokenKind::RBrace)?;
+
+        Ok(SchemaStatement::CreateProcedure(CreateProcedureStatement {
+            name,
+            params,
+            returns,
+            body,
+            if_not_exists,
+            or_replace,
+            span: None,
+        }))
+    }
+
     /// Parses `CREATE [PROPERTY] GRAPH [IF NOT EXISTS] <name>`.
     fn parse_create_graph(&mut self) -> Result<SessionCommand> {
         self.expect(TokenKind::Create)?;
@@ -4057,9 +4410,24 @@ impl<'a> Parser<'a> {
         let name = self.get_identifier_name();
         self.advance();
 
+        // Optional TYPED type_name
+        let typed =
+            if self.is_identifier() && self.get_identifier_name().eq_ignore_ascii_case("TYPED") {
+                self.advance();
+                if !self.is_identifier() {
+                    return Err(self.error("Expected graph type name after TYPED"));
+                }
+                let type_name = self.get_identifier_name();
+                self.advance();
+                Some(type_name)
+            } else {
+                None
+            };
+
         Ok(SessionCommand::CreateGraph {
             name,
             if_not_exists,
+            typed,
         })
     }
 
@@ -4209,7 +4577,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parses `START TRANSACTION`.
+    /// Parses `START TRANSACTION [READ ONLY | READ WRITE] [ISOLATION LEVEL ...]`.
     fn parse_start_transaction(&mut self) -> Result<SessionCommand> {
         self.advance(); // consume START
         if !self.is_identifier()
@@ -4219,8 +4587,99 @@ impl<'a> Parser<'a> {
         {
             return Err(self.error("Expected TRANSACTION after START"));
         }
-        self.advance();
-        Ok(SessionCommand::StartTransaction)
+        self.advance(); // consume TRANSACTION
+
+        let mut read_only = false;
+        let mut isolation_level = None;
+
+        // Parse optional characteristics (can appear in either order)
+        for _ in 0..2 {
+            if !self.is_identifier() {
+                break;
+            }
+            let kw = self.get_identifier_name().to_uppercase();
+            match kw.as_str() {
+                "READ" => {
+                    self.advance(); // consume READ
+                    if !self.is_identifier() {
+                        return Err(self.error("Expected ONLY or WRITE after READ"));
+                    }
+                    let mode = self.get_identifier_name().to_uppercase();
+                    match mode.as_str() {
+                        "ONLY" => {
+                            self.advance();
+                            read_only = true;
+                        }
+                        "WRITE" | "COMMITTED" if mode == "WRITE" => {
+                            self.advance();
+                            read_only = false;
+                        }
+                        _ => return Err(self.error("Expected ONLY or WRITE after READ")),
+                    }
+                }
+                "ISOLATION" => {
+                    self.advance(); // consume ISOLATION
+                    if !self.is_identifier()
+                        || !self.get_identifier_name().eq_ignore_ascii_case("LEVEL")
+                    {
+                        return Err(self.error("Expected LEVEL after ISOLATION"));
+                    }
+                    self.advance(); // consume LEVEL
+                    isolation_level = Some(self.parse_isolation_level_name()?);
+                }
+                _ => break,
+            }
+        }
+
+        Ok(SessionCommand::StartTransaction {
+            read_only,
+            isolation_level,
+        })
+    }
+
+    /// Parses an isolation level name: READ COMMITTED, SNAPSHOT [ISOLATION],
+    /// REPEATABLE READ, or SERIALIZABLE.
+    fn parse_isolation_level_name(&mut self) -> Result<TransactionIsolationLevel> {
+        if !self.is_identifier() {
+            return Err(self.error("Expected isolation level name"));
+        }
+        let name = self.get_identifier_name().to_uppercase();
+        match name.as_str() {
+            "READ" => {
+                self.advance();
+                if !self.is_identifier()
+                    || !self.get_identifier_name().eq_ignore_ascii_case("COMMITTED")
+                {
+                    return Err(self.error("Expected COMMITTED after READ"));
+                }
+                self.advance();
+                Ok(TransactionIsolationLevel::ReadCommitted)
+            }
+            "SNAPSHOT" => {
+                self.advance();
+                // Optional "ISOLATION" suffix
+                if self.is_identifier()
+                    && self.get_identifier_name().eq_ignore_ascii_case("ISOLATION")
+                {
+                    self.advance();
+                }
+                Ok(TransactionIsolationLevel::SnapshotIsolation)
+            }
+            "REPEATABLE" => {
+                self.advance();
+                if !self.is_identifier() || !self.get_identifier_name().eq_ignore_ascii_case("READ")
+                {
+                    return Err(self.error("Expected READ after REPEATABLE"));
+                }
+                self.advance();
+                Ok(TransactionIsolationLevel::SnapshotIsolation)
+            }
+            "SERIALIZABLE" => {
+                self.advance();
+                Ok(TransactionIsolationLevel::Serializable)
+            }
+            _ => Err(self.error(&format!("Unknown isolation level: {name}"))),
+        }
     }
 
     fn error(&self, message: &str) -> Error {
@@ -5730,6 +6189,7 @@ mod tests {
         if let Statement::SessionCommand(SessionCommand::CreateGraph {
             name,
             if_not_exists,
+            ..
         }) = result.unwrap()
         {
             assert_eq!(name, "mydb");
@@ -5752,6 +6212,7 @@ mod tests {
         if let Statement::SessionCommand(SessionCommand::CreateGraph {
             name,
             if_not_exists,
+            ..
         }) = result.unwrap()
         {
             assert_eq!(name, "mydb");
@@ -5774,6 +6235,7 @@ mod tests {
         if let Statement::SessionCommand(SessionCommand::CreateGraph {
             name,
             if_not_exists,
+            ..
         }) = result.unwrap()
         {
             assert_eq!(name, "pg1");
@@ -5985,11 +6447,70 @@ mod tests {
             "START TRANSACTION should parse: {:?}",
             result.err()
         );
+        match result.unwrap() {
+            Statement::SessionCommand(SessionCommand::StartTransaction {
+                read_only,
+                isolation_level,
+            }) => {
+                assert!(!read_only);
+                assert!(isolation_level.is_none());
+            }
+            other => panic!("Expected StartTransaction, got {other:?}"),
+        }
+    }
 
-        assert!(matches!(
-            result.unwrap(),
-            Statement::SessionCommand(SessionCommand::StartTransaction)
-        ));
+    #[test]
+    fn test_parse_start_transaction_read_only() {
+        let mut parser = Parser::new("START TRANSACTION READ ONLY");
+        let result = parser.parse().unwrap();
+        match result {
+            Statement::SessionCommand(SessionCommand::StartTransaction {
+                read_only,
+                isolation_level,
+            }) => {
+                assert!(read_only);
+                assert!(isolation_level.is_none());
+            }
+            other => panic!("Expected StartTransaction READ ONLY, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_start_transaction_isolation_level() {
+        let mut parser = Parser::new("START TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+        let result = parser.parse().unwrap();
+        match result {
+            Statement::SessionCommand(SessionCommand::StartTransaction {
+                read_only,
+                isolation_level,
+            }) => {
+                assert!(!read_only);
+                assert_eq!(
+                    isolation_level,
+                    Some(TransactionIsolationLevel::Serializable)
+                );
+            }
+            other => panic!("Expected StartTransaction with isolation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_start_transaction_read_only_with_isolation() {
+        let mut parser = Parser::new("START TRANSACTION READ ONLY ISOLATION LEVEL READ COMMITTED");
+        let result = parser.parse().unwrap();
+        match result {
+            Statement::SessionCommand(SessionCommand::StartTransaction {
+                read_only,
+                isolation_level,
+            }) => {
+                assert!(read_only);
+                assert_eq!(
+                    isolation_level,
+                    Some(TransactionIsolationLevel::ReadCommitted)
+                );
+            }
+            other => panic!("Expected StartTransaction READ ONLY + isolation, got {other:?}"),
+        }
     }
 
     #[test]

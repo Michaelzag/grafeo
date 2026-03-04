@@ -78,6 +78,8 @@ pub struct Planner {
     pub(super) edge_columns: std::cell::RefCell<std::collections::HashSet<String>>,
     /// Optional constraint validator for schema enforcement during mutations.
     pub(super) validator: Option<Arc<dyn ConstraintValidator>>,
+    /// Catalog for user-defined procedure lookup.
+    pub(super) catalog: Option<Arc<crate::catalog::Catalog>>,
 }
 
 impl Planner {
@@ -98,6 +100,7 @@ impl Planner {
             scalar_columns: std::cell::RefCell::new(std::collections::HashSet::new()),
             edge_columns: std::cell::RefCell::new(std::collections::HashSet::new()),
             validator: None,
+            catalog: None,
         }
     }
 
@@ -126,6 +129,7 @@ impl Planner {
             scalar_columns: std::cell::RefCell::new(std::collections::HashSet::new()),
             edge_columns: std::cell::RefCell::new(std::collections::HashSet::new()),
             validator: None,
+            catalog: None,
         }
     }
 
@@ -158,6 +162,13 @@ impl Planner {
     #[must_use]
     pub fn with_validator(mut self, validator: Arc<dyn ConstraintValidator>) -> Self {
         self.validator = Some(validator);
+        self
+    }
+
+    /// Sets the catalog for user-defined procedure lookup.
+    #[must_use]
+    pub fn with_catalog(mut self, catalog: Arc<crate::catalog::Catalog>) -> Self {
+        self.catalog = Some(catalog);
         self
     }
 
@@ -813,6 +824,7 @@ fn value_to_logical_type(value: &grafeo_common::types::Value) -> LogicalType {
         Value::Date(_) => LogicalType::Date,
         Value::Time(_) => LogicalType::Time,
         Value::Duration(_) => LogicalType::Duration,
+        Value::ZonedDatetime(_) => LogicalType::ZonedDatetime,
         Value::List(_) => LogicalType::String, // Lists not yet supported as logical type
         Value::Map(_) => LogicalType::String,  // Maps not yet supported as logical type
         Value::Vector(v) => LogicalType::Vector(v.len()),
@@ -916,6 +928,36 @@ impl Operator for StaticResultOperator {
 
     fn name(&self) -> &'static str {
         "StaticResult"
+    }
+}
+
+/// Evaluates a constant logical expression to a Value.
+///
+/// Only handles literals, unary minus on numeric literals, and simple expressions.
+/// Returns an error for runtime-dependent expressions (variables, property accesses, etc.).
+pub(crate) fn eval_constant_expression(
+    expr: &crate::query::plan::LogicalExpression,
+) -> grafeo_common::utils::error::Result<grafeo_common::types::Value> {
+    use crate::query::plan::LogicalExpression;
+    use grafeo_common::types::Value;
+    use grafeo_common::utils::error::Error;
+
+    match expr {
+        LogicalExpression::Literal(val) => Ok(val.clone()),
+        LogicalExpression::Unary {
+            op: crate::query::plan::UnaryOp::Neg,
+            operand,
+        } => {
+            let val = eval_constant_expression(operand)?;
+            match val {
+                Value::Int64(n) => Ok(Value::Int64(-n)),
+                Value::Float64(f) => Ok(Value::Float64(-f)),
+                _ => Err(Error::Internal("Cannot negate non-numeric value".into())),
+            }
+        }
+        _ => Err(Error::Internal(
+            "Procedure argument must be a constant value".into(),
+        )),
     }
 }
 

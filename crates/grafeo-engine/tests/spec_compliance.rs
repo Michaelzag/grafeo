@@ -669,17 +669,26 @@ mod gql_session_commands {
     }
 
     #[test]
-    fn start_transaction_errors_helpfully() {
+    fn start_transaction_commit_rollback_via_gql() {
         let db = GrafeoDB::new_in_memory();
         let session = db.session();
-        let result = session.execute("START TRANSACTION");
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("begin_tx"), "Should suggest begin_tx()");
+
+        // START TRANSACTION works
+        session.execute("START TRANSACTION").unwrap();
+        assert!(session.in_transaction());
+
+        // COMMIT works
+        session.execute("COMMIT").unwrap();
+        assert!(!session.in_transaction());
+
+        // ROLLBACK works
+        session.execute("START TRANSACTION").unwrap();
+        session.execute("ROLLBACK").unwrap();
+        assert!(!session.in_transaction());
     }
 
     #[test]
-    fn commit_errors_helpfully() {
+    fn commit_without_transaction_errors() {
         let db = GrafeoDB::new_in_memory();
         let session = db.session();
         let result = session.execute("COMMIT");
@@ -687,7 +696,7 @@ mod gql_session_commands {
     }
 
     #[test]
-    fn rollback_errors_helpfully() {
+    fn rollback_without_transaction_errors() {
         let db = GrafeoDB::new_in_memory();
         let session = db.session();
         let result = session.execute("ROLLBACK");
@@ -855,7 +864,6 @@ mod cypher_features {
     }
 
     #[test]
-    #[ignore = "reduce runtime: list property not returned as Value::List from store"]
     fn reduce_function() {
         let db = GrafeoDB::new_in_memory();
         let session = db.session();
@@ -1369,6 +1377,7 @@ mod gql_parser_unit {
             Statement::SessionCommand(SessionCommand::CreateGraph {
                 name,
                 if_not_exists,
+                ..
             }) => {
                 assert_eq!(name, "mydb");
                 assert!(!if_not_exists);
@@ -1384,6 +1393,7 @@ mod gql_parser_unit {
             Statement::SessionCommand(SessionCommand::CreateGraph {
                 name,
                 if_not_exists,
+                ..
             }) => {
                 assert_eq!(name, "mydb");
                 assert!(if_not_exists);
@@ -1525,7 +1535,7 @@ mod gql_parser_unit {
         let stmt = gql::parse("START TRANSACTION").unwrap();
         assert!(matches!(
             stmt,
-            Statement::SessionCommand(SessionCommand::StartTransaction)
+            Statement::SessionCommand(SessionCommand::StartTransaction { .. })
         ));
     }
 

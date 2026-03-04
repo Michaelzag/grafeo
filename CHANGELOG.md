@@ -42,7 +42,7 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 - **Version history**: `get_node_history(id)` and `get_edge_history(id)` return all versions with creation/deletion epochs, newest first
 - **ValidityTs type**: reverse-ordered validity timestamp for future disk-backed key encoding (newest versions sort first in key order)
 
-#### GQL Spec Compliance (78% to 93%)
+#### GQL Spec Compliance (78% to ~97%)
 
 - **LIKE operator**: SQL pattern matching with `%` and `_` wildcards now works in WHERE clauses
 - **CAST to temporal types**: `CAST(expr AS DATE/TIME/DATETIME/DURATION/LIST)` desugars to conversion functions
@@ -52,6 +52,12 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 - **RETURN * / WITH ***: wildcard return and pass-through now work correctly in the binder and planner
 - **List comprehensions in RETURN**: `[x IN list WHERE pred | transform]` now works in RETURN clauses
 - **List predicates in RETURN**: `all()`, `any()`, `none()`, `single()` now work in RETURN clauses
+- **Transaction characteristics**: `START TRANSACTION [READ ONLY | READ WRITE] [ISOLATION LEVEL ...]` with read-only enforcement blocking mutations
+- **Zoned temporal types**: `ZONED DATETIME` and `ZONED TIME` with fixed UTC offset, CAST support, and component extraction
+- **ALTER DDL**: `ALTER NODE TYPE`, `ALTER EDGE TYPE`, `ALTER GRAPH TYPE` for adding/dropping properties and type members
+- **CREATE GRAPH TYPED**: `CREATE GRAPH name TYPED type_name` binds a graph instance to a registered graph type
+- **Stored procedures**: `CREATE [OR REPLACE] PROCEDURE name(params) RETURNS (cols) AS { body }`, `DROP PROCEDURE`, execution via `CALL`
+- **List property storage**: `reduce()` and list operations now work correctly after INSERT with list-valued properties
 
 ### Fixed
 

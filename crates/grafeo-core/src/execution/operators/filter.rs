@@ -723,16 +723,20 @@ impl ExpressionPredicate {
             } => {
                 let init_val = self.eval_expr(initial, chunk, row)?;
                 let list_val = self.eval_expr(list, chunk, row)?;
-                if let Value::List(items) = list_val {
-                    let mut acc = init_val;
-                    for item in items.iter() {
-                        acc =
-                            self.eval_reduce_expr(expression, &acc, accumulator, item, variable)?;
+                let owned_items: Vec<Value>;
+                let items: &[Value] = match &list_val {
+                    Value::List(list) => list,
+                    Value::Vector(vec) => {
+                        owned_items = vec.iter().map(|&f| Value::Float64(f64::from(f))).collect();
+                        &owned_items
                     }
-                    Some(acc)
-                } else {
-                    None
+                    _ => return None,
+                };
+                let mut acc = init_val;
+                for item in items {
+                    acc = self.eval_reduce_expr(expression, &acc, accumulator, item, variable)?;
                 }
+                Some(acc)
             }
         }
     }
@@ -2125,6 +2129,34 @@ impl ExpressionPredicate {
                     _ => None,
                 }
             }
+            "tozoneddatetime" | "zoneddatetime" => {
+                let val = self.eval_expr(args.first()?, chunk, row)?;
+                match val {
+                    Value::String(s) => {
+                        grafeo_common::types::ZonedDatetime::parse(&s).map(Value::ZonedDatetime)
+                    }
+                    Value::Timestamp(ts) => Some(Value::ZonedDatetime(
+                        grafeo_common::types::ZonedDatetime::from_timestamp_offset(ts, 0),
+                    )),
+                    Value::ZonedDatetime(_) => Some(val),
+                    _ => None,
+                }
+            }
+            "tozonedtime" | "zonedtime" => {
+                let val = self.eval_expr(args.first()?, chunk, row)?;
+                match val {
+                    Value::String(s) => {
+                        let t = grafeo_common::types::Time::parse(&s)?;
+                        if t.offset_seconds().is_some() {
+                            Some(Value::Time(t))
+                        } else {
+                            None
+                        }
+                    }
+                    Value::Time(t) if t.offset_seconds().is_some() => Some(val),
+                    _ => None,
+                }
+            }
             "current_date" | "currentdate" => {
                 Some(Value::Date(grafeo_common::types::Date::today()))
             }
@@ -2138,6 +2170,9 @@ impl ExpressionPredicate {
                 match val {
                     Value::Date(d) => Some(Value::Int64(i64::from(d.year()))),
                     Value::Timestamp(ts) => Some(Value::Int64(i64::from(ts.to_date().year()))),
+                    Value::ZonedDatetime(zdt) => {
+                        Some(Value::Int64(i64::from(zdt.to_local_date().year())))
+                    }
                     _ => None,
                 }
             }
@@ -2146,6 +2181,9 @@ impl ExpressionPredicate {
                 match val {
                     Value::Date(d) => Some(Value::Int64(i64::from(d.month()))),
                     Value::Timestamp(ts) => Some(Value::Int64(i64::from(ts.to_date().month()))),
+                    Value::ZonedDatetime(zdt) => {
+                        Some(Value::Int64(i64::from(zdt.to_local_date().month())))
+                    }
                     _ => None,
                 }
             }
@@ -2154,6 +2192,9 @@ impl ExpressionPredicate {
                 match val {
                     Value::Date(d) => Some(Value::Int64(i64::from(d.day()))),
                     Value::Timestamp(ts) => Some(Value::Int64(i64::from(ts.to_date().day()))),
+                    Value::ZonedDatetime(zdt) => {
+                        Some(Value::Int64(i64::from(zdt.to_local_date().day())))
+                    }
                     _ => None,
                 }
             }
@@ -2162,6 +2203,9 @@ impl ExpressionPredicate {
                 match val {
                     Value::Time(t) => Some(Value::Int64(i64::from(t.hour()))),
                     Value::Timestamp(ts) => Some(Value::Int64(i64::from(ts.to_time().hour()))),
+                    Value::ZonedDatetime(zdt) => {
+                        Some(Value::Int64(i64::from(zdt.to_local_time().hour())))
+                    }
                     _ => None,
                 }
             }
@@ -2170,6 +2214,9 @@ impl ExpressionPredicate {
                 match val {
                     Value::Time(t) => Some(Value::Int64(i64::from(t.minute()))),
                     Value::Timestamp(ts) => Some(Value::Int64(i64::from(ts.to_time().minute()))),
+                    Value::ZonedDatetime(zdt) => {
+                        Some(Value::Int64(i64::from(zdt.to_local_time().minute())))
+                    }
                     _ => None,
                 }
             }
@@ -2178,6 +2225,9 @@ impl ExpressionPredicate {
                 match val {
                     Value::Time(t) => Some(Value::Int64(i64::from(t.second()))),
                     Value::Timestamp(ts) => Some(Value::Int64(i64::from(ts.to_time().second()))),
+                    Value::ZonedDatetime(zdt) => {
+                        Some(Value::Int64(i64::from(zdt.to_local_time().second())))
+                    }
                     _ => None,
                 }
             }

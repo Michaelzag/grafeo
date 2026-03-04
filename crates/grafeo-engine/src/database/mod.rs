@@ -467,6 +467,85 @@ impl GrafeoDB {
                     let _ = catalog.drop_schema_namespace(name);
                 }
 
+                WalRecord::AlterNodeType { name, alterations } => {
+                    for (action, prop_name, type_name, nullable) in alterations {
+                        match action.as_str() {
+                            "add" => {
+                                let prop = TypedProperty {
+                                    name: prop_name.clone(),
+                                    data_type: PropertyDataType::from_type_name(type_name),
+                                    nullable: *nullable,
+                                    default_value: None,
+                                };
+                                let _ = catalog.alter_node_type_add_property(name, prop);
+                            }
+                            "drop" => {
+                                let _ = catalog.alter_node_type_drop_property(name, prop_name);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                WalRecord::AlterEdgeType { name, alterations } => {
+                    for (action, prop_name, type_name, nullable) in alterations {
+                        match action.as_str() {
+                            "add" => {
+                                let prop = TypedProperty {
+                                    name: prop_name.clone(),
+                                    data_type: PropertyDataType::from_type_name(type_name),
+                                    nullable: *nullable,
+                                    default_value: None,
+                                };
+                                let _ = catalog.alter_edge_type_add_property(name, prop);
+                            }
+                            "drop" => {
+                                let _ = catalog.alter_edge_type_drop_property(name, prop_name);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                WalRecord::AlterGraphType { name, alterations } => {
+                    for (action, type_name) in alterations {
+                        match action.as_str() {
+                            "add_node" => {
+                                let _ =
+                                    catalog.alter_graph_type_add_node_type(name, type_name.clone());
+                            }
+                            "drop_node" => {
+                                let _ = catalog.alter_graph_type_drop_node_type(name, type_name);
+                            }
+                            "add_edge" => {
+                                let _ =
+                                    catalog.alter_graph_type_add_edge_type(name, type_name.clone());
+                            }
+                            "drop_edge" => {
+                                let _ = catalog.alter_graph_type_drop_edge_type(name, type_name);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                WalRecord::CreateProcedure {
+                    name,
+                    params,
+                    returns,
+                    body,
+                } => {
+                    use crate::catalog::ProcedureDefinition;
+                    let def = ProcedureDefinition {
+                        name: name.clone(),
+                        params: params.clone(),
+                        returns: returns.clone(),
+                        body: body.clone(),
+                    };
+                    let _ = catalog.register_procedure(def);
+                }
+                WalRecord::DropProcedure { name } => {
+                    let _ = catalog.drop_procedure(name);
+                }
+
                 WalRecord::TxCommit { .. }
                 | WalRecord::TxAbort { .. }
                 | WalRecord::Checkpoint { .. } => {

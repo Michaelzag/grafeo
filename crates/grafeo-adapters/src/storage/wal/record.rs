@@ -199,6 +199,48 @@ pub enum WalRecord {
         name: String,
     },
 
+    /// Alter a node type (add/drop properties).
+    AlterNodeType {
+        /// Type name.
+        name: String,
+        /// Alterations: ("add", prop_name, type, nullable) or ("drop", prop_name, "", false).
+        alterations: Vec<(String, String, String, bool)>,
+    },
+
+    /// Alter an edge type (add/drop properties).
+    AlterEdgeType {
+        /// Type name.
+        name: String,
+        /// Alterations: ("add", prop_name, type, nullable) or ("drop", prop_name, "", false).
+        alterations: Vec<(String, String, String, bool)>,
+    },
+
+    /// Alter a graph type (add/drop node/edge types).
+    AlterGraphType {
+        /// Graph type name.
+        name: String,
+        /// Alterations: ("add_node_type"|"drop_node_type"|"add_edge_type"|"drop_edge_type", type_name).
+        alterations: Vec<(String, String)>,
+    },
+
+    /// Create a stored procedure.
+    CreateProcedure {
+        /// Procedure name.
+        name: String,
+        /// Parameters: (name, type).
+        params: Vec<(String, String)>,
+        /// Return columns: (name, type).
+        returns: Vec<(String, String)>,
+        /// Raw GQL body.
+        body: String,
+    },
+
+    /// Drop a stored procedure.
+    DropProcedure {
+        /// Procedure name.
+        name: String,
+    },
+
     // === Transaction Control ===
     /// Transaction commit.
     TxCommit {

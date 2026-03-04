@@ -17,6 +17,7 @@ mod time;
 mod timestamp;
 mod validity;
 mod value;
+mod zoned_datetime;
 
 pub use date::Date;
 pub use duration::Duration;
@@ -27,3 +28,4 @@ pub use time::Time;
 pub use timestamp::Timestamp;
 pub use validity::ValidityTs;
 pub use value::{HashableValue, OrderableValue, OrderedFloat64, PropertyKey, Value};
+pub use zoned_datetime::ZonedDatetime;

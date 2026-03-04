@@ -749,6 +749,17 @@ impl SqlPgqTranslator {
                     Value::from(s.as_str())
                 }
             }
+            ast::Literal::ZonedDatetime(s) => grafeo_common::types::ZonedDatetime::parse(s)
+                .map_or_else(|| Value::from(s.as_str()), Value::ZonedDatetime),
+            ast::Literal::ZonedTime(s) => {
+                if let Some(t) = grafeo_common::types::Time::parse(s)
+                    && t.offset_seconds().is_some()
+                {
+                    Value::Time(t)
+                } else {
+                    Value::from(s.as_str())
+                }
+            }
         };
         Ok(LogicalExpression::Literal(value))
     }

@@ -206,9 +206,19 @@ nav:
       - Basic Queries: user-guide/gql/basic-queries.md
       - Pattern Matching: user-guide/gql/patterns.md
       - Filtering: user-guide/gql/filtering.md
+      - Expressions: user-guide/gql/expressions.md
       - Aggregations: user-guide/gql/aggregations.md
       - Path Queries: user-guide/gql/paths.md
       - Mutations: user-guide/gql/mutations.md
+      - Composite Queries: user-guide/gql/composite-queries.md
+      - Functions:
+        - String Functions: user-guide/gql/functions-string.md
+        - Numeric Functions: user-guide/gql/functions-numeric.md
+        - Temporal Functions: user-guide/gql/functions-temporal.md
+        - Element & Path Functions: user-guide/gql/functions-element.md
+      - Type System: user-guide/gql/types.md
+      - Schema & DDL: user-guide/gql/schema.md
+      - Transactions & Sessions: user-guide/gql/transactions.md
     - Cypher Query Language:
       - user-guide/cypher/index.md
       - Basic Queries: user-guide/cypher/basic-queries.md

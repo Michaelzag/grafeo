@@ -70,6 +70,7 @@ impl HashKey {
                 HashKey::Int64(d.days()),
                 HashKey::Int64(d.nanos()),
             ]),
+            Value::ZonedDatetime(zdt) => HashKey::Int64(zdt.as_timestamp().as_micros()),
             Value::List(items) => {
                 HashKey::Composite(items.iter().map(HashKey::from_value).collect())
             }

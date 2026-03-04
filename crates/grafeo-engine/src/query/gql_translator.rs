@@ -2028,6 +2028,18 @@ impl GqlTranslator {
                     Value::String(s.clone().into())
                 }
             }
+            ast::Literal::ZonedDatetime(s) => grafeo_common::types::ZonedDatetime::parse(s)
+                .map_or_else(|| Value::String(s.clone().into()), Value::ZonedDatetime),
+            ast::Literal::ZonedTime(s) => {
+                // Parse as Time with required offset
+                if let Some(t) = grafeo_common::types::Time::parse(s)
+                    && t.offset_seconds().is_some()
+                {
+                    Value::Time(t)
+                } else {
+                    Value::String(s.clone().into())
+                }
+            }
         };
         LogicalExpression::Literal(value)
     }

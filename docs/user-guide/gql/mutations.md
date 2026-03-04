@@ -64,17 +64,62 @@ MATCH (p:Person {name: 'Alice'})
 SET p.temporaryField = null
 ```
 
-## Deleting Nodes
+## Map Property Operations
+
+### Replace All Properties
+
+`SET n = {map}` replaces all existing properties with the map contents:
 
 ```sql
--- Delete a node (must have no edges)
+-- Replace all properties on a node
+MATCH (p:Person {name: 'Alice'})
+SET p = {name: 'Alice', age: 31, city: 'NYC'}
+-- Any properties not in the map are removed
+```
+
+### Merge Properties
+
+`SET n += {map}` merges the map into existing properties, keeping properties not in the map:
+
+```sql
+-- Add or update properties, keep existing ones
+MATCH (p:Person {name: 'Alice'})
+SET p += {city: 'NYC', role: 'engineer'}
+-- Existing properties like name and age are preserved
+```
+
+## Label Operations
+
+```sql
+-- Add labels to a node
+MATCH (p:Person {name: 'Alice'})
+SET p:Employee:Manager
+
+-- Remove a label
+MATCH (p:Person {name: 'Alice'})
+REMOVE p:Manager
+```
+
+## Deleting Nodes
+
+GQL supports two delete modes for nodes:
+
+```sql
+-- DELETE (or NODETACH DELETE): errors if the node has edges
 MATCH (p:Person {name: 'Alice'})
 DELETE p
 
--- Delete node and all its edges
+-- Explicit NODETACH (same behavior as bare DELETE)
+MATCH (p:Person {name: 'Alice'})
+NODETACH DELETE p
+
+-- DETACH DELETE: delete the node and all its connected edges
 MATCH (p:Person {name: 'Alice'})
 DETACH DELETE p
 ```
+
+!!! tip
+    Use `DELETE` (without DETACH) when you want to ensure no edges are accidentally removed. The query will fail if the node still has connections, giving you a chance to handle them explicitly.
 
 ## Deleting Edges
 

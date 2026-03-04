@@ -57,6 +57,12 @@ pub enum LogicalType {
     /// Duration/interval
     Duration,
 
+    /// Time of day with a required UTC offset
+    ZonedTime,
+
+    /// Datetime with a fixed UTC offset
+    ZonedDatetime,
+
     /// Homogeneous list of elements
     List(Box<LogicalType>),
 
@@ -122,7 +128,12 @@ impl LogicalType {
     pub const fn is_temporal(&self) -> bool {
         matches!(
             self,
-            LogicalType::Date | LogicalType::Time | LogicalType::Timestamp | LogicalType::Duration
+            LogicalType::Date
+                | LogicalType::Time
+                | LogicalType::Timestamp
+                | LogicalType::Duration
+                | LogicalType::ZonedTime
+                | LogicalType::ZonedDatetime
         )
     }
 
@@ -198,6 +209,9 @@ impl LogicalType {
                 LogicalType::Float32 | LogicalType::Float64,
             ) => true,
             (LogicalType::Int64, LogicalType::Float64) => true,
+            // Temporal coercion: Time <-> ZonedTime, Timestamp <-> ZonedDatetime
+            (LogicalType::Time, LogicalType::ZonedTime) => true,
+            (LogicalType::Timestamp, LogicalType::ZonedDatetime) => true,
             _ => false,
         }
     }
@@ -235,6 +249,19 @@ impl LogicalType {
             return Some(LogicalType::Int64);
         }
 
+        // Temporal promotion: zoned wins over local
+        match (self, other) {
+            (LogicalType::Time, LogicalType::ZonedTime)
+            | (LogicalType::ZonedTime, LogicalType::Time) => {
+                return Some(LogicalType::ZonedTime);
+            }
+            (LogicalType::Timestamp, LogicalType::ZonedDatetime)
+            | (LogicalType::ZonedDatetime, LogicalType::Timestamp) => {
+                return Some(LogicalType::ZonedDatetime);
+            }
+            _ => {}
+        }
+
         None
     }
 }
@@ -257,6 +284,8 @@ impl fmt::Display for LogicalType {
             LogicalType::Time => write!(f, "TIME"),
             LogicalType::Timestamp => write!(f, "TIMESTAMP"),
             LogicalType::Duration => write!(f, "DURATION"),
+            LogicalType::ZonedTime => write!(f, "ZONED TIME"),
+            LogicalType::ZonedDatetime => write!(f, "ZONED DATETIME"),
             LogicalType::List(elem) => write!(f, "LIST<{elem}>"),
             LogicalType::Map { key, value } => write!(f, "MAP<{key}, {value}>"),
             LogicalType::Struct(fields) => {

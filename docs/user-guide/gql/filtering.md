@@ -96,3 +96,116 @@ MATCH (a)-[r:KNOWS]->(b)
 WHERE r.since > 2020
 RETURN a.name, b.name
 ```
+
+## LIKE Pattern Matching
+
+SQL-style pattern matching with `%` (any characters) and `_` (single character):
+
+```sql
+-- Names starting with 'Al'
+WHERE p.name LIKE 'Al%'
+
+-- Names ending with 'son'
+WHERE p.name LIKE '%son'
+
+-- Names with exactly 5 characters
+WHERE p.name LIKE '_____'
+
+-- Second character is 'l'
+WHERE p.name LIKE '_l%'
+```
+
+## XOR (Exclusive Or)
+
+`XOR` is true when exactly one of the two conditions is true:
+
+```sql
+-- Active in one system but not both
+MATCH (u:User)
+WHERE u.active_in_crm XOR u.active_in_erp
+RETURN u.name
+```
+
+## Type Checking
+
+### IS TYPED / IS NOT TYPED
+
+Check the runtime type of a value:
+
+```sql
+-- Find nodes where age is stored as an integer
+MATCH (p:Person)
+WHERE p.age IS TYPED INTEGER
+RETURN p.name, p.age
+
+-- Find mistyped values
+MATCH (p:Person)
+WHERE p.age IS NOT TYPED INTEGER
+RETURN p.name, p.age
+```
+
+## Graph Element Predicates
+
+### IS DIRECTED / IS NOT DIRECTED
+
+Check edge directionality:
+
+```sql
+MATCH ()-[r]-()
+WHERE r IS DIRECTED
+RETURN type(r)
+```
+
+### IS LABELED / IS NOT LABELED
+
+Check if a node or edge has a specific label:
+
+```sql
+MATCH (n)
+WHERE n IS LABELED Person
+RETURN n.name
+
+MATCH (n)
+WHERE n IS NOT LABELED Inactive
+RETURN n.name
+```
+
+### IS SOURCE OF / IS DESTINATION OF
+
+Check whether a node is the source or destination of an edge:
+
+```sql
+MATCH (a)-[r:KNOWS]-(b)
+WHERE a IS SOURCE OF r
+RETURN a.name AS from, b.name AS to
+```
+
+### ALL_DIFFERENT
+
+Check that all elements in the argument list are distinct:
+
+```sql
+MATCH (a)-[:KNOWS]->(b)-[:KNOWS]->(c)
+WHERE ALL_DIFFERENT(a, b, c)
+RETURN a.name, b.name, c.name
+```
+
+### SAME
+
+Check that all elements in the argument list are equal:
+
+```sql
+MATCH (a)-[:KNOWS]->(b), (a)-[:WORKS_WITH]->(c)
+WHERE SAME(b, c)
+RETURN a.name, b.name
+```
+
+### PROPERTY_EXISTS
+
+Check whether a property key exists on an entity:
+
+```sql
+MATCH (p:Person)
+WHERE PROPERTY_EXISTS(p, 'email')
+RETURN p.name, p.email
+```

@@ -201,6 +201,10 @@ pub fn value_to_napi(env: sys::napi_env, value: &Value) -> Result<sys::napi_valu
             let s = d.to_string();
             unsafe { <&str as ToNapiValue>::to_napi_value(env, &s) }
         }
+        Value::ZonedDatetime(zdt) => {
+            let s = zdt.to_string();
+            unsafe { <&str as ToNapiValue>::to_napi_value(env, &s) }
+        }
         Value::Vector(v) => unsafe {
             <Float32Array as ToNapiValue>::to_napi_value(env, Float32Array::new(v.to_vec()))
         },
