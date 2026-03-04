@@ -2,6 +2,12 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
+## [0.5.14] - Unreleased
+
+### Changed
+
+- (placeholder for next release)
+
 ## [0.5.13] - 2026-03-04
 
 ### Completed
