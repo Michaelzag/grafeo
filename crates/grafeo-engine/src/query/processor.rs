@@ -668,9 +668,11 @@ fn substitute_in_operator(op: &mut LogicalOperator, params: &QueryParams) -> Res
             substitute_in_operator(&mut sort.input, params)?;
         }
         LogicalOperator::Limit(limit) => {
+            resolve_count_param(&mut limit.count, params)?;
             substitute_in_operator(&mut limit.input, params)?;
         }
         LogicalOperator::Skip(skip) => {
+            resolve_count_param(&mut skip.count, params)?;
             substitute_in_operator(&mut skip.input, params)?;
         }
         LogicalOperator::Distinct(distinct) => {
@@ -826,6 +828,41 @@ fn substitute_in_operator(op: &mut LogicalOperator, params: &QueryParams) -> Res
         LogicalOperator::CreatePropertyGraph(_) => {}
         // Procedure calls: arguments could contain parameters but we handle at execution time
         LogicalOperator::CallProcedure(_) => {}
+    }
+    Ok(())
+}
+
+/// Resolves a `CountExpr::Parameter` by looking up the parameter value.
+fn resolve_count_param(
+    count: &mut crate::query::plan::CountExpr,
+    params: &QueryParams,
+) -> Result<()> {
+    use crate::query::plan::CountExpr;
+    use grafeo_common::utils::error::{QueryError, QueryErrorKind};
+
+    if let CountExpr::Parameter(name) = count {
+        let value = params.get(name.as_str()).ok_or_else(|| {
+            Error::Query(QueryError::new(
+                QueryErrorKind::Semantic,
+                format!("Missing parameter for SKIP/LIMIT: ${name}"),
+            ))
+        })?;
+        let n = match value {
+            Value::Int64(i) if *i >= 0 => *i as usize,
+            Value::Int64(i) => {
+                return Err(Error::Query(QueryError::new(
+                    QueryErrorKind::Semantic,
+                    format!("SKIP/LIMIT parameter ${name} must be non-negative, got {i}"),
+                )));
+            }
+            other => {
+                return Err(Error::Query(QueryError::new(
+                    QueryErrorKind::Semantic,
+                    format!("SKIP/LIMIT parameter ${name} must be an integer, got {other:?}"),
+                )));
+            }
+        };
+        *count = CountExpr::Literal(n);
     }
     Ok(())
 }

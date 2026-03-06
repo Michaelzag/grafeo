@@ -318,7 +318,7 @@ impl Planner {
             }
             LogicalOperator::Limit(limit) => {
                 let input_estimate = self.estimate_cardinality(&limit.input);
-                let estimate = (input_estimate).min(limit.count as f64);
+                let estimate = (input_estimate).min(limit.count.estimate());
                 let id = format!("limit_{depth}");
                 ctx.set_estimate(&id, estimate);
 
@@ -326,7 +326,7 @@ impl Planner {
             }
             LogicalOperator::Skip(skip) => {
                 let input_estimate = self.estimate_cardinality(&skip.input);
-                let estimate = (input_estimate - skip.count as f64).max(0.0);
+                let estimate = (input_estimate - skip.count.estimate()).max(0.0);
                 let id = format!("skip_{depth}");
                 ctx.set_estimate(&id, estimate);
 
@@ -388,9 +388,9 @@ impl Planner {
             LogicalOperator::Return(ret) => self.estimate_cardinality(&ret.input),
             LogicalOperator::Limit(limit) => self
                 .estimate_cardinality(&limit.input)
-                .min(limit.count as f64),
+                .min(limit.count.estimate()),
             LogicalOperator::Skip(skip) => {
-                (self.estimate_cardinality(&skip.input) - skip.count as f64).max(0.0)
+                (self.estimate_cardinality(&skip.input) - skip.count.estimate()).max(0.0)
             }
             LogicalOperator::Sort(sort) => self.estimate_cardinality(&sort.input),
             LogicalOperator::Union(union) => union
@@ -1060,7 +1060,7 @@ mod tests {
             }],
             distinct: false,
             input: Box::new(LogicalOperator::Limit(LogicalLimitOp {
-                count: 10,
+                count: 10.into(),
                 input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
                     variable: "n".to_string(),
                     label: None,
@@ -1086,7 +1086,7 @@ mod tests {
             }],
             distinct: false,
             input: Box::new(LogicalOperator::Skip(LogicalSkipOp {
-                count: 5,
+                count: 5.into(),
                 input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
                     variable: "n".to_string(),
                     label: None,
@@ -1902,7 +1902,7 @@ mod tests {
             }],
             distinct: false,
             input: Box::new(LogicalOperator::Limit(LogicalLimitOp {
-                count: 10,
+                count: 10.into(),
                 input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
                     variable: "n".to_string(),
                     label: None,
@@ -1927,7 +1927,7 @@ mod tests {
             }],
             distinct: false,
             input: Box::new(LogicalOperator::Skip(LogicalSkipOp {
-                count: 5,
+                count: 5.into(),
                 input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
                     variable: "n".to_string(),
                     label: None,

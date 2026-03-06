@@ -6,8 +6,8 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::query::plan::{
-    AggregateFunction, BinaryOp, DistinctOp, FilterOp, LimitOp, LogicalExpression, LogicalOperator,
-    ReturnItem, ReturnOp, SkipOp, SortKey, SortOp,
+    AggregateFunction, BinaryOp, CountExpr, DistinctOp, FilterOp, LimitOp, LogicalExpression,
+    LogicalOperator, ReturnItem, ReturnOp, SkipOp, SortKey, SortOp,
 };
 use grafeo_common::utils::error::{Error, QueryError, QueryErrorKind, Result};
 
@@ -186,17 +186,17 @@ pub(crate) fn wrap_sort(input: LogicalOperator, keys: Vec<SortKey>) -> LogicalOp
 }
 
 /// Wraps an operator with SKIP.
-pub(crate) fn wrap_skip(input: LogicalOperator, count: usize) -> LogicalOperator {
+pub(crate) fn wrap_skip(input: LogicalOperator, count: impl Into<CountExpr>) -> LogicalOperator {
     LogicalOperator::Skip(SkipOp {
-        count,
+        count: count.into(),
         input: Box::new(input),
     })
 }
 
 /// Wraps an operator with LIMIT.
-pub(crate) fn wrap_limit(input: LogicalOperator, count: usize) -> LogicalOperator {
+pub(crate) fn wrap_limit(input: LogicalOperator, count: impl Into<CountExpr>) -> LogicalOperator {
     LogicalOperator::Limit(LimitOp {
-        count,
+        count: count.into(),
         input: Box::new(input),
     })
 }

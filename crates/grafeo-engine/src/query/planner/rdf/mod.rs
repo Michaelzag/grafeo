@@ -338,7 +338,12 @@ impl RdfPlanner {
         use crate::query::planner::common;
         let (input_op, columns) = self.plan_operator(&limit.input)?;
         let schema = derive_rdf_schema(&columns);
-        Ok(common::build_limit(input_op, columns, limit.count, schema))
+        Ok(common::build_limit(
+            input_op,
+            columns,
+            limit.count.value(),
+            schema,
+        ))
     }
 
     /// Plans a SKIP operator.
@@ -346,7 +351,12 @@ impl RdfPlanner {
         use crate::query::planner::common;
         let (input_op, columns) = self.plan_operator(&skip.input)?;
         let schema = derive_rdf_schema(&columns);
-        Ok(common::build_skip(input_op, columns, skip.count, schema))
+        Ok(common::build_skip(
+            input_op,
+            columns,
+            skip.count.value(),
+            schema,
+        ))
     }
 
     /// Plans a SORT operator.
