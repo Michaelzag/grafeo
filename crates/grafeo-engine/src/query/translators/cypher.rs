@@ -1230,6 +1230,7 @@ impl CypherTranslator {
                         distinct: *distinct,
                         alias: alias.clone(),
                         percentile,
+                        separator: None,
                     }))
                 } else {
                     Ok(None)
@@ -2042,6 +2043,7 @@ impl CypherTranslator {
                         distinct: false,
                         alias: Some(alias.clone()),
                         percentile: None,
+                        separator: None,
                     }],
                     input: Box::new(rewritten_subplan),
                     having: None,

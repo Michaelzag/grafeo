@@ -36,6 +36,7 @@ pub(crate) fn is_aggregate_function(name: &str) -> bool {
             | "PERCENTILECONT"
             | "GROUP_CONCAT"
             | "GROUPCONCAT"
+            | "LISTAGG"
             | "SAMPLE"
             | "COVAR_SAMP"
             | "COVAR_POP"
@@ -67,7 +68,7 @@ pub(crate) fn to_aggregate_function(name: &str) -> Option<AggregateFunction> {
         "VAR_POP" => Some(AggregateFunction::VariancePop),
         "PERCENTILE_DISC" | "PERCENTILEDISC" => Some(AggregateFunction::PercentileDisc),
         "PERCENTILE_CONT" | "PERCENTILECONT" => Some(AggregateFunction::PercentileCont),
-        "GROUP_CONCAT" | "GROUPCONCAT" => Some(AggregateFunction::GroupConcat),
+        "GROUP_CONCAT" | "GROUPCONCAT" | "LISTAGG" => Some(AggregateFunction::GroupConcat),
         "SAMPLE" => Some(AggregateFunction::Sample),
         "COVAR_SAMP" => Some(AggregateFunction::CovarSamp),
         "COVAR_POP" => Some(AggregateFunction::CovarPop),

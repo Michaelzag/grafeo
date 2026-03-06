@@ -819,6 +819,8 @@ pub struct AggregateExpr {
     pub alias: Option<String>,
     /// Percentile parameter for PERCENTILE_DISC/PERCENTILE_CONT (0.0 to 1.0).
     pub percentile: Option<f64>,
+    /// Separator string for GROUP_CONCAT / LISTAGG (defaults to space for GROUP_CONCAT, comma for LISTAGG).
+    pub separator: Option<String>,
 }
 
 /// Aggregate function.

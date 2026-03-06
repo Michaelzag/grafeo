@@ -1596,6 +1596,7 @@ mod tests {
                     distinct: false,
                     alias: Some("cnt".to_string()),
                     percentile: None,
+                    separator: None,
                 }],
                 input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
                     variable: "n".to_string(),

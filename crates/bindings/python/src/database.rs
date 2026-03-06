@@ -1289,9 +1289,9 @@ impl PyGrafeoDB {
     }
 
     /// Get database statistics.
-    fn stats(&self) -> PyResult<PyDbStats> {
+    fn stats(&self) -> PyResult<PyDatabaseStats> {
         let db = self.inner.read();
-        Ok(PyDbStats {
+        Ok(PyDatabaseStats {
             node_count: db.node_count() as u64,
             edge_count: db.edge_count() as u64,
             label_count: db.label_count() as u64,
@@ -1810,10 +1810,10 @@ impl PyTransaction {
         // Begin the transaction with the specified isolation level
         if let Some(level) = level {
             session
-                .begin_tx_with_isolation(level)
+                .begin_transaction_with_isolation(level)
                 .map_err(PyGrafeoError::from)?;
         } else {
-            session.begin_tx().map_err(PyGrafeoError::from)?;
+            session.begin_transaction().map_err(PyGrafeoError::from)?;
         }
 
         Ok(Self {
@@ -1981,8 +1981,8 @@ impl PyTransaction {
 }
 
 /// Quick stats about your database - node count, edge count, and more.
-#[pyclass(name = "DbStats")]
-pub struct PyDbStats {
+#[pyclass(name = "DatabaseStats")]
+pub struct PyDatabaseStats {
     #[pyo3(get)]
     node_count: u64,
     #[pyo3(get)]
@@ -1994,7 +1994,7 @@ pub struct PyDbStats {
 }
 
 #[pymethods]
-impl PyDbStats {
+impl PyDatabaseStats {
     fn __repr__(&self) -> String {
         format!(
             "DbStats(nodes={}, edges={}, labels={}, properties={})",

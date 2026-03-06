@@ -78,6 +78,7 @@ tracing-subscriber = "0.3"
 
 # Regex
 regex = "1"
+regex-lite = "0.1"
 
 # Unicode
 unicode-normalization = "0.1"

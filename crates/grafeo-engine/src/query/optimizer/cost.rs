@@ -842,6 +842,7 @@ mod tests {
                     distinct: false,
                     alias: Some("cnt".to_string()),
                     percentile: None,
+                    separator: None,
                 },
                 AggregateExpr {
                     function: AggregateFunction::Sum,
@@ -850,6 +851,7 @@ mod tests {
                     distinct: false,
                     alias: Some("total".to_string()),
                     percentile: None,
+                    separator: None,
                 },
             ],
             input: Box::new(LogicalOperator::Empty),
