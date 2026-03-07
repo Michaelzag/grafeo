@@ -1773,16 +1773,29 @@ impl<'a> Parser<'a> {
                     EdgeDirection::Outgoing,
                 )
             } else if self.current.kind == TokenKind::DoubleDash {
-                // Simple --
+                // `--` (undirected) or `-->` (outgoing shorthand)
                 self.advance();
-                (
-                    None,
-                    Vec::new(),
-                    None,
-                    None,
-                    Vec::new(),
-                    EdgeDirection::Undirected,
-                )
+                if self.current.kind == TokenKind::Gt {
+                    // --> shorthand: directed outgoing, no bracket
+                    self.advance();
+                    (
+                        None,
+                        Vec::new(),
+                        None,
+                        None,
+                        Vec::new(),
+                        EdgeDirection::Outgoing,
+                    )
+                } else {
+                    (
+                        None,
+                        Vec::new(),
+                        None,
+                        None,
+                        Vec::new(),
+                        EdgeDirection::Undirected,
+                    )
+                }
             } else if self.current.kind == TokenKind::Tilde {
                 // GQL undirected edge: ~[variable:TYPE*min..max {props}]~
                 self.advance();
@@ -6855,6 +6868,63 @@ mod tests {
         let result = parser.parse().expect("Tilde with pipe types should parse");
         let edges = get_first_path_edges(&result);
         assert_eq!(edges[0].types, vec!["KNOWS", "LIKES"]);
+        assert_eq!(edges[0].direction, EdgeDirection::Undirected);
+    }
+
+    // ==================== shorthand arrow edges ====================
+
+    #[test]
+    fn test_parse_shorthand_outgoing_arrow() {
+        // --> shorthand: directed outgoing, no brackets
+        let mut parser = Parser::new("MATCH (a)-->(b) RETURN b");
+        let result = parser.parse().expect("Shorthand --> should parse");
+        let edges = get_first_path_edges(&result);
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].direction, EdgeDirection::Outgoing);
+        assert!(edges[0].variable.is_none());
+        assert!(edges[0].types.is_empty());
+    }
+
+    #[test]
+    fn test_parse_shorthand_incoming_arrow() {
+        // <-- shorthand: directed incoming, no brackets
+        let mut parser = Parser::new("MATCH (a)<--(b) RETURN a");
+        let result = parser.parse().expect("Shorthand <-- should parse");
+        let edges = get_first_path_edges(&result);
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].direction, EdgeDirection::Incoming);
+        assert!(edges[0].variable.is_none());
+        assert!(edges[0].types.is_empty());
+    }
+
+    #[test]
+    fn test_parse_shorthand_arrow_chain() {
+        // Chained shorthand arrows: (a)-->(b)-->(c)
+        let mut parser = Parser::new("MATCH (a)-->(b)-->(c) RETURN c");
+        let result = parser.parse().expect("Chained --> should parse");
+        let edges = get_first_path_edges(&result);
+        assert_eq!(edges.len(), 2);
+        assert_eq!(edges[0].direction, EdgeDirection::Outgoing);
+        assert_eq!(edges[1].direction, EdgeDirection::Outgoing);
+    }
+
+    #[test]
+    fn test_parse_shorthand_mixed_directions() {
+        // Mixed: (a)<--(b)-->(c)
+        let mut parser = Parser::new("MATCH (a)<--(b)-->(c) RETURN c");
+        let result = parser.parse().expect("Mixed <-- and --> should parse");
+        let edges = get_first_path_edges(&result);
+        assert_eq!(edges.len(), 2);
+        assert_eq!(edges[0].direction, EdgeDirection::Incoming);
+        assert_eq!(edges[1].direction, EdgeDirection::Outgoing);
+    }
+
+    #[test]
+    fn test_parse_shorthand_undirected_still_works() {
+        // -- (undirected) must still work
+        let mut parser = Parser::new("MATCH (a)--(b) RETURN b");
+        let result = parser.parse().expect("Undirected -- should still parse");
+        let edges = get_first_path_edges(&result);
         assert_eq!(edges[0].direction, EdgeDirection::Undirected);
     }
 
