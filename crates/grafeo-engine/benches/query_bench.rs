@@ -169,7 +169,7 @@ fn bench_fan_out_expand_untyped_10k(c: &mut Criterion) {
     c.bench_function("query_fan_out_untyped_10k", |b| {
         b.iter(|| {
             let result = session
-                .execute("MATCH (a:Person)-->(b) RETURN COUNT(b)")
+                .execute("MATCH (a:Person)-[]->(b) RETURN COUNT(b)")
                 .unwrap();
             black_box(result)
         });
