@@ -19,6 +19,7 @@ pub mod optimizer;
 pub mod plan;
 pub mod planner;
 pub mod processor;
+pub mod profile;
 pub mod translators;
 
 // Core exports

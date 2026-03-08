@@ -73,6 +73,8 @@ pub struct LogicalPlan {
     pub root: LogicalOperator,
     /// When true, return the plan tree as text instead of executing.
     pub explain: bool,
+    /// When true, execute the query and return per-operator runtime metrics.
+    pub profile: bool,
 }
 
 impl LogicalPlan {
@@ -81,6 +83,7 @@ impl LogicalPlan {
         Self {
             root,
             explain: false,
+            profile: false,
         }
     }
 
@@ -89,6 +92,16 @@ impl LogicalPlan {
         Self {
             root,
             explain: true,
+            profile: false,
+        }
+    }
+
+    /// Creates a PROFILE plan that executes and returns per-operator metrics.
+    pub fn profile(root: LogicalOperator) -> Self {
+        Self {
+            root,
+            explain: false,
+            profile: true,
         }
     }
 }
