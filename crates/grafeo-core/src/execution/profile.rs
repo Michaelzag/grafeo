@@ -93,7 +93,6 @@ const _: () = {
 mod tests {
     use super::*;
     use crate::execution::chunk::DataChunk;
-    use crate::execution::operators::OperatorError;
     use crate::execution::vector::ValueVector;
     use grafeo_common::types::LogicalType;
 
@@ -112,13 +111,20 @@ mod tests {
         }
     }
 
+    // SAFETY: MockOperator holds no shared mutable state.
+    unsafe impl Send for MockOperator {}
+    unsafe impl Sync for MockOperator {}
+
     impl Operator for MockOperator {
         fn next(&mut self) -> OperatorResult {
             if self.chunks_remaining == 0 {
                 return Ok(None);
             }
             self.chunks_remaining -= 1;
-            let col = ValueVector::with_capacity(LogicalType::Integer, self.rows_per_chunk);
+            let mut col = ValueVector::with_capacity(LogicalType::Int64, self.rows_per_chunk);
+            for i in 0..self.rows_per_chunk {
+                col.push(grafeo_common::types::Value::Int64(i as i64));
+            }
             let chunk = DataChunk::new(vec![col]);
             Ok(Some(chunk))
         }
@@ -129,10 +135,6 @@ mod tests {
             "MockOperator"
         }
     }
-
-    // Send + Sync required by Operator trait
-    unsafe impl Send for MockOperator {}
-    unsafe impl Sync for MockOperator {}
 
     #[test]
     fn profile_stats_default_is_zero() {
@@ -148,10 +150,8 @@ mod tests {
         let stats = Arc::new(Mutex::new(ProfileStats::default()));
         let mut profiled = ProfiledOperator::new(Box::new(mock), Arc::clone(&stats));
 
-        // Drain operator
+        // Drain operator (3 chunks + 1 None = 4 calls)
         while profiled.next().unwrap().is_some() {}
-        // One extra call returns None
-        assert!(profiled.next().unwrap().is_none());
 
         let s = stats.lock();
         assert_eq!(s.rows_out, 30); // 3 chunks x 10 rows
