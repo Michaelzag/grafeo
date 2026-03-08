@@ -2,7 +2,7 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
-## [0.5.17] - 2026-03-08
+## [0.5.17] - 2026-03-09
 
 Cypher query execution bug fixes for Deriva compatibility.
 
