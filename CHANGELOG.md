@@ -16,6 +16,8 @@ Performance enhancements, bug fixes and Rust examples
 
 - **Cost model calibration**: recursive plan costing, statistics-aware IO estimation, actual child cardinalities for joins, multi-edge-type expand costing
 - **Supply chain audit**: replaced `cargo audit` CI job with `cargo-deny` (licenses, advisories, bans, source verification)
+- **Benchmark regression detection**: PRs now run all three criterion suites (arena, index, query) and fail on >10% regression via `benchmark-action`
+- **Examples CI**: added `cargo build -p grafeo-examples` to CI checks
 
 ### Fixed
 
