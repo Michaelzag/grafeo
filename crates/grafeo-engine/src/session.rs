@@ -555,7 +555,7 @@ impl Session {
             };
         }
 
-        match cmd {
+        let result = match cmd {
             SchemaStatement::CreateNodeType(stmt) => {
                 #[cfg(feature = "wal")]
                 let props_for_wal: Vec<(String, String, bool)> = stmt
@@ -1250,7 +1250,15 @@ impl Session {
                 wal_log!(self, WalRecord::DropProcedure { name: name.clone() });
                 Ok(QueryResult::status(format!("Dropped procedure '{name}'")))
             }
+        };
+
+        // Invalidate all cached query plans after any successful DDL change.
+        // DDL is rare, so clearing the entire cache is cheap and correct.
+        if result.is_ok() {
+            self.query_cache.clear();
         }
+
+        result
     }
 
     /// Creates a vector index on the store by scanning existing nodes.
@@ -1958,11 +1966,27 @@ impl Session {
     pub fn execute_sparql_with_params(
         &self,
         query: &str,
-        _params: std::collections::HashMap<String, Value>,
+        params: std::collections::HashMap<String, Value>,
     ) -> Result<QueryResult> {
-        // TODO: Implement parameter substitution for SPARQL
-        // For now, just execute the query without parameters
-        self.execute_sparql(query)
+        use crate::query::{
+            Executor, optimizer::Optimizer, planner::rdf::RdfPlanner, processor::substitute_params,
+            translators::sparql,
+        };
+
+        let mut logical_plan = sparql::translate(query)?;
+
+        substitute_params(&mut logical_plan, &params)?;
+
+        let optimizer = Optimizer::from_graph_store(&*self.graph_store);
+        let optimized_plan = optimizer.optimize(logical_plan)?;
+
+        let planner = RdfPlanner::new(Arc::clone(&self.rdf_store))
+            .with_transaction_id(*self.current_transaction.lock());
+        let mut physical_plan = planner.plan(&optimized_plan)?;
+
+        let executor = Executor::with_columns(physical_plan.columns.clone())
+            .with_deadline(self.query_deadline());
+        executor.execute(physical_plan.operator.as_mut())
     }
 
     /// Executes a query in the specified language by name.
@@ -2072,6 +2096,21 @@ impl Session {
     /// # Ok(())
     /// # }
     /// ```
+    /// Clears all cached query plans.
+    ///
+    /// The plan cache is shared across all sessions on the same database,
+    /// so clearing from one session affects all sessions.
+    pub fn clear_plan_cache(&self) {
+        self.query_cache.clear();
+    }
+
+    /// Begins a new transaction on this session.
+    ///
+    /// Uses the default isolation level (`SnapshotIsolation`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a transaction is already active.
     pub fn begin_transaction(&mut self) -> Result<()> {
         self.begin_transaction_inner(false, None)
     }

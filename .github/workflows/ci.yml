@@ -396,18 +396,14 @@ jobs:
       - name: Run benchmarks
         run: cargo bench --all-features --bench arena_bench --bench index_bench -- --noplot
 
-  # Security audit
-  security:
-    name: Security Audit
+  # Supply chain security (licenses, advisories, bans, sources)
+  supply-chain:
+    name: Supply Chain Audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cargo-audit
-        run: cargo install cargo-audit
-
-      - name: Run security audit
-        run: cargo audit
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --all-features

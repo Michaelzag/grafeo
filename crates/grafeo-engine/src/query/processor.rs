@@ -365,7 +365,7 @@ impl QueryProcessor {
         &self,
         query: &str,
         language: QueryLanguage,
-        _params: Option<&QueryParams>,
+        params: Option<&QueryParams>,
     ) -> Result<QueryResult> {
         use crate::query::planner::rdf::RdfPlanner;
 
@@ -374,9 +374,14 @@ impl QueryProcessor {
         })?;
 
         // 1. Parse and translate to logical plan
-        let logical_plan = self.translate_rdf(query, language)?;
+        let mut logical_plan = self.translate_rdf(query, language)?;
 
-        // 2. Semantic validation
+        // 2. Substitute parameters if provided
+        if let Some(params) = params {
+            substitute_params(&mut logical_plan, params)?;
+        }
+
+        // 3. Semantic validation
         let mut binder = Binder::new();
         let _binding_context = binder.bind(&logical_plan)?;
 
@@ -597,7 +602,7 @@ pub(crate) fn explain_result(plan: &LogicalPlan) -> QueryResult {
 }
 
 /// Substitutes parameters in a logical plan with their values.
-fn substitute_params(plan: &mut LogicalPlan, params: &QueryParams) -> Result<()> {
+pub fn substitute_params(plan: &mut LogicalPlan, params: &QueryParams) -> Result<()> {
     substitute_in_operator(&mut plan.root, params)
 }
 

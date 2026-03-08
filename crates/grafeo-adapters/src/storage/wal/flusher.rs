@@ -82,7 +82,6 @@ impl AdaptiveFlusher {
     /// # Errors
     ///
     /// Returns an error if the background flusher thread cannot be spawned.
-    // FIXME: propagate Result to callers
     pub fn new(wal: Arc<WalManager>, target_interval_ms: u64) -> Result<Self, std::io::Error> {
         let target_interval = Duration::from_millis(target_interval_ms);
         let (shutdown_tx, shutdown_rx) = mpsc::channel();

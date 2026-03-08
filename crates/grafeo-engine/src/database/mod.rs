@@ -743,6 +743,15 @@ impl GrafeoDB {
         &self.query_cache
     }
 
+    /// Clears all cached query plans.
+    ///
+    /// This is called automatically after DDL operations, but can also be
+    /// invoked manually after external schema changes (e.g., WAL replay,
+    /// import) or when you want to force re-optimization of all queries.
+    pub fn clear_plan_cache(&self) {
+        self.query_cache.clear();
+    }
+
     // =========================================================================
     // Lifecycle
     // =========================================================================

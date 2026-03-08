@@ -332,7 +332,6 @@ impl LpgStore {
     ///
     /// Returns [`AllocError`] if the arena allocator cannot be initialized
     /// (only possible with the `tiered-storage` feature).
-    // FIXME: propagate Result to callers
     pub fn new() -> Result<Self, AllocError> {
         Self::with_config(LpgStoreConfig::default())
     }
@@ -343,7 +342,6 @@ impl LpgStore {
     ///
     /// Returns [`AllocError`] if the arena allocator cannot be initialized
     /// (only possible with the `tiered-storage` feature).
-    // FIXME: propagate Result to callers
     pub fn with_config(config: LpgStoreConfig) -> Result<Self, AllocError> {
         let backward_adj = if config.backward_edges {
             Some(ChunkedAdjacency::new())
@@ -495,7 +493,6 @@ impl LpgStore {
     /// # Errors
     ///
     /// Returns [`AllocError`] if a new store cannot be allocated.
-    // FIXME: propagate Result to callers
     pub fn graph_or_create(&self, name: &str) -> Result<Arc<LpgStore>, AllocError> {
         {
             let graphs = self.named_graphs.read();
@@ -518,7 +515,6 @@ impl LpgStore {
     /// # Errors
     ///
     /// Returns [`AllocError`] if the new store cannot be allocated.
-    // FIXME: propagate Result to callers
     pub fn create_graph(&self, name: &str) -> Result<bool, AllocError> {
         let mut graphs = self.named_graphs.write();
         if graphs.contains_key(name) {
@@ -563,7 +559,6 @@ impl LpgStore {
     /// # Errors
     ///
     /// Returns [`AllocError`] if the destination store cannot be allocated.
-    // FIXME: propagate Result to callers
     pub fn copy_graph(&self, source: Option<&str>, dest: Option<&str>) -> Result<(), AllocError> {
         let _src = match source {
             Some(n) => self.graph(n),
@@ -653,7 +648,6 @@ impl LpgStore {
 
 impl Default for LpgStore {
     fn default() -> Self {
-        // FIXME: propagate Result to callers (Default trait cannot return Result)
         Self::new().expect("failed to allocate arena for default LpgStore")
     }
 }

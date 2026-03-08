@@ -78,37 +78,13 @@ impl Optimizer {
     /// Creates an optimizer with cardinality estimates from the store's statistics.
     ///
     /// Pre-populates the cardinality estimator with per-label row counts and
-    /// edge type fanout. Feeds per-edge-type degree stats into the cost model
-    /// for accurate expand cost estimation.
+    /// edge type fanout. Feeds per-edge-type degree stats, label cardinalities,
+    /// and graph totals into the cost model for accurate estimation.
     #[must_use]
     pub fn from_store(store: &grafeo_core::graph::lpg::LpgStore) -> Self {
         store.ensure_statistics_fresh();
         let stats = store.statistics();
-        let estimator = CardinalityEstimator::from_statistics(&stats);
-
-        // Derive average fanout from statistics for the cost model
-        let avg_fanout = if stats.total_nodes > 0 {
-            (stats.total_edges as f64 / stats.total_nodes as f64).max(1.0)
-        } else {
-            10.0
-        };
-
-        // Collect per-edge-type degree stats for accurate expand costing
-        let edge_type_degrees: std::collections::HashMap<String, (f64, f64)> = stats
-            .edge_types
-            .iter()
-            .map(|(name, et)| (name.clone(), (et.avg_out_degree, et.avg_in_degree)))
-            .collect();
-
-        Self {
-            enable_filter_pushdown: true,
-            enable_join_reorder: true,
-            enable_projection_pushdown: true,
-            cost_model: CostModel::new()
-                .with_avg_fanout(avg_fanout)
-                .with_edge_type_degrees(edge_type_degrees),
-            card_estimator: estimator,
-        }
+        Self::from_statistics(&stats)
     }
 
     /// Creates an optimizer from any GraphStore implementation.
@@ -120,7 +96,16 @@ impl Optimizer {
     #[must_use]
     pub fn from_graph_store(store: &dyn grafeo_core::graph::GraphStore) -> Self {
         let stats = store.statistics();
-        let estimator = CardinalityEstimator::from_statistics(&stats);
+        Self::from_statistics(&stats)
+    }
+
+    /// Creates an optimizer from a Statistics snapshot.
+    ///
+    /// Extracts label cardinalities, edge type degrees, and graph totals
+    /// for both the cardinality estimator and cost model.
+    #[must_use]
+    fn from_statistics(stats: &grafeo_core::statistics::Statistics) -> Self {
+        let estimator = CardinalityEstimator::from_statistics(stats);
 
         let avg_fanout = if stats.total_nodes > 0 {
             (stats.total_edges as f64 / stats.total_nodes as f64).max(1.0)
@@ -134,13 +119,21 @@ impl Optimizer {
             .map(|(name, et)| (name.clone(), (et.avg_out_degree, et.avg_in_degree)))
             .collect();
 
+        let label_cardinalities: std::collections::HashMap<String, u64> = stats
+            .labels
+            .iter()
+            .map(|(name, ls)| (name.clone(), ls.node_count))
+            .collect();
+
         Self {
             enable_filter_pushdown: true,
             enable_join_reorder: true,
             enable_projection_pushdown: true,
             cost_model: CostModel::new()
                 .with_avg_fanout(avg_fanout)
-                .with_edge_type_degrees(edge_type_degrees),
+                .with_edge_type_degrees(edge_type_degrees)
+                .with_label_cardinalities(label_cardinalities)
+                .with_graph_totals(stats.total_nodes, stats.total_edges),
             card_estimator: estimator,
         }
     }
@@ -191,10 +184,14 @@ impl Optimizer {
         &self.card_estimator
     }
 
-    /// Estimates the cost of a plan.
+    /// Estimates the total cost of a plan by recursively costing the entire tree.
+    ///
+    /// Walks every operator in the plan, computing cardinality at each level
+    /// and summing the per-operator costs. Uses actual child cardinalities
+    /// for join cost estimation rather than approximations.
     pub fn estimate_cost(&self, plan: &LogicalPlan) -> Cost {
-        let cardinality = self.card_estimator.estimate(&plan.root);
-        self.cost_model.estimate(&plan.root, cardinality)
+        self.cost_model
+            .estimate_tree(&plan.root, &self.card_estimator)
     }
 
     /// Estimates the cardinality of a plan.

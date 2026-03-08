@@ -122,6 +122,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(feature = "testing-crash-injection")]
     fn crash_at_exact_count() {
         let result = with_crash_at(3, || {
             maybe_crash("point_1");

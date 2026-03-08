@@ -2951,6 +2951,7 @@ impl Operator for FilterOperator {
 }
 
 /// Escapes a character for use in a regex pattern.
+#[cfg(any(feature = "regex", feature = "regex-lite"))]
 fn regex_escape_char(ch: char, out: &mut String) {
     if ".+*?^${}()|[]\\".contains(ch) {
         out.push('\\');

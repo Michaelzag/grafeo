@@ -1773,16 +1773,29 @@ impl<'a> Parser<'a> {
                     EdgeDirection::Outgoing,
                 )
             } else if self.current.kind == TokenKind::DoubleDash {
-                // Simple --
+                // `--` (undirected) or `-->` (outgoing shorthand)
                 self.advance();
-                (
-                    None,
-                    Vec::new(),
-                    None,
-                    None,
-                    Vec::new(),
-                    EdgeDirection::Undirected,
-                )
+                if self.current.kind == TokenKind::Gt {
+                    // --> shorthand: directed outgoing, no bracket
+                    self.advance();
+                    (
+                        None,
+                        Vec::new(),
+                        None,
+                        None,
+                        Vec::new(),
+                        EdgeDirection::Outgoing,
+                    )
+                } else {
+                    (
+                        None,
+                        Vec::new(),
+                        None,
+                        None,
+                        Vec::new(),
+                        EdgeDirection::Undirected,
+                    )
+                }
             } else if self.current.kind == TokenKind::Tilde {
                 // GQL undirected edge: ~[variable:TYPE*min..max {props}]~
                 self.advance();
@@ -3496,6 +3509,26 @@ impl<'a> Parser<'a> {
         // Parse MATCH clauses
         while self.current.kind == TokenKind::Match || self.current.kind == TokenKind::Optional {
             match_clauses.push(self.parse_match_clause()?);
+        }
+
+        // Bare pattern form: EXISTS { (a)-[r]->(b) WHERE ... }
+        // Treat as implicit MATCH when no MATCH keyword but a pattern starts with (
+        if match_clauses.is_empty() && self.current.kind == TokenKind::LParen {
+            let span_start = self.current.span.start;
+            let mut patterns = Vec::new();
+            patterns.push(self.parse_aliased_pattern()?);
+            while self.current.kind == TokenKind::Comma {
+                self.advance();
+                patterns.push(self.parse_aliased_pattern()?);
+            }
+            match_clauses.push(MatchClause {
+                optional: false,
+                path_mode: None,
+                search_prefix: None,
+                match_mode: None,
+                patterns,
+                span: Some(SourceSpan::new(span_start, self.current.span.end, 1, 1)),
+            });
         }
 
         if match_clauses.is_empty() {
@@ -6858,6 +6891,63 @@ mod tests {
         assert_eq!(edges[0].direction, EdgeDirection::Undirected);
     }
 
+    // ==================== shorthand arrow edges ====================
+
+    #[test]
+    fn test_parse_shorthand_outgoing_arrow() {
+        // --> shorthand: directed outgoing, no brackets
+        let mut parser = Parser::new("MATCH (a)-->(b) RETURN b");
+        let result = parser.parse().expect("Shorthand --> should parse");
+        let edges = get_first_path_edges(&result);
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].direction, EdgeDirection::Outgoing);
+        assert!(edges[0].variable.is_none());
+        assert!(edges[0].types.is_empty());
+    }
+
+    #[test]
+    fn test_parse_shorthand_incoming_arrow() {
+        // <-- shorthand: directed incoming, no brackets
+        let mut parser = Parser::new("MATCH (a)<--(b) RETURN a");
+        let result = parser.parse().expect("Shorthand <-- should parse");
+        let edges = get_first_path_edges(&result);
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].direction, EdgeDirection::Incoming);
+        assert!(edges[0].variable.is_none());
+        assert!(edges[0].types.is_empty());
+    }
+
+    #[test]
+    fn test_parse_shorthand_arrow_chain() {
+        // Chained shorthand arrows: (a)-->(b)-->(c)
+        let mut parser = Parser::new("MATCH (a)-->(b)-->(c) RETURN c");
+        let result = parser.parse().expect("Chained --> should parse");
+        let edges = get_first_path_edges(&result);
+        assert_eq!(edges.len(), 2);
+        assert_eq!(edges[0].direction, EdgeDirection::Outgoing);
+        assert_eq!(edges[1].direction, EdgeDirection::Outgoing);
+    }
+
+    #[test]
+    fn test_parse_shorthand_mixed_directions() {
+        // Mixed: (a)<--(b)-->(c)
+        let mut parser = Parser::new("MATCH (a)<--(b)-->(c) RETURN c");
+        let result = parser.parse().expect("Mixed <-- and --> should parse");
+        let edges = get_first_path_edges(&result);
+        assert_eq!(edges.len(), 2);
+        assert_eq!(edges[0].direction, EdgeDirection::Incoming);
+        assert_eq!(edges[1].direction, EdgeDirection::Outgoing);
+    }
+
+    #[test]
+    fn test_parse_shorthand_undirected_still_works() {
+        // -- (undirected) must still work
+        let mut parser = Parser::new("MATCH (a)--(b) RETURN b");
+        let result = parser.parse().expect("Undirected -- should still parse");
+        let edges = get_first_path_edges(&result);
+        assert_eq!(edges[0].direction, EdgeDirection::Undirected);
+    }
+
     // ==================== unescape_string ====================
 
     #[test]
@@ -7997,5 +8087,39 @@ mod tests {
         } else {
             panic!("Expected CreateGraphType");
         }
+    }
+
+    // ==================== EXISTS bare pattern ====================
+
+    #[test]
+    fn test_parse_exists_with_match() {
+        // EXISTS with explicit MATCH (should already work)
+        let mut parser = Parser::new("MATCH (n) WHERE EXISTS { MATCH (n)-[:KNOWS]->() } RETURN n");
+        let result = parser.parse();
+        assert!(result.is_ok(), "EXISTS with MATCH should parse: {result:?}");
+    }
+
+    #[test]
+    fn test_parse_exists_bare_pattern() {
+        // Bare pattern without MATCH keyword
+        let mut parser = Parser::new("MATCH (n) WHERE EXISTS { (n)-[:KNOWS]->() } RETURN n");
+        let result = parser.parse();
+        assert!(
+            result.is_ok(),
+            "EXISTS bare pattern should parse: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_parse_exists_bare_pattern_with_where() {
+        // Bare pattern with WHERE inside EXISTS
+        let mut parser = Parser::new(
+            "MATCH (a), (b) WHERE NOT EXISTS { (a)-[r]->(b) WHERE type(r) = 'KNOWS' } RETURN a",
+        );
+        let result = parser.parse();
+        assert!(
+            result.is_ok(),
+            "EXISTS bare pattern with WHERE should parse: {result:?}"
+        );
     }
 }

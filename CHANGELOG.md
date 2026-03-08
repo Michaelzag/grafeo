@@ -2,6 +2,25 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
+## [0.5.16] - Unreleased
+
+Performance enhancements, bug fixes and Rust examples
+
+### Added
+
+- **Rust examples**: 7 runnable examples in `examples/rust/` covering the core API (basic queries, transactions, parameterized queries, vector search, graph algorithms, WAL persistence, multi-language dispatch)
+
+### Improved
+
+- **Cost model calibration**: recursive plan costing, statistics-aware IO estimation, actual child cardinalities for joins, multi-edge-type expand costing
+
+### Fixed
+
+- **GQL `-->` shorthand**: parser recognizes `-->` as a directed outgoing edge instead of splitting into `--` and `>`
+- **EXISTS bare patterns**: `EXISTS { (a)-[r]->(b) }` without explicit MATCH keyword now works in GQL and Cypher
+- **CASE WHEN in aggregates**: expressions like `sum(CASE WHEN ... THEN 1 ELSE 0 END)` resolve correctly in the LPG planner
+- **SPARQL parameters**: `execute_sparql_with_params()` now substitutes `$param` values instead of ignoring them
+
 ## [0.5.15] - 2026-03-07
 
 Full ecosystem feature profiles reworks and several graph database nice to haves

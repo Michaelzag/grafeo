@@ -484,13 +484,51 @@ impl RdfPlanner {
     fn plan_aggregate(&self, agg: &AggregateOp) -> Result<(Box<dyn Operator>, Vec<String>)> {
         use grafeo_core::execution::operators::AggregateExpr as PhysicalAggregateExpr;
 
-        let (input_op, input_columns) = self.plan_operator(&agg.input)?;
+        let (mut input_op, input_columns) = self.plan_operator(&agg.input)?;
 
-        let variable_columns: HashMap<String, usize> = input_columns
+        let mut variable_columns: HashMap<String, usize> = input_columns
             .iter()
             .enumerate()
             .map(|(i, name)| (name.clone(), i))
             .collect();
+
+        // Pre-project complex expressions (CASE, Binary, etc.) inside aggregate arguments
+        let mut expression_projections: Vec<(FilterExpression, String)> = Vec::new();
+        let mut next_col_idx = input_columns.len();
+        for agg_expr in &agg.aggregates {
+            for expr_opt in [&agg_expr.expression, &agg_expr.expression2] {
+                let Some(expr) = expr_opt else { continue };
+                match expr {
+                    LogicalExpression::Variable(_) => {}
+                    _ => {
+                        let col_name = format!("__expr_{:?}", expr);
+                        if !variable_columns.contains_key(&col_name) {
+                            let filter_expr = convert_filter_expression(expr)?;
+                            expression_projections.push((filter_expr, col_name.clone()));
+                            variable_columns.insert(col_name, next_col_idx);
+                            next_col_idx += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        if !expression_projections.is_empty() {
+            let mut projections: Vec<ProjectExpr> =
+                (0..input_columns.len()).map(ProjectExpr::Column).collect();
+            let mut output_types: Vec<LogicalType> =
+                input_columns.iter().map(|_| LogicalType::String).collect();
+
+            for (filter_expr, _col_name) in &expression_projections {
+                projections.push(ProjectExpr::Expression {
+                    expr: filter_expr.clone(),
+                    variable_columns: variable_columns.clone(),
+                });
+                output_types.push(LogicalType::Any);
+            }
+
+            input_op = Box::new(ProjectOperator::new(input_op, projections, output_types));
+        }
 
         let group_columns: Vec<usize> = agg
             .group_by
@@ -3332,10 +3370,13 @@ fn resolve_expression(
             .get(name)
             .copied()
             .ok_or_else(|| Error::Internal(format!("Variable '{}' not found", name))),
-        _ => Err(Error::Internal(format!(
-            "Cannot resolve expression to column: {:?}",
-            expr
-        ))),
+        _ => {
+            // Complex expression (CASE, Binary, etc.): look up synthetic column
+            let col_name = format!("__expr_{:?}", expr);
+            variable_columns.get(&col_name).copied().ok_or_else(|| {
+                Error::Internal(format!("Cannot resolve expression to column: {:?}", expr))
+            })
+        }
     }
 }
 

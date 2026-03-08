@@ -7,6 +7,7 @@ use crate::query::plan::{
     LogicalOperator, MultiWayJoinOp, NodeScanOp, ProjectOp, ReturnOp, SkipOp, SortOp, VectorJoinOp,
     VectorScanOp,
 };
+use std::collections::HashMap;
 
 /// Cost of an operation.
 ///
@@ -118,7 +119,13 @@ pub struct CostModel {
     /// Global average edge fanout (fallback when per-type stats unavailable).
     avg_fanout: f64,
     /// Per-edge-type degree stats: (avg_out_degree, avg_in_degree).
-    edge_type_degrees: std::collections::HashMap<String, (f64, f64)>,
+    edge_type_degrees: HashMap<String, (f64, f64)>,
+    /// Per-label node counts for accurate scan IO estimation.
+    label_cardinalities: HashMap<String, u64>,
+    /// Total node count in the graph.
+    total_nodes: u64,
+    /// Total edge count in the graph.
+    total_edges: u64,
 }
 
 impl CostModel {
@@ -132,7 +139,10 @@ impl CostModel {
             avg_tuple_size: 100.0,
             page_size: 8192.0,
             avg_fanout: 10.0,
-            edge_type_degrees: std::collections::HashMap::new(),
+            edge_type_degrees: HashMap::new(),
+            label_cardinalities: HashMap::new(),
+            total_nodes: 0,
+            total_edges: 0,
         }
     }
 
@@ -147,29 +157,56 @@ impl CostModel {
     ///
     /// Each entry maps edge type name to `(avg_out_degree, avg_in_degree)`.
     #[must_use]
-    pub fn with_edge_type_degrees(
-        mut self,
-        degrees: std::collections::HashMap<String, (f64, f64)>,
-    ) -> Self {
+    pub fn with_edge_type_degrees(mut self, degrees: HashMap<String, (f64, f64)>) -> Self {
         self.edge_type_degrees = degrees;
+        self
+    }
+
+    /// Sets per-label node counts for accurate scan IO estimation.
+    #[must_use]
+    pub fn with_label_cardinalities(mut self, cardinalities: HashMap<String, u64>) -> Self {
+        self.label_cardinalities = cardinalities;
+        self
+    }
+
+    /// Sets graph-level totals for cost estimation.
+    #[must_use]
+    pub fn with_graph_totals(mut self, total_nodes: u64, total_edges: u64) -> Self {
+        self.total_nodes = total_nodes;
+        self.total_edges = total_edges;
         self
     }
 
     /// Returns the fanout for a specific expand operation.
     ///
     /// Uses per-edge-type degree stats when available, falling back to the
-    /// global average fanout.
+    /// global average fanout. For multiple edge types, sums per-type fanouts.
     fn fanout_for_expand(&self, expand: &ExpandOp) -> f64 {
-        if expand.edge_types.len() == 1
-            && let Some(&(out_deg, in_deg)) = self.edge_type_degrees.get(&expand.edge_types[0])
-        {
-            return match expand.direction {
-                ExpandDirection::Outgoing => out_deg,
-                ExpandDirection::Incoming => in_deg,
-                ExpandDirection::Both => out_deg + in_deg,
-            };
+        if expand.edge_types.is_empty() {
+            return self.avg_fanout;
         }
-        self.avg_fanout
+
+        let mut total_fanout = 0.0;
+        let mut all_found = true;
+
+        for edge_type in &expand.edge_types {
+            if let Some(&(out_deg, in_deg)) = self.edge_type_degrees.get(edge_type) {
+                total_fanout += match expand.direction {
+                    ExpandDirection::Outgoing => out_deg,
+                    ExpandDirection::Incoming => in_deg,
+                    ExpandDirection::Both => out_deg + in_deg,
+                };
+            } else {
+                all_found = false;
+                break;
+            }
+        }
+
+        if all_found {
+            total_fanout
+        } else {
+            self.avg_fanout
+        }
     }
 
     /// Estimates the cost of a logical operator.
@@ -196,8 +233,23 @@ impl CostModel {
     }
 
     /// Estimates the cost of a node scan.
-    fn node_scan_cost(&self, _scan: &NodeScanOp, cardinality: f64) -> Cost {
-        let pages = (cardinality * self.avg_tuple_size) / self.page_size;
+    ///
+    /// When label statistics are available, uses the actual label cardinality
+    /// for IO estimation (pages to read) rather than the optimizer's cardinality
+    /// estimate, which may already account for filter selectivity.
+    fn node_scan_cost(&self, scan: &NodeScanOp, cardinality: f64) -> Cost {
+        // IO cost: based on how many nodes we actually need to scan from storage
+        let scan_size = if let Some(label) = &scan.label {
+            self.label_cardinalities
+                .get(label)
+                .map_or(cardinality, |&count| count as f64)
+        } else if self.total_nodes > 0 {
+            self.total_nodes as f64
+        } else {
+            cardinality
+        };
+        let pages = (scan_size * self.avg_tuple_size) / self.page_size;
+        // CPU cost: only pay for rows that pass the label filter
         Cost::cpu(cardinality * self.cpu_tuple_cost).with_io(pages)
     }
 
@@ -228,35 +280,38 @@ impl CostModel {
     }
 
     /// Estimates the cost of a join operation.
+    ///
+    /// When child cardinalities are known (from recursive estimation), uses them
+    /// directly for build/probe cost. Otherwise falls back to sqrt approximation.
     fn join_cost(&self, join: &JoinOp, cardinality: f64) -> Cost {
-        // Cost depends on join type
-        match join.join_type {
-            JoinType::Cross => {
-                // Cross join is O(n * m)
-                Cost::cpu(cardinality * self.cpu_tuple_cost)
-            }
-            JoinType::Inner | JoinType::Left | JoinType::Right | JoinType::Full => {
-                // Hash join: build phase + probe phase
-                // Assume left side is build, right side is probe
-                let build_cardinality = cardinality.sqrt(); // Rough estimate
-                let probe_cardinality = cardinality.sqrt();
+        self.join_cost_with_children(join, cardinality, None, None)
+    }
 
-                // Build hash table
+    /// Estimates join cost using actual child cardinalities.
+    fn join_cost_with_children(
+        &self,
+        join: &JoinOp,
+        cardinality: f64,
+        left_cardinality: Option<f64>,
+        right_cardinality: Option<f64>,
+    ) -> Cost {
+        match join.join_type {
+            JoinType::Cross => Cost::cpu(cardinality * self.cpu_tuple_cost),
+            JoinType::Inner | JoinType::Left | JoinType::Right | JoinType::Full => {
+                // Hash join: build the smaller side, probe with the larger
+                let build_cardinality = left_cardinality.unwrap_or_else(|| cardinality.sqrt());
+                let probe_cardinality = right_cardinality.unwrap_or_else(|| cardinality.sqrt());
+
                 let build_cost = build_cardinality * self.hash_lookup_cost;
                 let memory_cost = build_cardinality * self.avg_tuple_size;
-
-                // Probe hash table
                 let probe_cost = probe_cardinality * self.hash_lookup_cost;
-
-                // Output cost
                 let output_cost = cardinality * self.cpu_tuple_cost;
 
                 Cost::cpu(build_cost + probe_cost + output_cost).with_memory(memory_cost)
             }
             JoinType::Semi | JoinType::Anti => {
-                // Semi/anti joins are typically cheaper
-                let build_cardinality = cardinality.sqrt();
-                let probe_cardinality = cardinality.sqrt();
+                let build_cardinality = left_cardinality.unwrap_or_else(|| cardinality.sqrt());
+                let probe_cardinality = right_cardinality.unwrap_or_else(|| cardinality.sqrt());
 
                 let build_cost = build_cardinality * self.hash_lookup_cost;
                 let probe_cost = probe_cardinality * self.hash_lookup_cost;
@@ -396,6 +451,95 @@ impl CostModel {
         let memory = cardinality * self.avg_tuple_size;
 
         Cost::cpu(total_search_cost).with_memory(memory)
+    }
+
+    /// Estimates the total cost of an operator tree recursively.
+    ///
+    /// Walks the entire plan tree, computing per-operator cost at each level
+    /// using the cardinality estimator for accurate child cardinalities.
+    /// Returns the sum of all operator costs in the tree.
+    #[must_use]
+    pub fn estimate_tree(
+        &self,
+        op: &LogicalOperator,
+        card_estimator: &super::CardinalityEstimator,
+    ) -> Cost {
+        self.estimate_tree_inner(op, card_estimator)
+    }
+
+    fn estimate_tree_inner(
+        &self,
+        op: &LogicalOperator,
+        card_est: &super::CardinalityEstimator,
+    ) -> Cost {
+        let cardinality = card_est.estimate(op);
+
+        match op {
+            LogicalOperator::NodeScan(scan) => self.node_scan_cost(scan, cardinality),
+            LogicalOperator::Filter(filter) => {
+                let child_cost = self.estimate_tree_inner(&filter.input, card_est);
+                child_cost + self.filter_cost(filter, cardinality)
+            }
+            LogicalOperator::Project(project) => {
+                let child_cost = self.estimate_tree_inner(&project.input, card_est);
+                child_cost + self.project_cost(project, cardinality)
+            }
+            LogicalOperator::Expand(expand) => {
+                let child_cost = self.estimate_tree_inner(&expand.input, card_est);
+                child_cost + self.expand_cost(expand, cardinality)
+            }
+            LogicalOperator::Join(join) => {
+                let left_cost = self.estimate_tree_inner(&join.left, card_est);
+                let right_cost = self.estimate_tree_inner(&join.right, card_est);
+                let left_card = card_est.estimate(&join.left);
+                let right_card = card_est.estimate(&join.right);
+                let join_cost = self.join_cost_with_children(
+                    join,
+                    cardinality,
+                    Some(left_card),
+                    Some(right_card),
+                );
+                left_cost + right_cost + join_cost
+            }
+            LogicalOperator::Aggregate(agg) => {
+                let child_cost = self.estimate_tree_inner(&agg.input, card_est);
+                child_cost + self.aggregate_cost(agg, cardinality)
+            }
+            LogicalOperator::Sort(sort) => {
+                let child_cost = self.estimate_tree_inner(&sort.input, card_est);
+                child_cost + self.sort_cost(sort, cardinality)
+            }
+            LogicalOperator::Distinct(distinct) => {
+                let child_cost = self.estimate_tree_inner(&distinct.input, card_est);
+                child_cost + self.distinct_cost(distinct, cardinality)
+            }
+            LogicalOperator::Limit(limit) => {
+                let child_cost = self.estimate_tree_inner(&limit.input, card_est);
+                child_cost + self.limit_cost(limit, cardinality)
+            }
+            LogicalOperator::Skip(skip) => {
+                let child_cost = self.estimate_tree_inner(&skip.input, card_est);
+                child_cost + self.skip_cost(skip, cardinality)
+            }
+            LogicalOperator::Return(ret) => {
+                let child_cost = self.estimate_tree_inner(&ret.input, card_est);
+                child_cost + self.return_cost(ret, cardinality)
+            }
+            LogicalOperator::VectorScan(scan) => self.vector_scan_cost(scan, cardinality),
+            LogicalOperator::VectorJoin(join) => {
+                let child_cost = self.estimate_tree_inner(&join.input, card_est);
+                child_cost + self.vector_join_cost(join, cardinality)
+            }
+            LogicalOperator::MultiWayJoin(mwj) => {
+                let mut children_cost = Cost::zero();
+                for input in &mwj.inputs {
+                    children_cost += self.estimate_tree_inner(input, card_est);
+                }
+                children_cost + self.multi_way_join_cost(mwj, cardinality)
+            }
+            LogicalOperator::Empty => Cost::zero(),
+            _ => Cost::cpu(cardinality * self.cpu_tuple_cost),
+        }
     }
 
     /// Compares two costs and returns the cheaper one.
@@ -1093,6 +1237,226 @@ mod tests {
         assert!(
             benefit <= 1.0,
             "Low fanout still benefits from factorization"
+        );
+    }
+
+    #[test]
+    fn test_node_scan_uses_label_cardinality_for_io() {
+        let mut label_cards = std::collections::HashMap::new();
+        label_cards.insert("Person".to_string(), 500_u64);
+        label_cards.insert("Company".to_string(), 50_u64);
+
+        let model = CostModel::new()
+            .with_label_cardinalities(label_cards)
+            .with_graph_totals(550, 1000);
+
+        let person_scan = NodeScanOp {
+            variable: "n".to_string(),
+            label: Some("Person".to_string()),
+            input: None,
+        };
+        let company_scan = NodeScanOp {
+            variable: "n".to_string(),
+            label: Some("Company".to_string()),
+            input: None,
+        };
+
+        let person_cost = model.node_scan_cost(&person_scan, 500.0);
+        let company_cost = model.node_scan_cost(&company_scan, 50.0);
+
+        // Person scan reads 10x more pages than Company scan
+        assert!(
+            person_cost.io > company_cost.io * 5.0,
+            "Person ({}) should have much higher IO than Company ({})",
+            person_cost.io,
+            company_cost.io
+        );
+    }
+
+    #[test]
+    fn test_node_scan_unlabeled_uses_total_nodes() {
+        let model = CostModel::new().with_graph_totals(10_000, 50_000);
+
+        let scan = NodeScanOp {
+            variable: "n".to_string(),
+            label: None,
+            input: None,
+        };
+
+        let cost = model.node_scan_cost(&scan, 10_000.0);
+        let expected_pages = (10_000.0 * 100.0) / 8192.0;
+        assert!(
+            (cost.io - expected_pages).abs() < 0.1,
+            "Unlabeled scan should use total_nodes for IO: got {}, expected {}",
+            cost.io,
+            expected_pages
+        );
+    }
+
+    #[test]
+    fn test_join_cost_with_actual_child_cardinalities() {
+        let model = CostModel::new();
+        let join = JoinOp {
+            left: Box::new(LogicalOperator::Empty),
+            right: Box::new(LogicalOperator::Empty),
+            join_type: JoinType::Inner,
+            conditions: vec![JoinCondition {
+                left: LogicalExpression::Variable("a".to_string()),
+                right: LogicalExpression::Variable("b".to_string()),
+            }],
+        };
+
+        // With actual child cardinalities (100 left, 10000 right)
+        let cost_actual = model.join_cost_with_children(&join, 500.0, Some(100.0), Some(10_000.0));
+
+        // With sqrt fallback (sqrt(500) ~ 22.4 for both sides)
+        let cost_sqrt = model.join_cost(&join, 500.0);
+
+        // Actual build side (100) is larger than sqrt(500) ~ 22.4, so
+        // actual cost should be higher for build, but the probe side (10000)
+        // should dominate
+        assert!(
+            cost_actual.cpu > cost_sqrt.cpu,
+            "Actual child cardinalities ({}) should produce different cost than sqrt fallback ({})",
+            cost_actual.cpu,
+            cost_sqrt.cpu
+        );
+    }
+
+    #[test]
+    fn test_expand_multi_edge_types() {
+        let mut degrees = std::collections::HashMap::new();
+        degrees.insert("KNOWS".to_string(), (5.0, 5.0));
+        degrees.insert("FOLLOWS".to_string(), (20.0, 100.0));
+
+        let model = CostModel::new().with_edge_type_degrees(degrees);
+
+        // Multi-type outgoing: KNOWS(5) + FOLLOWS(20) = 25
+        let multi_expand = ExpandOp {
+            from_variable: "a".to_string(),
+            to_variable: "b".to_string(),
+            edge_variable: None,
+            direction: ExpandDirection::Outgoing,
+            edge_types: vec!["KNOWS".to_string(), "FOLLOWS".to_string()],
+            min_hops: 1,
+            max_hops: Some(1),
+            input: Box::new(LogicalOperator::Empty),
+            path_alias: None,
+            path_mode: PathMode::Walk,
+        };
+        let multi_cost = model.expand_cost(&multi_expand, 100.0);
+
+        // Single type: KNOWS(5) only
+        let single_expand = ExpandOp {
+            from_variable: "a".to_string(),
+            to_variable: "b".to_string(),
+            edge_variable: None,
+            direction: ExpandDirection::Outgoing,
+            edge_types: vec!["KNOWS".to_string()],
+            min_hops: 1,
+            max_hops: Some(1),
+            input: Box::new(LogicalOperator::Empty),
+            path_alias: None,
+            path_mode: PathMode::Walk,
+        };
+        let single_cost = model.expand_cost(&single_expand, 100.0);
+
+        // Multi-type (fanout=25) should be more expensive than single (fanout=5)
+        assert!(
+            multi_cost.cpu > single_cost.cpu * 3.0,
+            "Multi-type fanout ({}) should be much higher than single-type ({})",
+            multi_cost.cpu,
+            single_cost.cpu
+        );
+    }
+
+    #[test]
+    fn test_recursive_tree_cost() {
+        use crate::query::optimizer::CardinalityEstimator;
+
+        let mut label_cards = std::collections::HashMap::new();
+        label_cards.insert("Person".to_string(), 1000_u64);
+
+        let model = CostModel::new()
+            .with_label_cardinalities(label_cards)
+            .with_graph_totals(1000, 5000)
+            .with_avg_fanout(5.0);
+
+        let mut card_est = CardinalityEstimator::new();
+        card_est.add_table_stats("Person", crate::query::optimizer::TableStats::new(1000));
+
+        // Build a plan: NodeScan -> Filter -> Return
+        let plan = LogicalOperator::Return(ReturnOp {
+            items: vec![ReturnItem {
+                expression: LogicalExpression::Variable("n".to_string()),
+                alias: None,
+            }],
+            distinct: false,
+            input: Box::new(LogicalOperator::Filter(FilterOp {
+                predicate: LogicalExpression::Binary {
+                    left: Box::new(LogicalExpression::Property {
+                        variable: "n".to_string(),
+                        property: "age".to_string(),
+                    }),
+                    op: crate::query::plan::BinaryOp::Gt,
+                    right: Box::new(LogicalExpression::Literal(
+                        grafeo_common::types::Value::Int64(30),
+                    )),
+                },
+                input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                    variable: "n".to_string(),
+                    label: Some("Person".to_string()),
+                    input: None,
+                })),
+                pushdown_hint: None,
+            })),
+        });
+
+        let tree_cost = model.estimate_tree(&plan, &card_est);
+
+        // Tree cost should include scan IO + filter CPU + return CPU
+        assert!(tree_cost.cpu > 0.0, "Tree should have CPU cost");
+        assert!(tree_cost.io > 0.0, "Tree should have IO cost from scan");
+
+        // Compare with single-operator estimate (only costs the root)
+        let root_only_card = card_est.estimate(&plan);
+        let root_only_cost = model.estimate(&plan, root_only_card);
+
+        // Tree cost should be strictly higher because it includes child costs
+        assert!(
+            tree_cost.total() > root_only_cost.total(),
+            "Recursive tree cost ({}) should exceed root-only cost ({})",
+            tree_cost.total(),
+            root_only_cost.total()
+        );
+    }
+
+    #[test]
+    fn test_statistics_driven_vs_default_cost() {
+        let default_model = CostModel::new();
+
+        let mut label_cards = std::collections::HashMap::new();
+        label_cards.insert("Person".to_string(), 100_u64);
+        let stats_model = CostModel::new()
+            .with_label_cardinalities(label_cards)
+            .with_graph_totals(100, 500);
+
+        // Scan a small label: statistics model knows it's only 100 nodes
+        let scan = NodeScanOp {
+            variable: "n".to_string(),
+            label: Some("Person".to_string()),
+            input: None,
+        };
+
+        let default_cost = default_model.node_scan_cost(&scan, 100.0);
+        let stats_cost = stats_model.node_scan_cost(&scan, 100.0);
+
+        // With statistics, IO cost is based on actual label size (100 nodes)
+        // Without statistics, IO cost uses cardinality parameter (also 100 here)
+        // They should be equal in this case since cardinality matches label size
+        assert!(
+            (default_cost.io - stats_cost.io).abs() < 0.1,
+            "When cardinality matches label size, costs should be similar"
         );
     }
 }

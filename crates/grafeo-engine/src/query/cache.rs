@@ -194,6 +194,8 @@ pub struct QueryCache {
     optimized_hits: AtomicU64,
     /// Cache miss count for optimized plans.
     optimized_misses: AtomicU64,
+    /// Number of times the cache was invalidated (cleared due to DDL).
+    invalidations: AtomicU64,
     /// Whether caching is enabled.
     enabled: bool,
 }
@@ -213,6 +215,7 @@ impl QueryCache {
             parsed_misses: AtomicU64::new(0),
             optimized_hits: AtomicU64::new(0),
             optimized_misses: AtomicU64::new(0),
+            invalidations: AtomicU64::new(0),
             enabled: true,
         }
     }
@@ -227,6 +230,7 @@ impl QueryCache {
             parsed_misses: AtomicU64::new(0),
             optimized_hits: AtomicU64::new(0),
             optimized_misses: AtomicU64::new(0),
+            invalidations: AtomicU64::new(0),
             enabled: false,
         }
     }
@@ -289,10 +293,16 @@ impl QueryCache {
         self.optimized_cache.lock().remove(key);
     }
 
-    /// Clears all cached entries.
+    /// Clears all cached entries and increments the invalidation counter
+    /// (only when the cache was non-empty).
     pub fn clear(&self) {
+        let had_entries =
+            self.parsed_cache.lock().len() > 0 || self.optimized_cache.lock().len() > 0;
         self.parsed_cache.lock().clear();
         self.optimized_cache.lock().clear();
+        if had_entries {
+            self.invalidations.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     /// Returns cache statistics.
@@ -305,15 +315,17 @@ impl QueryCache {
             parsed_misses: self.parsed_misses.load(Ordering::Relaxed),
             optimized_hits: self.optimized_hits.load(Ordering::Relaxed),
             optimized_misses: self.optimized_misses.load(Ordering::Relaxed),
+            invalidations: self.invalidations.load(Ordering::Relaxed),
         }
     }
 
-    /// Resets hit/miss counters.
+    /// Resets hit/miss counters and invalidation counter.
     pub fn reset_stats(&self) {
         self.parsed_hits.store(0, Ordering::Relaxed);
         self.parsed_misses.store(0, Ordering::Relaxed);
         self.optimized_hits.store(0, Ordering::Relaxed);
         self.optimized_misses.store(0, Ordering::Relaxed);
+        self.invalidations.store(0, Ordering::Relaxed);
     }
 }
 
@@ -339,6 +351,8 @@ pub struct CacheStats {
     pub optimized_hits: u64,
     /// Number of optimized cache misses.
     pub optimized_misses: u64,
+    /// Number of times the cache was invalidated (cleared due to DDL).
+    pub invalidations: u64,
 }
 
 impl CacheStats {

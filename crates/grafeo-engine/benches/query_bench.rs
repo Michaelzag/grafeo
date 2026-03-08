@@ -115,6 +115,67 @@ fn bench_filter_range(c: &mut Criterion) {
     });
 }
 
+fn bench_two_hop_pattern_10k(c: &mut Criterion) {
+    let db = setup_social_graph(10_000, 5);
+    let session = db.session();
+
+    c.bench_function("query_2hop_pattern_10k", |b| {
+        b.iter(|| {
+            let result = session
+                .execute(
+                    "MATCH (a:Person {id: 0})-[:KNOWS]->(b)-[:KNOWS]->(c) RETURN DISTINCT c.id",
+                )
+                .unwrap();
+            black_box(result)
+        });
+    });
+}
+
+fn bench_fan_out_expand_1k(c: &mut Criterion) {
+    let db = setup_social_graph(1_000, 5);
+    let session = db.session();
+
+    // This query expands from ALL Person nodes, not just one.
+    // Tests expand performance with many scattered source nodes.
+    c.bench_function("query_fan_out_expand_1k", |b| {
+        b.iter(|| {
+            let result = session
+                .execute("MATCH (a:Person)-[:KNOWS]->(b) RETURN COUNT(b)")
+                .unwrap();
+            black_box(result)
+        });
+    });
+}
+
+fn bench_fan_out_expand_10k(c: &mut Criterion) {
+    let db = setup_social_graph(10_000, 5);
+    let session = db.session();
+
+    c.bench_function("query_fan_out_expand_10k", |b| {
+        b.iter(|| {
+            let result = session
+                .execute("MATCH (a:Person)-[:KNOWS]->(b) RETURN COUNT(b)")
+                .unwrap();
+            black_box(result)
+        });
+    });
+}
+
+fn bench_fan_out_expand_untyped_10k(c: &mut Criterion) {
+    let db = setup_social_graph(10_000, 5);
+    let session = db.session();
+
+    // Same fan-out but WITHOUT edge type filter - skips edge_type() lookups
+    c.bench_function("query_fan_out_untyped_10k", |b| {
+        b.iter(|| {
+            let result = session
+                .execute("MATCH (a:Person)-[]->(b) RETURN COUNT(b)")
+                .unwrap();
+            black_box(result)
+        });
+    });
+}
+
 fn bench_insert_single_node(c: &mut Criterion) {
     let db = GrafeoDB::new_in_memory();
     let session = db.session();
@@ -135,6 +196,10 @@ criterion_group!(
     bench_node_lookup,
     bench_pattern_match,
     bench_two_hop_pattern,
+    bench_two_hop_pattern_10k,
+    bench_fan_out_expand_1k,
+    bench_fan_out_expand_10k,
+    bench_fan_out_expand_untyped_10k,
     bench_aggregation_count,
     bench_filter_range,
     bench_insert_single_node,
