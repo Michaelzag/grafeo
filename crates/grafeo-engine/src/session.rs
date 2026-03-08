@@ -1956,6 +1956,64 @@ impl Session {
         })
     }
 
+    /// Executes a GraphQL query against the RDF store.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails to parse or execute.
+    #[cfg(all(feature = "graphql", feature = "rdf"))]
+    pub fn execute_graphql_rdf(&self, query: &str) -> Result<QueryResult> {
+        use crate::query::{
+            Executor, optimizer::Optimizer, planner::rdf::RdfPlanner, translators::graphql_rdf,
+        };
+
+        let logical_plan = graphql_rdf::translate(query, "http://example.org/")?;
+
+        let optimizer = Optimizer::from_graph_store(&*self.graph_store);
+        let optimized_plan = optimizer.optimize(logical_plan)?;
+
+        let planner = RdfPlanner::new(Arc::clone(&self.rdf_store))
+            .with_transaction_id(*self.current_transaction.lock());
+        let mut physical_plan = planner.plan(&optimized_plan)?;
+
+        let executor = Executor::with_columns(physical_plan.columns.clone())
+            .with_deadline(self.query_deadline());
+        executor.execute(physical_plan.operator.as_mut())
+    }
+
+    /// Executes a GraphQL query against the RDF store with parameters.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails to parse or execute.
+    #[cfg(all(feature = "graphql", feature = "rdf"))]
+    pub fn execute_graphql_rdf_with_params(
+        &self,
+        query: &str,
+        params: std::collections::HashMap<String, Value>,
+    ) -> Result<QueryResult> {
+        use crate::query::processor::{QueryLanguage, QueryProcessor};
+
+        let has_mutations = Self::query_looks_like_mutation(query);
+
+        self.with_auto_commit(has_mutations, || {
+            let (viewing_epoch, transaction_id) = self.get_transaction_context();
+
+            let processor = QueryProcessor::for_graph_store_with_transaction(
+                Arc::clone(&self.graph_store),
+                Arc::clone(&self.transaction_manager),
+            );
+
+            let processor = if let Some(transaction_id) = transaction_id {
+                processor.with_transaction_context(viewing_epoch, transaction_id)
+            } else {
+                processor
+            };
+
+            processor.process(query, QueryLanguage::GraphQLRdf, Some(&params))
+        })
+    }
+
     /// Executes a SQL/PGQ query (SQL:2023 GRAPH_TABLE).
     ///
     /// # Errors
@@ -2146,7 +2204,7 @@ impl Session {
     /// Executes a query in the specified language by name.
     ///
     /// Supported language names: `"gql"`, `"cypher"`, `"gremlin"`, `"graphql"`,
-    /// `"sparql"`, `"sql"`. Each requires the corresponding feature flag.
+    /// `"graphql-rdf"`, `"sparql"`, `"sql"`. Each requires the corresponding feature flag.
     ///
     /// # Errors
     ///
@@ -2201,6 +2259,14 @@ impl Session {
                     self.execute_graphql_with_params(query, p)
                 } else {
                     self.execute_graphql(query)
+                }
+            }
+            #[cfg(all(feature = "graphql", feature = "rdf"))]
+            "graphql-rdf" => {
+                if let Some(p) = params {
+                    self.execute_graphql_rdf_with_params(query, p)
+                } else {
+                    self.execute_graphql_rdf(query)
                 }
             }
             #[cfg(feature = "sql-pgq")]

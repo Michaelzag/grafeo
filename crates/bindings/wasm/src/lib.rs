@@ -122,7 +122,7 @@ impl Database {
 
     /// Executes a query using a specific query language.
     ///
-    /// Supported languages: `"gql"`, `"cypher"`, `"sparql"`, `"gremlin"`, `"graphql"`, `"sql"`.
+    /// Supported languages: `"gql"`, `"cypher"`, `"sparql"`, `"gremlin"`, `"graphql"`, `"graphql-rdf"`, `"sql"`.
     /// Languages require their corresponding feature flag to be enabled.
     ///
     /// ```js

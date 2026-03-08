@@ -302,6 +302,254 @@ fn test_exists_complex_gql_syntax() {
     assert_eq!(names, vec!["Alix", "Dave", "Gus"]);
 }
 
+// ---------- Deriva-pattern EXISTS reproduction ----------
+
+/// Graph mimicking Deriva's dual-namespace pattern with different edge types.
+fn create_deriva_graph() -> GrafeoDB {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    // Model elements (like ArchiMate elements)
+    session
+        .execute("INSERT (:Model {identifier: 'm1', name: 'AuthService', enabled: true})")
+        .unwrap();
+    session
+        .execute("INSERT (:Model {identifier: 'm2', name: 'LoginModule', enabled: true})")
+        .unwrap();
+    session
+        .execute("INSERT (:Model {identifier: 'm3', name: 'Database', enabled: true})")
+        .unwrap();
+
+    // Composition edge from m1 to m2 (AuthService contains LoginModule)
+    session
+        .execute_cypher(
+            "MATCH (a:Model {identifier: 'm1'}), (b:Model {identifier: 'm2'}) \
+             CREATE (a)-[:Composition]->(b)",
+        )
+        .unwrap();
+
+    // Flow edge from m2 to m3 (LoginModule uses Database)
+    session
+        .execute_cypher(
+            "MATCH (a:Model {identifier: 'm2'}), (b:Model {identifier: 'm3'}) \
+             CREATE (a)-[:Flow]->(b)",
+        )
+        .unwrap();
+
+    db
+}
+
+#[test]
+fn test_correlated_not_exists_with_type_filter() {
+    // Reproduces Deriva's dedup pattern: find model pairs WITHOUT a specific relationship type
+    let db = create_deriva_graph();
+    let session = db.session();
+
+    // NOT EXISTS with inner WHERE on type(): find pairs without Composition edge
+    // m1->m2 has Composition, so (m1,m2) should be excluded
+    // All other directed pairs should be included
+    let result = session.execute_cypher(
+        "MATCH (a:Model), (b:Model) \
+         WHERE a.identifier <> b.identifier \
+           AND NOT EXISTS { MATCH (a)-[r]->(b) WHERE type(r) = 'Composition' } \
+         RETURN a.name AS src, b.name AS tgt \
+         ORDER BY a.name, b.name",
+    );
+
+    assert!(result.is_ok(), "Query failed: {:?}", result.err());
+    let rows = &result.unwrap().rows;
+    // m1->m2 (AuthService->LoginModule) should be excluded (has Composition)
+    // Remaining 5 directed pairs should be returned
+    assert_eq!(rows.len(), 5, "Expected 5 rows but got {}", rows.len());
+}
+
+#[test]
+fn test_correlated_not_exists_bare_pattern() {
+    // Same as above but with bare pattern syntax (no MATCH keyword inside EXISTS)
+    let db = create_deriva_graph();
+    let session = db.session();
+
+    let result = session.execute_cypher(
+        "MATCH (a:Model), (b:Model) \
+         WHERE a.identifier <> b.identifier \
+           AND NOT EXISTS { (a)-[r]->(b) WHERE type(r) = 'Composition' } \
+         RETURN a.name AS src, b.name AS tgt \
+         ORDER BY a.name, b.name",
+    );
+
+    assert!(result.is_ok(), "Bare pattern query failed: {:?}", result.err());
+    let rows = &result.unwrap().rows;
+    assert_eq!(rows.len(), 5, "Expected 5 rows but got {}", rows.len());
+}
+
+#[test]
+fn test_case_when_in_aggregate() {
+    // Reproduces Deriva's directory classification pattern: CASE WHEN inside SUM
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    session
+        .execute("INSERT (:File {name: 'a.py', file_type: 'source'})")
+        .unwrap();
+    session
+        .execute("INSERT (:File {name: 'b.md', file_type: 'docs'})")
+        .unwrap();
+    session
+        .execute("INSERT (:File {name: 'c.py', file_type: 'source'})")
+        .unwrap();
+
+    let result = session.execute_cypher(
+        "MATCH (f:File) \
+         RETURN count(f) AS total, \
+                sum(CASE WHEN f.file_type = 'source' THEN 1 ELSE 0 END) AS source_count",
+    );
+
+    assert!(result.is_ok(), "CASE in aggregate failed: {:?}", result.err());
+    let rows = &result.unwrap().rows;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0][0], Value::Int64(3), "total should be 3");
+    assert_eq!(rows[0][1], Value::Int64(2), "source_count should be 2");
+}
+
+#[test]
+fn test_any_labels_starts_with() {
+    // Deriva uses: any(lbl IN labels(n) WHERE lbl STARTS WITH 'Model:')
+    let db = create_deriva_graph();
+    let session = db.session();
+
+    let result = session.execute_cypher(
+        "MATCH (e) \
+         WHERE any(lbl IN labels(e) WHERE lbl STARTS WITH 'Mod') \
+         RETURN e.name ORDER BY e.name",
+    );
+    assert!(
+        result.is_ok(),
+        "any(labels) STARTS WITH failed: {:?}",
+        result.err()
+    );
+    let rows = &result.unwrap().rows;
+    assert_eq!(rows.len(), 3);
+}
+
+#[test]
+fn test_type_starts_with() {
+    // Deriva uses: type(r) STARTS WITH 'Model:'
+    let db = create_deriva_graph();
+    let session = db.session();
+
+    let result = session.execute_cypher(
+        "MATCH ()-[r]->() \
+         WHERE type(r) STARTS WITH 'Comp' \
+         RETURN type(r) AS rel_type",
+    );
+    assert!(
+        result.is_ok(),
+        "type(r) STARTS WITH failed: {:?}",
+        result.err()
+    );
+    assert_eq!(result.unwrap().row_count(), 1);
+}
+
+#[test]
+fn test_list_comprehension_on_labels() {
+    // Deriva uses: [lbl IN labels(e) WHERE lbl STARTS WITH 'Model:'][0]
+    let db = create_deriva_graph();
+    let session = db.session();
+
+    let result = session.execute_cypher(
+        "MATCH (e:Model) \
+         RETURN [lbl IN labels(e) WHERE lbl STARTS WITH 'Mod'][0] AS label, e.name \
+         ORDER BY e.name",
+    );
+    assert!(
+        result.is_ok(),
+        "List comprehension on labels failed: {:?}",
+        result.err()
+    );
+    let rows = &result.unwrap().rows;
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0][0], Value::String("Model".into()));
+}
+
+#[test]
+fn test_not_exists_combined_many_conditions() {
+    // Deriva's actual pattern: many AND conditions + NOT EXISTS at the end
+    let db = create_deriva_graph();
+    let session = db.session();
+
+    let result = session.execute_cypher(
+        "MATCH (a:Model), (b:Model) \
+         WHERE a.enabled = true \
+           AND b.enabled = true \
+           AND a.identifier <> b.identifier \
+           AND NOT EXISTS { MATCH (a)-[r]->(b) WHERE type(r) = 'Composition' } \
+         RETURN a.name, b.name \
+         ORDER BY a.name, b.name",
+    );
+    assert!(
+        result.is_ok(),
+        "Many conditions + NOT EXISTS failed: {:?}",
+        result.err()
+    );
+    let rows = &result.unwrap().rows;
+    // 3 nodes * 2 remaining pairs per node = 6, minus 1 (m1->m2 Composition) = 5
+    assert_eq!(rows.len(), 5, "Expected 5 rows but got {}", rows.len());
+}
+
+#[test]
+fn test_any_labels_in_list() {
+    // Bug 3 from cypher-bugs-0.5.17: any() with IN list returns 0 rows
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    session
+        .execute("INSERT (:A:B:C {name: 'Test'})")
+        .unwrap();
+
+    // Should return 1 row: node has labels A and B which are in the list
+    let result = session.execute_cypher(
+        "MATCH (n) WHERE any(lbl IN labels(n) WHERE lbl IN ['A', 'B']) RETURN n.name",
+    );
+    assert!(
+        result.is_ok(),
+        "any() IN list failed: {:?}",
+        result.err()
+    );
+    let rows = &result.unwrap().rows;
+    assert_eq!(rows.len(), 1, "Expected 1 row but got {}", rows.len());
+
+    // Should return 0 rows: no matching labels
+    let result2 = session.execute_cypher(
+        "MATCH (n) WHERE any(lbl IN labels(n) WHERE lbl IN ['X', 'Y']) RETURN n.name",
+    );
+    assert!(
+        result2.is_ok(),
+        "any() IN list (no match) failed: {:?}",
+        result2.err()
+    );
+    assert_eq!(result2.unwrap().row_count(), 0);
+}
+
+#[test]
+fn test_case_when_in_reduce() {
+    // Bug 4 from cypher-bugs-0.5.17: CASE WHEN inside reduce()
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    let result = session.execute_cypher(
+        "WITH [3, 1, 4, 1, 5] AS vals \
+         RETURN reduce(acc = 0, x IN vals | CASE WHEN x > acc THEN x ELSE acc END) AS max_val",
+    );
+    assert!(
+        result.is_ok(),
+        "CASE in reduce() failed: {:?}",
+        result.err()
+    );
+    let rows = &result.unwrap().rows;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0][0], Value::Int64(5), "max_val should be 5");
+}
+
 // ============================================================================
 // List/Map expressions: covers expression.rs List, Map branches
 // ============================================================================
