@@ -220,7 +220,11 @@ impl Optimizer {
             root = self.push_projections_down(root);
         }
 
-        Ok(LogicalPlan::new(root))
+        Ok(LogicalPlan {
+            root,
+            explain: plan.explain,
+            profile: plan.profile,
+        })
     }
 
     /// Pushes projections down the operator tree to eliminate unused columns early.

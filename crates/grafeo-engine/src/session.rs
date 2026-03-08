@@ -1456,6 +1456,39 @@ impl Session {
             return Ok(explain_result(&plan));
         }
 
+        // PROFILE: execute with per-operator instrumentation
+        if optimized_plan.profile {
+            let has_mutations = optimized_plan.root.has_mutations();
+            return self.with_auto_commit(has_mutations, || {
+                let (viewing_epoch, transaction_id) = self.get_transaction_context();
+                let planner = self.create_planner(viewing_epoch, transaction_id);
+                let (mut physical_plan, entries) = planner.plan_profiled(&optimized_plan)?;
+
+                let executor = Executor::with_columns(physical_plan.columns.clone())
+                    .with_deadline(self.query_deadline());
+                let _result = executor.execute(physical_plan.operator.as_mut())?;
+
+                let total_time_ms;
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    total_time_ms = start_time.elapsed().as_secs_f64() * 1000.0;
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    total_time_ms = 0.0;
+                }
+
+                let profile_tree = crate::query::profile::build_profile_tree(
+                    &optimized_plan.root,
+                    &mut entries.into_iter(),
+                );
+                Ok(crate::query::profile::profile_result(
+                    &profile_tree,
+                    total_time_ms,
+                ))
+            });
+        }
+
         let has_mutations = optimized_plan.root.has_mutations();
 
         self.with_auto_commit(has_mutations, || {
@@ -1579,6 +1612,9 @@ impl Session {
             processor::QueryLanguage, translators::cypher,
         };
 
+        #[cfg(not(target_arch = "wasm32"))]
+        let start_time = std::time::Instant::now();
+
         // Create cache key for this query
         let cache_key = CacheKey::new(query, QueryLanguage::Cypher);
 
@@ -1602,6 +1638,47 @@ impl Session {
 
             plan
         };
+
+        // EXPLAIN
+        if optimized_plan.explain {
+            use crate::query::processor::{annotate_pushdown_hints, explain_result};
+            let mut plan = optimized_plan;
+            annotate_pushdown_hints(&mut plan.root, self.graph_store.as_ref());
+            return Ok(explain_result(&plan));
+        }
+
+        // PROFILE
+        if optimized_plan.profile {
+            let has_mutations = optimized_plan.root.has_mutations();
+            return self.with_auto_commit(has_mutations, || {
+                let (viewing_epoch, transaction_id) = self.get_transaction_context();
+                let planner = self.create_planner(viewing_epoch, transaction_id);
+                let (mut physical_plan, entries) = planner.plan_profiled(&optimized_plan)?;
+
+                let executor = Executor::with_columns(physical_plan.columns.clone())
+                    .with_deadline(self.query_deadline());
+                let _result = executor.execute(physical_plan.operator.as_mut())?;
+
+                let total_time_ms;
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    total_time_ms = start_time.elapsed().as_secs_f64() * 1000.0;
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    total_time_ms = 0.0;
+                }
+
+                let profile_tree = crate::query::profile::build_profile_tree(
+                    &optimized_plan.root,
+                    &mut entries.into_iter(),
+                );
+                Ok(crate::query::profile::profile_result(
+                    &profile_tree,
+                    total_time_ms,
+                ))
+            });
+        }
 
         let has_mutations = optimized_plan.root.has_mutations();
 

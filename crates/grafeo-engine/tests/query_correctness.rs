@@ -1975,3 +1975,111 @@ mod sql_pgq_db_execute {
         assert_eq!(result.row_count(), 3);
     }
 }
+
+// ============================================================================
+// PROFILE Statement Tests
+// ============================================================================
+
+#[cfg(feature = "gql")]
+mod profile_tests {
+    use grafeo_common::types::Value;
+    use grafeo_engine::GrafeoDB;
+
+    #[test]
+    fn gql_profile_returns_single_profile_column() {
+        let db = GrafeoDB::new_in_memory();
+        let session = db.session();
+        session
+            .execute("INSERT (:Person {name: 'Alix', age: 30})")
+            .unwrap();
+        session
+            .execute("INSERT (:Person {name: 'Gus', age: 25})")
+            .unwrap();
+
+        let result = session
+            .execute("PROFILE MATCH (n:Person) RETURN n.name")
+            .unwrap();
+
+        // PROFILE returns a single "profile" column with one row
+        assert_eq!(result.columns, vec!["profile"]);
+        assert_eq!(result.row_count(), 1);
+
+        // The value is a string containing operator names and metrics
+        let profile_text = match &result.rows[0][0] {
+            Value::String(s) => s.to_string(),
+            other => panic!("Expected String, got {other:?}"),
+        };
+
+        // Verify the profile output contains expected operator names
+        assert!(
+            profile_text.contains("Return"),
+            "Profile should contain Return operator, got: {profile_text}"
+        );
+        assert!(
+            profile_text.contains("NodeScan") || profile_text.contains("Scan"),
+            "Profile should contain a scan operator, got: {profile_text}"
+        );
+        assert!(
+            profile_text.contains("rows="),
+            "Profile should contain row counts, got: {profile_text}"
+        );
+        assert!(
+            profile_text.contains("time="),
+            "Profile should contain timing, got: {profile_text}"
+        );
+        assert!(
+            profile_text.contains("Total time:"),
+            "Profile should contain total time, got: {profile_text}"
+        );
+    }
+
+    #[test]
+    fn gql_profile_row_counts_are_accurate() {
+        let db = GrafeoDB::new_in_memory();
+        let session = db.session();
+        for i in 0..5 {
+            session
+                .execute(&format!("INSERT (:Person {{name: 'P{i}', age: {i}0}})"))
+                .unwrap();
+        }
+
+        let result = session
+            .execute("PROFILE MATCH (n:Person) RETURN n.name")
+            .unwrap();
+
+        let profile_text = match &result.rows[0][0] {
+            Value::String(s) => s.to_string(),
+            other => panic!("Expected String, got {other:?}"),
+        };
+
+        // The Return operator should show rows=5
+        assert!(
+            profile_text.contains("rows=5"),
+            "Profile should show 5 rows for 5 Person nodes, got: {profile_text}"
+        );
+    }
+
+    #[cfg(feature = "cypher")]
+    #[test]
+    fn cypher_profile_works() {
+        let db = GrafeoDB::new_in_memory();
+        let session = db.session();
+        session.execute("INSERT (:Person {name: 'Alix'})").unwrap();
+
+        let result = session
+            .execute_cypher("PROFILE MATCH (n:Person) RETURN n.name")
+            .unwrap();
+
+        assert_eq!(result.columns, vec!["profile"]);
+        assert_eq!(result.row_count(), 1);
+
+        let profile_text = match &result.rows[0][0] {
+            Value::String(s) => s.to_string(),
+            other => panic!("Expected String, got {other:?}"),
+        };
+        assert!(
+            profile_text.contains("rows="),
+            "Cypher PROFILE should work, got: {profile_text}"
+        );
+    }
+}

@@ -111,10 +111,6 @@ mod tests {
         }
     }
 
-    // SAFETY: MockOperator holds no shared mutable state.
-    unsafe impl Send for MockOperator {}
-    unsafe impl Sync for MockOperator {}
-
     impl Operator for MockOperator {
         fn next(&mut self) -> OperatorResult {
             if self.chunks_remaining == 0 {
