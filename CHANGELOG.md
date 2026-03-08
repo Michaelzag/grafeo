@@ -2,12 +2,16 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
-## [0.5.16] - Unreleased
+## [0.5.16] - 2026-03-08
 
 Performance enhancements, bug fixes and Rust examples
 
 ### Added
 
+- **LOAD CSV**: `LOAD CSV [WITH HEADERS] FROM 'path' AS row [FIELDTERMINATOR '\t']` in Cypher, with inline CSV parser supporting quoted fields, `file:///` URIs, and custom delimiters
+- **Cypher schema DDL**: `CREATE/DROP INDEX`, `CREATE/DROP CONSTRAINT`, `SHOW INDEXES`, `SHOW CONSTRAINTS`
+- **Relationship WHERE**: inline predicates on relationship patterns (`-[r WHERE r.since > 2020]->`)
+- **Temporal map constructors**: `date({year:2024, month:3})`, `time({hour:14})`, `datetime(...)`, `duration({years:1, months:2, days:3})`
 - **PROFILE statement**: `PROFILE MATCH ... RETURN ...` executes the query and returns per-operator metrics (rows, self-time, call counts) for GQL and Cypher
 - **Rust examples**: 7 runnable examples in `examples/rust/` covering the core API (basic queries, transactions, parameterized queries, vector search, graph algorithms, WAL persistence, multi-language dispatch)
 - **Plan cache invalidation**: query plan cache is automatically cleared after DDL operations (CREATE/DROP INDEX, TYPE, CONSTRAINT, etc.), with manual `clear_plan_cache()` API on `GrafeoDB` and `Session`
