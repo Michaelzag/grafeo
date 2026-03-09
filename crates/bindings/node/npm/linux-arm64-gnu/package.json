@@ -1,11 +1,19 @@
 {
   "name": "@grafeo-db/js-linux-arm64-gnu",
   "version": "0.5.18",
-  "os": ["linux"],
-  "cpu": ["arm64"],
-  "libc": ["glibc"],
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "libc": [
+    "glibc"
+  ],
   "main": "grafeo.linux-arm64-gnu.node",
-  "files": ["grafeo.linux-arm64-gnu.node"],
+  "files": [
+    "grafeo.linux-arm64-gnu.node"
+  ],
   "description": "Grafeo native binding for Linux arm64 (glibc)",
   "license": "Apache-2.0",
   "engines": {

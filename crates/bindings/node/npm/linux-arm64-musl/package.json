@@ -1,11 +1,19 @@
 {
   "name": "@grafeo-db/js-linux-arm64-musl",
   "version": "0.5.18",
-  "os": ["linux"],
-  "cpu": ["arm64"],
-  "libc": ["musl"],
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "libc": [
+    "musl"
+  ],
   "main": "grafeo.linux-arm64-musl.node",
-  "files": ["grafeo.linux-arm64-musl.node"],
+  "files": [
+    "grafeo.linux-arm64-musl.node"
+  ],
   "description": "Grafeo native binding for Linux arm64 (musl)",
   "license": "Apache-2.0",
   "engines": {

@@ -1,10 +1,16 @@
 {
   "name": "@grafeo-db/js-darwin-x64",
   "version": "0.5.18",
-  "os": ["darwin"],
-  "cpu": ["x64"],
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
   "main": "grafeo.darwin-x64.node",
-  "files": ["grafeo.darwin-x64.node"],
+  "files": [
+    "grafeo.darwin-x64.node"
+  ],
   "description": "Grafeo native binding for macOS x64",
   "license": "Apache-2.0",
   "engines": {
