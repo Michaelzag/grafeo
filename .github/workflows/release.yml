@@ -250,7 +250,7 @@ jobs:
         shell: bash
         run: |
           if [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
-            npx napi build --platform --release --target ${{ matrix.target }} --features full --zig
+            npx napi build --platform --release --target ${{ matrix.target }} --features full --cross-compile
           else
             npx napi build --platform --release --target ${{ matrix.target }} --features full
           fi
@@ -291,15 +291,14 @@ jobs:
 
       - name: Move artifacts to npm directories
         working-directory: crates/bindings/node
-        run: npx napi artifacts --build-output-dir artifacts --npm-dir npm
-
-      - name: List artifacts
-        working-directory: crates/bindings/node
         run: |
           echo "=== Downloaded artifacts ==="
-          ls -la artifacts/ || true
+          ls -la artifacts/
+          # Copy .node files to cwd where napi artifacts expects them
+          cp artifacts/grafeo.*.node .
+          npx napi artifacts --npm-dir npm
           echo "=== Platform packages ==="
-          find npm -name '*.node' -ls || true
+          find npm -name '*.node' -ls
 
       - name: Publish platform packages
         working-directory: crates/bindings/node
