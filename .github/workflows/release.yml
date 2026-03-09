@@ -195,11 +195,80 @@ jobs:
           ESCAPED=$(echo "github.com/GrafeoDB/grafeo/crates/bindings/go" | sed 's/[A-Z]/!\L&/g')
           curl -sf "https://proxy.golang.org/${ESCAPED}/@v/${VERSION}.info" || echo "Go proxy fetch pending"
 
-  # Publish npm packages
+  # Build Node.js native modules for each platform
+  build-node-native:
+    name: Node.js (${{ matrix.target }})
+    runs-on: ${{ matrix.host }}
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: macos-latest
+            target: x86_64-apple-darwin
+          - host: macos-latest
+            target: aarch64-apple-darwin
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - host: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+          - host: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross tools (aarch64 Linux GNU)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Install cross tools (aarch64 Linux musl)
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: |
+          pip install ziglang
+          cargo install cargo-zigbuild
+
+      - name: Install dependencies
+        working-directory: crates/bindings/node
+        run: npm install
+
+      - name: Build native module
+        working-directory: crates/bindings/node
+        shell: bash
+        run: |
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
+            npx napi build --platform --release --target ${{ matrix.target }} --features full --cross-compile
+          else
+            npx napi build --platform --release --target ${{ matrix.target }} --features full
+          fi
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-bindings-${{ matrix.target }}
+          path: crates/bindings/node/grafeo.*.node
+          if-no-files-found: error
+
+  # Publish Node.js platform packages and main package to npm
   publish-npm:
     name: Publish to npm
     runs-on: ubuntu-latest
-    needs: create-release
+    needs: [create-release, build-node-native]
     steps:
       - uses: actions/checkout@v4
 
@@ -209,16 +278,43 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
       - name: Install dependencies
         working-directory: crates/bindings/node
         run: npm install
 
-      - name: Build native module
+      - name: Download all Node.js artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: crates/bindings/node/artifacts
+          pattern: node-bindings-*
+          merge-multiple: true
+
+      - name: Move artifacts to npm directories
         working-directory: crates/bindings/node
-        run: npm run build
+        run: |
+          echo "=== Downloaded artifacts ==="
+          ls -la artifacts/
+          # Copy .node files to cwd where napi artifacts expects them
+          cp artifacts/grafeo.*.node .
+          npx napi artifacts --npm-dir npm
+          echo "=== Platform packages ==="
+          find npm -name '*.node' -ls
+
+      - name: Publish platform packages
+        working-directory: crates/bindings/node
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for dir in npm/*/; do
+            if ls "$dir"*.node 1>/dev/null 2>&1; then
+              echo "Publishing $(basename "$dir")..."
+              (cd "$dir" && npm publish --access public) || true
+            fi
+          done
+
+      - name: Regenerate loader with correct version
+        working-directory: crates/bindings/node
+        run: npx napi prepublish -t npm
 
       - name: Publish @grafeo-db/js
         working-directory: crates/bindings/node

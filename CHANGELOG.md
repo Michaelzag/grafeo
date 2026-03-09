@@ -33,6 +33,7 @@ Query language compliance improvements, expanded test coverage, and Deriva compa
 - **Label mutation rollback**: `SET n:Label` and `REMOVE n:Label` changes are correctly undone on `ROLLBACK`
 - **MERGE ON MATCH SET rollback**: properties updated via `MERGE ... ON MATCH SET` are correctly restored on `ROLLBACK`
 - **Savepoint partial rollback**: `ROLLBACK TO SAVEPOINT` now undoes property and label mutations made after the savepoint while preserving earlier changes
+- **NPM package missing native binaries** ([#128](https://github.com/GrafeoDB/grafeo/issues/128)): `@grafeo-db/js` now publishes per-platform packages (`@grafeo-db/js-darwin-arm64`, `@grafeo-db/js-linux-x64-gnu`, etc.) as `optionalDependencies`, so `npm install` and `bun install` pull the correct native binary automatically
 
 ## [0.5.17] - 2026-03-09
 
