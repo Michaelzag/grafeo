@@ -1022,3 +1022,352 @@ class TestDerivaIntegrationPatterns:
         assert "keep_me" in names
         assert "also_keep" in names
         assert "delete_me" not in names
+
+
+# =============================================================================
+# EXISTS Subquery Tests (Tests 5-11 from exists-subquery-bug.md)
+# =============================================================================
+
+
+def setup_exists_subquery_graph(db):
+    """Create a graph for EXISTS subquery tests.
+
+    Graph layer: Repository > Directory > Files, with IMPORTS edges.
+    Model layer: ArchiMate elements with source_identifier links back to Graph.
+    One existing Model:Composition relationship for dedup testing.
+
+    Nodes use dual labels: a base label (e.g. Model) for simple MATCH patterns,
+    and a backtick-escaped namespaced label (e.g. `Model:ApplicationComponent`)
+    for STARTS WITH filtering on labels(). This mirrors Deriva's convention.
+    """
+    # Graph layer nodes (base label + namespaced label)
+    db.execute_cypher(
+        "CREATE (:Graph:`Graph:Repository` {id: 'repo-1', name: 'TestRepo', active: true})"
+    )
+    db.execute_cypher("CREATE (:Graph:`Graph:Directory` {id: 'dir-1', name: 'src', active: true})")
+    db.execute_cypher("CREATE (:Graph:`Graph:File` {id: 'file-1', name: 'app.py', active: true})")
+    db.execute_cypher(
+        "CREATE (:Graph:`Graph:File` {id: 'file-2', name: 'models.py', active: true})"
+    )
+    db.execute_cypher("CREATE (:Graph:`Graph:File` {id: 'file-3', name: 'utils.py', active: true})")
+
+    # Graph layer edges
+    db.execute_cypher(
+        "MATCH (a:`Graph:Repository` {id: 'repo-1'}), (b:`Graph:Directory` {id: 'dir-1'}) "
+        "CREATE (a)-[:`Graph:CONTAINS`]->(b)"
+    )
+    db.execute_cypher(
+        "MATCH (a:`Graph:Directory` {id: 'dir-1'}), (b:`Graph:File` {id: 'file-1'}) "
+        "CREATE (a)-[:`Graph:CONTAINS`]->(b)"
+    )
+    db.execute_cypher(
+        "MATCH (a:`Graph:Directory` {id: 'dir-1'}), (b:`Graph:File` {id: 'file-2'}) "
+        "CREATE (a)-[:`Graph:CONTAINS`]->(b)"
+    )
+    db.execute_cypher(
+        "MATCH (a:`Graph:File` {id: 'file-1'}), (b:`Graph:File` {id: 'file-2'}) "
+        "CREATE (a)-[:`Graph:IMPORTS`]->(b)"
+    )
+
+    # Model layer nodes (base label Model + namespaced label)
+    db.execute_cypher(
+        "CREATE (:Model:`Model:ApplicationComponent` {"
+        "identifier: 'ac-1', name: 'App', enabled: true, "
+        "source_identifier: 'file-1', "
+        'properties_json: \'{"source": "file-1"}\''
+        "})"
+    )
+    db.execute_cypher(
+        "CREATE (:Model:`Model:ApplicationComponent` {"
+        "identifier: 'ac-2', name: 'Models', enabled: true, "
+        "source_identifier: 'file-2', "
+        'properties_json: \'{"source": "file-2"}\''
+        "})"
+    )
+    db.execute_cypher(
+        "CREATE (:Model:`Model:ApplicationComponent` {"
+        "identifier: 'ac-3', name: 'Utils', enabled: true, "
+        "source_identifier: 'file-3', "
+        'properties_json: \'{"source": "file-3"}\''
+        "})"
+    )
+    db.execute_cypher(
+        "CREATE (:Model:`Model:DataObject` {"
+        "identifier: 'do-1', name: 'UserData', enabled: true, "
+        "source_identifier: 'file-2', "
+        'properties_json: \'{"source": "file-2"}\''
+        "})"
+    )
+
+    # One existing Model relationship (for dedup testing)
+    db.execute_cypher(
+        "MATCH (a:`Model:ApplicationComponent` {identifier: 'ac-1'}), "
+        "(b:`Model:ApplicationComponent` {identifier: 'ac-2'}) "
+        "CREATE (a)-[:`Model:Composition`]->(b)"
+    )
+
+
+class TestExistsSubqueryPatterns:
+    """Tests for EXISTS/NOT EXISTS subquery patterns (Tests 5-11).
+
+    These test patterns from Deriva's relationship derivation, orphan
+    detection, and cross-layer connection checking.
+    """
+
+    def test_relationship_dedup_with_circular_prevention(self, db):
+        """Test 5: Two NOT EXISTS in same WHERE clause.
+
+        First NOT EXISTS prevents duplicate relationships.
+        Second NOT EXISTS prevents circular Composition.
+        Should NOT return (App, Models) because ac1 -[:Model:Composition]-> ac2 exists.
+        """
+        setup_exists_subquery_graph(db)
+
+        result = list(
+            db.execute_cypher(
+                "MATCH (graph_src)-[edge:`Graph:CONTAINS`]->(graph_tgt) "
+                "WHERE graph_src.active = true AND graph_tgt.active = true "
+                "MATCH (model_src), (model_tgt) "
+                "WHERE any(lbl IN labels(model_src) WHERE lbl STARTS WITH 'Model:') "
+                "  AND any(lbl IN labels(model_tgt) WHERE lbl STARTS WITH 'Model:') "
+                "  AND model_src.enabled = true AND model_tgt.enabled = true "
+                "  AND model_src.source_identifier = graph_src.id "
+                "  AND model_tgt.source_identifier = graph_tgt.id "
+                "  AND model_src.identifier <> model_tgt.identifier "
+                "  AND NOT EXISTS { "
+                "      (model_src)-[existing]->(model_tgt) "
+                "      WHERE type(existing) = 'Model:Composition' "
+                "  } "
+                "  AND NOT EXISTS { "
+                "      (model_tgt)-[reverse:`Model:Composition`]->(model_src) "
+                "  } "
+                "RETURN DISTINCT "
+                "    model_src.identifier AS source_id, "
+                "    model_src.name AS source_name, "
+                "    model_tgt.identifier AS target_id, "
+                "    model_tgt.name AS target_name"
+            )
+        )
+
+        # ac1 -> ac2 already has Model:Composition, so should be filtered out.
+        # No other CONTAINS edges connect to model layer nodes, so expect 0 rows.
+        source_pairs = {(r["source_id"], r["target_id"]) for r in result}
+        assert ("ac-1", "ac-2") not in source_pairs, (
+            "Should filter out (App, Models): Model:Composition already exists"
+        )
+
+    def test_single_not_exists_with_complex_where(self, db):
+        """Test 6: Single NOT EXISTS with complex inner WHERE.
+
+        Dedup only (no circular check). Uses Graph:IMPORTS edge type.
+        Should return (App, Models) because no Model:ServingRelationship exists.
+        """
+        setup_exists_subquery_graph(db)
+
+        result = list(
+            db.execute_cypher(
+                "MATCH (graph_src)-[edge:`Graph:IMPORTS`]->(graph_tgt) "
+                "WHERE graph_src.active = true AND graph_tgt.active = true "
+                "MATCH (model_src), (model_tgt) "
+                "WHERE any(lbl IN labels(model_src) WHERE lbl STARTS WITH 'Model:') "
+                "  AND any(lbl IN labels(model_tgt) WHERE lbl STARTS WITH 'Model:') "
+                "  AND model_src.enabled = true AND model_tgt.enabled = true "
+                "  AND model_src.source_identifier = graph_src.id "
+                "  AND model_tgt.source_identifier = graph_tgt.id "
+                "  AND model_src.identifier <> model_tgt.identifier "
+                "  AND NOT EXISTS { "
+                "      (model_src)-[existing]->(model_tgt) "
+                "      WHERE type(existing) = 'Model:ServingRelationship' "
+                "  } "
+                "RETURN DISTINCT "
+                "    model_src.identifier AS source_id, "
+                "    model_src.name AS source_name, "
+                "    model_tgt.identifier AS target_id, "
+                "    model_tgt.name AS target_name"
+            )
+        )
+
+        # Graph:IMPORTS from file-1 to file-2.
+        # ac-1 (source_id=file-1) and ac-2 (source_id=file-2) should match.
+        # No Model:ServingRelationship exists, so NOT EXISTS passes.
+        source_pairs = {(r["source_id"], r["target_id"]) for r in result}
+        assert ("ac-1", "ac-2") in source_pairs, (
+            "Should return (App, Models): IMPORTS edge exists, "
+            "no ServingRelationship to filter it out"
+        )
+
+    def test_fallback_query_with_two_not_exists(self, db):
+        """Test 7: Two NOT EXISTS using CONTAINS on properties_json.
+
+        Fallback candidate query using string CONTAINS instead of
+        source_identifier equality. Should NOT return (App, Models)
+        because an existing Model: relationship exists.
+        """
+        setup_exists_subquery_graph(db)
+
+        result = list(
+            db.execute_cypher(
+                "MATCH (graph_src)-[edge:`Graph:CONTAINS`]->(graph_tgt) "
+                "WHERE graph_src.active = true AND graph_tgt.active = true "
+                "WITH graph_src.id as src_id, graph_tgt.id as tgt_id "
+                "MATCH (model_src), (model_tgt) "
+                "WHERE any(lbl IN labels(model_src) WHERE lbl STARTS WITH 'Model:') "
+                "  AND any(lbl IN labels(model_tgt) WHERE lbl STARTS WITH 'Model:') "
+                "  AND model_src.enabled = true AND model_tgt.enabled = true "
+                "  AND model_src.properties_json CONTAINS src_id "
+                "  AND model_tgt.properties_json CONTAINS tgt_id "
+                "  AND model_src.identifier <> model_tgt.identifier "
+                "  AND NOT EXISTS { "
+                "      (model_src)-[existing]->(model_tgt) "
+                "      WHERE type(existing) STARTS WITH 'Model:' "
+                "  } "
+                "  AND NOT EXISTS { "
+                "      (model_tgt)-[reverse:`Model:Composition`]->(model_src) "
+                "  } "
+                "RETURN DISTINCT "
+                "    model_src.identifier AS source_id, "
+                "    model_src.name AS source_name, "
+                "    model_tgt.identifier AS target_id, "
+                "    model_tgt.name AS target_name"
+            )
+        )
+
+        # ac1 -> ac2 has a Model:Composition, so first NOT EXISTS filters it.
+        source_pairs = {(r["source_id"], r["target_id"]) for r in result}
+        assert ("ac-1", "ac-2") not in source_pairs, (
+            "Should filter out (App, Models): Model:Composition already exists"
+        )
+
+    def test_orphan_element_detection(self, db):
+        """Test 8: Single NOT EXISTS with undirected relationship pattern.
+
+        Finds model elements with no Model: relationships (orphans).
+        Should return ac3 (Utils) and do1 (UserData).
+        """
+        setup_exists_subquery_graph(db)
+
+        result = list(
+            db.execute_cypher(
+                "MATCH (e) "
+                "WHERE any(lbl IN labels(e) WHERE lbl STARTS WITH 'Model:') "
+                "  AND e.enabled = true "
+                "WITH e "
+                "WHERE NOT EXISTS { "
+                "    MATCH (e)-[r]-() "
+                "    WHERE type(r) STARTS WITH 'Model:' "
+                "} "
+                "RETURN e.identifier as identifier, "
+                "       e.name as name, "
+                "       [lbl IN labels(e) WHERE lbl STARTS WITH 'Model:'][0] as label "
+                "ORDER BY e.name"
+            )
+        )
+
+        identifiers = {r["identifier"] for r in result}
+
+        # ac3 (Utils) and do1 (UserData) have no Model: edges
+        assert "ac-3" in identifiers, "Utils should be an orphan"
+        assert "do-1" in identifiers, "UserData should be an orphan"
+        # ac1 and ac2 have Model:Composition between them
+        assert "ac-1" not in identifiers, "App has a Model:Composition edge"
+        assert "ac-2" not in identifiers, "Models has a Model:Composition edge"
+
+    def test_cross_layer_connection_check(self, db):
+        """Test 9: Single NOT EXISTS with undirected relationship and label filter.
+
+        Finds ApplicationComponent/ApplicationService elements with no
+        connection to DataObject/TechnologyNode via Model: edges.
+        """
+        setup_exists_subquery_graph(db)
+
+        result = list(
+            db.execute_cypher(
+                "MATCH (source) "
+                "WHERE any(lbl IN labels(source) WHERE lbl IN "
+                "    ['Model:ApplicationComponent', 'Model:ApplicationService']) "
+                "  AND source.enabled = true "
+                "WITH source "
+                "WHERE NOT EXISTS { "
+                "    MATCH (source)-[r]-(target) "
+                "    WHERE any(lbl IN labels(target) WHERE lbl IN "
+                "        ['Model:DataObject', 'Model:TechnologyNode']) "
+                "      AND type(r) STARTS WITH 'Model:' "
+                "} "
+                "RETURN source.identifier as identifier, "
+                "       source.name as name, "
+                "       [lbl IN labels(source) WHERE lbl STARTS WITH 'Model:'][0] as label "
+                "ORDER BY source.name"
+            )
+        )
+
+        identifiers = {r["identifier"] for r in result}
+
+        # All three ApplicationComponents have no Model: connection to DataObject
+        assert "ac-1" in identifiers, "App has no Model: edge to DataObject/TechnologyNode"
+        assert "ac-2" in identifiers, "Models has no Model: edge to DataObject/TechnologyNode"
+        assert "ac-3" in identifiers, "Utils has no Model: edge to DataObject/TechnologyNode"
+
+    def test_floating_element_check(self, db):
+        """Test 10: Single NOT EXISTS, finds DataObjects not connected to Application layer."""
+        setup_exists_subquery_graph(db)
+
+        result = list(
+            db.execute_cypher(
+                "MATCH (elem) "
+                "WHERE any(lbl IN labels(elem) WHERE lbl IN ['Model:DataObject']) "
+                "  AND elem.enabled = true "
+                "WITH elem "
+                "WHERE NOT EXISTS { "
+                "    MATCH (elem)-[r]-(connected) "
+                "    WHERE any(lbl IN labels(connected) WHERE lbl IN "
+                "        ['Model:ApplicationComponent', 'Model:ApplicationService']) "
+                "      AND type(r) STARTS WITH 'Model:' "
+                "} "
+                "RETURN elem.identifier as identifier, "
+                "       elem.name as name, "
+                "       [lbl IN labels(elem) WHERE lbl STARTS WITH 'Model:'][0] as label"
+            )
+        )
+
+        identifiers = {r["identifier"] for r in result}
+
+        # do1 (UserData) has no Model: edge to any ApplicationComponent
+        assert "do-1" in identifiers, "UserData should be floating"
+
+    def test_not_exists_with_backtick_escaped_type(self, db):
+        """Test 11: Two NOT EXISTS with backtick-escaped relationship type.
+
+        One NOT EXISTS uses type() = 'Model:Composition', the other uses
+        backtick syntax `Model:Composition` in the relationship pattern.
+        Both forms must work identically.
+        """
+        setup_exists_subquery_graph(db)
+
+        result = list(
+            db.execute_cypher(
+                "MATCH (a:Model), (b:Model) "
+                "WHERE a.identifier <> b.identifier "
+                "  AND a.enabled = true AND b.enabled = true "
+                "  AND NOT EXISTS { "
+                "      (a)-[existing]->(b) "
+                "      WHERE type(existing) = 'Model:Composition' "
+                "  } "
+                "  AND NOT EXISTS { "
+                "      (b)-[reverse:`Model:Composition`]->(a) "
+                "  } "
+                "RETURN a.identifier AS a_id, b.identifier AS b_id "
+                "ORDER BY a.identifier, b.identifier"
+            )
+        )
+
+        pairs = {(r["a_id"], r["b_id"]) for r in result}
+
+        # ac1 -> ac2 has Model:Composition, so (ac-1, ac-2) should be filtered
+        assert ("ac-1", "ac-2") not in pairs, (
+            "Should filter: Model:Composition exists from ac-1 to ac-2"
+        )
+        # Reverse: ac2 -> ac1 has no Model:Composition, but (ac-2, ac-1) should
+        # be filtered by the second NOT EXISTS (reverse check)
+        assert ("ac-2", "ac-1") not in pairs, (
+            "Should filter: reverse Model:Composition check catches ac-2 to ac-1"
+        )

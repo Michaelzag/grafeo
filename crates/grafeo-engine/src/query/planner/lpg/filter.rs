@@ -76,23 +76,31 @@ impl super::Planner {
         Ok((operator, columns))
     }
 
-    /// Extracts a complex EXISTS or NOT EXISTS pattern from a filter predicate.
+    /// Extracts an EXISTS or NOT EXISTS subquery from a filter predicate for
+    /// semi-join rewriting.
     ///
-    /// Returns `(subquery, is_negated, remaining_predicate)` only when the subplan
-    /// is too complex for the simple single-hop fast path in `extract_exists_pattern()`.
+    /// Returns `(subquery, is_negated, remaining_predicate)`.
     ///
-    /// Handles these predicate shapes:
-    /// - Top-level: `ExistsSubquery(plan)`
-    /// - Negated: `Not(ExistsSubquery(plan))`
-    /// - AND-combined: `And(ExistsSubquery(plan), other)` (either side)
-    /// - AND + negated: `And(Not(ExistsSubquery(plan)), other)` (either side)
+    /// At the top level (standalone EXISTS / NOT EXISTS), only complex patterns
+    /// that cannot use the inline fast path in `extract_exists_pattern()` are
+    /// extracted. Within AND trees, ALL EXISTS patterns are extracted regardless
+    /// of complexity: when multiple EXISTS subqueries share a WHERE clause, every
+    /// one must go through the semi-join path so the recursive handler in
+    /// `plan_exists_as_semi_join` can chain them.
+    ///
+    /// The Cypher translator builds left-leaning AND trees from sequential WHERE
+    /// predicates, so EXISTS nodes sit at the right child of AND nodes at various
+    /// depths. The recursive semi-join handler (`plan_exists_as_semi_join`) calls
+    /// this function again on each remaining predicate, peeling off one EXISTS
+    /// per level until only scalar predicates remain.
     fn extract_complex_exists<'a>(
         &self,
         predicate: &'a LogicalExpression,
     ) -> Option<(&'a LogicalOperator, bool, Option<&'a LogicalExpression>)> {
         match predicate {
             LogicalExpression::ExistsSubquery(subplan) => {
-                // Only use semi-join for complex patterns; simple ones use the fast path
+                // Top-level EXISTS: only use semi-join for complex patterns.
+                // Simple single-hop patterns use the fast path in convert_expression().
                 if self.extract_exists_pattern(subplan).is_err() {
                     Some((subplan.as_ref(), false, None))
                 } else {
@@ -118,16 +126,14 @@ impl super::Planner {
                 left,
                 right,
             } => {
-                // Check left side for EXISTS
-                if let Some((subplan, negated)) = Self::extract_exists_from_expr(left)
-                    && self.extract_exists_pattern(subplan).is_err()
-                {
+                // In AND context, extract ANY EXISTS (simple or complex).
+                // When multiple EXISTS appear in the same WHERE, extracting the
+                // first one (even if simple) lets the recursive semi-join handler
+                // find and extract the remaining complex ones from the rest.
+                if let Some((subplan, negated)) = Self::extract_exists_from_expr(left) {
                     return Some((subplan, negated, Some(right)));
                 }
-                // Check right side for EXISTS
-                if let Some((subplan, negated)) = Self::extract_exists_from_expr(right)
-                    && self.extract_exists_pattern(subplan).is_err()
-                {
+                if let Some((subplan, negated)) = Self::extract_exists_from_expr(right) {
                     return Some((subplan, negated, Some(left)));
                 }
                 None
