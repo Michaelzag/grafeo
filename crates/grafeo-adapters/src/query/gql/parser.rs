@@ -1,5 +1,6 @@
 //! GQL Parser.
 
+#[allow(clippy::wildcard_imports)]
 use super::ast::*;
 use super::lexer::{Lexer, Token, TokenKind};
 use grafeo_common::utils::error::{Error, QueryError, QueryErrorKind, Result, SourceSpan};

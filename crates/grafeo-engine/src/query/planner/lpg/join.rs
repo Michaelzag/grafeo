@@ -1,7 +1,10 @@
 //! Join, union, and distinct planning.
 
-use super::*;
-use crate::query::planner::common;
+use super::{
+    ApplyOp, ApplyOperator, DistinctOp, Error, ExceptOp, HashJoinOperator, IntersectOp, JoinOp,
+    JoinType, LeapfrogJoinOperator, LogicalExpression, MultiWayJoinOp, Operator, OtherwiseOp,
+    PhysicalJoinType, Result, UnionOp, common,
+};
 
 impl super::Planner {
     /// Plans a JOIN operator.

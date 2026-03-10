@@ -1566,6 +1566,17 @@ impl CypherTranslator {
                         None
                     };
 
+                    // COUNT(expr) uses CountNonNull to skip NULLs;
+                    // COUNT(*) uses Count to count all rows.
+                    let function = if function == AggregateFunction::Count
+                        && !is_count_star
+                        && expression.is_some()
+                    {
+                        AggregateFunction::CountNonNull
+                    } else {
+                        function
+                    };
+
                     Ok(Some(AggregateExpr {
                         function,
                         expression,

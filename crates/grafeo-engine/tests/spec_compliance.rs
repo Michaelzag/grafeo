@@ -1694,6 +1694,7 @@ mod load_data_features {
 
 #[cfg(all(feature = "sparql", feature = "rdf"))]
 mod sparql_features {
+    use grafeo_common::types::Value;
     use grafeo_engine::{Config, GrafeoDB, GraphModel};
 
     fn rdf_db() -> GrafeoDB {
@@ -1772,6 +1773,209 @@ mod sparql_features {
             .unwrap();
         // Both Alix and Gus, but only Alix has age
         assert_eq!(result.row_count(), 2);
+    }
+
+    #[test]
+    fn sparql_optional_null_values() {
+        // Verify that unbound variables from OPTIONAL produce NULL in results.
+        let db = rdf_db();
+        let session = db.session();
+        session
+            .execute_sparql(
+                r#"INSERT DATA {
+                    <http://ex.org/alix> <http://ex.org/name> "Alix" .
+                    <http://ex.org/alix> <http://ex.org/age> "30" .
+                    <http://ex.org/gus> <http://ex.org/name> "Gus" .
+                }"#,
+            )
+            .unwrap();
+        let result = session
+            .execute_sparql(
+                r#"SELECT ?name ?age WHERE {
+                    ?s <http://ex.org/name> ?name .
+                    OPTIONAL { ?s <http://ex.org/age> ?age }
+                }
+                ORDER BY ?name"#,
+            )
+            .unwrap();
+        assert_eq!(result.row_count(), 2);
+        // Alix has age, Gus does not
+        // Verify Gus row has NULL for age
+        let gus_row = result
+            .rows
+            .iter()
+            .find(|r| r[0] == Value::String("Gus".into()))
+            .expect("Gus should appear in results");
+        assert_eq!(gus_row[1], Value::Null, "Gus has no age, should be NULL");
+    }
+
+    #[test]
+    fn sparql_nested_optional() {
+        // Nested OPTIONAL: OPTIONAL { ?x <p> ?y OPTIONAL { ?y <q> ?z } }
+        let db = rdf_db();
+        let session = db.session();
+        session
+            .execute_sparql(
+                r#"INSERT DATA {
+                    <http://ex.org/alix> <http://ex.org/name> "Alix" .
+                    <http://ex.org/alix> <http://ex.org/knows> <http://ex.org/gus> .
+                    <http://ex.org/gus> <http://ex.org/name> "Gus" .
+                    <http://ex.org/gus> <http://ex.org/city> "Amsterdam" .
+                    <http://ex.org/harm> <http://ex.org/name> "Harm" .
+                }"#,
+            )
+            .unwrap();
+        let result = session
+            .execute_sparql(
+                r#"SELECT ?name ?friend ?city WHERE {
+                    ?s <http://ex.org/name> ?name .
+                    OPTIONAL {
+                        ?s <http://ex.org/knows> ?f .
+                        ?f <http://ex.org/name> ?friend .
+                        OPTIONAL { ?f <http://ex.org/city> ?city }
+                    }
+                }
+                ORDER BY ?name"#,
+            )
+            .unwrap();
+        // Alix knows Gus (who has city Amsterdam): Alix, "Gus", "Amsterdam"
+        // Gus knows nobody: Gus, NULL, NULL
+        // Harm knows nobody: Harm, NULL, NULL
+        assert_eq!(result.row_count(), 3);
+        let alix_row = result
+            .rows
+            .iter()
+            .find(|r| r[0] == Value::String("Alix".into()))
+            .expect("Alix should appear");
+        assert_eq!(alix_row[1], Value::String("Gus".into()));
+        assert_eq!(alix_row[2], Value::String("Amsterdam".into()));
+
+        let harm_row = result
+            .rows
+            .iter()
+            .find(|r| r[0] == Value::String("Harm".into()))
+            .expect("Harm should appear");
+        assert_eq!(harm_row[1], Value::Null, "Harm knows nobody");
+        assert_eq!(harm_row[2], Value::Null, "Nested optional also NULL");
+    }
+
+    #[test]
+    fn sparql_optional_with_filter_inside() {
+        // SPARQL semantics: FILTER inside OPTIONAL acts as a join condition,
+        // not a post-filter. Persons without a matching score should get NULL,
+        // not be eliminated.
+        let db = rdf_db();
+        let session = db.session();
+        session
+            .execute_sparql(
+                r#"INSERT DATA {
+                    <http://ex.org/alix> <http://ex.org/name> "Alix" .
+                    <http://ex.org/alix> <http://ex.org/score> "80" .
+                    <http://ex.org/gus> <http://ex.org/name> "Gus" .
+                    <http://ex.org/gus> <http://ex.org/score> "40" .
+                    <http://ex.org/harm> <http://ex.org/name> "Harm" .
+                }"#,
+            )
+            .unwrap();
+
+        let result = session
+            .execute_sparql(
+                r#"SELECT ?name ?score WHERE {
+                    ?s <http://ex.org/name> ?name .
+                    OPTIONAL {
+                        ?s <http://ex.org/score> ?score .
+                        FILTER(?score > "50")
+                    }
+                }
+                ORDER BY ?name"#,
+            )
+            .unwrap();
+        // All 3 persons should appear:
+        // Alix: score "80" > "50" -> bound
+        // Gus: score "40" NOT > "50" -> NULL (filter eliminates inside optional)
+        // Harm: no score -> NULL
+        assert_eq!(
+            result.row_count(),
+            3,
+            "All 3 persons preserved: FILTER inside OPTIONAL is a join condition"
+        );
+        let alix_row = result
+            .rows
+            .iter()
+            .find(|r| r[0] == Value::String("Alix".into()))
+            .expect("Alix should appear");
+        assert_eq!(
+            alix_row[1],
+            Value::String("80".into()),
+            "Alix score passes filter"
+        );
+
+        let gus_row = result
+            .rows
+            .iter()
+            .find(|r| r[0] == Value::String("Gus".into()))
+            .expect("Gus should appear");
+        assert_eq!(
+            gus_row[1],
+            Value::Null,
+            "Gus score fails filter, should be NULL"
+        );
+
+        let harm_row = result
+            .rows
+            .iter()
+            .find(|r| r[0] == Value::String("Harm".into()))
+            .expect("Harm should appear");
+        assert_eq!(
+            harm_row[1],
+            Value::Null,
+            "Harm has no score, should be NULL"
+        );
+    }
+
+    #[test]
+    fn sparql_optional_shared_variables() {
+        // Shared variable between required and optional patterns.
+        let db = rdf_db();
+        let session = db.session();
+        session
+            .execute_sparql(
+                r#"INSERT DATA {
+                    <http://ex.org/alix> <http://ex.org/name> "Alix" .
+                    <http://ex.org/alix> <http://ex.org/knows> <http://ex.org/gus> .
+                    <http://ex.org/gus> <http://ex.org/name> "Gus" .
+                }"#,
+            )
+            .unwrap();
+        let result = session
+            .execute_sparql(
+                r#"SELECT ?name ?friend WHERE {
+                    ?s <http://ex.org/name> ?name .
+                    OPTIONAL { ?s <http://ex.org/knows> ?f . ?f <http://ex.org/name> ?friend }
+                }
+                ORDER BY ?name"#,
+            )
+            .unwrap();
+        // Alix knows Gus -> Alix, Gus
+        // Gus knows nobody -> Gus, NULL
+        assert_eq!(result.row_count(), 2);
+        let alix_row = result
+            .rows
+            .iter()
+            .find(|r| r[0] == Value::String("Alix".into()))
+            .expect("Alix should appear");
+        assert_eq!(alix_row[1], Value::String("Gus".into()));
+
+        let gus_row = result
+            .rows
+            .iter()
+            .find(|r| r[0] == Value::String("Gus".into()))
+            .expect("Gus should appear");
+        assert_eq!(
+            gus_row[1],
+            Value::Null,
+            "Gus has no knows, friend should be NULL"
+        );
     }
 
     #[test]

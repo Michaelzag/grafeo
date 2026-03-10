@@ -1,6 +1,10 @@
 //! Relationship expansion and factorized chain planning.
 
-use super::*;
+use super::{
+    Arc, Direction, Error, ExecutionPathMode, ExpandDirection, ExpandOp, ExpandOperator,
+    ExpandStep, GraphStore, LazyFactorizedChainOperator, LogicalOperator, Operator, PathMode,
+    Result, VariableLengthExpandOperator,
+};
 
 impl super::Planner {
     /// Plans an expand operator.

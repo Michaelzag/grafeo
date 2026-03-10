@@ -22,6 +22,8 @@
 // SIMD intrinsics require unsafe code - this is well-understood and verified.
 #![allow(unsafe_code)]
 #![allow(unsafe_op_in_unsafe_fn)]
+// SIMD intrinsics are imported via wildcard by convention (hundreds of functions).
+#![allow(clippy::wildcard_imports)]
 
 use super::DistanceMetric;
 

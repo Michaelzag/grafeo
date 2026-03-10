@@ -3,6 +3,7 @@
 //! Parses SQL:2023 GRAPH_TABLE queries into an AST. The inner MATCH clause
 //! uses GQL pattern syntax, producing GQL AST types.
 
+#[allow(clippy::wildcard_imports)]
 use super::ast::*;
 use super::lexer::{Lexer, Token, TokenKind};
 use grafeo_common::utils::error::{QueryError, QueryErrorKind, Result};

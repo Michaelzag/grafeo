@@ -2,6 +2,7 @@
 //!
 //! Parses tokenized GraphQL queries into an AST.
 
+#[allow(clippy::wildcard_imports)]
 use super::ast::*;
 use super::lexer::{Lexer, Token, TokenKind};
 use grafeo_common::utils::error::{Error, Result};

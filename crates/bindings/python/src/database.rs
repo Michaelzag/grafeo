@@ -1808,6 +1808,145 @@ impl PyGrafeoDB {
         Ok(df.unbind())
     }
 
+    /// Import nodes or edges from a pandas or polars DataFrame.
+    ///
+    /// **Node import** (`mode='nodes'`): each row becomes a node. The `label`
+    /// parameter sets the label(s). All DataFrame columns become properties.
+    ///
+    /// **Edge import** (`mode='edges'`): each row becomes an edge. The
+    /// `source` and `target` columns must contain integer node IDs.
+    /// Remaining columns become edge properties.
+    ///
+    /// Requires pandas or polars (`uv add pandas` or `uv add polars`).
+    ///
+    /// Example:
+    /// ```python
+    /// import pandas as pd
+    ///
+    /// # Import nodes
+    /// people = pd.DataFrame({"name": ["Alix", "Gus"], "age": [30, 25]})
+    /// db.import_df(people, mode="nodes", label="Person")
+    ///
+    /// # Import edges (source/target are node IDs)
+    /// edges = pd.DataFrame({"source": [0, 1], "target": [1, 0], "since": [2020, 2021]})
+    /// db.import_df(edges, mode="edges", edge_type="KNOWS")
+    /// ```
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (df, mode, *, label=None, edge_type=None, source="source", target="target"))]
+    fn import_df(
+        &self,
+        py: Python<'_>,
+        df: &Bound<'_, PyAny>,
+        mode: &str,
+        label: Option<Py<PyAny>>,
+        edge_type: Option<&str>,
+        source: &str,
+        target: &str,
+    ) -> PyResult<u64> {
+        // Extract columns and rows from pandas or polars DataFrame
+        let (columns, rows) = extract_dataframe(py, df)?;
+
+        let db = self.inner.read();
+        let mut count: u64 = 0;
+
+        match mode {
+            "nodes" => {
+                // Resolve label(s)
+                let labels: Vec<String> = match label {
+                    Some(ref obj) => {
+                        let bound = obj.bind(py);
+                        if let Ok(s) = bound.extract::<String>() {
+                            vec![s]
+                        } else if let Ok(list) = bound.extract::<Vec<String>>() {
+                            list
+                        } else {
+                            return Err(pyo3::exceptions::PyValueError::new_err(
+                                "label must be a string or list of strings",
+                            ));
+                        }
+                    }
+                    None => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(
+                            "label is required for mode='nodes'",
+                        ));
+                    }
+                };
+                let label_refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
+
+                for row in &rows {
+                    let props: Vec<(
+                        grafeo_common::types::PropertyKey,
+                        grafeo_common::types::Value,
+                    )> = columns
+                        .iter()
+                        .zip(row.iter())
+                        .filter(|(_, v)| !v.is_null())
+                        .map(|(col, val)| {
+                            (
+                                grafeo_common::types::PropertyKey::new(col.clone()),
+                                val.clone(),
+                            )
+                        })
+                        .collect();
+
+                    db.create_node_with_props(&label_refs, props);
+                    count += 1;
+                }
+            }
+            "edges" => {
+                let edge_type_str = edge_type.ok_or_else(|| {
+                    pyo3::exceptions::PyValueError::new_err(
+                        "edge_type is required for mode='edges'",
+                    )
+                })?;
+
+                let source_idx = columns.iter().position(|c| c == source).ok_or_else(|| {
+                    pyo3::exceptions::PyKeyError::new_err(format!(
+                        "source column '{source}' not found in DataFrame"
+                    ))
+                })?;
+                let target_idx = columns.iter().position(|c| c == target).ok_or_else(|| {
+                    pyo3::exceptions::PyKeyError::new_err(format!(
+                        "target column '{target}' not found in DataFrame"
+                    ))
+                })?;
+
+                for row in &rows {
+                    let src_id = value_to_node_id(&row[source_idx], source)?;
+                    let dst_id = value_to_node_id(&row[target_idx], target)?;
+
+                    let props: Vec<(
+                        grafeo_common::types::PropertyKey,
+                        grafeo_common::types::Value,
+                    )> = columns
+                        .iter()
+                        .zip(row.iter())
+                        .enumerate()
+                        .filter(|(i, (_, val))| {
+                            *i != source_idx && *i != target_idx && !val.is_null()
+                        })
+                        .map(|(_, (col, val))| {
+                            (
+                                grafeo_common::types::PropertyKey::new(col.clone()),
+                                val.clone(),
+                            )
+                        })
+                        .collect();
+
+                    db.create_edge_with_props(src_id, dst_id, edge_type_str, props);
+                    count += 1;
+                }
+            }
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "mode must be 'nodes' or 'edges'",
+                ));
+            }
+        }
+
+        Ok(count)
+    }
+
     fn __repr__(&self) -> String {
         "GrafeoDB()".to_string()
     }
@@ -2303,4 +2442,111 @@ fn change_event_to_dict(
     map.insert("after".to_string(), after_py);
 
     map
+}
+
+/// Extracts column names and row data from a pandas or polars DataFrame.
+///
+/// Returns `(column_names, rows)` where each row is a `Vec<Value>`.
+fn extract_dataframe(
+    py: Python<'_>,
+    df: &Bound<'_, PyAny>,
+) -> PyResult<(Vec<String>, Vec<Vec<Value>>)> {
+    let columns_attr = df.getattr("columns")?;
+    let columns: Vec<String> = columns_attr
+        .extract()
+        .or_else(|_| columns_attr.call_method0("tolist")?.extract())?;
+
+    let num_rows: usize = df.call_method0("__len__")?.extract()?;
+    let mut rows = Vec::with_capacity(num_rows);
+
+    // Try iterrows (pandas) or iter_rows (polars)
+    let is_polars = df
+        .getattr("__class__")?
+        .getattr("__module__")?
+        .extract::<String>()?
+        .starts_with("polars");
+
+    if is_polars {
+        // polars: iter_rows(named=False) returns tuples
+        let kwargs = pyo3::types::PyDict::new(py);
+        kwargs.set_item("named", false)?;
+        let iter = df.call_method("iter_rows", (), Some(&kwargs))?;
+        for row_result in iter.try_iter()? {
+            let row_tuple = row_result?;
+            let mut row_values = Vec::with_capacity(columns.len());
+            for i in 0..columns.len() {
+                let item = row_tuple.get_item(i)?;
+                let val = PyValue::from_py(&item)?;
+                row_values.push(val);
+            }
+            rows.push(row_values);
+        }
+    } else {
+        // pandas: use .values.tolist() for efficient bulk extraction
+        let values_list = df.getattr("values")?.call_method0("tolist")?;
+        for row_result in values_list.try_iter()? {
+            let row_list = row_result?;
+            let mut row_values = Vec::with_capacity(columns.len());
+            for i in 0..columns.len() {
+                let item = row_list.get_item(i)?;
+                // pandas NaN/NaT -> check for NaN explicitly
+                let val = if is_pandas_na(py, &item) {
+                    Value::Null
+                } else {
+                    PyValue::from_py(&item)?
+                };
+                row_values.push(val);
+            }
+            rows.push(row_values);
+        }
+    }
+
+    Ok((columns, rows))
+}
+
+/// Check if a Python value is pandas NA / NaN / NaT.
+fn is_pandas_na(py: Python<'_>, obj: &Bound<'_, PyAny>) -> bool {
+    // float NaN
+    if let Ok(f) = obj.extract::<f64>()
+        && f.is_nan()
+    {
+        return true;
+    }
+    // pandas.isna()
+    if let Ok(pd) = py.import("pandas")
+        && let Ok(result) = pd.call_method1("isna", (obj,))
+        && let Ok(b) = result.extract::<bool>()
+    {
+        return b;
+    }
+    false
+}
+
+/// Convert a Value to a NodeId, validating that it's a valid integer.
+fn value_to_node_id(value: &Value, col_name: &str) -> PyResult<NodeId> {
+    match value {
+        Value::Int64(i) => {
+            if *i < 0 {
+                Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "negative node ID {i} in column '{col_name}'"
+                )))
+            } else {
+                #[allow(clippy::cast_sign_loss)]
+                Ok(NodeId(*i as u64))
+            }
+        }
+        Value::Float64(f) => {
+            if *f < 0.0 || f.fract() != 0.0 {
+                Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "invalid node ID {f} in column '{col_name}' (must be a non-negative integer)"
+                )))
+            } else {
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                Ok(NodeId(*f as u64))
+            }
+        }
+        _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "column '{col_name}' must contain integer node IDs, got {value:?}"
+        ))),
+    }
 }

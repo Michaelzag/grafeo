@@ -1,6 +1,16 @@
 //! Mutation planning (CREATE, DELETE, SET, MERGE, CALL, labels).
 
-use super::*;
+use super::{
+    AddLabelOp, AddLabelOperator, AntiJoinOp, Arc, CreateEdgeOp, CreateEdgeOperator, CreateNodeOp,
+    CreateNodeOperator, DeleteEdgeOp, DeleteEdgeOperator, DeleteNodeOp, DeleteNodeOperator,
+    Direction, Error, ExpandDirection, GraphStore, HashMap, LeftJoinOp, LogicalExpression,
+    LogicalOperator, LogicalType, MergeConfig, MergeOp, MergeOperator, MergeRelationshipConfig,
+    MergeRelationshipOp, MergeRelationshipOperator, Operator, ProjectExpr, ProjectOperator,
+    PropertySource, RemoveLabelOp, RemoveLabelOperator, Result, SetPropertyOp, SetPropertyOperator,
+    ShortestPathOp, ShortestPathOperator, UnwindOp, UnwindOperator, Value,
+};
+#[cfg(feature = "algos")]
+use super::{CallProcedureOp, GraphStoreMut, StaticResultOperator};
 
 impl super::Planner {
     /// Plans a CREATE NODE operator.

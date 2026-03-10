@@ -1,6 +1,9 @@
 //! Expression conversion from logical to physical representations.
 
-use super::*;
+use super::{
+    Direction, Error, ExpandDirection, ExpandOp, FilterExpression, LogicalExpression,
+    LogicalOperator, Result, convert_binary_op, convert_unary_op,
+};
 
 impl super::Planner {
     /// Converts a logical expression to a filter expression.

@@ -1,6 +1,9 @@
 //! Node scan planning.
 
-use super::*;
+use super::{
+    Arc, GraphStore, LogicalType, NestedLoopJoinOperator, NodeScanOp, Operator, PhysicalJoinType,
+    Result, ScanOperator,
+};
 
 impl super::Planner {
     /// Plans a node scan operator.

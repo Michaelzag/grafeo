@@ -1,6 +1,12 @@
 //! Aggregate and factorized aggregate planning.
 
-use super::*;
+use super::{
+    AggregateOp, Arc, Direction, Error, ExpandDirection, ExpandStep, ExpressionPredicate,
+    FactorizedAggregate, FactorizedAggregateOperator, FilterExpression, FilterOperator, GraphStore,
+    HashAggregateOperator, HashMap, LazyFactorizedChainOperator, LogicalAggregateFunction,
+    LogicalExpression, LogicalType, Operator, PhysicalAggregateExpr, ProjectExpr, ProjectOperator,
+    Result, SimpleAggregateOperator, convert_aggregate_function, expression_to_string,
+};
 
 impl super::Planner {
     /// Plans an AGGREGATE operator.

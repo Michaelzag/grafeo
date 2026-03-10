@@ -118,11 +118,12 @@ impl ValueVector {
     /// Sets the value at index to null.
     pub fn set_null(&mut self, index: usize) {
         if self.validity.is_none() {
-            self.validity = Some(vec![true; self.len]);
+            self.validity = Some(vec![true; index + 1]);
         }
-        if let Some(validity) = &mut self.validity
-            && index < validity.len()
-        {
+        if let Some(validity) = &mut self.validity {
+            if validity.len() <= index {
+                validity.resize(index + 1, true);
+            }
             validity[index] = false;
         }
     }

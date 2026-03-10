@@ -466,6 +466,7 @@ pub(crate) fn annotate_pushdown_hints(
     op: &mut LogicalOperator,
     store: &dyn grafeo_core::graph::GraphStore,
 ) {
+    #[allow(clippy::wildcard_imports)]
     use crate::query::plan::*;
 
     match op {
@@ -523,6 +524,7 @@ fn infer_pushdown(
     scan: &crate::query::plan::NodeScanOp,
     store: &dyn grafeo_core::graph::GraphStore,
 ) -> Option<crate::query::plan::PushdownHint> {
+    #[allow(clippy::wildcard_imports)]
     use crate::query::plan::*;
 
     match predicate {
@@ -608,6 +610,7 @@ pub fn substitute_params(plan: &mut LogicalPlan, params: &QueryParams) -> Result
 
 /// Recursively substitutes parameters in an operator.
 fn substitute_in_operator(op: &mut LogicalOperator, params: &QueryParams) -> Result<()> {
+    #[allow(clippy::wildcard_imports)]
     use crate::query::plan::*;
 
     match op {

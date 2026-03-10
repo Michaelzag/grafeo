@@ -1,6 +1,12 @@
 //! Filter planning with zone map pre-filtering and index lookups.
 
-use super::*;
+use super::{
+    ApplyOperator, Arc, BinaryOp, EmptyOperator, ExpressionPredicate, FilterExpression, FilterOp,
+    FilterOperator, GraphStore, HashAggregateOperator, HashJoinOperator, HashMap,
+    LogicalExpression, LogicalOperator, NodeListOperator, Operator, PhysicalAggregateExpr,
+    PhysicalJoinType, RangeBounds, Result, TransactionId, UnaryOp, Value, convert_binary_op,
+    convert_filter_expression,
+};
 
 impl super::Planner {
     /// Plans a filter operator.

@@ -825,6 +825,426 @@ fn test_optional_match_is_null_check() {
 }
 
 // ============================================================================
+// OPTIONAL MATCH Phase 4: Chained OPTIONAL MATCH
+// ============================================================================
+
+#[test]
+fn test_chained_independent_optional_matches_mixed() {
+    // Two independent OPTIONAL MATCHHes where one matches and one does not.
+    // Alix has WORKS_AT->TechCorp but no MANAGES edges.
+    let db = create_social_network();
+    let session = db.session();
+
+    let result = session
+        .execute_cypher(
+            "MATCH (a:Person {name: 'Alix'}) \
+             OPTIONAL MATCH (a)-[:WORKS_AT]->(c:Company) \
+             OPTIONAL MATCH (a)-[:MANAGES]->(m) \
+             RETURN a.name, c.name, m",
+        )
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows[0][1], Value::String("TechCorp".into()));
+    assert_eq!(result.rows[0][2], Value::Null);
+}
+
+#[test]
+fn test_chained_dependent_optional_matches() {
+    // Dependent optionals: second OPTIONAL depends on result of first.
+    // OPTIONAL MATCH (a)-[:KNOWS]->(b), then OPTIONAL MATCH (b)-[:WORKS_AT]->(c).
+    // Harm has no outgoing KNOWS, so b is NULL and c must also be NULL.
+    let db = create_social_network();
+    let session = db.session();
+
+    let result = session
+        .execute_cypher(
+            "MATCH (a:Person {name: 'Harm'}) \
+             OPTIONAL MATCH (a)-[:KNOWS]->(b:Person) \
+             OPTIONAL MATCH (b)-[:WORKS_AT]->(c:Company) \
+             RETURN a.name, b.name, c.name",
+        )
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0][0], Value::String("Harm".into()));
+    assert_eq!(result.rows[0][1], Value::Null);
+    assert_eq!(result.rows[0][2], Value::Null);
+}
+
+#[test]
+fn test_chained_dependent_optional_partial_match() {
+    // Alix-KNOWS->Gus and Alix-KNOWS->Harm.
+    // Gus has WORKS_AT->TechCorp, Harm does not.
+    // So second OPTIONAL should match for Gus but NULL for Harm.
+    let db = create_social_network();
+    let session = db.session();
+
+    let result = session
+        .execute_cypher(
+            "MATCH (a:Person {name: 'Alix'}) \
+             OPTIONAL MATCH (a)-[:KNOWS]->(b:Person) \
+             OPTIONAL MATCH (b)-[:WORKS_AT]->(c:Company) \
+             RETURN a.name, b.name, c.name \
+             ORDER BY b.name",
+        )
+        .unwrap();
+
+    // Alix knows Gus (who works at TechCorp) and Harm (who doesn't)
+    assert_eq!(result.rows.len(), 2);
+
+    // Gus -> TechCorp
+    assert_eq!(result.rows[0][1], Value::String("Gus".into()));
+    assert_eq!(result.rows[0][2], Value::String("TechCorp".into()));
+
+    // Harm -> null (no WORKS_AT edge)
+    assert_eq!(result.rows[1][1], Value::String("Harm".into()));
+    assert_eq!(result.rows[1][2], Value::Null);
+}
+
+#[test]
+fn test_optional_match_with_node_label_filter() {
+    // OPTIONAL MATCH with label on optional side node.
+    // Create a Developer label for Gus only.
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    session
+        .execute_cypher(
+            "CREATE (a:Person {name: 'Alix'}), \
+             (b:Person:Developer {name: 'Gus'}), \
+             (c:Person {name: 'Harm'}), \
+             (a)-[:KNOWS]->(b), \
+             (a)-[:KNOWS]->(c)",
+        )
+        .unwrap();
+
+    let result = session
+        .execute_cypher(
+            "MATCH (a:Person {name: 'Alix'}) \
+             OPTIONAL MATCH (a)-[:KNOWS]->(m:Developer) \
+             RETURN a.name, m.name",
+        )
+        .unwrap();
+
+    // Only Gus is a Developer, so one row with Gus
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0][1], Value::String("Gus".into()));
+}
+
+#[test]
+fn test_optional_match_with_vle() {
+    // OPTIONAL MATCH with variable-length path.
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    session
+        .execute_cypher(
+            "CREATE (a:Person {name: 'Alix'}), \
+             (b:Person {name: 'Gus'}), \
+             (c:Person {name: 'Harm'}), \
+             (d:Person {name: 'Jules'}), \
+             (a)-[:KNOWS]->(b), \
+             (b)-[:KNOWS]->(c)",
+        )
+        .unwrap();
+
+    let result = session
+        .execute_cypher(
+            "MATCH (a:Person {name: 'Alix'}) \
+             OPTIONAL MATCH (a)-[:KNOWS*1..2]->(m:Person) \
+             RETURN a.name, m.name \
+             ORDER BY m.name",
+        )
+        .unwrap();
+
+    // Alix reaches Gus (1 hop) and Harm (2 hops). Jules is unreachable.
+    assert!(
+        result.rows.len() >= 2,
+        "Should find at least Gus and Harm via VLE, got {}",
+        result.rows.len()
+    );
+
+    let names: Vec<_> = result
+        .rows
+        .iter()
+        .filter_map(|r| match &r[1] {
+            Value::String(s) => Some(s.as_str().to_owned()),
+            _ => None,
+        })
+        .collect();
+    assert!(names.contains(&"Gus".to_owned()));
+    assert!(names.contains(&"Harm".to_owned()));
+}
+
+#[test]
+fn test_optional_match_with_vle_no_path() {
+    // OPTIONAL MATCH with VLE where no path exists: should produce NULL.
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    session
+        .execute_cypher(
+            "CREATE (a:Person {name: 'Alix'}), \
+             (b:Person {name: 'Gus'})",
+        )
+        .unwrap();
+
+    let result = session
+        .execute_cypher(
+            "MATCH (a:Person {name: 'Alix'}) \
+             OPTIONAL MATCH (a)-[:KNOWS*1..3]->(m:Person) \
+             RETURN a.name, m.name",
+        )
+        .unwrap();
+
+    // No KNOWS edges, so m is NULL but Alix is preserved
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows[0][1], Value::Null);
+}
+
+#[test]
+fn test_chained_independent_optional_gql() {
+    // Same as Cypher chained test but in GQL syntax.
+    let db = create_social_network();
+    let session = db.session();
+
+    let result = session
+        .execute(
+            "MATCH (a:Person {name: 'Alix'}) \
+             OPTIONAL MATCH (a)-[:WORKS_AT]->(c:Company) \
+             OPTIONAL MATCH (a)-[:MANAGES]->(m) \
+             RETURN a.name, c.name, m",
+        )
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows[0][1], Value::String("TechCorp".into()));
+    assert_eq!(result.rows[0][2], Value::Null);
+}
+
+// ============================================================================
+// OPTIONAL MATCH Phase 5: NULL Semantics
+// ============================================================================
+
+#[test]
+fn test_optional_match_is_not_null() {
+    // IS NOT NULL should correctly identify non-NULL optional values.
+    let db = create_social_network();
+    let session = db.session();
+
+    let result = session
+        .execute_cypher(
+            "MATCH (a:Person) \
+             OPTIONAL MATCH (a)-[:WORKS_AT]->(c:Company) \
+             RETURN a.name, c IS NOT NULL AS has_job \
+             ORDER BY a.name",
+        )
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 3);
+    // Alix has WORKS_AT -> true
+    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows[0][1], Value::Bool(true));
+    // Gus has WORKS_AT -> true
+    assert_eq!(result.rows[1][0], Value::String("Gus".into()));
+    assert_eq!(result.rows[1][1], Value::Bool(true));
+    // Harm has no WORKS_AT -> false
+    assert_eq!(result.rows[2][0], Value::String("Harm".into()));
+    assert_eq!(result.rows[2][1], Value::Bool(false));
+}
+
+#[test]
+fn test_optional_match_coalesce() {
+    // COALESCE should return the first non-NULL argument.
+    let db = create_social_network();
+    let session = db.session();
+
+    let result = session
+        .execute_cypher(
+            "MATCH (a:Person) \
+             OPTIONAL MATCH (a)-[:WORKS_AT]->(c:Company) \
+             RETURN a.name, COALESCE(c.name, 'unemployed') AS employer \
+             ORDER BY a.name",
+        )
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows[0][1], Value::String("TechCorp".into()));
+    assert_eq!(result.rows[1][1], Value::String("TechCorp".into()));
+    assert_eq!(result.rows[2][1], Value::String("unemployed".into()));
+}
+
+#[test]
+fn test_optional_match_case_when() {
+    // CASE WHEN with NULL from OPTIONAL MATCH.
+    let db = create_social_network();
+    let session = db.session();
+
+    let result = session
+        .execute_cypher(
+            "MATCH (a:Person) \
+             OPTIONAL MATCH (a)-[:WORKS_AT]->(c:Company) \
+             RETURN a.name, \
+                    CASE WHEN c IS NOT NULL THEN c.name ELSE 'none' END AS employer \
+             ORDER BY a.name",
+        )
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows[0][1], Value::String("TechCorp".into()));
+    assert_eq!(result.rows[1][1], Value::String("TechCorp".into()));
+    assert_eq!(result.rows[2][1], Value::String("none".into()));
+}
+
+#[test]
+fn test_optional_match_count_star_vs_count_expr() {
+    // COUNT(*) should count all rows (including NULLs from OPTIONAL MATCH).
+    // COUNT(c.name) should skip NULLs (property access on NULL node produces NULL).
+    let db = create_social_network();
+    let session = db.session();
+
+    let result = session
+        .execute_cypher(
+            "MATCH (a:Person) \
+             OPTIONAL MATCH (a)-[:WORKS_AT]->(c:Company) \
+             RETURN COUNT(*) AS total, COUNT(c.name) AS with_job",
+        )
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 1);
+    // COUNT(*) = 3 (all persons)
+    assert_eq!(result.rows[0][0], Value::Int64(3));
+    // COUNT(c.name) = 2 (only Alix and Gus have WORKS_AT with c.name = 'TechCorp')
+    assert_eq!(result.rows[0][1], Value::Int64(2));
+}
+
+#[test]
+fn test_optional_match_collect_skips_nulls() {
+    // COLLECT should omit NULL values from the result list.
+    let db = create_social_network();
+    let session = db.session();
+
+    let result = session
+        .execute_cypher(
+            "MATCH (a:Person) \
+             OPTIONAL MATCH (a)-[:WORKS_AT]->(c:Company) \
+             RETURN COLLECT(c.name) AS employers",
+        )
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 1);
+    match &result.rows[0][0] {
+        Value::List(list) => {
+            // Should only contain TechCorp entries (no NULLs)
+            assert_eq!(
+                list.len(),
+                2,
+                "COLLECT should have 2 items (no NULLs), got {:?}",
+                list
+            );
+            for item in list.iter() {
+                assert_ne!(*item, Value::Null, "COLLECT should not contain NULL values");
+            }
+        }
+        other => panic!("Expected List from COLLECT, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_optional_match_sum_skips_nulls() {
+    // SUM should skip NULL values from OPTIONAL MATCH.
+    let db = create_social_network();
+    let session = db.session();
+
+    // Add headcount property to TechCorp
+    session
+        .execute_cypher("MATCH (c:Company {name: 'TechCorp'}) SET c.headcount = 100")
+        .unwrap();
+
+    let result = session
+        .execute_cypher(
+            "MATCH (a:Person) \
+             OPTIONAL MATCH (a)-[:WORKS_AT]->(c:Company) \
+             RETURN SUM(c.headcount) AS total_headcount",
+        )
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 1);
+    // Alix and Gus both see headcount=100, Harm sees NULL (skipped)
+    // SUM = 100 + 100 = 200
+    assert_eq!(result.rows[0][0], Value::Int64(200));
+}
+
+#[test]
+fn test_optional_match_count_per_group() {
+    // COUNT with GROUP BY from OPTIONAL MATCH.
+    let db = create_social_network();
+    let session = db.session();
+
+    let result = session
+        .execute_cypher(
+            "MATCH (a:Person) \
+             OPTIONAL MATCH (a)-[:KNOWS]->(b:Person) \
+             RETURN a.name AS person, COUNT(b.name) AS friend_count \
+             ORDER BY person",
+        )
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 3);
+    // Alix knows Gus and Harm -> 2
+    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows[0][1], Value::Int64(2));
+    // Gus knows Harm -> 1
+    assert_eq!(result.rows[1][0], Value::String("Gus".into()));
+    assert_eq!(result.rows[1][1], Value::Int64(1));
+    // Harm knows nobody -> 0
+    assert_eq!(result.rows[2][0], Value::String("Harm".into()));
+    assert_eq!(result.rows[2][1], Value::Int64(0));
+}
+
+#[test]
+fn test_optional_match_boolean_null_comparison() {
+    // Comparing NULL to a value should produce NULL (falsy), not true or false.
+    // This means WHERE m.age > 30 should not match when m is NULL.
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    session
+        .execute_cypher(
+            "CREATE (a:Person {name: 'Alix', active: true}), \
+             (b:Person {name: 'Gus'}), \
+             (a)-[:KNOWS]->(b)",
+        )
+        .unwrap();
+
+    let result = session
+        .execute_cypher(
+            "MATCH (a:Person) \
+             OPTIONAL MATCH (a)-[:KNOWS]->(m:Person) \
+             WHERE m.active = true \
+             RETURN a.name, m.name \
+             ORDER BY a.name",
+        )
+        .unwrap();
+
+    // Alix has no outgoing KNOWS to someone with active=true (Gus has no active prop).
+    // Gus has no outgoing KNOWS at all.
+    // Both should be preserved by the left join.
+    assert_eq!(result.rows.len(), 2, "Both persons preserved by left join");
+    for row in &result.rows {
+        assert_eq!(
+            row[1],
+            Value::Null,
+            "No match for active=true, right side should be NULL"
+        );
+    }
+}
+
+// ============================================================================
 // CALL PROCEDURE: covers plan_call_procedure, plan_static_result
 // ============================================================================
 
