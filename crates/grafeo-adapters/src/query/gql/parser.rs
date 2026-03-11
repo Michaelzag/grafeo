@@ -5651,11 +5651,12 @@ impl<'a> Parser<'a> {
             self.expect(TokenKind::RParen)?;
         }
 
-        // Expect AS
-        if !self.is_identifier() || !self.get_identifier_name().eq_ignore_ascii_case("AS") {
+        // Expect AS (TokenKind::As is a keyword, not a contextual identifier)
+        if self.current.kind == TokenKind::As {
+            self.advance();
+        } else {
             return Err(self.error("Expected AS before procedure body"));
         }
-        self.advance();
 
         // Parse body: { ... } with brace nesting
         self.expect(TokenKind::LBrace)?;

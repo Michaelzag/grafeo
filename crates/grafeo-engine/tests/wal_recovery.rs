@@ -296,4 +296,201 @@ mod wal {
 
         db.close().expect("close");
     }
+
+    // =========================================================================
+    // Named Graph WAL Recovery
+    // =========================================================================
+
+    #[test]
+    fn test_named_graph_persists_across_restart() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("named_graph.grafeo");
+
+        {
+            let db = GrafeoDB::open(&path).expect("open");
+            let session = db.session();
+            session.execute("CREATE GRAPH analytics").unwrap();
+            session.execute("USE GRAPH analytics").unwrap();
+            session
+                .execute("INSERT (:KPI {name: 'pageviews', count: 42})")
+                .unwrap();
+            assert_eq!(db.node_count(), 0, "default graph should be empty");
+            db.close().expect("close");
+        }
+
+        {
+            let db = GrafeoDB::open(&path).expect("reopen");
+            let session = db.session();
+            // Default graph should still be empty
+            assert_eq!(db.node_count(), 0);
+
+            // Named graph should have the data
+            session.execute("USE GRAPH analytics").unwrap();
+            let result = session
+                .execute("MATCH (m:KPI) RETURN m.name, m.count")
+                .unwrap();
+            assert_eq!(result.rows.len(), 1);
+            assert_eq!(result.rows[0][0], Value::String("pageviews".into()));
+            assert_eq!(result.rows[0][1], Value::Int64(42));
+            db.close().expect("close");
+        }
+    }
+
+    #[test]
+    fn test_drop_named_graph_persists() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("drop_graph.grafeo");
+
+        {
+            let db = GrafeoDB::open(&path).expect("open");
+            let session = db.session();
+            session.execute("CREATE GRAPH temp_graph").unwrap();
+            session.execute("USE GRAPH temp_graph").unwrap();
+            session.execute("INSERT (:Temp {val: 1})").unwrap();
+            // Drop the graph we just created
+            session.execute("USE GRAPH default").unwrap();
+            session.execute("DROP GRAPH temp_graph").unwrap();
+            db.close().expect("close");
+        }
+
+        {
+            let db = GrafeoDB::open(&path).expect("reopen");
+            let session = db.session();
+            // Trying to use the dropped graph should fail
+            let result = session.execute("USE GRAPH temp_graph");
+            assert!(
+                result.is_err(),
+                "dropped graph should not exist after recovery"
+            );
+            db.close().expect("close");
+        }
+    }
+
+    #[test]
+    fn test_multiple_named_graphs_persist() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("multi_graph.grafeo");
+
+        {
+            let db = GrafeoDB::open(&path).expect("open");
+            let session = db.session();
+
+            // Create data in default graph
+            session.execute("INSERT (:Person {name: 'Alix'})").unwrap();
+
+            // Create data in graph "alpha"
+            session.execute("CREATE GRAPH alpha").unwrap();
+            session.execute("USE GRAPH alpha").unwrap();
+            session.execute("INSERT (:Item {name: 'Widget'})").unwrap();
+
+            // Create data in graph "beta"
+            session.execute("USE GRAPH default").unwrap();
+            session.execute("CREATE GRAPH beta").unwrap();
+            session.execute("USE GRAPH beta").unwrap();
+            session
+                .execute("INSERT (:City {name: 'Amsterdam'})")
+                .unwrap();
+
+            db.close().expect("close");
+        }
+
+        {
+            let db = GrafeoDB::open(&path).expect("reopen");
+            let session = db.session();
+
+            // Check default graph
+            let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
+            assert_eq!(result.rows.len(), 1);
+            assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+
+            // Check alpha graph
+            session.execute("USE GRAPH alpha").unwrap();
+            let result = session.execute("MATCH (i:Item) RETURN i.name").unwrap();
+            assert_eq!(result.rows.len(), 1);
+            assert_eq!(result.rows[0][0], Value::String("Widget".into()));
+
+            // Check beta graph
+            session.execute("USE GRAPH beta").unwrap();
+            let result = session.execute("MATCH (c:City) RETURN c.name").unwrap();
+            assert_eq!(result.rows.len(), 1);
+            assert_eq!(result.rows[0][0], Value::String("Amsterdam".into()));
+
+            db.close().expect("close");
+        }
+    }
+
+    #[test]
+    fn test_named_graph_wal_interleaved_with_default() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("interleaved.grafeo");
+
+        {
+            let db = GrafeoDB::open(&path).expect("open");
+            let session = db.session();
+
+            // Interleave mutations between default and named graph
+            session.execute("INSERT (:Person {name: 'Alix'})").unwrap();
+            session.execute("CREATE GRAPH other").unwrap();
+            session.execute("USE GRAPH other").unwrap();
+            session.execute("INSERT (:Robot {name: 'R2D2'})").unwrap();
+            session.execute("USE GRAPH default").unwrap();
+            session.execute("INSERT (:Person {name: 'Gus'})").unwrap();
+            session.execute("USE GRAPH other").unwrap();
+            session.execute("INSERT (:Robot {name: 'C3PO'})").unwrap();
+
+            db.close().expect("close");
+        }
+
+        {
+            let db = GrafeoDB::open(&path).expect("reopen");
+            let session = db.session();
+
+            // Default graph: 2 persons
+            let result = session
+                .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name")
+                .unwrap();
+            assert_eq!(result.rows.len(), 2);
+            assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+            assert_eq!(result.rows[1][0], Value::String("Gus".into()));
+
+            // Other graph: 2 robots
+            session.execute("USE GRAPH other").unwrap();
+            let result = session
+                .execute("MATCH (r:Robot) RETURN r.name ORDER BY r.name")
+                .unwrap();
+            assert_eq!(result.rows.len(), 2);
+            assert_eq!(result.rows[0][0], Value::String("C3PO".into()));
+            assert_eq!(result.rows[1][0], Value::String("R2D2".into()));
+
+            db.close().expect("close");
+        }
+    }
+
+    #[test]
+    fn test_save_preserves_named_graphs() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let save_path = dir.path().join("saved_graphs.grafeo");
+
+        let db = GrafeoDB::new_in_memory();
+        let session = db.session();
+
+        session.execute("INSERT (:Person {name: 'Alix'})").unwrap();
+        session.execute("CREATE GRAPH analytics").unwrap();
+        session.execute("USE GRAPH analytics").unwrap();
+        session
+            .execute("INSERT (:KPI {name: 'views', count: 100})")
+            .unwrap();
+
+        db.save(&save_path).expect("save should succeed");
+
+        let restored = GrafeoDB::open(&save_path).expect("open saved");
+        assert_eq!(restored.node_count(), 1, "default graph: 1 person");
+
+        let session2 = restored.session();
+        session2.execute("USE GRAPH analytics").unwrap();
+        let result = session2.execute("MATCH (m:KPI) RETURN m.name").unwrap();
+        assert_eq!(result.rows.len(), 1);
+        assert_eq!(result.rows[0][0], Value::String("views".into()));
+        restored.close().expect("close");
+    }
 }

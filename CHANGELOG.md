@@ -10,6 +10,8 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 - **LOAD DATA (multi-format import)**: generalized `LOAD DATA FROM 'path' FORMAT CSV|JSONL|PARQUET [WITH HEADERS] AS variable` in GQL, with Cypher-compatible `LOAD CSV` syntax preserved; JSONL behind `jsonl-import` feature, Parquet behind `parquet-import` feature
 - **Python `import_df()`**: bulk-import nodes or edges from a pandas or polars DataFrame via `db.import_df(df, 'nodes', label='Person')` or `db.import_df(df, 'edges', edge_type='KNOWS')`
 - **Memory introspection**: `db.memory_usage()` returns a hierarchical breakdown of heap usage across store, indexes, MVCC chains, query caches, string pools, and buffer manager regions
+- **Named graph WAL persistence**: `CREATE GRAPH` / `DROP GRAPH` and all data mutations within named graphs are now WAL-logged and recovered on restart via `SwitchGraph` context records; concurrent sessions writing to different named graphs are safely interleaved
+- **Named graph snapshot persistence**: snapshot v2 format includes named graph data in `export_snapshot`, `import_snapshot`, `restore_snapshot`, `save`, and `to_memory`; v1 snapshots remain backward-compatible
 
 ### Fixed
 

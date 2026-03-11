@@ -257,6 +257,28 @@ pub enum WalRecord {
         name: String,
     },
 
+    // === Named Graph Lifecycle ===
+    /// Create a named graph partition.
+    CreateNamedGraph {
+        /// Graph name.
+        name: String,
+    },
+
+    /// Drop a named graph partition.
+    DropNamedGraph {
+        /// Graph name.
+        name: String,
+    },
+
+    /// Switch the WAL replay cursor to a named graph.
+    ///
+    /// Subsequent data mutation records apply to this graph until the next
+    /// `SwitchGraph`. `None` switches back to the default graph.
+    SwitchGraph {
+        /// Target graph name, or `None` for the default graph.
+        name: Option<String>,
+    },
+
     // === Transaction Control ===
     /// Transaction commit.
     TransactionCommit {
@@ -524,6 +546,51 @@ mod tests {
         let parsed = roundtrip(&record);
         match parsed {
             WalRecord::CreateNode { labels, .. } => assert!(labels.is_empty()),
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_create_named_graph_roundtrip() {
+        let record = WalRecord::CreateNamedGraph {
+            name: "analytics".to_string(),
+        };
+        let parsed = roundtrip(&record);
+        match parsed {
+            WalRecord::CreateNamedGraph { name } => assert_eq!(name, "analytics"),
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_drop_named_graph_roundtrip() {
+        let record = WalRecord::DropNamedGraph {
+            name: "temp".to_string(),
+        };
+        let parsed = roundtrip(&record);
+        match parsed {
+            WalRecord::DropNamedGraph { name } => assert_eq!(name, "temp"),
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_switch_graph_roundtrip() {
+        // Switch to named graph
+        let record = WalRecord::SwitchGraph {
+            name: Some("analytics".to_string()),
+        };
+        let parsed = roundtrip(&record);
+        match parsed {
+            WalRecord::SwitchGraph { name } => assert_eq!(name, Some("analytics".to_string())),
+            _ => panic!("Wrong variant"),
+        }
+
+        // Switch back to default
+        let record = WalRecord::SwitchGraph { name: None };
+        let parsed = roundtrip(&record);
+        match parsed {
+            WalRecord::SwitchGraph { name } => assert_eq!(name, None),
             _ => panic!("Wrong variant"),
         }
     }

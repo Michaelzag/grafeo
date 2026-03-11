@@ -116,6 +116,9 @@ pub struct Session {
     /// WAL for logging schema changes.
     #[cfg(feature = "wal")]
     wal: Option<Arc<grafeo_adapters::storage::wal::LpgWal>>,
+    /// Shared WAL graph context tracker for named graph awareness.
+    #[cfg(feature = "wal")]
+    wal_graph_context: Option<Arc<parking_lot::Mutex<Option<String>>>>,
     /// CDC log for change tracking.
     #[cfg(feature = "cdc")]
     cdc_log: Arc<crate::cdc::CdcLog>,
@@ -162,6 +165,8 @@ impl Session {
             transaction_start_edge_count: AtomicUsize::new(0),
             #[cfg(feature = "wal")]
             wal: None,
+            #[cfg(feature = "wal")]
+            wal_graph_context: None,
             #[cfg(feature = "cdc")]
             cdc_log: Arc::new(crate::cdc::CdcLog::new()),
             current_graph: parking_lot::Mutex::new(None),
@@ -178,13 +183,19 @@ impl Session {
     /// This also wraps `graph_store` in a [`WalGraphStore`] so that mutation
     /// operators (INSERT, DELETE, SET via queries) log to the WAL.
     #[cfg(feature = "wal")]
-    pub(crate) fn set_wal(&mut self, wal: Arc<grafeo_adapters::storage::wal::LpgWal>) {
+    pub(crate) fn set_wal(
+        &mut self,
+        wal: Arc<grafeo_adapters::storage::wal::LpgWal>,
+        wal_graph_context: Arc<parking_lot::Mutex<Option<String>>>,
+    ) {
         // Wrap the graph store so query-engine mutations are WAL-logged
         self.graph_store = Arc::new(crate::database::wal_store::WalGraphStore::new(
             Arc::clone(&self.store),
             Arc::clone(&wal),
+            Arc::clone(&wal_graph_context),
         ));
         self.wal = Some(wal);
+        self.wal_graph_context = Some(wal_graph_context);
     }
 
     /// Sets the CDC log for this session (shared with the database).
@@ -221,6 +232,8 @@ impl Session {
             transaction_start_edge_count: AtomicUsize::new(0),
             #[cfg(feature = "wal")]
             wal: None,
+            #[cfg(feature = "wal")]
+            wal_graph_context: None,
             #[cfg(feature = "cdc")]
             cdc_log: Arc::new(crate::cdc::CdcLog::new()),
             current_graph: parking_lot::Mutex::new(None),
@@ -265,6 +278,8 @@ impl Session {
             transaction_start_edge_count: AtomicUsize::new(0),
             #[cfg(feature = "wal")]
             wal: None,
+            #[cfg(feature = "wal")]
+            wal_graph_context: None,
             #[cfg(feature = "cdc")]
             cdc_log: Arc::new(crate::cdc::CdcLog::new()),
             current_graph: parking_lot::Mutex::new(None),
@@ -298,17 +313,30 @@ impl Session {
     /// Returns the graph store for the currently active graph.
     ///
     /// If `current_graph` is `None` or `"default"`, returns the session's
-    /// default `graph_store`. Otherwise looks up the named graph in the
-    /// root store and returns it as a trait object.
+    /// default `graph_store` (already WAL-wrapped for the default graph).
+    /// Otherwise looks up the named graph in the root store and wraps it
+    /// in a [`WalGraphStore`] so mutations are WAL-logged with the correct
+    /// graph context.
     fn active_store(&self) -> Arc<dyn GraphStoreMut> {
         let graph_name = self.current_graph.lock().clone();
         match graph_name {
             None => Arc::clone(&self.graph_store),
             Some(ref name) if name.eq_ignore_ascii_case("default") => Arc::clone(&self.graph_store),
-            Some(ref name) => self.store.graph(name).map_or_else(
-                || Arc::clone(&self.graph_store),
-                |g| g as Arc<dyn GraphStoreMut>,
-            ),
+            Some(ref name) => match self.store.graph(name) {
+                Some(named_store) => {
+                    #[cfg(feature = "wal")]
+                    if let (Some(wal), Some(ctx)) = (&self.wal, &self.wal_graph_context) {
+                        return Arc::new(crate::database::wal_store::WalGraphStore::new_for_graph(
+                            named_store,
+                            Arc::clone(wal),
+                            name.clone(),
+                            Arc::clone(ctx),
+                        )) as Arc<dyn GraphStoreMut>;
+                    }
+                    named_store as Arc<dyn GraphStoreMut>
+                }
+                None => Arc::clone(&self.graph_store),
+            },
         }
     }
 
@@ -452,6 +480,14 @@ impl Session {
                         format!("Graph '{name}' already exists"),
                     )));
                 }
+                if created {
+                    #[cfg(feature = "wal")]
+                    self.log_schema_wal(
+                        &grafeo_adapters::storage::wal::WalRecord::CreateNamedGraph {
+                            name: name.clone(),
+                        },
+                    );
+                }
 
                 // AS COPY OF: copy data from source graph
                 if let Some(ref src) = copy_of {
@@ -487,8 +523,14 @@ impl Session {
                         format!("Graph '{name}' does not exist"),
                     )));
                 }
-                // If this session was using the dropped graph, reset to default
                 if dropped {
+                    #[cfg(feature = "wal")]
+                    self.log_schema_wal(
+                        &grafeo_adapters::storage::wal::WalRecord::DropNamedGraph {
+                            name: name.clone(),
+                        },
+                    );
+                    // If this session was using the dropped graph, reset to default
                     let mut current = self.current_graph.lock();
                     if current
                         .as_deref()

@@ -1066,4 +1066,112 @@ mod tests {
         let p = props(&[("x", Value::Bool(true))]);
         assert!(evaluate_check("x > 5", &p).is_err());
     }
+
+    // -- Arithmetic in boolean context --
+
+    #[test]
+    fn test_arithmetic_in_boolean_context_errors() {
+        let p = props(&[("x", Value::Int64(5))]);
+        assert!(evaluate_check("x + 1", &p).is_err());
+    }
+
+    // -- Integer overflow / underflow --
+
+    #[test]
+    fn test_integer_overflow_add() {
+        let p = props(&[("x", Value::Int64(i64::MAX))]);
+        assert!(evaluate_check("x + 1 > 0", &p).is_err());
+    }
+
+    #[test]
+    fn test_integer_underflow_sub() {
+        let p = props(&[("x", Value::Int64(i64::MIN))]);
+        assert!(evaluate_check("x - 1 < 0", &p).is_err());
+    }
+
+    #[test]
+    fn test_integer_overflow_mul() {
+        let p = props(&[("x", Value::Int64(i64::MAX))]);
+        assert!(evaluate_check("x * 2 > 0", &p).is_err());
+    }
+
+    #[test]
+    fn test_modulo_by_zero() {
+        let p = props(&[("x", Value::Int64(10))]);
+        assert!(evaluate_check("x % 0 = 0", &p).is_err());
+    }
+
+    // -- Float arithmetic --
+
+    #[test]
+    fn test_float_arithmetic() {
+        let p = props(&[("x", Value::Float64(2.5))]);
+        assert!(evaluate_check("x * 2.0 = 5.0", &p).unwrap());
+        assert!(evaluate_check("x + 1.5 = 4.0", &p).unwrap());
+        assert!(evaluate_check("x - 0.5 = 2.0", &p).unwrap());
+    }
+
+    #[test]
+    fn test_float_division() {
+        let p = props(&[("x", Value::Float64(10.0))]);
+        assert!(evaluate_check("x / 2.0 = 5.0", &p).unwrap());
+    }
+
+    #[test]
+    fn test_float_modulo() {
+        let p = props(&[("x", Value::Float64(10.0))]);
+        assert!(evaluate_check("x % 3.0 = 1.0", &p).unwrap());
+    }
+
+    // -- Cross-type numeric promotion --
+
+    #[test]
+    fn test_int_float_cross_promotion() {
+        let p = props(&[("x", Value::Int64(5)), ("y", Value::Float64(2.5))]);
+        assert!(evaluate_check("x + y = 7.5", &p).unwrap());
+        assert!(evaluate_check("y * x = 12.5", &p).unwrap());
+    }
+
+    // -- Unsupported arithmetic types --
+
+    #[test]
+    fn test_arithmetic_on_strings_errors() {
+        let p = props(&[("x", Value::String("hello".into()))]);
+        assert!(evaluate_check("x + 1 = 2", &p).is_err());
+    }
+
+    // -- Negated IN and BETWEEN --
+
+    #[test]
+    fn test_not_in_list_generic() {
+        let p = props(&[("x", Value::Int64(5))]);
+        assert!(evaluate_check("x NOT IN (1, 2, 3)", &p).unwrap());
+        assert!(!evaluate_check("x NOT IN (5, 6, 7)", &p).unwrap());
+    }
+
+    #[test]
+    fn test_not_between_generic() {
+        let p = props(&[("x", Value::Int64(5))]);
+        assert!(evaluate_check("x NOT BETWEEN 10 AND 20", &p).unwrap());
+        assert!(!evaluate_check("x NOT BETWEEN 1 AND 10", &p).unwrap());
+    }
+
+    // -- Null propagation in arithmetic --
+
+    #[test]
+    fn test_null_in_arithmetic_comparison() {
+        let p = props(&[("x", Value::Null)]);
+        // NULL + 1 comparison should yield false (not error)
+        assert!(!evaluate_check("x > 5", &p).unwrap());
+    }
+
+    // -- Complex nested boolean --
+
+    #[test]
+    fn test_nested_and_or_not() {
+        let p = props(&[("x", Value::Int64(5)), ("y", Value::Int64(10))]);
+        assert!(evaluate_check("(x > 0 AND y > 0) OR x < -100", &p).unwrap());
+        assert!(evaluate_check("NOT (x > 100)", &p).unwrap());
+        assert!(!evaluate_check("NOT (x > 0 AND y > 0)", &p).unwrap());
+    }
 }

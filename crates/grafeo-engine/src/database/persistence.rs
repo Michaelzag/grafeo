@@ -12,10 +12,27 @@ use crate::config::Config;
 #[cfg(feature = "wal")]
 use grafeo_adapters::storage::wal::WalRecord;
 
-/// Binary snapshot format for database export/import.
+/// Binary snapshot format v1 (no named graphs).
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Snapshot {
     version: u8,
+    nodes: Vec<SnapshotNode>,
+    edges: Vec<SnapshotEdge>,
+}
+
+/// Binary snapshot format v2 (with named graphs).
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SnapshotV2 {
+    version: u8,
+    nodes: Vec<SnapshotNode>,
+    edges: Vec<SnapshotEdge>,
+    named_graphs: Vec<NamedGraphSnapshot>,
+}
+
+/// A named graph partition within a v2 snapshot.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct NamedGraphSnapshot {
+    name: String,
     nodes: Vec<SnapshotNode>,
     edges: Vec<SnapshotEdge>,
 }
@@ -34,6 +51,97 @@ struct SnapshotEdge {
     dst: NodeId,
     edge_type: String,
     properties: Vec<(String, Value)>,
+}
+
+/// Collects all nodes from a store into snapshot format.
+fn collect_snapshot_nodes(store: &grafeo_core::graph::lpg::LpgStore) -> Vec<SnapshotNode> {
+    store
+        .all_nodes()
+        .map(|n| SnapshotNode {
+            id: n.id,
+            labels: n.labels.iter().map(|l| l.to_string()).collect(),
+            properties: n
+                .properties
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect(),
+        })
+        .collect()
+}
+
+/// Collects all edges from a store into snapshot format.
+fn collect_snapshot_edges(store: &grafeo_core::graph::lpg::LpgStore) -> Vec<SnapshotEdge> {
+    store
+        .all_edges()
+        .map(|e| SnapshotEdge {
+            id: e.id,
+            src: e.src,
+            dst: e.dst,
+            edge_type: e.edge_type.to_string(),
+            properties: e
+                .properties
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect(),
+        })
+        .collect()
+}
+
+/// Populates a store from snapshot node/edge data.
+fn populate_store_from_snapshot(
+    store: &grafeo_core::graph::lpg::LpgStore,
+    nodes: Vec<SnapshotNode>,
+    edges: Vec<SnapshotEdge>,
+) -> Result<()> {
+    for node in nodes {
+        let label_refs: Vec<&str> = node.labels.iter().map(|s| s.as_str()).collect();
+        store.create_node_with_id(node.id, &label_refs)?;
+        for (key, value) in node.properties {
+            store.set_node_property(node.id, &key, value);
+        }
+    }
+    for edge in edges {
+        store.create_edge_with_id(edge.id, edge.src, edge.dst, &edge.edge_type)?;
+        for (key, value) in edge.properties {
+            store.set_edge_property(edge.id, &key, value);
+        }
+    }
+    Ok(())
+}
+
+/// Validates snapshot nodes/edges for duplicates and dangling references.
+fn validate_snapshot_data(nodes: &[SnapshotNode], edges: &[SnapshotEdge]) -> Result<()> {
+    let mut node_ids = HashSet::with_capacity(nodes.len());
+    for node in nodes {
+        if !node_ids.insert(node.id) {
+            return Err(Error::Internal(format!(
+                "snapshot contains duplicate node ID {}",
+                node.id
+            )));
+        }
+    }
+    let mut edge_ids = HashSet::with_capacity(edges.len());
+    for edge in edges {
+        if !edge_ids.insert(edge.id) {
+            return Err(Error::Internal(format!(
+                "snapshot contains duplicate edge ID {}",
+                edge.id
+            )));
+        }
+        if !node_ids.contains(&edge.src) {
+            return Err(Error::Internal(format!(
+                "snapshot edge {} references non-existent source node {}",
+                edge.id, edge.src
+            )));
+        }
+        if !node_ids.contains(&edge.dst) {
+            return Err(Error::Internal(format!(
+                "snapshot edge {} references non-existent destination node {}",
+                edge.id, edge.dst
+            )));
+        }
+    }
+    Ok(())
 }
 
 impl super::GrafeoDB {
@@ -112,6 +220,70 @@ impl super::GrafeoDB {
             }
         }
 
+        // Copy named graphs
+        for graph_name in self.store.graph_names() {
+            if let Some(src_graph) = self.store.graph(&graph_name) {
+                target.log_wal(&WalRecord::CreateNamedGraph {
+                    name: graph_name.clone(),
+                })?;
+                target
+                    .store
+                    .create_graph(&graph_name)
+                    .map_err(|e| Error::Internal(e.to_string()))?;
+
+                if let Some(dst_graph) = target.store.graph(&graph_name) {
+                    // Switch WAL context to this named graph
+                    target.log_wal(&WalRecord::SwitchGraph {
+                        name: Some(graph_name.clone()),
+                    })?;
+
+                    for node in src_graph.all_nodes() {
+                        let label_refs: Vec<&str> = node.labels.iter().map(|s| &**s).collect();
+                        dst_graph.create_node_with_id(node.id, &label_refs)?;
+                        target.log_wal(&WalRecord::CreateNode {
+                            id: node.id,
+                            labels: node.labels.iter().map(|s| s.to_string()).collect(),
+                        })?;
+                        for (key, value) in node.properties {
+                            dst_graph.set_node_property(node.id, key.as_str(), value.clone());
+                            target.log_wal(&WalRecord::SetNodeProperty {
+                                id: node.id,
+                                key: key.to_string(),
+                                value,
+                            })?;
+                        }
+                    }
+                    for edge in src_graph.all_edges() {
+                        dst_graph.create_edge_with_id(
+                            edge.id,
+                            edge.src,
+                            edge.dst,
+                            &edge.edge_type,
+                        )?;
+                        target.log_wal(&WalRecord::CreateEdge {
+                            id: edge.id,
+                            src: edge.src,
+                            dst: edge.dst,
+                            edge_type: edge.edge_type.to_string(),
+                        })?;
+                        for (key, value) in edge.properties {
+                            dst_graph.set_edge_property(edge.id, key.as_str(), value.clone());
+                            target.log_wal(&WalRecord::SetEdgeProperty {
+                                id: edge.id,
+                                key: key.to_string(),
+                                value,
+                            })?;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Switch WAL context back to default graph
+        if !self.store.graph_names().is_empty() {
+            target.log_wal(&WalRecord::SwitchGraph { name: None })?;
+        }
+
         // Checkpoint and close the target database
         target.close()?;
 
@@ -120,7 +292,8 @@ impl super::GrafeoDB {
 
     /// Creates an in-memory copy of this database.
     ///
-    /// Returns a new database that is completely independent.
+    /// Returns a new database that is completely independent, including
+    /// all named graph data.
     /// Useful for:
     /// - Testing modifications without affecting the original
     /// - Faster operations when persistence isn't needed
@@ -132,26 +305,52 @@ impl super::GrafeoDB {
         let config = Config::in_memory();
         let target = Self::with_config(config)?;
 
-        // Copy all nodes
+        // Copy default graph nodes
         for node in self.store.all_nodes() {
             let label_refs: Vec<&str> = node.labels.iter().map(|s| &**s).collect();
             target.store.create_node_with_id(node.id, &label_refs)?;
-
-            // Copy properties
             for (key, value) in node.properties {
                 target.store.set_node_property(node.id, key.as_str(), value);
             }
         }
 
-        // Copy all edges
+        // Copy default graph edges
         for edge in self.store.all_edges() {
             target
                 .store
                 .create_edge_with_id(edge.id, edge.src, edge.dst, &edge.edge_type)?;
-
-            // Copy properties
             for (key, value) in edge.properties {
                 target.store.set_edge_property(edge.id, key.as_str(), value);
+            }
+        }
+
+        // Copy named graphs
+        for graph_name in self.store.graph_names() {
+            if let Some(src_graph) = self.store.graph(&graph_name) {
+                target
+                    .store
+                    .create_graph(&graph_name)
+                    .map_err(|e| Error::Internal(e.to_string()))?;
+                if let Some(dst_graph) = target.store.graph(&graph_name) {
+                    for node in src_graph.all_nodes() {
+                        let label_refs: Vec<&str> = node.labels.iter().map(|s| &**s).collect();
+                        dst_graph.create_node_with_id(node.id, &label_refs)?;
+                        for (key, value) in node.properties {
+                            dst_graph.set_node_property(node.id, key.as_str(), value);
+                        }
+                    }
+                    for edge in src_graph.all_edges() {
+                        dst_graph.create_edge_with_id(
+                            edge.id,
+                            edge.src,
+                            edge.dst,
+                            &edge.edge_type,
+                        )?;
+                        for (key, value) in edge.properties {
+                            dst_graph.set_edge_property(edge.id, key.as_str(), value);
+                        }
+                    }
+                }
             }
         }
 
@@ -184,49 +383,40 @@ impl super::GrafeoDB {
     // ADMIN API: Snapshot Export/Import
     // =========================================================================
 
-    /// Exports the entire database to a binary snapshot.
+    /// Exports the entire database to a binary snapshot (v2 format).
     ///
     /// The returned bytes can be stored (e.g. in IndexedDB) and later
     /// restored with [`import_snapshot()`](Self::import_snapshot).
+    /// Includes all named graph data.
     ///
     /// # Errors
     ///
     /// Returns an error if serialization fails.
     pub fn export_snapshot(&self) -> Result<Vec<u8>> {
-        let nodes: Vec<SnapshotNode> = self
+        let nodes = collect_snapshot_nodes(&self.store);
+        let edges = collect_snapshot_edges(&self.store);
+
+        // Collect named graphs
+        let named_graphs: Vec<NamedGraphSnapshot> = self
             .store
-            .all_nodes()
-            .map(|n| SnapshotNode {
-                id: n.id,
-                labels: n.labels.iter().map(|l| l.to_string()).collect(),
-                properties: n
-                    .properties
-                    .into_iter()
-                    .map(|(k, v)| (k.to_string(), v))
-                    .collect(),
+            .graph_names()
+            .into_iter()
+            .filter_map(|name| {
+                self.store
+                    .graph(&name)
+                    .map(|graph_store| NamedGraphSnapshot {
+                        name,
+                        nodes: collect_snapshot_nodes(&graph_store),
+                        edges: collect_snapshot_edges(&graph_store),
+                    })
             })
             .collect();
 
-        let edges: Vec<SnapshotEdge> = self
-            .store
-            .all_edges()
-            .map(|e| SnapshotEdge {
-                id: e.id,
-                src: e.src,
-                dst: e.dst,
-                edge_type: e.edge_type.to_string(),
-                properties: e
-                    .properties
-                    .into_iter()
-                    .map(|(k, v)| (k.to_string(), v))
-                    .collect(),
-            })
-            .collect();
-
-        let snapshot = Snapshot {
-            version: 1,
+        let snapshot = SnapshotV2 {
+            version: 2,
             nodes,
             edges,
+            named_graphs,
         };
 
         let config = bincode::config::standard();
@@ -236,6 +426,7 @@ impl super::GrafeoDB {
 
     /// Creates a new in-memory database from a binary snapshot.
     ///
+    /// Accepts both v1 (no named graphs) and v2 (with named graphs) formats.
     /// The `data` must have been produced by [`export_snapshot()`](Self::export_snapshot).
     ///
     /// All edge references are validated before any data is inserted: every
@@ -248,67 +439,55 @@ impl super::GrafeoDB {
     /// Returns an error if the snapshot is invalid, contains dangling edge
     /// references, has duplicate IDs, or deserialization fails.
     pub fn import_snapshot(data: &[u8]) -> Result<Self> {
+        if data.is_empty() {
+            return Err(Error::Internal("empty snapshot data".to_string()));
+        }
+
         let config = bincode::config::standard();
+
+        // Peek at version byte (bincode standard encodes u8 as raw byte)
+        match data[0] {
+            1 => Self::import_snapshot_v1(data, config),
+            2 => Self::import_snapshot_v2(data, config),
+            v => Err(Error::Internal(format!(
+                "unsupported snapshot version: {v}"
+            ))),
+        }
+    }
+
+    fn import_snapshot_v1(data: &[u8], config: bincode::config::Configuration) -> Result<Self> {
         let (snapshot, _): (Snapshot, _) = bincode::serde::decode_from_slice(data, config)
             .map_err(|e| Error::Internal(format!("snapshot import failed: {e}")))?;
 
-        if snapshot.version != 1 {
-            return Err(Error::Internal(format!(
-                "unsupported snapshot version: {}",
-                snapshot.version
-            )));
-        }
+        validate_snapshot_data(&snapshot.nodes, &snapshot.edges)?;
 
-        // Pre-validate: collect all node IDs and check for duplicates
-        let mut node_ids = HashSet::with_capacity(snapshot.nodes.len());
-        for node in &snapshot.nodes {
-            if !node_ids.insert(node.id) {
-                return Err(Error::Internal(format!(
-                    "snapshot contains duplicate node ID {}",
-                    node.id
-                )));
-            }
-        }
-
-        // Validate edge references and check for duplicate edge IDs
-        let mut edge_ids = HashSet::with_capacity(snapshot.edges.len());
-        for edge in &snapshot.edges {
-            if !edge_ids.insert(edge.id) {
-                return Err(Error::Internal(format!(
-                    "snapshot contains duplicate edge ID {}",
-                    edge.id
-                )));
-            }
-            if !node_ids.contains(&edge.src) {
-                return Err(Error::Internal(format!(
-                    "snapshot edge {} references non-existent source node {}",
-                    edge.id, edge.src
-                )));
-            }
-            if !node_ids.contains(&edge.dst) {
-                return Err(Error::Internal(format!(
-                    "snapshot edge {} references non-existent destination node {}",
-                    edge.id, edge.dst
-                )));
-            }
-        }
-
-        // Validation passed: build the database
         let db = Self::new_in_memory();
+        populate_store_from_snapshot(&db.store, snapshot.nodes, snapshot.edges)?;
+        Ok(db)
+    }
 
-        for node in snapshot.nodes {
-            let label_refs: Vec<&str> = node.labels.iter().map(|s| s.as_str()).collect();
-            db.store.create_node_with_id(node.id, &label_refs)?;
-            for (key, value) in node.properties {
-                db.store.set_node_property(node.id, &key, value);
-            }
+    fn import_snapshot_v2(data: &[u8], config: bincode::config::Configuration) -> Result<Self> {
+        let (snapshot, _): (SnapshotV2, _) = bincode::serde::decode_from_slice(data, config)
+            .map_err(|e| Error::Internal(format!("snapshot import failed: {e}")))?;
+
+        // Validate default graph data
+        validate_snapshot_data(&snapshot.nodes, &snapshot.edges)?;
+
+        // Validate each named graph
+        for ng in &snapshot.named_graphs {
+            validate_snapshot_data(&ng.nodes, &ng.edges)?;
         }
 
-        for edge in snapshot.edges {
+        let db = Self::new_in_memory();
+        populate_store_from_snapshot(&db.store, snapshot.nodes, snapshot.edges)?;
+
+        // Restore named graphs
+        for ng in snapshot.named_graphs {
             db.store
-                .create_edge_with_id(edge.id, edge.src, edge.dst, &edge.edge_type)?;
-            for (key, value) in edge.properties {
-                db.store.set_edge_property(edge.id, &key, value);
+                .create_graph(&ng.name)
+                .map_err(|e| Error::Internal(e.to_string()))?;
+            if let Some(graph_store) = db.store.graph(&ng.name) {
+                populate_store_from_snapshot(&graph_store, ng.nodes, ng.edges)?;
             }
         }
 
@@ -317,7 +496,8 @@ impl super::GrafeoDB {
 
     /// Replaces the current database contents with data from a binary snapshot.
     ///
-    /// The `data` must have been produced by [`export_snapshot()`](Self::export_snapshot).
+    /// Accepts both v1 and v2 snapshot formats. The `data` must have been
+    /// produced by [`export_snapshot()`](Self::export_snapshot).
     ///
     /// All validation (duplicate IDs, dangling edge references) is performed
     /// before any data is modified. If validation fails, the current database
@@ -330,67 +510,68 @@ impl super::GrafeoDB {
     /// Returns an error if the snapshot is invalid, contains dangling edge
     /// references, has duplicate IDs, or deserialization fails.
     pub fn restore_snapshot(&self, data: &[u8]) -> Result<()> {
+        if data.is_empty() {
+            return Err(Error::Internal("empty snapshot data".to_string()));
+        }
+
         let config = bincode::config::standard();
+
+        match data[0] {
+            1 => self.restore_snapshot_v1(data, config),
+            2 => self.restore_snapshot_v2(data, config),
+            v => Err(Error::Internal(format!(
+                "unsupported snapshot version: {v}"
+            ))),
+        }
+    }
+
+    fn restore_snapshot_v1(
+        &self,
+        data: &[u8],
+        config: bincode::config::Configuration,
+    ) -> Result<()> {
         let (snapshot, _): (Snapshot, _) = bincode::serde::decode_from_slice(data, config)
             .map_err(|e| Error::Internal(format!("snapshot restore failed: {e}")))?;
 
-        if snapshot.version != 1 {
-            return Err(Error::Internal(format!(
-                "unsupported snapshot version: {}",
-                snapshot.version
-            )));
+        validate_snapshot_data(&snapshot.nodes, &snapshot.edges)?;
+
+        // Drop all named graphs before clearing the default store
+        for name in self.store.graph_names() {
+            self.store.drop_graph(&name);
+        }
+        self.store.clear();
+        populate_store_from_snapshot(&self.store, snapshot.nodes, snapshot.edges)
+    }
+
+    fn restore_snapshot_v2(
+        &self,
+        data: &[u8],
+        config: bincode::config::Configuration,
+    ) -> Result<()> {
+        let (snapshot, _): (SnapshotV2, _) = bincode::serde::decode_from_slice(data, config)
+            .map_err(|e| Error::Internal(format!("snapshot restore failed: {e}")))?;
+
+        // Validate all data before making any changes
+        validate_snapshot_data(&snapshot.nodes, &snapshot.edges)?;
+        for ng in &snapshot.named_graphs {
+            validate_snapshot_data(&ng.nodes, &ng.edges)?;
         }
 
-        // Pre-validate: collect all node IDs and check for duplicates
-        let mut node_ids = HashSet::with_capacity(snapshot.nodes.len());
-        for node in &snapshot.nodes {
-            if !node_ids.insert(node.id) {
-                return Err(Error::Internal(format!(
-                    "snapshot contains duplicate node ID {}",
-                    node.id
-                )));
-            }
+        // Drop all existing named graphs, then clear default store
+        for name in self.store.graph_names() {
+            self.store.drop_graph(&name);
         }
-
-        // Validate edge references and check for duplicate edge IDs
-        let mut edge_ids = HashSet::with_capacity(snapshot.edges.len());
-        for edge in &snapshot.edges {
-            if !edge_ids.insert(edge.id) {
-                return Err(Error::Internal(format!(
-                    "snapshot contains duplicate edge ID {}",
-                    edge.id
-                )));
-            }
-            if !node_ids.contains(&edge.src) {
-                return Err(Error::Internal(format!(
-                    "snapshot edge {} references non-existent source node {}",
-                    edge.id, edge.src
-                )));
-            }
-            if !node_ids.contains(&edge.dst) {
-                return Err(Error::Internal(format!(
-                    "snapshot edge {} references non-existent destination node {}",
-                    edge.id, edge.dst
-                )));
-            }
-        }
-
-        // Validation passed: clear and rebuild
         self.store.clear();
 
-        for node in snapshot.nodes {
-            let label_refs: Vec<&str> = node.labels.iter().map(|s| s.as_str()).collect();
-            self.store.create_node_with_id(node.id, &label_refs)?;
-            for (key, value) in node.properties {
-                self.store.set_node_property(node.id, &key, value);
-            }
-        }
+        populate_store_from_snapshot(&self.store, snapshot.nodes, snapshot.edges)?;
 
-        for edge in snapshot.edges {
+        // Restore named graphs
+        for ng in snapshot.named_graphs {
             self.store
-                .create_edge_with_id(edge.id, edge.src, edge.dst, &edge.edge_type)?;
-            for (key, value) in edge.properties {
-                self.store.set_edge_property(edge.id, &key, value);
+                .create_graph(&ng.name)
+                .map_err(|e| Error::Internal(e.to_string()))?;
+            if let Some(graph_store) = self.store.graph(&ng.name) {
+                populate_store_from_snapshot(&graph_store, ng.nodes, ng.edges)?;
             }
         }
 

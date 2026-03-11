@@ -85,6 +85,11 @@ pub struct GrafeoDB {
     /// Write-ahead log manager (if durability is enabled).
     #[cfg(feature = "wal")]
     pub(super) wal: Option<Arc<LpgWal>>,
+    /// Shared WAL graph context tracker. Tracks which named graph was last
+    /// written to the WAL, so concurrent sessions can emit `SwitchGraph`
+    /// records only when the context actually changes.
+    #[cfg(feature = "wal")]
+    pub(super) wal_graph_context: Arc<parking_lot::Mutex<Option<String>>>,
     /// Query cache for parsed and optimized plans.
     pub(super) query_cache: Arc<QueryCache>,
     /// Shared commit counter for auto-GC across sessions.
@@ -259,6 +264,8 @@ impl GrafeoDB {
             buffer_manager,
             #[cfg(feature = "wal")]
             wal,
+            #[cfg(feature = "wal")]
+            wal_graph_context: Arc::new(parking_lot::Mutex::new(None)),
             query_cache,
             commit_counter: Arc::new(AtomicUsize::new(0)),
             is_open: RwLock::new(true),
@@ -323,6 +330,8 @@ impl GrafeoDB {
             buffer_manager,
             #[cfg(feature = "wal")]
             wal: None,
+            #[cfg(feature = "wal")]
+            wal_graph_context: Arc::new(parking_lot::Mutex::new(None)),
             query_cache,
             commit_counter: Arc::new(AtomicUsize::new(0)),
             is_open: RwLock::new(true),
@@ -335,20 +344,57 @@ impl GrafeoDB {
     }
 
     /// Applies WAL records to restore the database state.
+    ///
+    /// Data mutation records are routed through a graph cursor that tracks
+    /// `SwitchGraph` context markers, replaying mutations into the correct
+    /// named graph (or the default graph when cursor is `None`).
     #[cfg(feature = "wal")]
-    fn apply_wal_records(store: &LpgStore, catalog: &Catalog, records: &[WalRecord]) -> Result<()> {
+    fn apply_wal_records(
+        store: &Arc<LpgStore>,
+        catalog: &Catalog,
+        records: &[WalRecord],
+    ) -> Result<()> {
         use crate::catalog::{
             EdgeTypeDefinition, NodeTypeDefinition, PropertyDataType, TypeConstraint, TypedProperty,
         };
+        use grafeo_common::utils::error::Error;
+
+        // Graph cursor: tracks which named graph receives data mutations.
+        // `None` means the default graph.
+        let mut current_graph: Option<String> = None;
+        let mut target_store: Arc<LpgStore> = Arc::clone(store);
 
         for record in records {
             match record {
+                // --- Named graph lifecycle ---
+                WalRecord::CreateNamedGraph { name } => {
+                    let _ = store.create_graph(name);
+                }
+                WalRecord::DropNamedGraph { name } => {
+                    store.drop_graph(name);
+                    // Reset cursor if the dropped graph was active
+                    if current_graph.as_deref() == Some(name.as_str()) {
+                        current_graph = None;
+                        target_store = Arc::clone(store);
+                    }
+                }
+                WalRecord::SwitchGraph { name } => {
+                    current_graph.clone_from(name);
+                    target_store = match &current_graph {
+                        None => Arc::clone(store),
+                        Some(graph_name) => store
+                            .graph_or_create(graph_name)
+                            .map_err(|e| Error::Internal(e.to_string()))?,
+                    };
+                }
+
+                // --- Data mutations: routed through target_store ---
                 WalRecord::CreateNode { id, labels } => {
                     let label_refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
-                    store.create_node_with_id(*id, &label_refs)?;
+                    target_store.create_node_with_id(*id, &label_refs)?;
                 }
                 WalRecord::DeleteNode { id } => {
-                    store.delete_node(*id);
+                    target_store.delete_node(*id);
                 }
                 WalRecord::CreateEdge {
                     id,
@@ -356,31 +402,31 @@ impl GrafeoDB {
                     dst,
                     edge_type,
                 } => {
-                    store.create_edge_with_id(*id, *src, *dst, edge_type)?;
+                    target_store.create_edge_with_id(*id, *src, *dst, edge_type)?;
                 }
                 WalRecord::DeleteEdge { id } => {
-                    store.delete_edge(*id);
+                    target_store.delete_edge(*id);
                 }
                 WalRecord::SetNodeProperty { id, key, value } => {
-                    store.set_node_property(*id, key, value.clone());
+                    target_store.set_node_property(*id, key, value.clone());
                 }
                 WalRecord::SetEdgeProperty { id, key, value } => {
-                    store.set_edge_property(*id, key, value.clone());
+                    target_store.set_edge_property(*id, key, value.clone());
                 }
                 WalRecord::AddNodeLabel { id, label } => {
-                    store.add_label(*id, label);
+                    target_store.add_label(*id, label);
                 }
                 WalRecord::RemoveNodeLabel { id, label } => {
-                    store.remove_label(*id, label);
+                    target_store.remove_label(*id, label);
                 }
                 WalRecord::RemoveNodeProperty { id, key } => {
-                    store.remove_node_property(*id, key);
+                    target_store.remove_node_property(*id, key);
                 }
                 WalRecord::RemoveEdgeProperty { id, key } => {
-                    store.remove_edge_property(*id, key);
+                    target_store.remove_edge_property(*id, key);
                 }
 
-                // Schema DDL replay
+                // --- Schema DDL replay (always on root catalog) ---
                 WalRecord::CreateNodeType {
                     name,
                     properties,
@@ -630,7 +676,7 @@ impl GrafeoDB {
 
         #[cfg(feature = "wal")]
         if let Some(ref wal) = self.wal {
-            session.set_wal(Arc::clone(wal));
+            session.set_wal(Arc::clone(wal), Arc::clone(&self.wal_graph_context));
         }
 
         #[cfg(feature = "cdc")]

@@ -529,3 +529,158 @@ fn import_rejects_duplicate_edge_ids() {
         }
     }
 }
+
+// =========================================================================
+// Named Graph Snapshot Tests
+// =========================================================================
+
+#[test]
+fn export_import_preserves_named_graphs() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    session.execute("INSERT (:Person {name: 'Alix'})").unwrap();
+    session.execute("CREATE GRAPH analytics").unwrap();
+    session.execute("USE GRAPH analytics").unwrap();
+    session
+        .execute("INSERT (:KPI {name: 'pageviews', count: 42})")
+        .unwrap();
+
+    let bytes = db.export_snapshot().unwrap();
+    let restored = GrafeoDB::import_snapshot(&bytes).unwrap();
+
+    // Default graph
+    assert_eq!(restored.node_count(), 1);
+    let session2 = restored.session();
+    let result = session2.execute("MATCH (p:Person) RETURN p.name").unwrap();
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+
+    // Named graph
+    session2.execute("USE GRAPH analytics").unwrap();
+    let result = session2
+        .execute("MATCH (m:KPI) RETURN m.name, m.count")
+        .unwrap();
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0][0], Value::String("pageviews".into()));
+    assert_eq!(result.rows[0][1], Value::Int64(42));
+}
+
+#[test]
+fn export_import_preserves_multiple_named_graphs() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    session.execute("CREATE GRAPH alpha").unwrap();
+    session.execute("USE GRAPH alpha").unwrap();
+    session.execute("INSERT (:Item {name: 'Widget'})").unwrap();
+
+    session.execute("USE GRAPH default").unwrap();
+    session.execute("CREATE GRAPH beta").unwrap();
+    session.execute("USE GRAPH beta").unwrap();
+    session
+        .execute("INSERT (:City {name: 'Amsterdam'})")
+        .unwrap();
+    session.execute("INSERT (:City {name: 'Berlin'})").unwrap();
+
+    let bytes = db.export_snapshot().unwrap();
+    let restored = GrafeoDB::import_snapshot(&bytes).unwrap();
+
+    let session2 = restored.session();
+
+    session2.execute("USE GRAPH alpha").unwrap();
+    let result = session2.execute("MATCH (i:Item) RETURN i.name").unwrap();
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0][0], Value::String("Widget".into()));
+
+    session2.execute("USE GRAPH beta").unwrap();
+    let result = session2
+        .execute("MATCH (c:City) RETURN c.name ORDER BY c.name")
+        .unwrap();
+    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows[0][0], Value::String("Amsterdam".into()));
+    assert_eq!(result.rows[1][0], Value::String("Berlin".into()));
+}
+
+#[test]
+fn restore_snapshot_includes_named_graphs() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    session.execute("INSERT (:Person {name: 'Alix'})").unwrap();
+    session.execute("CREATE GRAPH metrics").unwrap();
+    session.execute("USE GRAPH metrics").unwrap();
+    session.execute("INSERT (:KPI {name: 'clicks'})").unwrap();
+
+    let snapshot = db.export_snapshot().unwrap();
+
+    // Modify: add more data
+    session.execute("USE GRAPH default").unwrap();
+    session.execute("INSERT (:Person {name: 'Gus'})").unwrap();
+
+    // Restore
+    db.restore_snapshot(&snapshot).unwrap();
+
+    assert_eq!(db.node_count(), 1, "default graph restored to 1 node");
+
+    let session2 = db.session();
+    session2.execute("USE GRAPH metrics").unwrap();
+    let result = session2.execute("MATCH (m:KPI) RETURN m.name").unwrap();
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0][0], Value::String("clicks".into()));
+}
+
+#[test]
+fn import_v1_snapshot_still_works() {
+    // Construct a v1 snapshot manually (no named_graphs field)
+    let snap = TestSnapshot {
+        version: 1,
+        nodes: vec![TestNode {
+            id: NodeId::new(0),
+            labels: vec!["Person".into()],
+            properties: vec![("name".into(), Value::String("Alix".into()))],
+        }],
+        edges: vec![],
+    };
+    let bytes = encode_snapshot(&snap);
+
+    let db = GrafeoDB::import_snapshot(&bytes).unwrap();
+    assert_eq!(db.node_count(), 1);
+
+    let session = db.session();
+    let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+}
+
+#[test]
+fn to_memory_copies_named_graphs() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    session.execute("INSERT (:Person {name: 'Alix'})").unwrap();
+    session.execute("CREATE GRAPH backup").unwrap();
+    session.execute("USE GRAPH backup").unwrap();
+    session
+        .execute("INSERT (:Archive {date: '2025-01-01'})")
+        .unwrap();
+
+    let copy = db.to_memory().unwrap();
+
+    // Default graph copied
+    assert_eq!(copy.node_count(), 1);
+
+    // Named graph copied
+    let session2 = copy.session();
+    session2.execute("USE GRAPH backup").unwrap();
+    let result = session2.execute("MATCH (a:Archive) RETURN a.date").unwrap();
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0][0], Value::String("2025-01-01".into()));
+
+    // Independence: mutating original doesn't affect copy
+    session
+        .execute("INSERT (:Archive {date: '2025-02-01'})")
+        .unwrap();
+    let result2 = session2.execute("MATCH (a:Archive) RETURN a.date").unwrap();
+    assert_eq!(result2.rows.len(), 1, "copy should still have 1 node");
+}
