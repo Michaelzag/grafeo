@@ -25,9 +25,25 @@ static QUERY_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
 ///
 /// Returns an error if the query cannot be parsed or translated.
 pub fn translate(query: &str) -> Result<LogicalPlan> {
-    let sparql_query = sparql::parse(query)?;
+    // Check for EXPLAIN prefix (case-insensitive, non-standard extension)
+    let trimmed = query.trim_start();
+    let (explain, actual_query) = if trimmed.len() >= 7
+        && trimmed[..7].eq_ignore_ascii_case("EXPLAIN")
+        && trimmed
+            .as_bytes()
+            .get(7)
+            .is_some_and(u8::is_ascii_whitespace)
+    {
+        (true, trimmed[7..].trim_start())
+    } else {
+        (false, query)
+    };
+
+    let sparql_query = sparql::parse(actual_query)?;
     let mut translator = SparqlTranslator::new();
-    translator.translate_query(&sparql_query)
+    let mut plan = translator.translate_query(&sparql_query)?;
+    plan.explain = explain;
+    Ok(plan)
 }
 
 /// Translator from SPARQL AST to LogicalPlan.

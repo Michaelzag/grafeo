@@ -201,35 +201,6 @@ impl super::GrafeoDB {
         })
     }
 
-    /// Returns RDF schema information.
-    ///
-    /// Only available when the RDF feature is enabled.
-    #[cfg(feature = "rdf")]
-    #[must_use]
-    pub fn rdf_schema(&self) -> crate::admin::SchemaInfo {
-        let stats = self.rdf_store.stats();
-
-        let predicates = self
-            .rdf_store
-            .predicates()
-            .into_iter()
-            .map(|predicate| {
-                let count = self.rdf_store.triples_with_predicate(&predicate).len();
-                crate::admin::PredicateInfo {
-                    iri: predicate.to_string(),
-                    count,
-                }
-            })
-            .collect();
-
-        crate::admin::SchemaInfo::Rdf(crate::admin::RdfSchemaInfo {
-            predicates,
-            named_graphs: Vec::new(), // Named graphs not yet implemented in RdfStore
-            subject_count: stats.subject_count,
-            object_count: stats.object_count,
-        })
-    }
-
     /// Returns detailed information about all indexes.
     #[must_use]
     pub fn list_indexes(&self) -> Vec<crate::admin::IndexInfo> {

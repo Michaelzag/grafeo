@@ -10,12 +10,17 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 - **Observability** (`metrics` feature): lock-free `MetricsRegistry` with atomic counters and fixed-bucket histograms; `GrafeoDB::metrics()` returns a serializable snapshot, `reset_metrics()` clears all counters; included in `server` profile, zero overhead when disabled. Tracks query count, latency (p50/p99/mean), errors, timeouts, and rows returned/scanned across all 6 query languages (GQL, Cypher, Gremlin, GraphQL, SPARQL, SQL/PGQ); transaction lifecycle (active, committed, rolled back, conflicts, duration p50/p99/mean); session lifecycle (active, created); GC sweep runs; plan cache hits, misses, size, and invalidations
 - **Edge visibility fast path**: `is_edge_visible_at_epoch()` and `is_edge_visible_versioned()` on `GraphStore` skip full edge construction when only checking MVCC visibility, matching the existing node visibility pattern
 - **Plan cache bindings**: `clear_plan_cache()` exposed in Python, Node.js, C, and WASM bindings
+- **RDF bulk load**: `RdfStore::bulk_load()` builds all indexes in a single pass with pre-sized HashMaps and computes statistics during the same traversal; `RdfStore::load_ntriples()` parses N-Triples documents with full term support (IRIs, blank nodes, typed/language-tagged literals)
+- **SPARQL EXPLAIN**: `EXPLAIN SELECT ...` prefix returns the optimized logical plan tree without executing the query, showing operator types and estimated cardinalities
+- **GQL conformance tracking**: `// ISO:` test annotations linking spec compliance tests to ISO/IEC 39075:2024 feature IDs; `scripts/gql-conformance.py` generates coverage reports and a machine-readable `docs/gql-dialect.json` dialect file for tools like GraphGlot (inspired by [community feedback](https://github.com/orgs/GrafeoDB/discussions/122))
+- **GQL binary set functions** (GF11): `COVAR_SAMP`, `COVAR_POP`, `CORR`, `REGR_SLOPE`, `REGR_INTERCEPT`, `REGR_R2`, `REGR_COUNT`, `REGR_SXX`, `REGR_SYY`, `REGR_SXY`, `REGR_AVGX`, `REGR_AVGY` aggregate functions for statistical analysis
 
 ### Changed
 
 - **RDF query performance**: replaced O(N*M) nested loop joins with O(N+M) hash joins for all RDF join types (inner, left/OPTIONAL, semi/EXISTS, anti/NOT EXISTS); added composite indexes (SP, PO, OS) for O(1) lookup on 2-bound triple patterns (was linear filter over single-term index); SPARQL optimizer now uses RDF-specific statistics with triple pattern cardinality estimation
 - **Unsafe code enforcement**: `#![forbid(unsafe_code)]` on pure-safe crates (grafeo, grafeo-adapters, bindings-common, python, wasm), `#![deny(unsafe_code)]` on crates with targeted unsafe (grafeo-common, grafeo-core, grafeo-engine, grafeo-cli)
 - **GroupKeyPart zero-alloc**: `GroupKeyPart::String` now uses `ArcStr` instead of `String`, eliminating allocations during aggregation group key construction
+- **RDF code consolidation**: consolidated scattered RDF `#[cfg]` gates in `grafeo-engine` by extracting dedicated `database/rdf_ops.rs` and `session/rdf.rs` modules
 
 ## [0.5.21] - 2026-03-13
 

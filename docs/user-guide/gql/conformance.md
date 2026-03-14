@@ -5,6 +5,10 @@ declaring which features are supported, partially supported or not yet implement
 
 Grafeo targets **minimum conformance** plus a broad set of optional features.
 
+A machine-readable version of this compliance matrix is available as
+[`gql-dialect.json`](../../gql-dialect.json) for tool integration (e.g. [GraphGlot](https://graphglot.com/)).
+Regenerate it with `python scripts/gql-conformance.py dialect`.
+
 ## Minimum Conformance (Section 24.2)
 
 Per the standard, minimum conformance requires:
@@ -337,9 +341,10 @@ Per the standard, minimum conformance requires:
 | GF05 | Multi-character TRIM function | **Supported** |
 | GF06 | Explicit TRIM function | Supported |
 | GF10 | Advanced aggregates: general set functions | **Supported** |
-| GF11 | Advanced aggregates: binary set functions | **Not yet** |
+| GF11 | Advanced aggregates: binary set functions | **Supported** |
 | GF12 | CARDINALITY function | **Supported** |
 | GF13 | SIZE function | Supported |
+| GF20 | Aggregate functions in sort keys | Supported |
 
 ### Catalog & Graph Features
 

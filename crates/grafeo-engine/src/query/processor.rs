@@ -172,26 +172,6 @@ impl QueryProcessor {
         })
     }
 
-    /// Creates a new query processor with both LPG and RDF stores.
-    #[cfg(feature = "rdf")]
-    #[must_use]
-    pub fn with_rdf(
-        lpg_store: Arc<LpgStore>,
-        rdf_store: Arc<grafeo_core::graph::rdf::RdfStore>,
-    ) -> Self {
-        let optimizer = Optimizer::from_store(&lpg_store);
-        let graph_store = Arc::clone(&lpg_store) as Arc<dyn GraphStoreMut>;
-        Self {
-            lpg_store,
-            graph_store,
-            transaction_manager: Arc::new(TransactionManager::new()),
-            catalog: Arc::new(Catalog::new()),
-            optimizer,
-            transaction_context: None,
-            rdf_store: Some(rdf_store),
-        }
-    }
-
     /// Sets the transaction context for MVCC visibility.
     ///
     /// This should be called when the processor is used within a transaction.
@@ -362,8 +342,65 @@ impl QueryProcessor {
         }
     }
 
+    /// Returns a reference to the LPG store.
+    #[must_use]
+    pub fn lpg_store(&self) -> &Arc<LpgStore> {
+        &self.lpg_store
+    }
+
+    /// Returns a reference to the catalog.
+    #[must_use]
+    pub fn catalog(&self) -> &Arc<Catalog> {
+        &self.catalog
+    }
+
+    /// Returns a reference to the optimizer.
+    #[must_use]
+    pub fn optimizer(&self) -> &Optimizer {
+        &self.optimizer
+    }
+}
+
+impl QueryProcessor {
+    /// Returns a reference to the transaction manager.
+    #[must_use]
+    pub fn transaction_manager(&self) -> &Arc<TransactionManager> {
+        &self.transaction_manager
+    }
+}
+
+// =========================================================================
+// RDF-specific methods (gated behind `rdf` feature)
+// =========================================================================
+
+#[cfg(feature = "rdf")]
+impl QueryProcessor {
+    /// Creates a new query processor with both LPG and RDF stores.
+    #[must_use]
+    pub fn with_rdf(
+        lpg_store: Arc<LpgStore>,
+        rdf_store: Arc<grafeo_core::graph::rdf::RdfStore>,
+    ) -> Self {
+        let optimizer = Optimizer::from_store(&lpg_store);
+        let graph_store = Arc::clone(&lpg_store) as Arc<dyn GraphStoreMut>;
+        Self {
+            lpg_store,
+            graph_store,
+            transaction_manager: Arc::new(TransactionManager::new()),
+            catalog: Arc::new(Catalog::new()),
+            optimizer,
+            transaction_context: None,
+            rdf_store: Some(rdf_store),
+        }
+    }
+
+    /// Returns a reference to the RDF store (if configured).
+    #[must_use]
+    pub fn rdf_store(&self) -> Option<&Arc<grafeo_core::graph::rdf::RdfStore>> {
+        self.rdf_store.as_ref()
+    }
+
     /// Processes an RDF query (SPARQL, GraphQL-RDF).
-    #[cfg(feature = "rdf")]
     fn process_rdf(
         &self,
         query: &str,
@@ -406,7 +443,6 @@ impl QueryProcessor {
     }
 
     /// Translates an RDF query to a logical plan.
-    #[cfg(feature = "rdf")]
     fn translate_rdf(&self, query: &str, language: QueryLanguage) -> Result<LogicalPlan> {
         match language {
             #[cfg(feature = "sparql")]
@@ -425,39 +461,6 @@ impl QueryProcessor {
                 language
             ))),
         }
-    }
-
-    /// Returns a reference to the LPG store.
-    #[must_use]
-    pub fn lpg_store(&self) -> &Arc<LpgStore> {
-        &self.lpg_store
-    }
-
-    /// Returns a reference to the catalog.
-    #[must_use]
-    pub fn catalog(&self) -> &Arc<Catalog> {
-        &self.catalog
-    }
-
-    /// Returns a reference to the optimizer.
-    #[must_use]
-    pub fn optimizer(&self) -> &Optimizer {
-        &self.optimizer
-    }
-
-    /// Returns a reference to the RDF store (if configured).
-    #[cfg(feature = "rdf")]
-    #[must_use]
-    pub fn rdf_store(&self) -> Option<&Arc<grafeo_core::graph::rdf::RdfStore>> {
-        self.rdf_store.as_ref()
-    }
-}
-
-impl QueryProcessor {
-    /// Returns a reference to the transaction manager.
-    #[must_use]
-    pub fn transaction_manager(&self) -> &Arc<TransactionManager> {
-        &self.transaction_manager
     }
 }
 

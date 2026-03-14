@@ -18,6 +18,8 @@ mod embed;
 mod index;
 mod persistence;
 mod query;
+#[cfg(feature = "rdf")]
+mod rdf_ops;
 mod search;
 #[cfg(feature = "wal")]
 pub(crate) mod wal_store;
@@ -710,63 +712,13 @@ impl GrafeoDB {
 
                 // --- RDF triple replay ---
                 #[cfg(feature = "rdf")]
-                WalRecord::InsertRdfTriple {
-                    subject,
-                    predicate,
-                    object,
-                    graph,
-                } => {
-                    use grafeo_core::graph::rdf::Term;
-                    if let (Some(s), Some(p), Some(o)) = (
-                        Term::from_ntriples(subject),
-                        Term::from_ntriples(predicate),
-                        Term::from_ntriples(object),
-                    ) {
-                        let triple = grafeo_core::graph::rdf::Triple::new(s, p, o);
-                        let target = match graph {
-                            Some(name) => rdf_store.graph_or_create(name),
-                            None => Arc::clone(rdf_store),
-                        };
-                        target.insert(triple);
-                    }
+                WalRecord::InsertRdfTriple { .. }
+                | WalRecord::DeleteRdfTriple { .. }
+                | WalRecord::ClearRdfGraph { .. }
+                | WalRecord::CreateRdfGraph { .. }
+                | WalRecord::DropRdfGraph { .. } => {
+                    rdf_ops::replay_rdf_wal_record(rdf_store, record);
                 }
-                #[cfg(feature = "rdf")]
-                WalRecord::DeleteRdfTriple {
-                    subject,
-                    predicate,
-                    object,
-                    graph,
-                } => {
-                    use grafeo_core::graph::rdf::Term;
-                    if let (Some(s), Some(p), Some(o)) = (
-                        Term::from_ntriples(subject),
-                        Term::from_ntriples(predicate),
-                        Term::from_ntriples(object),
-                    ) {
-                        let triple = grafeo_core::graph::rdf::Triple::new(s, p, o);
-                        let target = match graph {
-                            Some(name) => rdf_store.graph_or_create(name),
-                            None => Arc::clone(rdf_store),
-                        };
-                        target.remove(&triple);
-                    }
-                }
-                #[cfg(feature = "rdf")]
-                WalRecord::ClearRdfGraph { graph } => {
-                    rdf_store.clear_graph(graph.as_deref());
-                }
-                #[cfg(feature = "rdf")]
-                WalRecord::CreateRdfGraph { name } => {
-                    let _ = rdf_store.create_graph(name);
-                }
-                #[cfg(feature = "rdf")]
-                WalRecord::DropRdfGraph { name } => match name {
-                    None => rdf_store.clear(),
-                    Some(graph_name) => {
-                        rdf_store.drop_graph(graph_name);
-                    }
-                },
-                // Skip RDF records when rdf feature is disabled
                 #[cfg(not(feature = "rdf"))]
                 WalRecord::InsertRdfTriple { .. }
                 | WalRecord::DeleteRdfTriple { .. }

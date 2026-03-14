@@ -145,4 +145,53 @@ mod tests {
         let result = translate(query);
         assert!(result.is_ok());
     }
+
+    #[test]
+    fn test_explain_prefix_sets_flag() {
+        let query = "EXPLAIN SELECT ?x WHERE { ?x ?y ?z }";
+        let plan = translate(query).unwrap();
+        assert!(plan.explain);
+    }
+
+    #[test]
+    fn test_explain_prefix_case_insensitive() {
+        let query = "explain SELECT ?x WHERE { ?x ?y ?z }";
+        let plan = translate(query).unwrap();
+        assert!(plan.explain);
+    }
+
+    #[test]
+    fn test_no_explain_prefix() {
+        let query = "SELECT ?x WHERE { ?x ?y ?z }";
+        let plan = translate(query).unwrap();
+        assert!(!plan.explain);
+    }
+}
+
+#[cfg(all(feature = "sparql", feature = "rdf"))]
+mod explain_integration {
+    use grafeo_engine::GrafeoDB;
+
+    #[test]
+    fn test_sparql_explain_returns_plan() {
+        let db = GrafeoDB::new_in_memory();
+        db.execute_sparql(
+            r#"INSERT DATA { <http://example.org/alix> <http://xmlns.com/foaf/0.1/name> "Alix" }"#,
+        )
+        .unwrap();
+
+        let result = db
+            .execute_sparql(
+                "EXPLAIN SELECT ?name WHERE { ?s <http://xmlns.com/foaf/0.1/name> ?name }",
+            )
+            .unwrap();
+
+        assert_eq!(result.columns, vec!["plan"]);
+        assert_eq!(result.rows.len(), 1);
+        let plan_text = result.rows[0][0].to_string();
+        assert!(
+            plan_text.contains("TripleScan"),
+            "Plan should contain TripleScan, got: {plan_text}"
+        );
+    }
 }

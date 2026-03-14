@@ -834,18 +834,4 @@ impl super::GrafeoDB {
 
         ids
     }
-
-    /// Batch-inserts RDF triples into the RDF store.
-    ///
-    /// Delegates to `RdfStore::batch_insert`, which acquires each index lock
-    /// once for the entire batch. Duplicates are silently skipped.
-    ///
-    /// Returns the number of triples that were newly inserted.
-    #[cfg(feature = "rdf")]
-    pub fn batch_insert_rdf(
-        &self,
-        triples: impl IntoIterator<Item = grafeo_core::graph::rdf::Triple>,
-    ) -> usize {
-        self.rdf_store.batch_insert(triples)
-    }
 }

@@ -421,6 +421,7 @@ fn test_set_map_replace() {
 // ISO GQL Conformance: Group 1 - Predicates (G113, G114, G115)
 // ---------------------------------------------------------------------------
 
+// ISO: G115
 #[test]
 fn test_property_exists_true() {
     let db = setup_db();
@@ -432,6 +433,7 @@ fn test_property_exists_true() {
     assert_eq!(result.rows[0][0], Value::Bool(true));
 }
 
+// ISO: G115
 #[test]
 fn test_property_exists_false() {
     let db = setup_db();
@@ -443,6 +445,7 @@ fn test_property_exists_false() {
     assert_eq!(result.rows[0][0], Value::Bool(false));
 }
 
+// ISO: G113
 #[test]
 fn test_all_different_distinct_nodes() {
     let db = setup_db();
@@ -457,6 +460,7 @@ fn test_all_different_distinct_nodes() {
     assert_eq!(result.rows[0][0], Value::Bool(true));
 }
 
+// ISO: G113
 #[test]
 fn test_all_different_same_node() {
     let db = setup_db();
@@ -471,6 +475,7 @@ fn test_all_different_same_node() {
     assert_eq!(result.rows[0][0], Value::Bool(false));
 }
 
+// ISO: G114
 #[test]
 fn test_same_identical_nodes() {
     let db = setup_db();
@@ -485,6 +490,7 @@ fn test_same_identical_nodes() {
     assert_eq!(result.rows[0][0], Value::Bool(true));
 }
 
+// ISO: G114
 #[test]
 fn test_same_different_nodes() {
     let db = setup_db();
@@ -504,6 +510,7 @@ fn test_same_different_nodes() {
 
 // NULLIF tests are in spec_compliance.rs (nullif_returns_null_when_equal, nullif_returns_value_when_different)
 
+// ISO: GA03
 #[test]
 fn test_coalesce_syntax() {
     let db = setup_db();
@@ -515,6 +522,7 @@ fn test_coalesce_syntax() {
     assert_eq!(result.rows[0][0], Value::String("Alix".into()));
 }
 
+// ISO: GA03
 #[test]
 fn test_order_by_nulls_first() {
     let db = GrafeoDB::new_in_memory();
@@ -538,6 +546,7 @@ fn test_order_by_nulls_first() {
     assert_eq!(result.rows[0][0], Value::String("B".into()));
 }
 
+// ISO: GA03
 #[test]
 fn test_order_by_nulls_last() {
     let db = GrafeoDB::new_in_memory();
@@ -601,6 +610,7 @@ fn test_is_not_normalized() {
 
 // --- Group 4: Parenthesized Path Enhancements (G049, G050) ---
 
+// ISO: G049
 #[test]
 fn test_parenthesized_path_mode_trail() {
     // G049: TRAIL mode inside parenthesized pattern prevents edge repetition
@@ -619,6 +629,7 @@ fn test_parenthesized_path_mode_trail() {
     );
 }
 
+// ISO: G050
 #[test]
 fn test_parenthesized_where_clause() {
     // G050: WHERE clause inside parenthesized pattern
@@ -649,6 +660,7 @@ fn test_parenthesized_where_clause() {
     );
 }
 
+// ISO: G049, G050
 #[test]
 fn test_parenthesized_path_mode_with_where() {
     // G049 + G050 combined: TRAIL mode + WHERE clause
@@ -665,6 +677,7 @@ fn test_parenthesized_path_mode_with_where() {
 
 // --- G048: Subpath variable declarations ---
 
+// ISO: G048
 #[test]
 fn test_subpath_variable_binding() {
     // G048: (p = (a)-[:KNOWS]->(b)){1,2} binds path variable p
@@ -698,6 +711,7 @@ fn test_subpath_variable_binding() {
     );
 }
 
+// ISO: G048
 #[test]
 fn test_subpath_variable_nodes_edges() {
     // G048: nodes(p) and edges(p) should work with subpath variables
@@ -717,6 +731,7 @@ fn test_subpath_variable_nodes_edges() {
 
 // --- Group 5: Simplified Path Patterns (G080, G039) ---
 
+// ISO: G080
 #[test]
 fn test_simplified_outgoing_path() {
     // G080: -/:KNOWS/-> is equivalent to -[:KNOWS]->
@@ -729,6 +744,7 @@ fn test_simplified_outgoing_path() {
     assert_eq!(result.rows[0][0], Value::String("Gus".into()));
 }
 
+// ISO: G080
 #[test]
 fn test_simplified_incoming_path() {
     // G080: <-/:KNOWS/- is equivalent to <-[:KNOWS]-
@@ -741,6 +757,7 @@ fn test_simplified_incoming_path() {
     assert_eq!(result.rows[0][0], Value::String("Alix".into()));
 }
 
+// ISO: G039, G080
 #[test]
 fn test_simplified_multi_label_path() {
     // G039: -/:KNOWS|WORKS_WITH/-> with multiple label alternatives
@@ -757,6 +774,7 @@ fn test_simplified_multi_label_path() {
 // Group 7: Numeric & Math Functions (GF01, GF02, GF03, GF12)
 // ============================================================
 
+// ISO: GF01
 #[test]
 fn test_power_function() {
     // GF01: power(base, exponent)
@@ -772,6 +790,7 @@ fn test_power_function() {
     }
 }
 
+// ISO: GF01
 #[test]
 fn test_power_fractional_exponent() {
     // GF01: power with fractional exponent (square root via power)
@@ -786,6 +805,7 @@ fn test_power_fractional_exponent() {
     }
 }
 
+// ISO: GF03
 #[test]
 fn test_log2_function() {
     // GF03: log2()
@@ -800,6 +820,7 @@ fn test_log2_function() {
     }
 }
 
+// ISO: GF02
 #[test]
 fn test_trig_functions() {
     // GF02: sin, cos, tan, asin, acos, atan, atan2
@@ -825,6 +846,7 @@ fn test_trig_functions() {
     }
 }
 
+// ISO: GF01
 #[test]
 fn test_enhanced_numeric_functions() {
     // GF01: abs, ceil, floor, sign, sqrt, round
@@ -846,6 +868,7 @@ fn test_enhanced_numeric_functions() {
     assert_eq!(row[5], Value::Int64(3)); // round(2.5)
 }
 
+// ISO: GF03
 #[test]
 fn test_logarithmic_functions() {
     // GF03: log/ln, log10, log2, exp
@@ -874,6 +897,7 @@ fn test_logarithmic_functions() {
     }
 }
 
+// ISO: GF12
 #[test]
 fn test_cardinality_function() {
     // GF12: CARDINALITY as alias for size on lists
@@ -886,6 +910,7 @@ fn test_cardinality_function() {
     assert_eq!(result.rows[0][0], Value::Int64(5));
 }
 
+// ISO: GF12
 #[test]
 fn test_cardinality_empty_list() {
     let db = setup_db();
@@ -901,6 +926,7 @@ fn test_cardinality_empty_list() {
 // Group 9: Lexical Enhancements (GL01, GL02, GL03)
 // ============================================================
 
+// ISO: GL01
 #[test]
 fn test_hex_integer_literal() {
     // GL01: 0xFF hexadecimal integer literals
@@ -913,6 +939,7 @@ fn test_hex_integer_literal() {
     assert_eq!(result.rows[0][0], Value::Int64(255));
 }
 
+// ISO: GL02
 #[test]
 fn test_octal_integer_literal() {
     // GL02: 0o77 octal integer literals
@@ -925,6 +952,7 @@ fn test_octal_integer_literal() {
     assert_eq!(result.rows[0][0], Value::Int64(63));
 }
 
+// ISO: GL03
 #[test]
 fn test_binary_integer_literal() {
     // GL03: 0b1010 binary integer literals
@@ -937,6 +965,7 @@ fn test_binary_integer_literal() {
     assert_eq!(result.rows[0][0], Value::Int64(10));
 }
 
+// ISO: GL01
 #[test]
 fn test_hex_in_expression() {
     // GL01: hex literals work in arithmetic expressions
@@ -953,6 +982,7 @@ fn test_hex_in_expression() {
 // Group 10: Multi-character TRIM (GF05)
 // ============================================================
 
+// ISO: GF05
 #[test]
 fn test_trim_both_chars() {
     // GF05: TRIM(BOTH 'xy' FROM string)
@@ -965,6 +995,7 @@ fn test_trim_both_chars() {
     assert_eq!(result.rows[0][0], Value::String("hello".into()));
 }
 
+// ISO: GF05
 #[test]
 fn test_trim_leading_chars() {
     // GF05: TRIM(LEADING '0' FROM string)
@@ -977,6 +1008,7 @@ fn test_trim_leading_chars() {
     assert_eq!(result.rows[0][0], Value::String("123".into()));
 }
 
+// ISO: GF05
 #[test]
 fn test_trim_trailing_chars() {
     // GF05: TRIM(TRAILING '.' FROM string)
@@ -1005,6 +1037,7 @@ fn test_trim_simple() {
 // Group 6: Path Multiset Alternation (G030, G031)
 // ============================================================
 
+// ISO: G030
 #[test]
 fn test_multiset_alternation_basic() {
     // G030: |+| multiset alternation preserves duplicates
@@ -1026,6 +1059,7 @@ fn test_multiset_alternation_basic() {
     );
 }
 
+// ISO: G032
 #[test]
 fn test_set_alternation_basic() {
     // Set alternation with | (for comparison)
@@ -1136,6 +1170,7 @@ fn test_delete_multiple_sequential() {
     assert_eq!(result.rows.len(), 0, "Y should be deleted");
 }
 
+// ISO: GD04
 #[test]
 fn test_delete_expression_property_access() {
     // GD04: DELETE with expression (property access resolving to a node)
@@ -1178,6 +1213,7 @@ fn test_delete_expression_property_access() {
 // Group 8: Enhanced Path Functions (GF04) + Path Value Types (GV55)
 // ---------------------------------------------------------------------------
 
+// ISO: GV55
 #[test]
 fn test_path_as_value() {
     // GV55: Path as first-class value type
@@ -1199,6 +1235,7 @@ fn test_path_as_value() {
     );
 }
 
+// ISO: GF04
 #[test]
 fn test_path_length_function() {
     // GF04: length(path) returns number of edges
@@ -1218,6 +1255,7 @@ fn test_path_length_function() {
     );
 }
 
+// ISO: GF04
 #[test]
 fn test_path_nodes_function() {
     // GF04: nodes(path) returns list of nodes
@@ -1238,6 +1276,7 @@ fn test_path_nodes_function() {
     }
 }
 
+// ISO: GF04
 #[test]
 fn test_path_edges_function() {
     // GF04: edges(path) returns list of edges
@@ -1258,6 +1297,7 @@ fn test_path_edges_function() {
     }
 }
 
+// ISO: GF04
 #[test]
 fn test_path_is_acyclic() {
     // GF04: isAcyclic(path) - a simple A->B path should be acyclic
@@ -1277,6 +1317,7 @@ fn test_path_is_acyclic() {
     );
 }
 
+// ISO: GF04
 #[test]
 fn test_path_is_simple() {
     // GF04: isSimple(path) - no repeated nodes
@@ -1296,6 +1337,7 @@ fn test_path_is_simple() {
     );
 }
 
+// ISO: GF04
 #[test]
 fn test_path_is_trail() {
     // GF04: isTrail(path) - no repeated edges
@@ -1315,6 +1357,7 @@ fn test_path_is_trail() {
     );
 }
 
+// ISO: GF04
 #[test]
 fn test_path_constructor() {
     // GF04: path(nodes, edges) - build a path from component lists
@@ -1334,6 +1377,7 @@ fn test_path_constructor() {
     }
 }
 
+// ISO: GF04
 #[test]
 fn test_path_constructor_from_match() {
     // path() constructor: extract nodes/edges from real path, rebuild
@@ -1354,6 +1398,7 @@ fn test_path_constructor_from_match() {
     );
 }
 
+// ISO: GA09
 #[test]
 fn test_path_equality() {
     // GA09: Path comparison (equality)
@@ -1374,6 +1419,7 @@ fn test_path_equality() {
     );
 }
 
+// ISO: GF04
 #[test]
 fn test_path_multi_hop_nodes() {
     // GF04: nodes() on multi-hop path using variable-length
@@ -1398,6 +1444,7 @@ fn test_path_multi_hop_nodes() {
 // Group 11: Advanced Aggregation (GE09, GF10, GF11, GF20)
 // ---------------------------------------------------------------------------
 
+// ISO: GF10
 #[test]
 fn test_variance_function() {
     // GF10: VARIANCE / VAR_SAMP - sample variance
@@ -1416,6 +1463,7 @@ fn test_variance_function() {
     }
 }
 
+// ISO: GF10
 #[test]
 fn test_var_pop_function() {
     // GF10: VAR_POP - population variance
@@ -1437,6 +1485,7 @@ fn test_var_pop_function() {
     }
 }
 
+// ISO: GF10
 #[test]
 fn test_stddev_samp_alias() {
     // GF10: STDDEV_SAMP alias for STDEV
@@ -1455,6 +1504,7 @@ fn test_stddev_samp_alias() {
     }
 }
 
+// ISO: GF10
 #[test]
 fn test_stddev_pop_alias() {
     // GF10: STDDEV_POP alias for STDEVP
@@ -1476,6 +1526,7 @@ fn test_stddev_pop_alias() {
     }
 }
 
+// ISO: GF20
 #[test]
 fn test_aggregate_in_order_by() {
     // GF20: Aggregate functions in ORDER BY
@@ -1492,6 +1543,7 @@ fn test_aggregate_in_order_by() {
     assert!(!result.rows.is_empty());
 }
 
+// ISO: GF20
 #[test]
 fn test_aggregate_order_by_alias() {
     // GF20: ORDER BY using alias of aggregate result
@@ -1511,6 +1563,7 @@ fn test_aggregate_order_by_alias() {
 // Group 13: Graph Type Advanced Features (GG03, GG04, GG21, GG22)
 // =========================================================================
 
+// ISO: GG03
 #[test]
 fn test_create_graph_type_inline_iso_syntax() {
     // GG03: CREATE GRAPH TYPE with inline NODE TYPE / EDGE TYPE (ISO syntax)
@@ -1536,6 +1589,7 @@ fn test_create_graph_type_inline_iso_syntax() {
     );
 }
 
+// ISO: GG03
 #[test]
 fn test_create_graph_type_inline_multiple() {
     // GG03: Multiple inline types in one graph type definition
@@ -1557,6 +1611,7 @@ fn test_create_graph_type_inline_multiple() {
     assert!(dup.is_err(), "Duplicate graph type should fail");
 }
 
+// ISO: GG03
 #[test]
 fn test_create_graph_typed_with_inline_type() {
     // GG03: Create a graph type with inline defs, then bind a graph to it
@@ -1578,6 +1633,7 @@ fn test_create_graph_typed_with_inline_type() {
     );
 }
 
+// ISO: GG04
 #[test]
 fn test_create_graph_type_like_graph() {
     // GG04: CREATE GRAPH TYPE ... LIKE <graph>
@@ -1609,6 +1665,7 @@ fn test_create_graph_type_like_graph() {
     assert!(bind.is_ok(), "Cloned type should be bindable: {bind:?}");
 }
 
+// ISO: GG21
 #[test]
 fn test_create_graph_type_key_label_sets() {
     // GG21: Explicit key label sets in element type definitions
@@ -1631,6 +1688,7 @@ fn test_create_graph_type_key_label_sets() {
     assert!(dup.is_err(), "Duplicate should fail");
 }
 
+// ISO: GG03
 #[test]
 fn test_create_graph_type_or_replace_inline() {
     // GG03 + OR REPLACE: Replace graph type with new inline types
@@ -1654,6 +1712,7 @@ fn test_create_graph_type_or_replace_inline() {
     assert!(result.is_ok(), "Failed to replace graph type: {result:?}");
 }
 
+// ISO: GG22
 #[test]
 fn test_graph_type_inference_from_registered_types() {
     // GG22: Element type key label set inference
@@ -1698,6 +1757,7 @@ fn setup_scatter_db() -> GrafeoDB {
     db
 }
 
+// ISO: GF11
 #[test]
 fn test_covar_samp_perfect_linear() {
     let db = setup_scatter_db();
@@ -1717,6 +1777,7 @@ fn test_covar_samp_perfect_linear() {
     );
 }
 
+// ISO: GF11
 #[test]
 fn test_covar_pop_perfect_linear() {
     let db = setup_scatter_db();
@@ -1738,6 +1799,7 @@ fn test_covar_pop_perfect_linear() {
     );
 }
 
+// ISO: GF11
 #[test]
 fn test_corr_perfect_positive() {
     let db = setup_scatter_db();
@@ -1756,6 +1818,7 @@ fn test_corr_perfect_positive() {
     );
 }
 
+// ISO: GF11
 #[test]
 fn test_regr_slope_and_intercept() {
     let db = setup_scatter_db();
@@ -1783,6 +1846,7 @@ fn test_regr_slope_and_intercept() {
     );
 }
 
+// ISO: GF11
 #[test]
 fn test_regr_r2() {
     let db = setup_scatter_db();
@@ -1798,6 +1862,7 @@ fn test_regr_r2() {
     assert!((r2 - 1.0).abs() < 1e-10, "REGR_R2 should be 1.0, got {r2}");
 }
 
+// ISO: GF11
 #[test]
 fn test_regr_count() {
     let db = setup_scatter_db();
@@ -1813,6 +1878,7 @@ fn test_regr_count() {
     assert_eq!(cnt, 5, "REGR_COUNT should be 5, got {cnt}");
 }
 
+// ISO: GF11
 #[test]
 fn test_regr_sxx_syy_sxy() {
     let db = setup_scatter_db();
@@ -1852,6 +1918,7 @@ fn test_regr_sxx_syy_sxy() {
     );
 }
 
+// ISO: GF11
 #[test]
 fn test_regr_avgx_avgy() {
     let db = setup_scatter_db();
@@ -1878,6 +1945,7 @@ fn test_regr_avgx_avgy() {
     );
 }
 
+// ISO: GF11
 #[test]
 fn test_binary_null_pair_skipping() {
     // When one value in a pair is NULL, the pair should be skipped entirely
@@ -1903,6 +1971,7 @@ fn test_binary_null_pair_skipping() {
     assert_eq!(cnt, 2, "REGR_COUNT should skip NULL pairs, got {cnt}");
 }
 
+// ISO: GF11
 #[test]
 fn test_binary_edge_case_empty() {
     // No matching rows: should return NULL
@@ -2139,9 +2208,10 @@ fn test_count_subquery_equals_zero_in_where() {
 }
 
 // -----------------------------------------------------------------------
-// Catalog introspection procedures
+// Catalog introspection procedures (require algos feature for CALL)
 // -----------------------------------------------------------------------
 
+#[cfg(feature = "algos")]
 #[test]
 fn test_db_labels() {
     let db = setup_db();
@@ -2161,6 +2231,7 @@ fn test_db_labels() {
     assert!(labels.contains(&"Person".to_string()), "labels: {labels:?}");
 }
 
+#[cfg(feature = "algos")]
 #[test]
 fn test_db_relationship_types() {
     let db = setup_db();
@@ -2179,6 +2250,7 @@ fn test_db_relationship_types() {
     assert!(types.contains(&"KNOWS".to_string()), "types: {types:?}");
 }
 
+#[cfg(feature = "algos")]
 #[test]
 fn test_db_property_keys() {
     let db = setup_db();
@@ -2199,6 +2271,7 @@ fn test_db_property_keys() {
     assert!(keys.contains(&"age".to_string()), "keys: {keys:?}");
 }
 
+#[cfg(feature = "algos")]
 #[test]
 fn test_db_labels_with_yield() {
     let db = setup_db();

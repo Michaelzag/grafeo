@@ -2,11 +2,6 @@
 
 use grafeo_common::utils::error::Result;
 
-#[cfg(feature = "rdf")]
-use grafeo_core::graph::rdf::RdfStore;
-#[cfg(feature = "rdf")]
-use std::sync::Arc;
-
 use super::{FromValue, QueryResult};
 
 impl super::GrafeoDB {
@@ -168,50 +163,6 @@ impl super::GrafeoDB {
         self.with_session(|s| s.execute_sql_with_params(query, params))
     }
 
-    /// Executes a SPARQL query and returns the result.
-    ///
-    /// SPARQL queries operate on the RDF triple store.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the query fails.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// use grafeo_engine::GrafeoDB;
-    ///
-    /// let db = GrafeoDB::new_in_memory();
-    /// let result = db.execute_sparql("SELECT ?s ?p ?o WHERE { ?s ?p ?o }")?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    #[cfg(all(feature = "sparql", feature = "rdf"))]
-    pub fn execute_sparql(&self, query: &str) -> Result<QueryResult> {
-        use crate::query::{
-            Executor, optimizer::Optimizer, planner::rdf::RdfPlanner, translators::sparql,
-        };
-
-        // Parse and translate the SPARQL query to a logical plan
-        let logical_plan = sparql::translate(query)?;
-
-        // Optimize the plan using RDF-specific statistics
-        let rdf_stats = self.rdf_store.collect_statistics();
-        let optimizer = Optimizer::from_rdf_statistics(rdf_stats);
-        let optimized_plan = optimizer.optimize(logical_plan)?;
-
-        // Convert to physical plan using RDF planner
-        let planner = RdfPlanner::new(Arc::clone(&self.rdf_store));
-        #[cfg(feature = "wal")]
-        let planner = planner.with_wal(self.wal.as_ref().map(Arc::clone));
-        let mut physical_plan = planner.plan(&optimized_plan)?;
-
-        // Execute the plan
-        let executor = Executor::with_columns(physical_plan.columns.clone());
-        executor.execute(physical_plan.operator.as_mut())
-    }
-
     /// Executes a query in the specified language by name.
     ///
     /// Supported language names: `"gql"`, `"cypher"`, `"gremlin"`, `"graphql"`,
@@ -228,15 +179,6 @@ impl super::GrafeoDB {
         params: Option<std::collections::HashMap<String, grafeo_common::types::Value>>,
     ) -> Result<QueryResult> {
         self.with_session(|s| s.execute_language(query, language, params))
-    }
-
-    /// Returns the RDF store.
-    ///
-    /// This provides direct access to the RDF store for triple operations.
-    #[cfg(feature = "rdf")]
-    #[must_use]
-    pub fn rdf_store(&self) -> &Arc<RdfStore> {
-        &self.rdf_store
     }
 
     /// Executes a query and returns a single scalar value.
