@@ -116,12 +116,16 @@ pub(crate) fn build_otherwise(
 /// then creates a hash join with inner semantics. Deduplicates shared columns
 /// by projecting away right-side columns that already appear on the left.
 /// Falls back to cross join when no shared variables exist.
+///
+/// When `cardinalities` is provided as `(left_card, right_card)`, the smaller
+/// side is placed as the build side for better memory and cache performance.
 pub(crate) fn build_inner_join(
     left: Box<dyn Operator>,
     right: Box<dyn Operator>,
     left_columns: &[String],
     right_columns: &[String],
     schema_fn: impl Fn(&[String]) -> Vec<LogicalType>,
+    cardinalities: Option<(f64, f64)>,
 ) -> (Box<dyn Operator>, Vec<String>) {
     let (probe_keys, build_keys) = find_shared_join_keys(left_columns, right_columns);
 
@@ -131,43 +135,91 @@ pub(crate) fn build_inner_join(
         PhysicalJoinType::Inner
     };
 
-    // Full join outputs all left + all right columns
-    let mut join_columns: Vec<String> = left_columns.to_vec();
-    join_columns.extend(right_columns.iter().cloned());
-    let join_schema = schema_fn(&join_columns);
+    // Decide whether to swap sides: build on the smaller input.
+    // Only swap for equi-joins (not cross joins) and when left is significantly larger.
+    let swap_sides = matches!(join_type, PhysicalJoinType::Inner)
+        && cardinalities.is_some_and(|(left_card, right_card)| right_card < left_card * 0.8);
 
-    let join_op: Box<dyn Operator> = Box::new(HashJoinOperator::new(
-        left,
-        right,
-        probe_keys,
-        build_keys,
-        join_type,
-        join_schema,
-    ));
+    if swap_sides {
+        // Swap: right becomes probe, left becomes build
+        // Output order is right+left from the join, then we project back to left+right
+        let mut join_columns: Vec<String> = right_columns.to_vec();
+        join_columns.extend(left_columns.iter().cloned());
+        let join_schema = schema_fn(&join_columns);
 
-    // Deduplicate: keep left columns, then only right columns not already on the left
-    let left_set: std::collections::HashSet<&str> =
-        left_columns.iter().map(String::as_str).collect();
-    let mut keep_indices: Vec<usize> = (0..left_columns.len()).collect();
-    let mut output_columns: Vec<String> = left_columns.to_vec();
-    for (right_idx, right_col) in right_columns.iter().enumerate() {
-        if !left_set.contains(right_col.as_str()) {
-            keep_indices.push(left_columns.len() + right_idx);
-            output_columns.push(right_col.clone());
+        let join_op: Box<dyn Operator> = Box::new(HashJoinOperator::new(
+            right,      // probe (larger)
+            left,       // build (smaller, materialized)
+            build_keys, // swapped: right keys become probe keys
+            probe_keys, // swapped: left keys become build keys
+            join_type,
+            join_schema,
+        ));
+
+        // Remap to logical left+right order and deduplicate shared columns
+        let right_count = right_columns.len();
+        let left_set: std::collections::HashSet<&str> =
+            left_columns.iter().map(String::as_str).collect();
+
+        // Build projection: first map left columns (which are at offset right_count in physical output)
+        let mut proj_indices: Vec<usize> =
+            (0..left_columns.len()).map(|i| right_count + i).collect();
+        let mut output_columns: Vec<String> = left_columns.to_vec();
+        // Then add right columns not already in left
+        for (right_idx, right_col) in right_columns.iter().enumerate() {
+            if !left_set.contains(right_col.as_str()) {
+                proj_indices.push(right_idx);
+                output_columns.push(right_col.clone());
+            }
         }
-    }
 
-    // If there are duplicates, add a ProjectOperator to strip them
-    if keep_indices.len() < join_columns.len() {
-        let proj_exprs: Vec<ProjectExpr> = keep_indices
+        let proj_exprs: Vec<ProjectExpr> = proj_indices
             .iter()
             .map(|&i| ProjectExpr::Column(i))
             .collect();
-        let proj_types: Vec<LogicalType> = keep_indices.iter().map(|_| LogicalType::Any).collect();
+        let proj_types: Vec<LogicalType> = proj_indices.iter().map(|_| LogicalType::Any).collect();
         let operator = Box::new(ProjectOperator::new(join_op, proj_exprs, proj_types));
         (operator, output_columns)
     } else {
-        (join_op, output_columns)
+        // Normal order: left = probe, right = build
+        let mut join_columns: Vec<String> = left_columns.to_vec();
+        join_columns.extend(right_columns.iter().cloned());
+        let join_schema = schema_fn(&join_columns);
+
+        let join_op: Box<dyn Operator> = Box::new(HashJoinOperator::new(
+            left,
+            right,
+            probe_keys,
+            build_keys,
+            join_type,
+            join_schema,
+        ));
+
+        // Deduplicate: keep left columns, then only right columns not already on the left
+        let left_set: std::collections::HashSet<&str> =
+            left_columns.iter().map(String::as_str).collect();
+        let mut keep_indices: Vec<usize> = (0..left_columns.len()).collect();
+        let mut output_columns: Vec<String> = left_columns.to_vec();
+        for (right_idx, right_col) in right_columns.iter().enumerate() {
+            if !left_set.contains(right_col.as_str()) {
+                keep_indices.push(left_columns.len() + right_idx);
+                output_columns.push(right_col.clone());
+            }
+        }
+
+        // If there are duplicates, add a ProjectOperator to strip them
+        if keep_indices.len() < join_columns.len() {
+            let proj_exprs: Vec<ProjectExpr> = keep_indices
+                .iter()
+                .map(|&i| ProjectExpr::Column(i))
+                .collect();
+            let proj_types: Vec<LogicalType> =
+                keep_indices.iter().map(|_| LogicalType::Any).collect();
+            let operator = Box::new(ProjectOperator::new(join_op, proj_exprs, proj_types));
+            (operator, output_columns)
+        } else {
+            (join_op, output_columns)
+        }
     }
 }
 

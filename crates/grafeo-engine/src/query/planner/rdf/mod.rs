@@ -685,12 +685,18 @@ impl RdfPlanner {
         use crate::query::planner::common;
         let (left_op, left_columns) = self.plan_operator(&join.left)?;
         let (right_op, right_columns) = self.plan_operator(&join.right)?;
+
+        // Estimate cardinalities for build-side selection
+        let cardinalities = estimate_operator_cardinality(&join.left, &self.store)
+            .zip(estimate_operator_cardinality(&join.right, &self.store));
+
         Ok(common::build_inner_join(
             left_op,
             right_op,
             &left_columns,
             &right_columns,
             derive_rdf_schema,
+            cardinalities,
         ))
     }
 
@@ -3399,6 +3405,72 @@ fn component_to_term(component: &TripleComponent) -> Option<Term> {
 /// Derives RDF schema (all String type for simplicity).
 fn derive_rdf_schema(columns: &[String]) -> Vec<LogicalType> {
     columns.iter().map(|_| LogicalType::String).collect()
+}
+
+/// Quick cardinality estimate for a logical operator subtree.
+///
+/// Uses store index sizes to estimate how many rows an operator produces,
+/// without collecting full statistics. Returns `None` if estimation is
+/// not possible for this operator type.
+fn estimate_operator_cardinality(
+    op: &crate::query::plan::LogicalOperator,
+    store: &RdfStore,
+) -> Option<f64> {
+    use crate::query::plan::LogicalOperator;
+    match op {
+        LogicalOperator::TripleScan(scan) => {
+            let stats = store.stats();
+            let total = stats.triple_count as f64;
+            if total == 0.0 {
+                return Some(0.0);
+            }
+
+            // Estimate based on which components are bound
+            let s_bound = matches!(
+                scan.subject,
+                crate::query::plan::TripleComponent::Iri(_)
+                    | crate::query::plan::TripleComponent::Literal(_)
+            );
+            let p_bound = matches!(
+                scan.predicate,
+                crate::query::plan::TripleComponent::Iri(_)
+                    | crate::query::plan::TripleComponent::Literal(_)
+            );
+            let o_bound = matches!(
+                scan.object,
+                crate::query::plan::TripleComponent::Iri(_)
+                    | crate::query::plan::TripleComponent::Literal(_)
+            );
+
+            let estimate = match (s_bound, p_bound, o_bound) {
+                (true, true, true) => 1.0,
+                (true, true, false) => total / stats.subject_count.max(1) as f64,
+                (true, false, true) => total / stats.subject_count.max(1) as f64,
+                (false, true, true) => total / stats.predicate_count.max(1) as f64,
+                (true, false, false) => total / stats.subject_count.max(1) as f64,
+                (false, true, false) => total / stats.predicate_count.max(1) as f64,
+                (false, false, true) => total / stats.object_count.max(1) as f64,
+                (false, false, false) => total,
+            };
+            Some(estimate.max(1.0))
+        }
+        LogicalOperator::Filter(f) => {
+            estimate_operator_cardinality(&f.input, store).map(|c| (c * 0.33).max(1.0))
+        }
+        LogicalOperator::Join(j) => {
+            let left = estimate_operator_cardinality(&j.left, store)?;
+            let right = estimate_operator_cardinality(&j.right, store)?;
+            Some((left * right * 0.1).max(1.0))
+        }
+        LogicalOperator::Limit(l) => {
+            if let crate::query::plan::CountExpr::Literal(n) = l.count {
+                Some(n as f64)
+            } else {
+                estimate_operator_cardinality(&l.input, store)
+            }
+        }
+        _ => None,
+    }
 }
 
 /// Resolves an expression to a column index.
