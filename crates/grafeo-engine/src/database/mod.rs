@@ -907,6 +907,10 @@ impl GrafeoDB {
         {
             if let Some(ref m) = self.metrics {
                 session.set_metrics(Arc::clone(m));
+                m.session_created
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                m.session_active
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
         }
 
@@ -970,9 +974,19 @@ impl GrafeoDB {
     #[cfg(feature = "metrics")]
     #[must_use]
     pub fn metrics(&self) -> crate::metrics::MetricsSnapshot {
-        self.metrics
+        let mut snapshot = self
+            .metrics
             .as_ref()
-            .map_or_else(crate::metrics::MetricsSnapshot::default, |m| m.snapshot())
+            .map_or_else(crate::metrics::MetricsSnapshot::default, |m| m.snapshot());
+
+        // Augment with cache stats from the query cache (not tracked in the registry)
+        let cache_stats = self.query_cache.stats();
+        snapshot.cache_hits = cache_stats.parsed_hits + cache_stats.optimized_hits;
+        snapshot.cache_misses = cache_stats.parsed_misses + cache_stats.optimized_misses;
+        snapshot.cache_size = cache_stats.parsed_size + cache_stats.optimized_size;
+        snapshot.cache_invalidations = cache_stats.invalidations;
+
+        snapshot
     }
 
     /// Resets all metrics counters and histograms to zero.
@@ -981,6 +995,7 @@ impl GrafeoDB {
         if let Some(ref m) = self.metrics {
             m.reset();
         }
+        self.query_cache.reset_stats();
     }
 
     /// Returns the underlying (default) store.

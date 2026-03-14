@@ -147,6 +147,9 @@ pub struct Session {
     /// Shared metrics registry (populated when the `metrics` feature is enabled).
     #[cfg(feature = "metrics")]
     pub(crate) metrics: Option<Arc<crate::metrics::MetricsRegistry>>,
+    /// Transaction start time for duration tracking.
+    #[cfg(feature = "metrics")]
+    tx_start_time: parking_lot::Mutex<Option<Instant>>,
 }
 
 /// Per-graph savepoint snapshot, capturing the store state at the time of the savepoint.
@@ -209,6 +212,8 @@ impl Session {
             touched_graphs: parking_lot::Mutex::new(Vec::new()),
             #[cfg(feature = "metrics")]
             metrics: None,
+            #[cfg(feature = "metrics")]
+            tx_start_time: parking_lot::Mutex::new(None),
         }
     }
 
@@ -286,6 +291,8 @@ impl Session {
             touched_graphs: parking_lot::Mutex::new(Vec::new()),
             #[cfg(feature = "metrics")]
             metrics: None,
+            #[cfg(feature = "metrics")]
+            tx_start_time: parking_lot::Mutex::new(None),
         }
     }
 
@@ -336,6 +343,8 @@ impl Session {
             touched_graphs: parking_lot::Mutex::new(Vec::new()),
             #[cfg(feature = "metrics")]
             metrics: None,
+            #[cfg(feature = "metrics")]
+            tx_start_time: parking_lot::Mutex::new(None),
         })
     }
 
@@ -2089,9 +2098,6 @@ impl Session {
     pub fn execute(&self, query: &str) -> Result<QueryResult> {
         self.require_lpg("GQL")?;
 
-        #[cfg(feature = "metrics")]
-        use crate::metrics::record_metric;
-
         use crate::query::{
             Executor, binder::Binder, cache::CacheKey, optimizer::Optimizer,
             processor::QueryLanguage, translators::gql,
@@ -2228,27 +2234,11 @@ impl Session {
         // Record metrics for this query execution.
         #[cfg(feature = "metrics")]
         {
-            record_metric!(self.metrics, query_count, inc);
-            if let Some(ref reg) = self.metrics {
-                reg.query_count_by_language.increment("gql");
-            }
             #[cfg(not(target_arch = "wasm32"))]
-            {
-                let elapsed_ms = start_time.elapsed().as_secs_f64() * 1000.0;
-                record_metric!(self.metrics, query_latency, observe elapsed_ms);
-            }
-            match &result {
-                Ok(r) => {
-                    let returned = r.rows.len() as u64;
-                    record_metric!(self.metrics, rows_returned, add returned);
-                    if let Some(scanned) = r.rows_scanned {
-                        record_metric!(self.metrics, rows_scanned, add scanned);
-                    }
-                }
-                Err(_) => {
-                    record_metric!(self.metrics, query_errors, inc);
-                }
-            }
+            let elapsed_ms = Some(start_time.elapsed().as_secs_f64() * 1000.0);
+            #[cfg(target_arch = "wasm32")]
+            let elapsed_ms = None;
+            self.record_query_metrics("gql", elapsed_ms, &result);
         }
 
         result
@@ -2454,7 +2444,7 @@ impl Session {
 
         let has_mutations = optimized_plan.root.has_mutations();
 
-        self.with_auto_commit(has_mutations, || {
+        let result = self.with_auto_commit(has_mutations, || {
             // Get transaction context for MVCC visibility
             let (viewing_epoch, transaction_id) = self.get_transaction_context();
 
@@ -2467,7 +2457,18 @@ impl Session {
             let executor = Executor::with_columns(physical_plan.columns.clone())
                 .with_deadline(self.query_deadline());
             executor.execute(physical_plan.operator.as_mut())
-        })
+        });
+
+        #[cfg(feature = "metrics")]
+        {
+            #[cfg(not(target_arch = "wasm32"))]
+            let elapsed_ms = Some(start_time.elapsed().as_secs_f64() * 1000.0);
+            #[cfg(target_arch = "wasm32")]
+            let elapsed_ms = None;
+            self.record_query_metrics("cypher", elapsed_ms, &result);
+        }
+
+        result
     }
 
     /// Executes a Gremlin query.
@@ -2497,6 +2498,9 @@ impl Session {
     pub fn execute_gremlin(&self, query: &str) -> Result<QueryResult> {
         use crate::query::{Executor, binder::Binder, optimizer::Optimizer, translators::gremlin};
 
+        #[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
+        let start_time = Instant::now();
+
         // Parse and translate the query to a logical plan
         let logical_plan = gremlin::translate(query)?;
 
@@ -2511,7 +2515,7 @@ impl Session {
 
         let has_mutations = optimized_plan.root.has_mutations();
 
-        self.with_auto_commit(has_mutations, || {
+        let result = self.with_auto_commit(has_mutations, || {
             // Get transaction context for MVCC visibility
             let (viewing_epoch, transaction_id) = self.get_transaction_context();
 
@@ -2524,7 +2528,18 @@ impl Session {
             let executor = Executor::with_columns(physical_plan.columns.clone())
                 .with_deadline(self.query_deadline());
             executor.execute(physical_plan.operator.as_mut())
-        })
+        });
+
+        #[cfg(feature = "metrics")]
+        {
+            #[cfg(not(target_arch = "wasm32"))]
+            let elapsed_ms = Some(start_time.elapsed().as_secs_f64() * 1000.0);
+            #[cfg(target_arch = "wasm32")]
+            let elapsed_ms = None;
+            self.record_query_metrics("gremlin", elapsed_ms, &result);
+        }
+
+        result
     }
 
     /// Executes a Gremlin query with parameters.
@@ -2540,28 +2555,36 @@ impl Session {
     ) -> Result<QueryResult> {
         use crate::query::processor::{QueryLanguage, QueryProcessor};
 
+        #[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
+        let start_time = Instant::now();
+
         let has_mutations = Self::query_looks_like_mutation(query);
         let active = self.active_store();
 
-        self.with_auto_commit(has_mutations, || {
-            // Get transaction context for MVCC visibility
+        let result = self.with_auto_commit(has_mutations, || {
             let (viewing_epoch, transaction_id) = self.get_transaction_context();
-
-            // Create processor with transaction context
             let processor = QueryProcessor::for_graph_store_with_transaction(
                 Arc::clone(&active),
                 Arc::clone(&self.transaction_manager),
             )?;
-
-            // Apply transaction context if in a transaction
             let processor = if let Some(transaction_id) = transaction_id {
                 processor.with_transaction_context(viewing_epoch, transaction_id)
             } else {
                 processor
             };
-
             processor.process(query, QueryLanguage::Gremlin, Some(&params))
-        })
+        });
+
+        #[cfg(feature = "metrics")]
+        {
+            #[cfg(not(target_arch = "wasm32"))]
+            let elapsed_ms = Some(start_time.elapsed().as_secs_f64() * 1000.0);
+            #[cfg(target_arch = "wasm32")]
+            let elapsed_ms = None;
+            self.record_query_metrics("gremlin", elapsed_ms, &result);
+        }
+
+        result
     }
 
     /// Executes a GraphQL query against the LPG store.
@@ -2591,34 +2614,38 @@ impl Session {
     pub fn execute_graphql(&self, query: &str) -> Result<QueryResult> {
         use crate::query::{Executor, binder::Binder, optimizer::Optimizer, translators::graphql};
 
-        // Parse and translate the query to a logical plan
-        let logical_plan = graphql::translate(query)?;
+        #[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
+        let start_time = Instant::now();
 
-        // Semantic validation
+        let logical_plan = graphql::translate(query)?;
         let mut binder = Binder::new();
         let _binding_context = binder.bind(&logical_plan)?;
 
-        // Optimize the plan
         let active = self.active_store();
         let optimizer = Optimizer::from_graph_store(&*active);
         let optimized_plan = optimizer.optimize(logical_plan)?;
-
         let has_mutations = optimized_plan.root.has_mutations();
 
-        self.with_auto_commit(has_mutations, || {
-            // Get transaction context for MVCC visibility
+        let result = self.with_auto_commit(has_mutations, || {
             let (viewing_epoch, transaction_id) = self.get_transaction_context();
-
-            // Convert to physical plan with transaction context
             let planner =
                 self.create_planner_for_store(Arc::clone(&active), viewing_epoch, transaction_id);
             let mut physical_plan = planner.plan(&optimized_plan)?;
-
-            // Execute the plan
             let executor = Executor::with_columns(physical_plan.columns.clone())
                 .with_deadline(self.query_deadline());
             executor.execute(physical_plan.operator.as_mut())
-        })
+        });
+
+        #[cfg(feature = "metrics")]
+        {
+            #[cfg(not(target_arch = "wasm32"))]
+            let elapsed_ms = Some(start_time.elapsed().as_secs_f64() * 1000.0);
+            #[cfg(target_arch = "wasm32")]
+            let elapsed_ms = None;
+            self.record_query_metrics("graphql", elapsed_ms, &result);
+        }
+
+        result
     }
 
     /// Executes a GraphQL query with parameters.
@@ -2634,28 +2661,36 @@ impl Session {
     ) -> Result<QueryResult> {
         use crate::query::processor::{QueryLanguage, QueryProcessor};
 
+        #[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
+        let start_time = Instant::now();
+
         let has_mutations = Self::query_looks_like_mutation(query);
         let active = self.active_store();
 
-        self.with_auto_commit(has_mutations, || {
-            // Get transaction context for MVCC visibility
+        let result = self.with_auto_commit(has_mutations, || {
             let (viewing_epoch, transaction_id) = self.get_transaction_context();
-
-            // Create processor with transaction context
             let processor = QueryProcessor::for_graph_store_with_transaction(
                 Arc::clone(&active),
                 Arc::clone(&self.transaction_manager),
             )?;
-
-            // Apply transaction context if in a transaction
             let processor = if let Some(transaction_id) = transaction_id {
                 processor.with_transaction_context(viewing_epoch, transaction_id)
             } else {
                 processor
             };
-
             processor.process(query, QueryLanguage::GraphQL, Some(&params))
-        })
+        });
+
+        #[cfg(feature = "metrics")]
+        {
+            #[cfg(not(target_arch = "wasm32"))]
+            let elapsed_ms = Some(start_time.elapsed().as_secs_f64() * 1000.0);
+            #[cfg(target_arch = "wasm32")]
+            let elapsed_ms = None;
+            self.record_query_metrics("graphql", elapsed_ms, &result);
+        }
+
+        result
     }
 
     /// Executes a GraphQL query against the RDF store.
@@ -2669,8 +2704,10 @@ impl Session {
             Executor, optimizer::Optimizer, planner::rdf::RdfPlanner, translators::graphql_rdf,
         };
 
-        let logical_plan = graphql_rdf::translate(query, "http://example.org/")?;
+        #[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
+        let start_time = Instant::now();
 
+        let logical_plan = graphql_rdf::translate(query, "http://example.org/")?;
         let active = self.active_store();
         let optimizer = Optimizer::from_graph_store(&*active);
         let optimized_plan = optimizer.optimize(logical_plan)?;
@@ -2683,7 +2720,18 @@ impl Session {
 
         let executor = Executor::with_columns(physical_plan.columns.clone())
             .with_deadline(self.query_deadline());
-        executor.execute(physical_plan.operator.as_mut())
+        let result = executor.execute(physical_plan.operator.as_mut());
+
+        #[cfg(feature = "metrics")]
+        {
+            #[cfg(not(target_arch = "wasm32"))]
+            let elapsed_ms = Some(start_time.elapsed().as_secs_f64() * 1000.0);
+            #[cfg(target_arch = "wasm32")]
+            let elapsed_ms = None;
+            self.record_query_metrics("graphql", elapsed_ms, &result);
+        }
+
+        result
     }
 
     /// Executes a GraphQL query against the RDF store with parameters.
@@ -2699,25 +2747,36 @@ impl Session {
     ) -> Result<QueryResult> {
         use crate::query::processor::{QueryLanguage, QueryProcessor};
 
+        #[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
+        let start_time = Instant::now();
+
         let has_mutations = Self::query_looks_like_mutation(query);
         let active = self.active_store();
 
-        self.with_auto_commit(has_mutations, || {
+        let result = self.with_auto_commit(has_mutations, || {
             let (viewing_epoch, transaction_id) = self.get_transaction_context();
-
             let processor = QueryProcessor::for_graph_store_with_transaction(
                 Arc::clone(&active),
                 Arc::clone(&self.transaction_manager),
             )?;
-
             let processor = if let Some(transaction_id) = transaction_id {
                 processor.with_transaction_context(viewing_epoch, transaction_id)
             } else {
                 processor
             };
-
             processor.process(query, QueryLanguage::GraphQLRdf, Some(&params))
-        })
+        });
+
+        #[cfg(feature = "metrics")]
+        {
+            #[cfg(not(target_arch = "wasm32"))]
+            let elapsed_ms = Some(start_time.elapsed().as_secs_f64() * 1000.0);
+            #[cfg(target_arch = "wasm32")]
+            let elapsed_ms = None;
+            self.record_query_metrics("graphql", elapsed_ms, &result);
+        }
+
+        result
     }
 
     /// Executes a SQL/PGQ query (SQL:2023 GRAPH_TABLE).
@@ -2751,6 +2810,9 @@ impl Session {
             processor::QueryLanguage, translators::sql_pgq,
         };
 
+        #[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
+        let start_time = Instant::now();
+
         // Parse and translate (always needed to check for DDL)
         let logical_plan = sql_pgq::translate(query)?;
 
@@ -2772,45 +2834,43 @@ impl Session {
             });
         }
 
-        // Create cache key for query plans
         let cache_key = CacheKey::with_graph(query, QueryLanguage::SqlPgq, self.current_graph());
 
-        // Try to get cached optimized plan
         let optimized_plan = if let Some(cached_plan) = self.query_cache.get_optimized(&cache_key) {
             cached_plan
         } else {
-            // Semantic validation
             let mut binder = Binder::new();
             let _binding_context = binder.bind(&logical_plan)?;
-
-            // Optimize the plan
             let active = self.active_store();
             let optimizer = Optimizer::from_graph_store(&*active);
             let plan = optimizer.optimize(logical_plan)?;
-
-            // Cache the optimized plan
             self.query_cache.put_optimized(cache_key, plan.clone());
-
             plan
         };
 
         let active = self.active_store();
         let has_mutations = optimized_plan.root.has_mutations();
 
-        self.with_auto_commit(has_mutations, || {
-            // Get transaction context for MVCC visibility
+        let result = self.with_auto_commit(has_mutations, || {
             let (viewing_epoch, transaction_id) = self.get_transaction_context();
-
-            // Convert to physical plan with transaction context
             let planner =
                 self.create_planner_for_store(Arc::clone(&active), viewing_epoch, transaction_id);
             let mut physical_plan = planner.plan(&optimized_plan)?;
-
-            // Execute the plan
             let executor = Executor::with_columns(physical_plan.columns.clone())
                 .with_deadline(self.query_deadline());
             executor.execute(physical_plan.operator.as_mut())
-        })
+        });
+
+        #[cfg(feature = "metrics")]
+        {
+            #[cfg(not(target_arch = "wasm32"))]
+            let elapsed_ms = Some(start_time.elapsed().as_secs_f64() * 1000.0);
+            #[cfg(target_arch = "wasm32")]
+            let elapsed_ms = None;
+            self.record_query_metrics("sql", elapsed_ms, &result);
+        }
+
+        result
     }
 
     /// Executes a SQL/PGQ query with parameters.
@@ -2826,28 +2886,36 @@ impl Session {
     ) -> Result<QueryResult> {
         use crate::query::processor::{QueryLanguage, QueryProcessor};
 
+        #[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
+        let start_time = Instant::now();
+
         let has_mutations = Self::query_looks_like_mutation(query);
         let active = self.active_store();
 
-        self.with_auto_commit(has_mutations, || {
-            // Get transaction context for MVCC visibility
+        let result = self.with_auto_commit(has_mutations, || {
             let (viewing_epoch, transaction_id) = self.get_transaction_context();
-
-            // Create processor with transaction context
             let processor = QueryProcessor::for_graph_store_with_transaction(
                 Arc::clone(&active),
                 Arc::clone(&self.transaction_manager),
             )?;
-
-            // Apply transaction context if in a transaction
             let processor = if let Some(transaction_id) = transaction_id {
                 processor.with_transaction_context(viewing_epoch, transaction_id)
             } else {
                 processor
             };
-
             processor.process(query, QueryLanguage::SqlPgq, Some(&params))
-        })
+        });
+
+        #[cfg(feature = "metrics")]
+        {
+            #[cfg(not(target_arch = "wasm32"))]
+            let elapsed_ms = Some(start_time.elapsed().as_secs_f64() * 1000.0);
+            #[cfg(target_arch = "wasm32")]
+            let elapsed_ms = None;
+            self.record_query_metrics("sql", elapsed_ms, &result);
+        }
+
+        result
     }
 
     /// Executes a SPARQL query.
@@ -2861,25 +2929,34 @@ impl Session {
             Executor, optimizer::Optimizer, planner::rdf::RdfPlanner, translators::sparql,
         };
 
-        // Parse and translate the SPARQL query to a logical plan
-        let logical_plan = sparql::translate(query)?;
+        #[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
+        let start_time = Instant::now();
 
-        // Optimize the plan
+        let logical_plan = sparql::translate(query)?;
         let active = self.active_store();
         let optimizer = Optimizer::from_graph_store(&*active);
         let optimized_plan = optimizer.optimize(logical_plan)?;
 
-        // Convert to physical plan using RDF planner
         let planner = RdfPlanner::new(Arc::clone(&self.rdf_store))
             .with_transaction_id(*self.current_transaction.lock());
         #[cfg(feature = "wal")]
         let planner = planner.with_wal(self.wal.clone());
         let mut physical_plan = planner.plan(&optimized_plan)?;
 
-        // Execute the plan
         let executor = Executor::with_columns(physical_plan.columns.clone())
             .with_deadline(self.query_deadline());
-        executor.execute(physical_plan.operator.as_mut())
+        let result = executor.execute(physical_plan.operator.as_mut());
+
+        #[cfg(feature = "metrics")]
+        {
+            #[cfg(not(target_arch = "wasm32"))]
+            let elapsed_ms = Some(start_time.elapsed().as_secs_f64() * 1000.0);
+            #[cfg(target_arch = "wasm32")]
+            let elapsed_ms = None;
+            self.record_query_metrics("sparql", elapsed_ms, &result);
+        }
+
+        result
     }
 
     /// Executes a SPARQL query with parameters.
@@ -2898,8 +2975,10 @@ impl Session {
             translators::sparql,
         };
 
-        let mut logical_plan = sparql::translate(query)?;
+        #[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
+        let start_time = Instant::now();
 
+        let mut logical_plan = sparql::translate(query)?;
         substitute_params(&mut logical_plan, &params)?;
 
         let active = self.active_store();
@@ -2914,7 +2993,18 @@ impl Session {
 
         let executor = Executor::with_columns(physical_plan.columns.clone())
             .with_deadline(self.query_deadline());
-        executor.execute(physical_plan.operator.as_mut())
+        let result = executor.execute(physical_plan.operator.as_mut());
+
+        #[cfg(feature = "metrics")]
+        {
+            #[cfg(not(target_arch = "wasm32"))]
+            let elapsed_ms = Some(start_time.elapsed().as_secs_f64() * 1000.0);
+            #[cfg(target_arch = "wasm32")]
+            let elapsed_ms = None;
+            self.record_query_metrics("sparql", elapsed_ms, &result);
+        }
+
+        result
     }
 
     /// Executes a query in the specified language by name.
@@ -2943,9 +3033,13 @@ impl Session {
             "cypher" => {
                 if let Some(p) = params {
                     use crate::query::processor::{QueryLanguage, QueryProcessor};
+
+                    #[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
+                    let start_time = Instant::now();
+
                     let has_mutations = Self::query_looks_like_mutation(query);
                     let active = self.active_store();
-                    self.with_auto_commit(has_mutations, || {
+                    let result = self.with_auto_commit(has_mutations, || {
                         let processor = QueryProcessor::for_graph_store_with_transaction(
                             Arc::clone(&active),
                             Arc::clone(&self.transaction_manager),
@@ -2957,7 +3051,18 @@ impl Session {
                             processor
                         };
                         processor.process(query, QueryLanguage::Cypher, Some(&p))
-                    })
+                    });
+
+                    #[cfg(feature = "metrics")]
+                    {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        let elapsed_ms = Some(start_time.elapsed().as_secs_f64() * 1000.0);
+                        #[cfg(target_arch = "wasm32")]
+                        let elapsed_ms = None;
+                        self.record_query_metrics("cypher", elapsed_ms, &result);
+                    }
+
+                    result
                 } else {
                     self.execute_cypher(query)
                 }
@@ -3106,6 +3211,10 @@ impl Session {
         #[cfg(feature = "metrics")]
         {
             crate::metrics::record_metric!(self.metrics, tx_active, inc);
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                *self.tx_start_time.lock() = Some(Instant::now());
+            }
         }
 
         Ok(())
@@ -3163,6 +3272,15 @@ impl Session {
                 {
                     crate::metrics::record_metric!(self.metrics, tx_active, dec);
                     crate::metrics::record_metric!(self.metrics, tx_conflicts, inc);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if let Some(start) = self.tx_start_time.lock().take() {
+                        let duration_ms = start.elapsed().as_secs_f64() * 1000.0;
+                        crate::metrics::record_metric!(
+                            self.metrics,
+                            tx_duration,
+                            observe duration_ms
+                        );
+                    }
                 }
                 return Err(e);
             }
@@ -3206,6 +3324,8 @@ impl Session {
                     store.gc_versions(min_epoch);
                 }
                 self.transaction_manager.gc();
+                #[cfg(feature = "metrics")]
+                crate::metrics::record_metric!(self.metrics, gc_runs, inc);
             }
         }
 
@@ -3213,6 +3333,11 @@ impl Session {
         {
             crate::metrics::record_metric!(self.metrics, tx_active, dec);
             crate::metrics::record_metric!(self.metrics, tx_committed, inc);
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(start) = self.tx_start_time.lock().take() {
+                let duration_ms = start.elapsed().as_secs_f64() * 1000.0;
+                crate::metrics::record_metric!(self.metrics, tx_duration, observe duration_ms);
+            }
         }
 
         Ok(())
@@ -3291,6 +3416,11 @@ impl Session {
         if result.is_ok() {
             crate::metrics::record_metric!(self.metrics, tx_active, dec);
             crate::metrics::record_metric!(self.metrics, tx_rolled_back, inc);
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(start) = self.tx_start_time.lock().take() {
+                let duration_ms = start.elapsed().as_secs_f64() * 1000.0;
+                crate::metrics::record_metric!(self.metrics, tx_duration, observe duration_ms);
+            }
         }
 
         result
@@ -3596,6 +3726,46 @@ impl Session {
         {
             let _ = &self.query_timeout;
             None
+        }
+    }
+
+    /// Records query metrics for any language.
+    ///
+    /// Called after query execution to update counters, latency histogram,
+    /// and per-language tracking. `elapsed_ms` should be `None` on WASM
+    /// where `Instant` is unavailable.
+    #[cfg(feature = "metrics")]
+    fn record_query_metrics(
+        &self,
+        language: &str,
+        elapsed_ms: Option<f64>,
+        result: &Result<crate::database::QueryResult>,
+    ) {
+        use crate::metrics::record_metric;
+
+        record_metric!(self.metrics, query_count, inc);
+        if let Some(ref reg) = self.metrics {
+            reg.query_count_by_language.increment(language);
+        }
+        if let Some(ms) = elapsed_ms {
+            record_metric!(self.metrics, query_latency, observe ms);
+        }
+        match result {
+            Ok(r) => {
+                let returned = r.rows.len() as u64;
+                record_metric!(self.metrics, rows_returned, add returned);
+                if let Some(scanned) = r.rows_scanned {
+                    record_metric!(self.metrics, rows_scanned, add scanned);
+                }
+            }
+            Err(e) => {
+                record_metric!(self.metrics, query_errors, inc);
+                // Detect timeout errors
+                let msg = e.to_string();
+                if msg.contains("exceeded timeout") {
+                    record_metric!(self.metrics, query_timeouts, inc);
+                }
+            }
         }
     }
 
@@ -4021,6 +4191,12 @@ impl Drop for Session {
         // dangling write locks, and uncommitted versions lingering in the store.
         if self.in_transaction() {
             let _ = self.rollback_inner();
+        }
+
+        #[cfg(feature = "metrics")]
+        if let Some(ref reg) = self.metrics {
+            reg.session_active
+                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
         }
     }
 }

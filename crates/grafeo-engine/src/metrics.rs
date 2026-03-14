@@ -284,6 +284,9 @@ pub struct MetricsRegistry {
     // -- Session --
     pub(crate) session_active: AtomicI64,
     pub(crate) session_created: AtomicU64,
+
+    // -- GC --
+    pub(crate) gc_runs: AtomicU64,
 }
 
 impl MetricsRegistry {
@@ -307,6 +310,8 @@ impl MetricsRegistry {
 
             session_active: AtomicI64::new(0),
             session_created: AtomicU64::new(0),
+
+            gc_runs: AtomicU64::new(0),
         }
     }
 
@@ -333,8 +338,16 @@ impl MetricsRegistry {
             tx_committed: self.tx_committed.load(Ordering::Relaxed),
             tx_rolled_back: self.tx_rolled_back.load(Ordering::Relaxed),
             tx_conflicts: self.tx_conflicts.load(Ordering::Relaxed),
+            tx_duration_p50_ms: self.tx_duration.percentile(0.50),
+            tx_duration_p99_ms: self.tx_duration.percentile(0.99),
+            tx_duration_mean_ms: self.tx_duration.mean(),
             session_active: self.session_active.load(Ordering::Relaxed),
             session_created: self.session_created.load(Ordering::Relaxed),
+            gc_runs: self.gc_runs.load(Ordering::Relaxed),
+            cache_hits: 0,
+            cache_misses: 0,
+            cache_size: 0,
+            cache_invalidations: 0,
         }
     }
 
@@ -356,6 +369,8 @@ impl MetricsRegistry {
 
         self.session_active.store(0, Ordering::Relaxed);
         self.session_created.store(0, Ordering::Relaxed);
+
+        self.gc_runs.store(0, Ordering::Relaxed);
     }
 }
 
@@ -411,12 +426,32 @@ pub struct MetricsSnapshot {
     pub tx_rolled_back: u64,
     /// Total transaction conflicts detected.
     pub tx_conflicts: u64,
+    /// 50th percentile transaction duration in milliseconds.
+    pub tx_duration_p50_ms: f64,
+    /// 99th percentile transaction duration in milliseconds.
+    pub tx_duration_p99_ms: f64,
+    /// Mean transaction duration in milliseconds.
+    pub tx_duration_mean_ms: f64,
 
     // -- Session --
     /// Currently active sessions.
     pub session_active: i64,
     /// Total sessions created.
     pub session_created: u64,
+
+    // -- GC --
+    /// Total garbage collection runs.
+    pub gc_runs: u64,
+
+    // -- Cache --
+    /// Total plan cache hits (parsed + optimized).
+    pub cache_hits: u64,
+    /// Total plan cache misses (parsed + optimized).
+    pub cache_misses: u64,
+    /// Current number of cached plans.
+    pub cache_size: usize,
+    /// Number of times the cache was invalidated (cleared due to DDL).
+    pub cache_invalidations: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -601,6 +636,8 @@ mod tests {
         registry.tx_committed.fetch_add(5, Ordering::Relaxed);
         registry.session_active.fetch_add(3, Ordering::Relaxed);
         registry.query_latency.observe(42.0);
+        registry.tx_duration.observe(10.0);
+        registry.gc_runs.fetch_add(2, Ordering::Relaxed);
 
         registry.reset();
 
@@ -609,6 +646,8 @@ mod tests {
         assert_eq!(snap.tx_committed, 0);
         assert_eq!(snap.session_active, 0);
         assert!((snap.query_latency_mean_ms).abs() < f64::EPSILON);
+        assert!((snap.tx_duration_mean_ms).abs() < f64::EPSILON);
+        assert_eq!(snap.gc_runs, 0);
     }
 
     #[test]
