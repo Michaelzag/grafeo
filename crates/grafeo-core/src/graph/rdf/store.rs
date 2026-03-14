@@ -438,6 +438,24 @@ impl RdfStore {
         }
     }
 
+    /// Collects detailed RDF statistics for query optimization.
+    ///
+    /// Iterates all triples to compute per-predicate cardinality estimates,
+    /// distinct subject/object counts, and index access pattern costs.
+    #[must_use]
+    pub fn collect_statistics(&self) -> crate::statistics::RdfStatistics {
+        let mut collector = crate::statistics::RdfStatisticsCollector::new();
+        let triples = self.triples.read();
+        for triple in triples.iter() {
+            collector.record_triple(
+                &triple.subject().to_string(),
+                &triple.predicate().to_string(),
+                &triple.object().to_string(),
+            );
+        }
+        collector.build()
+    }
+
     // =========================================================================
     // Named graph support
     // =========================================================================

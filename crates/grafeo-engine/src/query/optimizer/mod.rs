@@ -99,6 +99,25 @@ impl Optimizer {
         Self::from_statistics(&stats)
     }
 
+    /// Creates an optimizer from RDF statistics.
+    ///
+    /// Uses triple pattern cardinality estimates for cost-based optimization
+    /// of SPARQL queries. Maps total triples to graph totals for the cost model.
+    #[cfg(feature = "rdf")]
+    #[must_use]
+    pub fn from_rdf_statistics(rdf_stats: grafeo_core::statistics::RdfStatistics) -> Self {
+        let total = rdf_stats.total_triples;
+        let estimator = CardinalityEstimator::from_rdf_statistics(rdf_stats);
+        Self {
+            enable_filter_pushdown: true,
+            enable_join_reorder: true,
+            enable_projection_pushdown: true,
+            cost_model: CostModel::new()
+                .with_graph_totals(total, total),
+            card_estimator: estimator,
+        }
+    }
+
     /// Creates an optimizer from a Statistics snapshot.
     ///
     /// Extracts label cardinalities, edge type degrees, and graph totals

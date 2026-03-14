@@ -196,8 +196,9 @@ impl super::GrafeoDB {
         // Parse and translate the SPARQL query to a logical plan
         let logical_plan = sparql::translate(query)?;
 
-        // Optimize the plan
-        let optimizer = Optimizer::from_store(&self.store);
+        // Optimize the plan using RDF-specific statistics
+        let rdf_stats = self.rdf_store.collect_statistics();
+        let optimizer = Optimizer::from_rdf_statistics(rdf_stats);
         let optimized_plan = optimizer.optimize(logical_plan)?;
 
         // Convert to physical plan using RDF planner

@@ -17,7 +17,7 @@
 use crate::query::plan::{
     AggregateOp, BinaryOp, DistinctOp, ExpandOp, FilterOp, JoinOp, JoinType, LeftJoinOp, LimitOp,
     LogicalExpression, LogicalOperator, MultiWayJoinOp, NodeScanOp, ProjectOp, SkipOp, SortOp,
-    UnaryOp, VectorJoinOp, VectorScanOp,
+    TripleComponent, TripleScanOp, UnaryOp, VectorJoinOp, VectorScanOp,
 };
 use std::collections::HashMap;
 
@@ -557,6 +557,8 @@ pub struct CardinalityEstimator {
     avg_fanout: f64,
     /// Configurable selectivity defaults.
     selectivity_config: SelectivityConfig,
+    /// RDF statistics for triple pattern cardinality estimation.
+    rdf_statistics: Option<grafeo_core::statistics::RdfStatistics>,
 }
 
 impl CardinalityEstimator {
@@ -570,6 +572,7 @@ impl CardinalityEstimator {
             default_selectivity: config.default,
             avg_fanout: 10.0,
             selectivity_config: config,
+            rdf_statistics: None,
         }
     }
 
@@ -582,6 +585,7 @@ impl CardinalityEstimator {
             default_selectivity: config.default,
             avg_fanout: 10.0,
             selectivity_config: config,
+            rdf_statistics: None,
         }
     }
 
@@ -641,6 +645,20 @@ impl CardinalityEstimator {
         estimator
     }
 
+    /// Creates a cardinality estimator from RDF statistics.
+    ///
+    /// Uses triple pattern cardinality estimates for `TripleScan` operators
+    /// and join selectivity from per-predicate statistics.
+    #[must_use]
+    pub fn from_rdf_statistics(rdf_stats: grafeo_core::statistics::RdfStatistics) -> Self {
+        let mut estimator = Self::new();
+        if rdf_stats.total_triples > 0 {
+            estimator.default_row_count = rdf_stats.total_triples;
+        }
+        estimator.rdf_statistics = Some(rdf_stats);
+        estimator
+    }
+
     /// Adds statistics for a table/label.
     pub fn add_table_stats(&mut self, name: &str, stats: TableStats) {
         self.table_stats.insert(name.to_string(), stats);
@@ -671,6 +689,7 @@ impl CardinalityEstimator {
             LogicalOperator::VectorJoin(join) => self.estimate_vector_join(join),
             LogicalOperator::MultiWayJoin(mwj) => self.estimate_multi_way_join(mwj),
             LogicalOperator::LeftJoin(lj) => self.estimate_left_join(lj),
+            LogicalOperator::TripleScan(scan) => self.estimate_triple_scan(scan),
             _ => self.default_row_count as f64,
         }
     }
@@ -684,6 +703,54 @@ impl CardinalityEstimator {
         }
         // No label filter - scan all nodes
         self.default_row_count as f64
+    }
+
+    /// Estimates triple scan cardinality using RDF statistics.
+    ///
+    /// If RDF statistics are available, uses the pattern binding (which positions
+    /// are bound vs variable) to produce accurate estimates. Otherwise falls back
+    /// to the default row count.
+    fn estimate_triple_scan(&self, scan: &TripleScanOp) -> f64 {
+        // If there's an input, the triple scan is chained: multiply input cardinality
+        // by the per-row expansion factor.
+        let base = if let Some(ref input) = scan.input {
+            self.estimate(input)
+        } else {
+            1.0
+        };
+
+        let Some(rdf_stats) = &self.rdf_statistics else {
+            return if scan.input.is_some() {
+                base * self.default_row_count as f64
+            } else {
+                self.default_row_count as f64
+            };
+        };
+
+        let subject_bound = matches!(scan.subject, TripleComponent::Iri(_) | TripleComponent::Literal(_));
+        let object_bound = matches!(scan.object, TripleComponent::Iri(_) | TripleComponent::Literal(_));
+        let predicate_iri = match &scan.predicate {
+            TripleComponent::Iri(iri) => Some(iri.as_str()),
+            _ => None,
+        };
+
+        let pattern_card = rdf_stats.estimate_triple_pattern_cardinality(
+            subject_bound,
+            predicate_iri,
+            object_bound,
+        );
+
+        if scan.input.is_some() {
+            // Chained scan: each input row expands by the pattern's selectivity
+            let selectivity = if rdf_stats.total_triples > 0 {
+                pattern_card / rdf_stats.total_triples as f64
+            } else {
+                1.0
+            };
+            (base * pattern_card * selectivity).max(1.0)
+        } else {
+            pattern_card.max(1.0)
+        }
     }
 
     /// Estimates filter cardinality.

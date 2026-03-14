@@ -2933,8 +2933,8 @@ impl Session {
         let start_time = Instant::now();
 
         let logical_plan = sparql::translate(query)?;
-        let active = self.active_store();
-        let optimizer = Optimizer::from_graph_store(&*active);
+        let rdf_stats = self.rdf_store.collect_statistics();
+        let optimizer = Optimizer::from_rdf_statistics(rdf_stats);
         let optimized_plan = optimizer.optimize(logical_plan)?;
 
         let planner = RdfPlanner::new(Arc::clone(&self.rdf_store))
@@ -2981,8 +2981,8 @@ impl Session {
         let mut logical_plan = sparql::translate(query)?;
         substitute_params(&mut logical_plan, &params)?;
 
-        let active = self.active_store();
-        let optimizer = Optimizer::from_graph_store(&*active);
+        let rdf_stats = self.rdf_store.collect_statistics();
+        let optimizer = Optimizer::from_rdf_statistics(rdf_stats);
         let optimized_plan = optimizer.optimize(logical_plan)?;
 
         let planner = RdfPlanner::new(Arc::clone(&self.rdf_store))
