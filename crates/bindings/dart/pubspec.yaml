@@ -3,7 +3,7 @@ version: 0.5.23
 description: >-
   High-performance embeddable graph database with GQL support.
   Dart bindings for grafeo-c via dart:ffi.
-repository: https://github.com/GrafeoDB/grafeo
+repository: https://github.com/GrafeoDB/grafeo/tree/main/crates/bindings/dart
 issue_tracker: https://github.com/GrafeoDB/grafeo/issues
 homepage: https://grafeo.dev
 

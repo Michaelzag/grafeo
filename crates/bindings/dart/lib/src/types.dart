@@ -43,12 +43,22 @@ class Node {
 
 /// A graph edge with an ID, type, source/target, and properties.
 class Edge {
+  /// Unique numeric identifier for this edge.
   final int id;
+
+  /// The relationship type label (e.g. `"KNOWS"`, `"WORKS_AT"`).
   final String type;
+
+  /// The ID of the source (start) node.
   final int sourceId;
+
+  /// The ID of the target (end) node.
   final int targetId;
+
+  /// Key/value properties stored on this edge.
   final Map<String, dynamic> properties;
 
+  /// Creates an edge with the given [id], [type], [sourceId], [targetId], and [properties].
   const Edge(this.id, this.type, this.sourceId, this.targetId, this.properties);
 
   @override

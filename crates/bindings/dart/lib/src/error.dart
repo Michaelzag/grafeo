@@ -66,6 +66,7 @@ class SerializationException extends GrafeoException {
 
 /// A generic database error (status 1, 7, 8, 9, or unknown).
 class DatabaseException extends GrafeoException {
+  /// Creates a [DatabaseException] with [message] and [status].
   const DatabaseException(super.message, super.status);
 }
 
