@@ -10,6 +10,7 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 - **Observability** (`metrics` feature): lock-free `MetricsRegistry` with atomic counters and fixed-bucket histograms; `GrafeoDB::metrics()` returns a serializable snapshot, `reset_metrics()` clears all counters; included in `server` profile, zero overhead when disabled. Tracks query count, latency (p50/p99/mean), errors, timeouts, and rows returned/scanned across all 6 query languages (GQL, Cypher, Gremlin, GraphQL, SPARQL, SQL/PGQ); transaction lifecycle (active, committed, rolled back, conflicts, duration p50/p99/mean); session lifecycle (active, created); GC sweep runs; plan cache hits, misses, size, and invalidations
 - **Edge visibility fast path**: `is_edge_visible_at_epoch()` and `is_edge_visible_versioned()` on `GraphStore` skip full edge construction when only checking MVCC visibility, matching the existing node visibility pattern
 - **Plan cache bindings**: `clear_plan_cache()` exposed in Python, Node.js, C, and WASM bindings
+- **RDF bulk load**: `RdfStore::bulk_load()` builds all indexes in a single pass with pre-sized HashMaps and computes statistics during the same traversal; `RdfStore::load_ntriples()` parses N-Triples documents with full term support (IRIs, blank nodes, typed/language-tagged literals)
 
 ### Changed
 
