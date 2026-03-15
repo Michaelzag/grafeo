@@ -517,3 +517,142 @@ fn test_create_property_graph_invalid_reference() {
         "Should fail: edge references non-existent table"
     );
 }
+
+// ============================================================================
+// LEFT OUTER JOIN (OPTIONAL MATCH)
+// ============================================================================
+
+/// Creates a network where some nodes have no outgoing KNOWS edges.
+fn create_partial_network() -> GrafeoDB {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    let alix = session.create_node_with_props(
+        &["Person"],
+        [("name", Value::String("Alix".into()))],
+    );
+    let gus = session.create_node_with_props(
+        &["Person"],
+        [("name", Value::String("Gus".into()))],
+    );
+    let vincent = session.create_node_with_props(
+        &["Person"],
+        [("name", Value::String("Vincent".into()))],
+    );
+
+    // Alix knows Gus, but Vincent knows nobody
+    session.create_edge(alix, gus, "KNOWS");
+
+    let _ = vincent; // Vincent has no outgoing KNOWS edges
+    db
+}
+
+#[test]
+fn test_left_outer_join_basic() {
+    let db = create_partial_network();
+    let session = db.session();
+
+    let result = session
+        .execute_sql(
+            "SELECT * FROM GRAPH_TABLE (
+                MATCH (a:Person)
+                LEFT OUTER JOIN MATCH (a)-[:KNOWS]->(b:Person)
+                COLUMNS (a.name AS person, b.name AS friend)
+            )",
+        )
+        .unwrap();
+
+    // Alix has a friend (Gus), Gus has none, Vincent has none
+    // LEFT JOIN preserves all left-side rows
+    assert_eq!(
+        result.row_count(),
+        3,
+        "All 3 persons should appear (LEFT JOIN preserves left rows)"
+    );
+
+    let names: Vec<&str> = result
+        .rows
+        .iter()
+        .map(|r| r[0].as_str().unwrap_or("NULL"))
+        .collect();
+    assert!(names.contains(&"Alix"), "Alix should be in results");
+    assert!(names.contains(&"Gus"), "Gus should be in results");
+    assert!(names.contains(&"Vincent"), "Vincent should be in results");
+
+    // Alix's friend column should be Gus, others should be NULL
+    let alix_row = result
+        .rows
+        .iter()
+        .find(|r| r[0].as_str() == Some("Alix"))
+        .unwrap();
+    assert_eq!(
+        alix_row[1].as_str(),
+        Some("Gus"),
+        "Alix's friend should be Gus"
+    );
+}
+
+#[test]
+fn test_left_join_shorthand() {
+    let db = create_partial_network();
+    let session = db.session();
+
+    // LEFT JOIN without OUTER
+    let result = session
+        .execute_sql(
+            "SELECT * FROM GRAPH_TABLE (
+                MATCH (a:Person)
+                LEFT JOIN MATCH (a)-[:KNOWS]->(b:Person)
+                COLUMNS (a.name AS person, b.name AS friend)
+            )",
+        )
+        .unwrap();
+
+    assert_eq!(result.row_count(), 3, "LEFT JOIN (without OUTER) should work identically");
+}
+
+#[test]
+fn test_optional_match_syntax() {
+    let db = create_partial_network();
+    let session = db.session();
+
+    // OPTIONAL MATCH syntax (GQL-compatible)
+    let result = session
+        .execute_sql(
+            "SELECT * FROM GRAPH_TABLE (
+                MATCH (a:Person)
+                OPTIONAL MATCH (a)-[:KNOWS]->(b:Person)
+                COLUMNS (a.name AS person, b.name AS friend)
+            )",
+        )
+        .unwrap();
+
+    assert_eq!(result.row_count(), 3, "OPTIONAL MATCH should work like LEFT JOIN");
+}
+
+#[test]
+fn test_left_join_null_values() {
+    let db = create_partial_network();
+    let session = db.session();
+
+    let result = session
+        .execute_sql(
+            "SELECT * FROM GRAPH_TABLE (
+                MATCH (a:Person)
+                LEFT OUTER JOIN MATCH (a)-[:KNOWS]->(b:Person)
+                COLUMNS (a.name AS person, b.name AS friend)
+            )",
+        )
+        .unwrap();
+
+    // Vincent has no friends: friend column should be NULL
+    let vincent_row = result
+        .rows
+        .iter()
+        .find(|r| r[0].as_str() == Some("Vincent"))
+        .unwrap();
+    assert!(
+        vincent_row[1].is_null(),
+        "Vincent's friend should be NULL (no outgoing KNOWS edges)"
+    );
+}

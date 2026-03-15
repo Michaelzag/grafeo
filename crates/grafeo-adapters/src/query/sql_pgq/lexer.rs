@@ -96,6 +96,16 @@ pub enum TokenKind {
     /// REFERENCES
     References,
 
+    // Join keywords
+    /// LEFT
+    Left,
+    /// OUTER
+    Outer,
+    /// JOIN
+    Join,
+    /// OPTIONAL
+    Optional,
+
     // Procedure keywords
     /// CALL
     Call,
@@ -465,6 +475,10 @@ impl<'a> Lexer<'a> {
             "BETWEEN" => Some(TokenKind::Between),
             "GRAPH_TABLE" => Some(TokenKind::GraphTable),
             "COLUMNS" => Some(TokenKind::Columns),
+            "LEFT" => Some(TokenKind::Left),
+            "OUTER" => Some(TokenKind::Outer),
+            "JOIN" => Some(TokenKind::Join),
+            "OPTIONAL" => Some(TokenKind::Optional),
             "PROPERTY" => Some(TokenKind::Property),
             "GRAPH" => Some(TokenKind::Graph),
             "TABLES" => Some(TokenKind::Tables),
@@ -502,6 +516,7 @@ impl<'a> Lexer<'a> {
             CommonKeyword::Edge => TokenKind::Edge,
             CommonKeyword::Call => TokenKind::Call,
             CommonKeyword::Yield => TokenKind::Yield,
+            CommonKeyword::Optional => TokenKind::Optional,
             // Keywords recognized by CommonKeyword but not used in SQL/PGQ
             // are mapped to Identifier (they can appear as table/column names)
             _ => TokenKind::Identifier,

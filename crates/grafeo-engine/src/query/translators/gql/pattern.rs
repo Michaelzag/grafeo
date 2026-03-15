@@ -582,6 +582,14 @@ impl GqlTranslator {
                     .insert(ev.clone(), pa.clone());
             }
 
+            // For questioned edges (->?), save the plan BEFORE the expand so the
+            // left side of the LeftJoin contains only the required patterns.
+            let pre_expand_plan = if edge.questioned {
+                Some(plan.clone())
+            } else {
+                None
+            };
+
             plan = LogicalOperator::Expand(ExpandOp {
                 from_variable: current_source,
                 to_variable: target_var.clone(),
@@ -594,14 +602,6 @@ impl GqlTranslator {
                 path_alias: expand_path_alias,
                 path_mode,
             });
-
-            // For questioned edges (->?), save the plan before expand so we can
-            // wrap the expand + filters in a LeftJoin later.
-            let pre_expand_plan = if edge.questioned {
-                Some(plan.clone())
-            } else {
-                None
-            };
 
             // Add filter for edge properties
             if !edge.properties.is_empty()

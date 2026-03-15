@@ -70,6 +70,8 @@ pub struct SelectItem {
 pub struct GraphTableExpression {
     /// The inner MATCH clause (GQL pattern syntax).
     pub match_clause: MatchClause,
+    /// Optional match clauses (LEFT OUTER JOIN or OPTIONAL MATCH).
+    pub optional_matches: Vec<MatchClause>,
     /// The COLUMNS clause (projection from graph to table).
     pub columns: ColumnsClause,
     /// Source span.

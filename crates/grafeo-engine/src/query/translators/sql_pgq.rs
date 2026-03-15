@@ -10,7 +10,7 @@ use super::common::{
 };
 use crate::query::plan::{
     AggregateExpr, AggregateOp, BinaryOp, CallProcedureOp, CreatePropertyGraphOp, ExpandDirection,
-    ExpandOp, LogicalExpression, LogicalOperator, LogicalPlan, NodeScanOp, PathMode,
+    ExpandOp, LeftJoinOp, LogicalExpression, LogicalOperator, LogicalPlan, NodeScanOp, PathMode,
     ProcedureYield, PropertyGraphEdgeTable, PropertyGraphNodeTable, ReturnItem, SortKey, SortOrder,
     UnaryOp,
 };
@@ -62,6 +62,16 @@ impl SqlPgqTranslator {
 
         // 1. Translate MATCH patterns → NodeScan + Expand
         let mut plan = self.translate_match(&select.graph_table.match_clause)?;
+
+        // 1b. Translate optional matches → LeftJoin
+        for opt_match in &select.graph_table.optional_matches {
+            let right = self.translate_match(opt_match)?;
+            plan = LogicalOperator::LeftJoin(LeftJoinOp {
+                left: Box::new(plan),
+                right: Box::new(right),
+                condition: None,
+            });
+        }
 
         // 2. Translate SQL WHERE → Filter (below Return)
         if let Some(where_expr) = &select.where_clause {

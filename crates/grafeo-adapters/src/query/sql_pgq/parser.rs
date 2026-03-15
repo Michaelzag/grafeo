@@ -331,12 +331,38 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::LParen)?;
 
         let match_clause = self.parse_match_clause()?;
+
+        // Parse optional matches: OPTIONAL MATCH or LEFT [OUTER] JOIN MATCH
+        let mut optional_matches = Vec::new();
+        loop {
+            if self.current.kind == TokenKind::Optional {
+                // OPTIONAL MATCH ...
+                self.advance(); // consume OPTIONAL
+                let mut opt = self.parse_match_clause()?;
+                opt.optional = true;
+                optional_matches.push(opt);
+            } else if self.current.kind == TokenKind::Left {
+                // LEFT [OUTER] JOIN MATCH ...
+                self.advance(); // consume LEFT
+                if self.current.kind == TokenKind::Outer {
+                    self.advance(); // consume OUTER (optional)
+                }
+                self.expect(TokenKind::Join)?;
+                let mut opt = self.parse_match_clause()?;
+                opt.optional = true;
+                optional_matches.push(opt);
+            } else {
+                break;
+            }
+        }
+
         let columns = self.parse_columns_clause()?;
 
         self.expect(TokenKind::RParen)?;
 
         Ok(GraphTableExpression {
             match_clause,
+            optional_matches,
             columns,
             span: None,
         })

@@ -663,3 +663,165 @@ mod cdc_tests {
         );
     }
 }
+
+// ============================================================================
+// GQL Questioned Edge (->?) Tests
+// ============================================================================
+
+/// Creates a partial network: Alix->Gus, Vincent has no outgoing edges.
+fn setup_questioned_edge() -> GrafeoDB {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+    let alix = session.create_node_with_props(
+        &["Person"],
+        [("name", Value::String("Alix".into()))],
+    );
+    let gus = session.create_node_with_props(
+        &["Person"],
+        [("name", Value::String("Gus".into()))],
+    );
+    let vincent = session.create_node_with_props(
+        &["Person"],
+        [("name", Value::String("Vincent".into()))],
+    );
+
+    session.create_edge(alix, gus, "KNOWS");
+    let _ = vincent;
+    db
+}
+
+#[test]
+fn test_questioned_edge_preserves_source_rows() {
+    let db = setup_questioned_edge();
+    let session = db.session();
+
+    // ->? means optional edge: source rows without matching edges are preserved
+    let result = session
+        .execute("MATCH (a:Person)-[:KNOWS]->?(b:Person) RETURN a.name, b.name")
+        .unwrap();
+
+    // All 3 persons should appear (Alix with match, Gus and Vincent without)
+    assert_eq!(
+        result.row_count(),
+        3,
+        "Questioned edge should preserve all source rows"
+    );
+
+    let names: Vec<&str> = result
+        .rows
+        .iter()
+        .map(|r| r[0].as_str().unwrap_or("NULL"))
+        .collect();
+    assert!(names.contains(&"Alix"));
+    assert!(names.contains(&"Gus"));
+    assert!(names.contains(&"Vincent"));
+}
+
+#[test]
+fn test_questioned_edge_null_when_no_match() {
+    let db = setup_questioned_edge();
+    let session = db.session();
+
+    let result = session
+        .execute("MATCH (a:Person)-[:KNOWS]->?(b:Person) RETURN a.name, b.name")
+        .unwrap();
+
+    // Vincent's b.name should be NULL
+    let vincent_row = result
+        .rows
+        .iter()
+        .find(|r| r[0].as_str() == Some("Vincent"))
+        .unwrap();
+    assert!(
+        vincent_row[1].is_null(),
+        "Vincent's target should be NULL (no KNOWS edge)"
+    );
+}
+
+#[test]
+fn test_questioned_edge_with_target_label_filter() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    let alix = session.create_node_with_props(
+        &["Person"],
+        [("name", Value::String("Alix".into()))],
+    );
+    let amsterdam = session.create_node_with_props(
+        &["City"],
+        [("name", Value::String("Amsterdam".into()))],
+    );
+    let gus = session.create_node_with_props(
+        &["Person"],
+        [("name", Value::String("Gus".into()))],
+    );
+
+    // Alix -> Amsterdam (LIVES_IN) and Alix -> Gus (KNOWS)
+    session.create_edge(alix, amsterdam, "LIVES_IN");
+    session.create_edge(alix, gus, "KNOWS");
+
+    // Questioned edge with label filter: only Person targets
+    let result = session
+        .execute("MATCH (a:Person)-[:KNOWS]->?(b:Person) RETURN a.name, b.name")
+        .unwrap();
+
+    // Alix matches Gus via KNOWS; Gus has no KNOWS edges -> NULL
+    assert_eq!(result.row_count(), 2, "Two Person nodes should appear");
+
+    let alix_row = result
+        .rows
+        .iter()
+        .find(|r| r[0].as_str() == Some("Alix"))
+        .unwrap();
+    assert_eq!(
+        alix_row[1].as_str(),
+        Some("Gus"),
+        "Alix's target should be Gus (KNOWS edge to Person)"
+    );
+
+    let gus_row = result
+        .rows
+        .iter()
+        .find(|r| r[0].as_str() == Some("Gus"))
+        .unwrap();
+    assert!(
+        gus_row[1].is_null(),
+        "Gus's target should be NULL (no outgoing KNOWS)"
+    );
+}
+
+#[test]
+fn test_questioned_edge_combined_with_optional_match() {
+    let db = setup_questioned_edge();
+    let session = db.session();
+
+    // Add a City node that only Alix lives in
+    session
+        .execute("MATCH (a:Person {name: 'Alix'}) INSERT (a)-[:LIVES_IN]->(:City {name: 'Amsterdam'})")
+        .unwrap();
+
+    // Combine OPTIONAL MATCH with a questioned edge in the first MATCH
+    let result = session
+        .execute(
+            "MATCH (a:Person)-[:KNOWS]->?(b:Person) \
+             OPTIONAL MATCH (a)-[:LIVES_IN]->(c:City) \
+             RETURN a.name, b.name, c.name",
+        )
+        .unwrap();
+
+    // All persons appear (questioned edge preserves rows), OPTIONAL MATCH adds city
+    assert_eq!(
+        result.row_count(),
+        3,
+        "All persons should appear with both questioned edge and optional match"
+    );
+
+    // Alix should have both a friend and a city
+    let alix_row = result
+        .rows
+        .iter()
+        .find(|r| r[0].as_str() == Some("Alix"))
+        .unwrap();
+    assert_eq!(alix_row[1].as_str(), Some("Gus"));
+    assert_eq!(alix_row[2].as_str(), Some("Amsterdam"));
+}
