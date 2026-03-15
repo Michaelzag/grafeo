@@ -2817,6 +2817,12 @@ impl Session {
         language: &str,
         params: Option<std::collections::HashMap<String, Value>>,
     ) -> Result<QueryResult> {
+        let _span = tracing::info_span!(
+            "grafeo::session::execute",
+            language,
+            query_len = query.len(),
+        )
+        .entered();
         match language {
             "gql" => {
                 if let Some(p) = params {

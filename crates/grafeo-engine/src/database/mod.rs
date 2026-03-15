@@ -941,6 +941,17 @@ impl GrafeoDB {
         snapshot
     }
 
+    /// Returns all metrics in Prometheus text exposition format.
+    ///
+    /// The output is ready to serve from an HTTP `/metrics` endpoint.
+    #[cfg(feature = "metrics")]
+    #[must_use]
+    pub fn metrics_prometheus(&self) -> String {
+        self.metrics
+            .as_ref()
+            .map_or_else(String::new, |m| m.to_prometheus())
+    }
+
     /// Resets all metrics counters and histograms to zero.
     #[cfg(feature = "metrics")]
     pub fn reset_metrics(&self) {

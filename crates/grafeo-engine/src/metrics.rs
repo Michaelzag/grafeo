@@ -351,6 +351,158 @@ impl MetricsRegistry {
         }
     }
 
+    /// Takes a snapshot with cache statistics merged in.
+    ///
+    /// Call this instead of [`snapshot()`](Self::snapshot) when you have
+    /// access to the query cache stats.
+    #[must_use]
+    pub fn snapshot_with_cache(
+        &self,
+        cache_hits: u64,
+        cache_misses: u64,
+        cache_size: usize,
+        cache_invalidations: u64,
+    ) -> MetricsSnapshot {
+        let mut snap = self.snapshot();
+        snap.cache_hits = cache_hits;
+        snap.cache_misses = cache_misses;
+        snap.cache_size = cache_size;
+        snap.cache_invalidations = cache_invalidations;
+        snap
+    }
+
+    /// Renders all metrics in Prometheus text exposition format.
+    ///
+    /// Returns a string ready to be served from an HTTP `/metrics` endpoint.
+    #[must_use]
+    pub fn to_prometheus(&self) -> String {
+        use std::fmt::Write;
+        let mut out = String::with_capacity(4096);
+
+        // Helper: counter
+        macro_rules! counter {
+            ($name:expr, $help:expr, $value:expr) => {
+                let _ = writeln!(out, "# HELP {} {}", $name, $help);
+                let _ = writeln!(out, "# TYPE {} counter", $name);
+                let _ = writeln!(out, "{} {}", $name, $value);
+            };
+        }
+
+        // Helper: gauge
+        macro_rules! gauge {
+            ($name:expr, $help:expr, $value:expr) => {
+                let _ = writeln!(out, "# HELP {} {}", $name, $help);
+                let _ = writeln!(out, "# TYPE {} gauge", $name);
+                let _ = writeln!(out, "{} {}", $name, $value);
+            };
+        }
+
+        // Query metrics
+        counter!(
+            "grafeo_query_count",
+            "Total queries executed.",
+            self.query_count.load(Ordering::Relaxed)
+        );
+        counter!(
+            "grafeo_query_errors",
+            "Queries that returned an error.",
+            self.query_errors.load(Ordering::Relaxed)
+        );
+        counter!(
+            "grafeo_query_timeouts",
+            "Queries cancelled by timeout.",
+            self.query_timeouts.load(Ordering::Relaxed)
+        );
+        counter!(
+            "grafeo_query_rows_returned",
+            "Cumulative rows returned.",
+            self.rows_returned.load(Ordering::Relaxed)
+        );
+        counter!(
+            "grafeo_query_rows_scanned",
+            "Cumulative rows scanned.",
+            self.rows_scanned.load(Ordering::Relaxed)
+        );
+
+        // Query latency histogram
+        Self::write_histogram(&mut out, "grafeo_query_latency_ms", "Query latency in milliseconds.", &self.query_latency);
+
+        // Per-language counters
+        let lang = self.query_count_by_language.snapshot();
+        let _ = writeln!(out, "# HELP grafeo_query_count_by_language Queries executed per language.");
+        let _ = writeln!(out, "# TYPE grafeo_query_count_by_language counter");
+        let _ = writeln!(out, "grafeo_query_count_by_language{{language=\"gql\"}} {}", lang.gql);
+        let _ = writeln!(out, "grafeo_query_count_by_language{{language=\"cypher\"}} {}", lang.cypher);
+        let _ = writeln!(out, "grafeo_query_count_by_language{{language=\"sparql\"}} {}", lang.sparql);
+        let _ = writeln!(out, "grafeo_query_count_by_language{{language=\"gremlin\"}} {}", lang.gremlin);
+        let _ = writeln!(out, "grafeo_query_count_by_language{{language=\"graphql\"}} {}", lang.graphql);
+        let _ = writeln!(out, "grafeo_query_count_by_language{{language=\"sql_pgq\"}} {}", lang.sql_pgq);
+
+        // Transaction metrics
+        gauge!(
+            "grafeo_tx_active",
+            "Currently active transactions.",
+            self.tx_active.load(Ordering::Relaxed)
+        );
+        counter!(
+            "grafeo_tx_committed",
+            "Total transactions committed.",
+            self.tx_committed.load(Ordering::Relaxed)
+        );
+        counter!(
+            "grafeo_tx_rolled_back",
+            "Total transactions rolled back.",
+            self.tx_rolled_back.load(Ordering::Relaxed)
+        );
+        counter!(
+            "grafeo_tx_conflicts",
+            "Write-write conflicts detected.",
+            self.tx_conflicts.load(Ordering::Relaxed)
+        );
+        Self::write_histogram(&mut out, "grafeo_tx_duration_ms", "Transaction duration in milliseconds.", &self.tx_duration);
+
+        // Session metrics
+        gauge!(
+            "grafeo_session_active",
+            "Currently active sessions.",
+            self.session_active.load(Ordering::Relaxed)
+        );
+        counter!(
+            "grafeo_session_created",
+            "Total sessions created.",
+            self.session_created.load(Ordering::Relaxed)
+        );
+
+        // GC metrics
+        counter!(
+            "grafeo_gc_runs",
+            "Total garbage collection runs.",
+            self.gc_runs.load(Ordering::Relaxed)
+        );
+
+        out
+    }
+
+    /// Writes a histogram in Prometheus text format.
+    fn write_histogram(out: &mut String, name: &str, help: &str, histogram: &AtomicHistogram) {
+        use std::fmt::Write;
+        let snap = histogram.snapshot();
+
+        let _ = writeln!(out, "# HELP {name} {help}");
+        let _ = writeln!(out, "# TYPE {name} histogram");
+
+        let mut cumulative: u64 = 0;
+        for (i, &boundary) in snap.boundaries.iter().enumerate() {
+            cumulative += snap.bucket_counts[i];
+            let _ = writeln!(out, "{name}_bucket{{le=\"{boundary}\"}} {cumulative}");
+        }
+        // Overflow bucket (+Inf)
+        cumulative += snap.bucket_counts[snap.boundaries.len()];
+        let _ = writeln!(out, "{name}_bucket{{le=\"+Inf\"}} {cumulative}");
+        let _ = writeln!(out, "{name}_sum {}", snap.sum);
+        let _ = writeln!(out, "{name}_count {}", snap.count);
+    }
+
     /// Resets every counter and histogram to zero.
     pub fn reset(&self) {
         self.query_count.store(0, Ordering::Relaxed);
@@ -789,6 +941,54 @@ mod tests {
             (p50 - 10000.0).abs() < f64::EPSILON,
             "overflow bucket should return last boundary, got {p50}"
         );
+    }
+
+    #[test]
+    fn prometheus_output_format() {
+        let registry = MetricsRegistry::new();
+        registry.query_count.fetch_add(42, Ordering::Relaxed);
+        registry.query_errors.fetch_add(3, Ordering::Relaxed);
+        registry.tx_committed.fetch_add(10, Ordering::Relaxed);
+        registry.session_created.fetch_add(5, Ordering::Relaxed);
+        registry.gc_runs.fetch_add(2, Ordering::Relaxed);
+        registry.query_latency.observe(1.0);
+        registry.query_latency.observe(5.0);
+        registry.query_count_by_language.increment("gql");
+
+        let output = registry.to_prometheus();
+
+        // Counters
+        assert!(output.contains("# TYPE grafeo_query_count counter"));
+        assert!(output.contains("grafeo_query_count 42"));
+        assert!(output.contains("grafeo_query_errors 3"));
+        assert!(output.contains("grafeo_tx_committed 10"));
+        assert!(output.contains("grafeo_session_created 5"));
+        assert!(output.contains("grafeo_gc_runs 2"));
+
+        // Gauges
+        assert!(output.contains("# TYPE grafeo_tx_active gauge"));
+        assert!(output.contains("# TYPE grafeo_session_active gauge"));
+
+        // Histogram
+        assert!(output.contains("# TYPE grafeo_query_latency_ms histogram"));
+        assert!(output.contains("grafeo_query_latency_ms_bucket{le=\"+Inf\"} 2"));
+        assert!(output.contains("grafeo_query_latency_ms_count 2"));
+
+        // Per-language
+        assert!(output.contains("grafeo_query_count_by_language{language=\"gql\"} 1"));
+    }
+
+    #[test]
+    fn snapshot_with_cache_merges_stats() {
+        let registry = MetricsRegistry::new();
+        registry.query_count.fetch_add(10, Ordering::Relaxed);
+
+        let snap = registry.snapshot_with_cache(100, 20, 50, 3);
+        assert_eq!(snap.query_count, 10);
+        assert_eq!(snap.cache_hits, 100);
+        assert_eq!(snap.cache_misses, 20);
+        assert_eq!(snap.cache_size, 50);
+        assert_eq!(snap.cache_invalidations, 3);
     }
 
     #[test]
