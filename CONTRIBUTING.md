@@ -43,8 +43,6 @@ We use conventional commits: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `pe
 
 ## Architecture
 
-See [ARCHITECTURE.md](.claude/ARCHITECTURE.md) for the full picture. The short version:
-
 | Crate | What it does |
 | ----- | ------------ |
 | `grafeo` | Top-level facade, re-exports public API |
@@ -67,8 +65,6 @@ See [ARCHITECTURE.md](.claude/ARCHITECTURE.md) for the full picture. The short v
 - Use `thiserror` for error types
 - Tests go in the same file under `#[cfg(test)]`
 - Descriptive test names: `test_<function>_<scenario>`
-
-See [CODE_STYLE.md](.claude/CODE_STYLE.md) for the full guide.
 
 ## Python Bindings
 
