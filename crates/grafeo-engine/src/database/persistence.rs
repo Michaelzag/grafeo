@@ -313,6 +313,8 @@ pub(super) fn load_snapshot_into_store(
             .map_err(|e| Error::Internal(e.to_string()))?;
         if let Some(graph_store) = store.graph(&graph.name) {
             populate_store_from_snapshot_ref(&graph_store, &graph.nodes, &graph.edges)?;
+            #[cfg(feature = "temporal")]
+            graph_store.sync_epoch(EpochId::new(snapshot.epoch));
         }
     }
     restore_schema_from_snapshot(catalog, &snapshot.schema);
@@ -879,7 +881,7 @@ impl super::GrafeoDB {
             schema,
             indexes,
             #[cfg(feature = "temporal")]
-            epoch: self.store.current_epoch().as_u64(),
+            epoch: self.transaction_manager.current_epoch().as_u64(),
             #[cfg(not(feature = "temporal"))]
             epoch: 0,
         };
@@ -937,6 +939,10 @@ impl super::GrafeoDB {
             db.transaction_manager.sync_epoch(epoch);
         }
 
+        // Capture epoch before moving snapshot fields
+        #[cfg(feature = "temporal")]
+        let snapshot_epoch = EpochId::new(snapshot.epoch);
+
         // Restore named graphs
         for ng in snapshot.named_graphs {
             db.store
@@ -944,6 +950,10 @@ impl super::GrafeoDB {
                 .map_err(|e| Error::Internal(e.to_string()))?;
             if let Some(graph_store) = db.store.graph(&ng.name) {
                 populate_store_from_snapshot(&graph_store, ng.nodes, ng.edges)?;
+                // Named graph stores need the same epoch so temporal property
+                // lookups via current_epoch() return the correct values.
+                #[cfg(feature = "temporal")]
+                graph_store.sync_epoch(snapshot_epoch);
             }
         }
 
@@ -1013,11 +1023,12 @@ impl super::GrafeoDB {
 
         // Restore epoch from temporal snapshot
         #[cfg(feature = "temporal")]
-        {
+        let snapshot_epoch = {
             let epoch = EpochId::new(snapshot.epoch);
             self.store.sync_epoch(epoch);
             self.transaction_manager.sync_epoch(epoch);
-        }
+            epoch
+        };
 
         // Restore named graphs
         for ng in snapshot.named_graphs {
@@ -1026,6 +1037,8 @@ impl super::GrafeoDB {
                 .map_err(|e| Error::Internal(e.to_string()))?;
             if let Some(graph_store) = self.store.graph(&ng.name) {
                 populate_store_from_snapshot(&graph_store, ng.nodes, ng.edges)?;
+                #[cfg(feature = "temporal")]
+                graph_store.sync_epoch(snapshot_epoch);
             }
         }
 

@@ -1,6 +1,6 @@
 //! Integration tests for snapshot export/import.
 
-use grafeo_common::types::{EdgeId, NodeId, Value};
+use grafeo_common::types::{EdgeId, EpochId, NodeId, Value};
 use grafeo_engine::GrafeoDB;
 
 /// Mirror of the private Snapshot struct for crafting test payloads.
@@ -14,6 +14,7 @@ struct TestSnapshot {
     rdf_named_graphs: Vec<()>,
     schema: TestSnapshotSchema,
     indexes: TestSnapshotIndexes,
+    epoch: u64,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Default)]
@@ -44,6 +45,7 @@ impl TestSnapshot {
             rdf_named_graphs: vec![],
             schema: TestSnapshotSchema::default(),
             indexes: TestSnapshotIndexes::default(),
+            epoch: 0,
         }
     }
 }
@@ -52,7 +54,7 @@ impl TestSnapshot {
 struct TestNode {
     id: NodeId,
     labels: Vec<String>,
-    properties: Vec<(String, Value)>,
+    properties: Vec<(String, Vec<(EpochId, Value)>)>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -61,7 +63,7 @@ struct TestEdge {
     src: NodeId,
     dst: NodeId,
     edge_type: String,
-    properties: Vec<(String, Value)>,
+    properties: Vec<(String, Vec<(EpochId, Value)>)>,
 }
 
 fn encode_snapshot(snap: &TestSnapshot) -> Vec<u8> {
@@ -711,7 +713,10 @@ fn import_v1_snapshot_is_rejected() {
         vec![TestNode {
             id: NodeId::new(0),
             labels: vec!["Person".into()],
-            properties: vec![("name".into(), Value::String("Alix".into()))],
+            properties: vec![(
+                "name".into(),
+                vec![(EpochId::new(0), Value::String("Alix".into()))],
+            )],
         }],
         vec![],
     );

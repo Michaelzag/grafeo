@@ -16,7 +16,12 @@ except ImportError:
     GRAFEO_AVAILABLE = False
 
 
-pytestmark = pytest.mark.skipif(not GRAFEO_AVAILABLE, reason="Grafeo Python bindings not installed")
+_HAS_SPARQL = GRAFEO_AVAILABLE and hasattr(GrafeoDB(), "execute_sparql")
+
+pytestmark = [
+    pytest.mark.skipif(not GRAFEO_AVAILABLE, reason="Grafeo Python bindings not installed"),
+    pytest.mark.skipif(not _HAS_SPARQL, reason="grafeo built without sparql feature"),
+]
 
 
 class TestRDFGraphQLTransactions:

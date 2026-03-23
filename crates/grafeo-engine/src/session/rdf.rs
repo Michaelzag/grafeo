@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
+#[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
 use std::time::Instant;
 
 use grafeo_common::types::{TransactionId, Value};
