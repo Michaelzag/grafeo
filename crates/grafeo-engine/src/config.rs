@@ -29,6 +29,32 @@ impl fmt::Display for GraphModel {
     }
 }
 
+/// Access mode for opening a database.
+///
+/// Controls whether the database is opened for full read-write access
+/// (the default) or read-only access. Read-only mode uses a shared file
+/// lock, allowing multiple processes to read the same `.grafeo` file
+/// concurrently.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum AccessMode {
+    /// Full read-write access (default). Acquires an exclusive file lock.
+    #[default]
+    ReadWrite,
+    /// Read-only access. Acquires a shared file lock, allowing concurrent
+    /// readers. The database loads the last checkpoint snapshot but does not
+    /// replay the WAL or allow mutations.
+    ReadOnly,
+}
+
+impl fmt::Display for AccessMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ReadWrite => write!(f, "read-write"),
+            Self::ReadOnly => write!(f, "read-only"),
+        }
+    }
+}
+
 /// Storage format for persistent databases.
 ///
 /// Controls whether the database uses a single `.grafeo` file or a legacy
@@ -194,6 +220,13 @@ pub struct Config {
     /// Old versions that are no longer visible to any active transaction are
     /// pruned to reclaim memory. Set to 0 to disable automatic GC.
     pub gc_interval: usize,
+
+    /// Access mode: read-write (default) or read-only.
+    ///
+    /// Read-only mode uses a shared file lock, allowing multiple processes to
+    /// read the same database concurrently. Mutations are rejected at the
+    /// session level.
+    pub access_mode: AccessMode,
 }
 
 /// Configuration for adaptive query execution.
@@ -282,6 +315,7 @@ impl Default for Config {
             schema_constraints: false,
             query_timeout: None,
             gc_interval: 100,
+            access_mode: AccessMode::default(),
         }
     }
 }
@@ -418,6 +452,27 @@ impl Config {
     pub fn with_gc_interval(mut self, interval: usize) -> Self {
         self.gc_interval = interval;
         self
+    }
+
+    /// Sets the access mode (read-write or read-only).
+    #[must_use]
+    pub fn with_access_mode(mut self, mode: AccessMode) -> Self {
+        self.access_mode = mode;
+        self
+    }
+
+    /// Shorthand for opening a persistent database in read-only mode.
+    ///
+    /// Uses a shared file lock, allowing multiple processes to read the same
+    /// `.grafeo` file concurrently. Mutations are rejected at the session level.
+    #[must_use]
+    pub fn read_only(path: impl Into<PathBuf>) -> Self {
+        Self {
+            path: Some(path.into()),
+            wal_enabled: false,
+            access_mode: AccessMode::ReadOnly,
+            ..Default::default()
+        }
     }
 
     /// Validates the configuration, returning an error for invalid combinations.
@@ -799,5 +854,38 @@ mod tests {
         assert!(config.spill_path.is_some());
         assert_eq!(config.query_timeout, Some(Duration::from_secs(60)));
         assert!(config.validate().is_ok());
+    }
+
+    // --- AccessMode tests ---
+
+    #[test]
+    fn test_access_mode_default_is_read_write() {
+        assert_eq!(AccessMode::default(), AccessMode::ReadWrite);
+    }
+
+    #[test]
+    fn test_access_mode_display() {
+        assert_eq!(AccessMode::ReadWrite.to_string(), "read-write");
+        assert_eq!(AccessMode::ReadOnly.to_string(), "read-only");
+    }
+
+    #[test]
+    fn test_config_with_access_mode() {
+        let config = Config::persistent("/tmp/db").with_access_mode(AccessMode::ReadOnly);
+        assert_eq!(config.access_mode, AccessMode::ReadOnly);
+    }
+
+    #[test]
+    fn test_config_read_only() {
+        let config = Config::read_only("/tmp/db.grafeo");
+        assert_eq!(config.access_mode, AccessMode::ReadOnly);
+        assert!(config.path.is_some());
+        assert!(!config.wal_enabled);
+    }
+
+    #[test]
+    fn test_config_default_is_read_write() {
+        let config = Config::default();
+        assert_eq!(config.access_mode, AccessMode::ReadWrite);
     }
 }

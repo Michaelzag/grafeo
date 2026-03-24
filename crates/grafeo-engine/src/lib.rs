@@ -44,7 +44,7 @@ pub use admin::{
     ValidationResult, ValidationWarning, WalStatus,
 };
 pub use catalog::{Catalog, CatalogError, IndexDefinition, IndexType};
-pub use config::{Config, ConfigError, DurabilityMode, GraphModel};
+pub use config::{AccessMode, Config, ConfigError, DurabilityMode, GraphModel};
 pub use database::GrafeoDB;
 pub use grafeo_core::graph::{GraphStore, GraphStoreMut};
 pub use memory_usage::MemoryUsage;

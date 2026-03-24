@@ -85,6 +85,19 @@ impl JsGrafeoDB {
         })
     }
 
+    /// Open an existing database in read-only mode.
+    ///
+    /// Uses a shared file lock, so multiple processes can read the same
+    /// .grafeo file concurrently. Mutations will throw an error.
+    #[napi(factory)]
+    pub fn open_read_only(path: String) -> Result<Self> {
+        let config = Config::read_only(path);
+        let db = GrafeoDB::with_config(config).map_err(NodeGrafeoError::from)?;
+        Ok(Self {
+            inner: Arc::new(RwLock::new(db)),
+        })
+    }
+
     /// Shared implementation for all language-specific execute methods.
     async fn execute_language_impl(
         &self,

@@ -1,6 +1,6 @@
 //! Integration tests for snapshot export/import.
 
-use grafeo_common::types::{EdgeId, NodeId, Value};
+use grafeo_common::types::{EdgeId, EpochId, NodeId, Value};
 use grafeo_engine::GrafeoDB;
 
 /// Mirror of the private Snapshot struct for crafting test payloads.
@@ -13,6 +13,8 @@ struct TestSnapshot {
     rdf_triples: Vec<()>,
     rdf_named_graphs: Vec<()>,
     schema: TestSnapshotSchema,
+    indexes: TestSnapshotIndexes,
+    epoch: u64,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Default)]
@@ -25,6 +27,13 @@ struct TestSnapshotSchema {
     graph_type_bindings: Vec<()>,
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct TestSnapshotIndexes {
+    property_indexes: Vec<()>,
+    vector_indexes: Vec<()>,
+    text_indexes: Vec<()>,
+}
+
 impl TestSnapshot {
     fn new(version: u8, nodes: Vec<TestNode>, edges: Vec<TestEdge>) -> Self {
         Self {
@@ -35,6 +44,8 @@ impl TestSnapshot {
             rdf_triples: vec![],
             rdf_named_graphs: vec![],
             schema: TestSnapshotSchema::default(),
+            indexes: TestSnapshotIndexes::default(),
+            epoch: 0,
         }
     }
 }
@@ -43,7 +54,7 @@ impl TestSnapshot {
 struct TestNode {
     id: NodeId,
     labels: Vec<String>,
-    properties: Vec<(String, Value)>,
+    properties: Vec<(String, Vec<(EpochId, Value)>)>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -52,7 +63,7 @@ struct TestEdge {
     src: NodeId,
     dst: NodeId,
     edge_type: String,
-    properties: Vec<(String, Value)>,
+    properties: Vec<(String, Vec<(EpochId, Value)>)>,
 }
 
 fn encode_snapshot(snap: &TestSnapshot) -> Vec<u8> {
@@ -518,7 +529,7 @@ fn import_rejects_dangling_edge_destination() {
 #[test]
 fn import_rejects_duplicate_node_ids() {
     let snap = TestSnapshot::new(
-        3,
+        4,
         vec![
             TestNode {
                 id: NodeId::new(0),
@@ -550,7 +561,7 @@ fn import_rejects_duplicate_node_ids() {
 #[test]
 fn import_rejects_duplicate_edge_ids() {
     let snap = TestSnapshot::new(
-        3,
+        4,
         vec![
             TestNode {
                 id: NodeId::new(0),
@@ -696,13 +707,16 @@ fn restore_snapshot_includes_named_graphs() {
 
 #[test]
 fn import_v1_snapshot_is_rejected() {
-    // V1 snapshots are no longer supported after consolidation to V3.
+    // V1 snapshots are no longer supported (current version is V4).
     let snap = TestSnapshot::new(
         1,
         vec![TestNode {
             id: NodeId::new(0),
             labels: vec!["Person".into()],
-            properties: vec![("name".into(), Value::String("Alix".into()))],
+            properties: vec![(
+                "name".into(),
+                vec![(EpochId::new(0), Value::String("Alix".into()))],
+            )],
         }],
         vec![],
     );

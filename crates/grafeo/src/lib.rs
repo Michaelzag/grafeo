@@ -66,8 +66,8 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 // Re-export the main database API
 pub use grafeo_engine::{
-    Catalog, CatalogError, Config, ConfigError, DurabilityMode, GrafeoDB, GraphModel, GraphStore,
-    GraphStoreMut, IndexDefinition, IndexType, Session, VERSION,
+    AccessMode, Catalog, CatalogError, Config, ConfigError, DurabilityMode, GrafeoDB, GraphModel,
+    GraphStore, GraphStoreMut, IndexDefinition, IndexType, Session, VERSION,
 };
 
 // Re-export core types - you'll need these for working with IDs and values

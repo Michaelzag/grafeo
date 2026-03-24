@@ -230,7 +230,17 @@ impl super::Planner {
         &self,
         left_join: &LeftJoinOp,
     ) -> Result<(Box<dyn Operator>, Vec<String>)> {
-        let (left_op, left_columns) = self.plan_operator(&left_join.left)?;
+        // Handle Empty left input (OPTIONAL MATCH as first clause):
+        // substitute a SingleRowOperator so the left side produces one row.
+        let (left_op, left_columns): (Box<dyn Operator>, Vec<String>) =
+            if matches!(left_join.left.as_ref(), LogicalOperator::Empty) {
+                let single_row: Box<dyn Operator> = Box::new(
+                    grafeo_core::execution::operators::single_row::SingleRowOperator::new(),
+                );
+                (single_row, Vec::new())
+            } else {
+                self.plan_operator(&left_join.left)?
+            };
         let (right_op, right_columns) = self.plan_operator(&left_join.right)?;
         let schema_fn = |cols: &[String]| self.derive_schema_from_columns(cols);
         Ok(super::common::build_left_join(
@@ -407,44 +417,61 @@ impl super::Planner {
             (Some(op), cols)
         };
 
-        // Convert match properties from LogicalExpression to Value
-        let match_properties: Vec<(String, grafeo_common::types::Value)> = merge
+        // Convert match properties to PropertySource (supports both constants and variables)
+        let match_properties: Vec<(String, PropertySource)> = merge
             .match_properties
             .iter()
-            .filter_map(|(name, expr)| {
-                if let LogicalExpression::Literal(v) = expr {
-                    Some((name.clone(), v.clone()))
-                } else {
-                    None // Skip non-literal expressions for now
-                }
+            .map(|(name, expr)| {
+                let source = self
+                    .expression_to_property_source(expr, &columns)
+                    .unwrap_or_else(|_| {
+                        // Fallback: try constant folding for complex expressions
+                        Self::try_fold_expression(expr).map_or(
+                            PropertySource::Constant(Value::Null),
+                            PropertySource::Constant,
+                        )
+                    });
+                (name.clone(), source)
             })
             .collect();
 
         // Convert ON CREATE properties
-        let on_create_properties: Vec<(String, grafeo_common::types::Value)> = merge
+        let on_create_properties: Vec<(String, PropertySource)> = merge
             .on_create
             .iter()
-            .filter_map(|(name, expr)| {
-                if let LogicalExpression::Literal(v) = expr {
-                    Some((name.clone(), v.clone()))
-                } else {
-                    None
-                }
+            .map(|(name, expr)| {
+                let source = self
+                    .expression_to_property_source(expr, &columns)
+                    .unwrap_or_else(|_| {
+                        Self::try_fold_expression(expr).map_or(
+                            PropertySource::Constant(Value::Null),
+                            PropertySource::Constant,
+                        )
+                    });
+                (name.clone(), source)
             })
             .collect();
 
         // Convert ON MATCH properties
-        let on_match_properties: Vec<(String, grafeo_common::types::Value)> = merge
+        let on_match_properties: Vec<(String, PropertySource)> = merge
             .on_match
             .iter()
-            .filter_map(|(name, expr)| {
-                if let LogicalExpression::Literal(v) = expr {
-                    Some((name.clone(), v.clone()))
-                } else {
-                    None
-                }
+            .map(|(name, expr)| {
+                let source = self
+                    .expression_to_property_source(expr, &columns)
+                    .unwrap_or_else(|_| {
+                        Self::try_fold_expression(expr).map_or(
+                            PropertySource::Constant(Value::Null),
+                            PropertySource::Constant,
+                        )
+                    });
+                (name.clone(), source)
             })
             .collect();
+
+        // Detect if the merge variable is already bound from the input.
+        // If so, record its column index for NULL-reference checking at runtime.
+        let bound_variable_column = columns.iter().position(|c| c == &merge.variable);
 
         // Column index for the merged node ID in the output
         let output_column = columns.len();
@@ -464,6 +491,7 @@ impl super::Planner {
                 on_match_properties,
                 output_schema,
                 output_column,
+                bound_variable_column,
             },
         )
         .with_transaction_context(self.viewing_epoch, self.transaction_id);
@@ -505,40 +533,52 @@ impl super::Planner {
                 ))
             })?;
 
-        // Convert match properties from LogicalExpression to Value
-        let match_properties: Vec<(String, grafeo_common::types::Value)> = merge_rel
+        // Convert match properties to PropertySource (supports variables from input)
+        let match_properties: Vec<(String, PropertySource)> = merge_rel
             .match_properties
             .iter()
-            .filter_map(|(name, expr)| {
-                if let LogicalExpression::Literal(v) = expr {
-                    Some((name.clone(), v.clone()))
-                } else {
-                    None
-                }
+            .map(|(name, expr)| {
+                let source = self
+                    .expression_to_property_source(expr, &columns)
+                    .unwrap_or_else(|_| {
+                        Self::try_fold_expression(expr).map_or(
+                            PropertySource::Constant(Value::Null),
+                            PropertySource::Constant,
+                        )
+                    });
+                (name.clone(), source)
             })
             .collect();
 
-        let on_create_properties: Vec<(String, grafeo_common::types::Value)> = merge_rel
+        let on_create_properties: Vec<(String, PropertySource)> = merge_rel
             .on_create
             .iter()
-            .filter_map(|(name, expr)| {
-                if let LogicalExpression::Literal(v) = expr {
-                    Some((name.clone(), v.clone()))
-                } else {
-                    None
-                }
+            .map(|(name, expr)| {
+                let source = self
+                    .expression_to_property_source(expr, &columns)
+                    .unwrap_or_else(|_| {
+                        Self::try_fold_expression(expr).map_or(
+                            PropertySource::Constant(Value::Null),
+                            PropertySource::Constant,
+                        )
+                    });
+                (name.clone(), source)
             })
             .collect();
 
-        let on_match_properties: Vec<(String, grafeo_common::types::Value)> = merge_rel
+        let on_match_properties: Vec<(String, PropertySource)> = merge_rel
             .on_match
             .iter()
-            .filter_map(|(name, expr)| {
-                if let LogicalExpression::Literal(v) = expr {
-                    Some((name.clone(), v.clone()))
-                } else {
-                    None
-                }
+            .map(|(name, expr)| {
+                let source = self
+                    .expression_to_property_source(expr, &columns)
+                    .unwrap_or_else(|_| {
+                        Self::try_fold_expression(expr).map_or(
+                            PropertySource::Constant(Value::Null),
+                            PropertySource::Constant,
+                        )
+                    });
+                (name.clone(), source)
             })
             .collect();
 
@@ -557,6 +597,8 @@ impl super::Planner {
         let config = MergeRelationshipConfig {
             source_column,
             target_column,
+            source_variable: merge_rel.source_variable.clone(),
+            target_variable: merge_rel.target_variable.clone(),
             edge_type: merge_rel.edge_type.clone(),
             match_properties,
             on_create_properties,

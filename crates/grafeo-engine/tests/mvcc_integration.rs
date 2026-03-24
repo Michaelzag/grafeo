@@ -125,28 +125,23 @@ fn test_committed_writes_visible_to_new_transactions() {
 
 #[test]
 fn test_write_write_conflict_detection() {
-    // Two transactions writing to the same entity should result in a conflict
+    // Two transactions writing to the same entity: first-writer-wins,
+    // so the second record_write is rejected immediately.
     let store = create_test_store();
     let tx_manager = Arc::new(TransactionManager::new());
 
     let node_id = store.node_ids()[0]; // Get first node
 
-    // T1 records a write
+    // T1 records a write (succeeds)
     let tx1 = tx_manager.begin();
     tx_manager.record_write(tx1, node_id).unwrap();
 
-    // T2 also records a write to same entity
+    // T2 tries to write the same entity (rejected by first-writer-wins)
     let tx2 = tx_manager.begin();
-    tx_manager.record_write(tx2, node_id).unwrap();
-
-    // T1 commits first
-    tx_manager.commit(tx1).unwrap();
-
-    // T2 should fail with conflict
-    let result = tx_manager.commit(tx2);
+    let result = tx_manager.record_write(tx2, node_id);
     assert!(
         result.is_err(),
-        "Second transaction should fail with write-write conflict"
+        "Second writer should be rejected immediately"
     );
 
     let err = result.unwrap_err();
@@ -154,6 +149,64 @@ fn test_write_write_conflict_detection() {
         err.to_string().contains("conflict"),
         "Error should indicate write conflict: {}",
         err
+    );
+}
+
+#[test]
+fn test_committed_transaction_conflict_at_commit() {
+    // T2 should fail at commit if T1 wrote to the same entity and committed
+    // between T2's start and T2's commit.
+    let store = create_test_store();
+    let tx_manager = Arc::new(TransactionManager::new());
+
+    let node_id = store.node_ids()[0];
+
+    // Both transactions start (T2 records its start_epoch)
+    let tx1 = tx_manager.begin();
+    let tx2 = tx_manager.begin();
+
+    // T1 writes and commits (advances epoch past T2's start)
+    tx_manager.record_write(tx1, node_id).unwrap();
+    tx_manager.commit(tx1).unwrap();
+
+    // T2 writes to same entity (succeeds: T1 is no longer active)
+    tx_manager.record_write(tx2, node_id).unwrap();
+
+    // T2 commit fails: T1 committed a conflicting write after T2's start
+    let result = tx_manager.commit(tx2);
+    assert!(
+        result.is_err(),
+        "T2 should fail at commit due to write-write conflict with committed T1"
+    );
+    let err = result.unwrap_err();
+    assert!(
+        err.to_string().contains("conflict"),
+        "Error should indicate write conflict: {err}"
+    );
+}
+
+#[test]
+fn test_post_commit_write_succeeds() {
+    // After T1 commits, a new transaction started after the commit should
+    // be able to write and commit to the same entity successfully.
+    let store = create_test_store();
+    let tx_manager = Arc::new(TransactionManager::new());
+
+    let node_id = store.node_ids()[0];
+
+    // T1 writes and commits
+    let tx1 = tx_manager.begin();
+    tx_manager.record_write(tx1, node_id).unwrap();
+    tx_manager.commit(tx1).unwrap();
+
+    // T2 starts after T1 committed, writes to same entity
+    let tx2 = tx_manager.begin();
+    tx_manager.record_write(tx2, node_id).unwrap();
+
+    // T2 commits successfully (T1's commit is within T2's visible snapshot)
+    assert!(
+        tx_manager.commit(tx2).is_ok(),
+        "T2 should commit after T1 committed (no conflict)"
     );
 }
 

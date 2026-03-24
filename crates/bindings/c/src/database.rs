@@ -101,6 +101,28 @@ pub extern "C" fn grafeo_open(path: *const c_char) -> *mut GrafeoDatabase {
     }
 }
 
+/// Open an existing database in read-only mode.
+///
+/// Uses a shared file lock, so multiple processes can read the same
+/// .grafeo file concurrently. Mutations will return an error.
+///
+/// Returns an opaque pointer, or null on error.
+#[unsafe(no_mangle)]
+pub extern "C" fn grafeo_open_read_only(path: *const c_char) -> *mut GrafeoDatabase {
+    let Ok(path_str) = str_from_ptr(path) else {
+        return std::ptr::null_mut();
+    };
+    match GrafeoDB::with_config(Config::read_only(path_str)) {
+        Ok(db) => Box::into_raw(Box::new(GrafeoDatabase {
+            inner: Arc::new(RwLock::new(db)),
+        })),
+        Err(e) => {
+            set_error(&e);
+            std::ptr::null_mut()
+        }
+    }
+}
+
 /// Close the database, flushing pending writes.
 #[unsafe(no_mangle)]
 pub extern "C" fn grafeo_close(db: *mut GrafeoDatabase) -> GrafeoStatus {

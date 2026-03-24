@@ -120,6 +120,9 @@ pub struct GrafeoDB {
     /// When set, each call to `session()` pre-configures the session to this graph.
     /// Updated after every one-shot `execute()` to reflect `USE GRAPH` / `SESSION RESET`.
     current_graph: RwLock<Option<String>>,
+    /// Whether this database is open in read-only mode.
+    /// When true, sessions automatically enforce read-only transactions.
+    read_only: bool,
 }
 
 impl GrafeoDB {
@@ -169,6 +172,35 @@ impl GrafeoDB {
     #[cfg(feature = "wal")]
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::with_config(Config::persistent(path.as_ref()))
+    }
+
+    /// Opens an existing database in read-only mode.
+    ///
+    /// Uses a shared file lock, so multiple processes can read the same
+    /// `.grafeo` file concurrently. The database loads the last checkpoint
+    /// snapshot but does **not** replay the WAL or allow mutations.
+    ///
+    /// Currently only supports the single-file (`.grafeo`) format.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file doesn't exist or can't be read.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use grafeo_engine::GrafeoDB;
+    ///
+    /// let db = GrafeoDB::open_read_only("./my_graph.grafeo")?;
+    /// let session = db.session();
+    /// let result = session.execute("MATCH (n) RETURN n LIMIT 10")?;
+    /// // Mutations will return an error:
+    /// // session.execute("INSERT (:Person)") => Err(ReadOnly)
+    /// # Ok::<(), grafeo_common::utils::error::Error>(())
+    /// ```
+    #[cfg(feature = "grafeo-file")]
+    pub fn open_read_only(path: impl AsRef<std::path::Path>) -> Result<Self> {
+        Self::with_config(Config::read_only(path.as_ref()))
     }
 
     /// Creates a database with custom configuration.
@@ -221,9 +253,38 @@ impl GrafeoDB {
         // Create catalog early so WAL replay can restore schema definitions
         let catalog = Arc::new(Catalog::new());
 
+        let is_read_only = config.access_mode == crate::config::AccessMode::ReadOnly;
+
         // --- Single-file format (.grafeo) ---
         #[cfg(feature = "grafeo-file")]
-        let file_manager: Option<Arc<GrafeoFileManager>> = if config.wal_enabled {
+        let file_manager: Option<Arc<GrafeoFileManager>> = if is_read_only {
+            // Read-only mode: open with shared lock, load snapshot, skip WAL
+            if let Some(ref db_path) = config.path {
+                if db_path.exists() && db_path.is_file() {
+                    let fm = GrafeoFileManager::open_read_only(db_path)?;
+                    let snapshot_data = fm.read_snapshot()?;
+                    if !snapshot_data.is_empty() {
+                        Self::apply_snapshot_data(
+                            &store,
+                            &catalog,
+                            #[cfg(feature = "rdf")]
+                            &rdf_store,
+                            &snapshot_data,
+                        )?;
+                    }
+                    Some(Arc::new(fm))
+                } else {
+                    return Err(grafeo_common::utils::error::Error::Internal(format!(
+                        "read-only open requires an existing .grafeo file: {}",
+                        db_path.display()
+                    )));
+                }
+            } else {
+                return Err(grafeo_common::utils::error::Error::Internal(
+                    "read-only mode requires a database path".to_string(),
+                ));
+            }
+        } else if config.wal_enabled {
             if let Some(ref db_path) = config.path {
                 if Self::should_use_single_file(db_path, config.storage_format) {
                     let fm = if db_path.exists() && db_path.is_file() {
@@ -275,8 +336,11 @@ impl GrafeoDB {
         };
 
         // Determine whether to use the WAL directory path (legacy) or sidecar
+        // Read-only mode skips WAL entirely (no recovery, no creation).
         #[cfg(feature = "wal")]
-        let wal = if config.wal_enabled {
+        let wal = if is_read_only {
+            None
+        } else if config.wal_enabled {
             if let Some(ref db_path) = config.path {
                 // When using single-file format, the WAL is a sidecar directory
                 #[cfg(feature = "grafeo-file")]
@@ -345,6 +409,11 @@ impl GrafeoDB {
         // Create query cache with default capacity (1000 queries)
         let query_cache = Arc::new(QueryCache::default());
 
+        // After all snapshot/WAL recovery, sync TransactionManager epoch
+        // with the store so queries use the correct viewing epoch.
+        #[cfg(feature = "temporal")]
+        transaction_manager.sync_epoch(store.current_epoch());
+
         Ok(Self {
             config,
             store,
@@ -370,6 +439,7 @@ impl GrafeoDB {
             #[cfg(feature = "metrics")]
             metrics: Some(Arc::new(crate::metrics::MetricsRegistry::new())),
             current_graph: RwLock::new(None),
+            read_only: is_read_only,
         })
     }
 
@@ -441,6 +511,7 @@ impl GrafeoDB {
             #[cfg(feature = "metrics")]
             metrics: Some(Arc::new(crate::metrics::MetricsRegistry::new())),
             current_graph: RwLock::new(None),
+            read_only: false,
         })
     }
 
@@ -726,9 +797,16 @@ impl GrafeoDB {
                 | WalRecord::CreateRdfGraph { .. }
                 | WalRecord::DropRdfGraph { .. } => {}
 
-                WalRecord::TransactionCommit { .. }
-                | WalRecord::TransactionAbort { .. }
-                | WalRecord::Checkpoint { .. } => {
+                WalRecord::TransactionCommit { .. } => {
+                    // In temporal mode, advance the store epoch on each committed
+                    // transaction so that subsequent property/label operations
+                    // are recorded at the correct epoch in their VersionLogs.
+                    #[cfg(feature = "temporal")]
+                    {
+                        target_store.new_epoch();
+                    }
+                }
+                WalRecord::TransactionAbort { .. } | WalRecord::Checkpoint { .. } => {
                     // Transaction control records don't need replay action
                     // (recovery already filtered to only committed transactions)
                 }
@@ -831,6 +909,7 @@ impl GrafeoDB {
             query_timeout: self.config.query_timeout,
             commit_counter: Arc::clone(&self.commit_counter),
             gc_interval: self.config.gc_interval,
+            read_only: self.read_only,
         };
 
         if let Some(ref ext_store) = self.external_store {
@@ -899,6 +978,12 @@ impl GrafeoDB {
     #[must_use]
     pub fn adaptive_config(&self) -> &crate::config::AdaptiveConfig {
         &self.config.adaptive
+    }
+
+    /// Returns `true` if this database was opened in read-only mode.
+    #[must_use]
+    pub fn is_read_only(&self) -> bool {
+        self.read_only
     }
 
     /// Returns the configuration.
@@ -1077,6 +1162,16 @@ impl GrafeoDB {
     pub fn close(&self) -> Result<()> {
         let mut is_open = self.is_open.write();
         if !*is_open {
+            return Ok(());
+        }
+
+        // Read-only databases: just release the shared lock, no checkpointing
+        if self.read_only {
+            #[cfg(feature = "grafeo-file")]
+            if let Some(ref fm) = self.file_manager {
+                fm.close()?;
+            }
+            *is_open = false;
             return Ok(());
         }
 

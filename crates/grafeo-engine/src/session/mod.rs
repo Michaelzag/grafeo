@@ -70,6 +70,8 @@ pub(crate) struct SessionConfig {
     pub query_timeout: Option<Duration>,
     pub commit_counter: Arc<AtomicUsize>,
     pub gc_interval: usize,
+    /// When true, the session permanently blocks all mutations.
+    pub read_only: bool,
 }
 
 /// Your handle to the database - execute queries and manage transactions.
@@ -97,6 +99,9 @@ pub struct Session {
     current_transaction: parking_lot::Mutex<Option<TransactionId>>,
     /// Whether the current transaction is read-only (blocks mutations).
     read_only_tx: parking_lot::Mutex<bool>,
+    /// Whether the database itself is read-only (set at open time, never changes).
+    /// When true, `read_only_tx` is always true regardless of transaction flags.
+    db_read_only: bool,
     /// Whether the session is in auto-commit mode.
     auto_commit: bool,
     /// Adaptive execution configuration.
@@ -189,7 +194,8 @@ impl Session {
             transaction_manager: cfg.transaction_manager,
             query_cache: cfg.query_cache,
             current_transaction: parking_lot::Mutex::new(None),
-            read_only_tx: parking_lot::Mutex::new(false),
+            read_only_tx: parking_lot::Mutex::new(cfg.read_only),
+            db_read_only: cfg.read_only,
             auto_commit: true,
             adaptive_config: cfg.adaptive_config,
             factorized_execution: cfg.factorized_execution,
@@ -273,7 +279,8 @@ impl Session {
             transaction_manager: cfg.transaction_manager,
             query_cache: cfg.query_cache,
             current_transaction: parking_lot::Mutex::new(None),
-            read_only_tx: parking_lot::Mutex::new(false),
+            read_only_tx: parking_lot::Mutex::new(cfg.read_only),
+            db_read_only: cfg.read_only,
             auto_commit: true,
             adaptive_config: cfg.adaptive_config,
             factorized_execution: cfg.factorized_execution,
@@ -2231,6 +2238,30 @@ impl Session {
         result
     }
 
+    /// Executes a GQL query at a specific epoch with optional parameters.
+    ///
+    /// Combines epoch-based time travel with parameterized queries.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if parsing or execution fails.
+    #[cfg(feature = "gql")]
+    pub fn execute_at_epoch_with_params(
+        &self,
+        query: &str,
+        epoch: EpochId,
+        params: Option<std::collections::HashMap<String, Value>>,
+    ) -> Result<QueryResult> {
+        let previous = self.viewing_epoch_override.lock().replace(epoch);
+        let result = if let Some(p) = params {
+            self.execute_with_params(query, p)
+        } else {
+            self.execute(query)
+        };
+        *self.viewing_epoch_override.lock() = previous;
+        result
+    }
+
     /// Executes a GQL query with parameters.
     ///
     /// # Errors
@@ -3002,7 +3033,7 @@ impl Session {
             self.transaction_manager.begin()
         };
         *current = Some(transaction_id);
-        *self.read_only_tx.lock() = read_only;
+        *self.read_only_tx.lock() = read_only || self.db_read_only;
 
         // Record the initial graph as "touched" for cross-graph atomicity.
         // Uses the full storage key (schema/graph) for schema-scoped resolution.
@@ -3069,7 +3100,7 @@ impl Session {
                 }
                 #[cfg(feature = "rdf")]
                 self.rollback_rdf_transaction(transaction_id);
-                *self.read_only_tx.lock() = false;
+                *self.read_only_tx.lock() = self.db_read_only;
                 self.savepoints.lock().clear();
                 self.touched_graphs.lock().clear();
                 #[cfg(feature = "metrics")]
@@ -3114,7 +3145,7 @@ impl Session {
         }
 
         // Reset read-only flag, clear savepoints and touched graphs
-        *self.read_only_tx.lock() = false;
+        *self.read_only_tx.lock() = self.db_read_only;
         self.savepoints.lock().clear();
         self.touched_graphs.lock().clear();
 
@@ -3197,7 +3228,7 @@ impl Session {
         })?;
 
         // Reset read-only flag
-        *self.read_only_tx.lock() = false;
+        *self.read_only_tx.lock() = self.db_read_only;
 
         // Discard uncommitted versions in ALL touched LPG stores (cross-graph atomicity).
         let touched = self.touched_graphs.lock().clone();

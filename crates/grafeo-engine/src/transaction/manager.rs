@@ -115,6 +115,8 @@ pub struct TransactionManager {
     next_transaction_id: AtomicU64,
     /// Current epoch.
     current_epoch: AtomicU64,
+    /// Number of currently active transactions (for fast-path conflict skip).
+    active_count: AtomicU64,
     /// Active transactions.
     transactions: RwLock<FxHashMap<TransactionId, TransactionInfo>>,
     /// Committed transaction epochs (for conflict detection).
@@ -131,6 +133,7 @@ impl TransactionManager {
             // TransactionId::INVALID = u64::MAX, TransactionId::SYSTEM = 1, user transactions start at 2
             next_transaction_id: AtomicU64::new(2),
             current_epoch: AtomicU64::new(0),
+            active_count: AtomicU64::new(0),
             transactions: RwLock::new(FxHashMap::default()),
             committed_epochs: RwLock::new(FxHashMap::default()),
         }
@@ -149,6 +152,7 @@ impl TransactionManager {
 
         let info = TransactionInfo::new(epoch, isolation_level);
         self.transactions.write().insert(transaction_id, info);
+        self.active_count.fetch_add(1, Ordering::Relaxed);
         transaction_id
     }
 
@@ -162,16 +166,22 @@ impl TransactionManager {
 
     /// Records a write operation for the transaction.
     ///
+    /// Uses first-writer-wins: if another active transaction has already
+    /// written to the same entity, returns a write-write conflict error
+    /// immediately (before the caller mutates the store).
+    ///
     /// # Errors
     ///
-    /// Returns an error if the transaction is not active.
+    /// Returns an error if the transaction is not active or if another
+    /// active transaction has already written to the same entity.
     pub fn record_write(
         &self,
         transaction_id: TransactionId,
         entity: impl Into<EntityId>,
     ) -> Result<()> {
+        let entity = entity.into();
         let mut txns = self.transactions.write();
-        let info = txns.get_mut(&transaction_id).ok_or_else(|| {
+        let info = txns.get(&transaction_id).ok_or_else(|| {
             Error::Transaction(TransactionError::InvalidState(
                 "Transaction not found".to_string(),
             ))
@@ -183,7 +193,27 @@ impl TransactionManager {
             )));
         }
 
-        info.write_set.insert(entity.into());
+        // First-writer-wins: reject if another active transaction already
+        // wrote to the same entity. This prevents interleaved PENDING
+        // entries in VersionLogs that cannot be rolled back per-transaction.
+        // Skip the scan when only one transaction is active (common case for
+        // auto-commit): there is nobody to conflict with.
+        if self.active_count.load(Ordering::Relaxed) > 1 {
+            for (other_tx, other_info) in txns.iter() {
+                if *other_tx != transaction_id
+                    && other_info.state == TransactionState::Active
+                    && other_info.write_set.contains(&entity)
+                {
+                    return Err(Error::Transaction(TransactionError::WriteConflict(
+                        format!("Write-write conflict on entity {entity:?}"),
+                    )));
+                }
+            }
+        }
+
+        // Safe to record: re-borrow mutably
+        let info = txns.get_mut(&transaction_id).expect("checked above");
+        info.write_set.insert(entity);
         Ok(())
     }
 
@@ -336,6 +366,7 @@ impl TransactionManager {
         if let Some(info) = txns.get_mut(&transaction_id) {
             info.state = TransactionState::Committed;
         }
+        self.active_count.fetch_sub(1, Ordering::Relaxed);
 
         // Record commit epoch (need to drop read lock first)
         drop(committed);
@@ -367,6 +398,7 @@ impl TransactionManager {
         }
 
         info.state = TransactionState::Aborted;
+        self.active_count.fetch_sub(1, Ordering::Relaxed);
         Ok(())
     }
 
@@ -412,6 +444,7 @@ impl TransactionManager {
         for info in txns.values_mut() {
             if info.state == TransactionState::Active {
                 info.state = TransactionState::Aborted;
+                self.active_count.fetch_sub(1, Ordering::Relaxed);
             }
         }
     }
@@ -436,6 +469,15 @@ impl TransactionManager {
     #[must_use]
     pub fn current_epoch(&self) -> EpochId {
         EpochId::new(self.current_epoch.load(Ordering::Acquire))
+    }
+
+    /// Synchronizes the epoch counter to at least the given value.
+    ///
+    /// Used after snapshot import and WAL recovery to align the
+    /// TransactionManager epoch with the store epoch.
+    pub fn sync_epoch(&self, epoch: EpochId) {
+        self.current_epoch
+            .fetch_max(epoch.as_u64(), Ordering::SeqCst);
     }
 
     /// Returns the minimum epoch that must be preserved for active transactions.
@@ -734,25 +776,24 @@ mod tests {
         let tx1 = mgr.begin();
         let tx2 = mgr.begin();
 
-        // Both try to write to the same entity
+        // First writer succeeds
         let entity = NodeId::new(42);
         mgr.record_write(tx1, entity).unwrap();
-        mgr.record_write(tx2, entity).unwrap();
 
-        // First commit succeeds
-        let result1 = mgr.commit(tx1);
-        assert!(result1.is_ok());
-
-        // Second commit should fail due to write-write conflict
-        let result2 = mgr.commit(tx2);
-        assert!(result2.is_err());
+        // Second writer is rejected immediately (first-writer-wins)
+        let result = mgr.record_write(tx2, entity);
+        assert!(result.is_err());
         assert!(
-            result2
+            result
                 .unwrap_err()
                 .to_string()
                 .contains("Write-write conflict"),
             "Expected write-write conflict error"
         );
+
+        // First commit succeeds (no conflict at commit time either)
+        let result1 = mgr.commit(tx1);
+        assert!(result1.is_ok());
     }
 
     #[test]
@@ -1052,18 +1093,21 @@ mod tests {
 
         let entity = NodeId::new(42);
 
-        // Both transactions write the same entity
+        // Both transactions attempt to write the same entity
         let tx1 = mgr.begin_with_isolation(IsolationLevel::Serializable);
         let tx2 = mgr.begin_with_isolation(IsolationLevel::Serializable);
 
+        // First writer succeeds
         mgr.record_write(tx1, entity).unwrap();
-        mgr.record_write(tx2, entity).unwrap();
+
+        // Second writer is rejected immediately (first-writer-wins)
+        let result = mgr.record_write(tx2, entity);
+        assert!(
+            result.is_err(),
+            "Second record_write should fail with write-write conflict"
+        );
 
         // First commit succeeds
         assert!(mgr.commit(tx1).is_ok());
-
-        // Second commit fails (write-write conflict)
-        let result = mgr.commit(tx2);
-        assert!(result.is_err());
     }
 }

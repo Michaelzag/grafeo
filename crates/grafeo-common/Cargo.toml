@@ -36,6 +36,7 @@ parking_lot.workspace = true
 [features]
 default = []
 tiered-storage = []
+temporal = []
 
 [dev-dependencies]
 criterion.workspace = true

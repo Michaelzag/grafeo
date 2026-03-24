@@ -309,7 +309,17 @@ impl GqlTranslator {
 
                 match clause {
                     ast::QueryClause::Match(match_clause) => {
-                        if matches!(plan, LogicalOperator::Empty) {
+                        if matches!(plan, LogicalOperator::Empty) && match_clause.optional {
+                            // OPTIONAL MATCH as the first clause: left join with
+                            // an implicit unit table so unmatched patterns produce
+                            // a single row of NULLs instead of zero rows.
+                            let match_plan = self.translate_match(match_clause)?;
+                            plan = LogicalOperator::LeftJoin(LeftJoinOp {
+                                left: Box::new(LogicalOperator::Empty),
+                                right: Box::new(match_plan),
+                                condition: None,
+                            });
+                        } else if matches!(plan, LogicalOperator::Empty) {
                             // No prior input: standard MATCH
                             plan = self.translate_match(match_clause)?;
                         } else if match_clause.optional {
@@ -445,7 +455,13 @@ impl GqlTranslator {
             // Legacy path: process MATCH, then UNWIND, then MERGE separately
             for match_clause in &query.match_clauses {
                 let match_plan = self.translate_match(match_clause)?;
-                if matches!(plan, LogicalOperator::Empty) {
+                if matches!(plan, LogicalOperator::Empty) && match_clause.optional {
+                    plan = LogicalOperator::LeftJoin(LeftJoinOp {
+                        left: Box::new(LogicalOperator::Empty),
+                        right: Box::new(match_plan),
+                        condition: None,
+                    });
+                } else if matches!(plan, LogicalOperator::Empty) {
                     plan = match_plan;
                 } else if match_clause.optional {
                     plan = LogicalOperator::LeftJoin(LeftJoinOp {

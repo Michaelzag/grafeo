@@ -27,7 +27,7 @@ use super::header;
 pub struct GrafeoFileManager {
     /// Path to the `.grafeo` file.
     path: PathBuf,
-    /// Open file handle (read/write).
+    /// Open file handle (read/write or read-only).
     file: Mutex<File>,
     /// File header (read once on open, immutable afterwards).
     file_header: FileHeader,
@@ -35,6 +35,8 @@ pub struct GrafeoFileManager {
     active_header: Mutex<DbHeader>,
     /// Slot index (0 or 1) of the active header.
     active_slot: Mutex<u8>,
+    /// Whether this manager was opened in read-only mode.
+    read_only: bool,
 }
 
 impl GrafeoFileManager {
@@ -102,6 +104,7 @@ impl GrafeoFileManager {
             file_header,
             active_header: Mutex::new(DbHeader::EMPTY),
             active_slot: Mutex::new(0),
+            read_only: false,
         })
     }
 
@@ -139,7 +142,58 @@ impl GrafeoFileManager {
             file_header,
             active_header: Mutex::new(active_header),
             active_slot: Mutex::new(active_slot),
+            read_only: false,
         })
+    }
+
+    /// Opens an existing `.grafeo` file in read-only mode.
+    ///
+    /// Uses a **shared** file lock (`try_lock_shared`), allowing multiple
+    /// readers to open the same file concurrently, even while a writer holds
+    /// an exclusive lock (on platforms with advisory locking).
+    ///
+    /// The returned manager only supports [`read_snapshot`](Self::read_snapshot)
+    /// and other read-only operations. Calling [`write_snapshot`](Self::write_snapshot)
+    /// will return an error.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file does not exist, has invalid magic, or
+    /// an unsupported format version.
+    pub fn open_read_only(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref().to_path_buf();
+
+        let mut file = OpenOptions::new().read(true).open(&path)?;
+
+        // Acquire a shared lock: coexists with other shared locks but
+        // blocks if an exclusive lock cannot be shared (platform-dependent).
+        file.try_lock_shared().map_err(|_| {
+            Error::Internal(format!(
+                "database file cannot be locked for reading: {}",
+                path.display()
+            ))
+        })?;
+
+        let file_header = header::read_file_header(&mut file)?;
+        header::validate_file_header(&file_header)?;
+
+        let (h0, h1) = header::read_db_headers(&mut file)?;
+        let (active_slot, active_header) = header::active_db_header(&h0, &h1);
+
+        Ok(Self {
+            path,
+            file: Mutex::new(file),
+            file_header,
+            active_header: Mutex::new(active_header),
+            active_slot: Mutex::new(active_slot),
+            read_only: true,
+        })
+    }
+
+    /// Returns `true` if this manager was opened in read-only mode.
+    #[must_use]
+    pub fn is_read_only(&self) -> bool {
+        self.read_only
     }
 
     /// Writes snapshot data into the file and updates the inactive DB header.
@@ -162,6 +216,12 @@ impl GrafeoFileManager {
         node_count: u64,
         edge_count: u64,
     ) -> Result<()> {
+        if self.read_only {
+            return Err(Error::Internal(
+                "cannot write snapshot: database is open in read-only mode".to_string(),
+            ));
+        }
+
         use grafeo_core::testing::crash::maybe_crash;
 
         let checksum = crc32fast::hash(data);
@@ -583,5 +643,67 @@ mod tests {
         let result = manager.read_snapshot();
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("checksum"));
+    }
+
+    #[test]
+    fn open_read_only_reads_snapshot() {
+        let dir = test_dir();
+        let path = dir.path().join("ro.grafeo");
+
+        // Create and write snapshot, then close
+        {
+            let manager = GrafeoFileManager::create(&path).unwrap();
+            manager
+                .write_snapshot(b"read-only test data", 3, 2, 5, 10)
+                .unwrap();
+            manager.close().unwrap();
+        }
+
+        // Open read-only
+        let ro = GrafeoFileManager::open_read_only(&path).unwrap();
+        assert!(ro.is_read_only());
+        let data = ro.read_snapshot().unwrap();
+        assert_eq!(data, b"read-only test data");
+
+        let header = ro.active_header();
+        assert_eq!(header.epoch, 3);
+        assert_eq!(header.node_count, 5);
+        assert_eq!(header.edge_count, 10);
+    }
+
+    #[test]
+    fn read_only_rejects_write_snapshot() {
+        let dir = test_dir();
+        let path = dir.path().join("ro_write.grafeo");
+
+        {
+            let manager = GrafeoFileManager::create(&path).unwrap();
+            manager.close().unwrap();
+        }
+
+        let ro = GrafeoFileManager::open_read_only(&path).unwrap();
+        let result = ro.write_snapshot(b"nope", 1, 1, 0, 0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("read-only"));
+    }
+
+    #[test]
+    fn read_only_coexists_with_exclusive_after_close() {
+        let dir = test_dir();
+        let path = dir.path().join("coexist.grafeo");
+
+        // Create, write, close
+        {
+            let manager = GrafeoFileManager::create(&path).unwrap();
+            manager.write_snapshot(b"coexist data", 1, 1, 1, 1).unwrap();
+            manager.close().unwrap();
+        }
+
+        // Two read-only opens should coexist
+        let ro1 = GrafeoFileManager::open_read_only(&path).unwrap();
+        let ro2 = GrafeoFileManager::open_read_only(&path).unwrap();
+
+        assert_eq!(ro1.read_snapshot().unwrap(), b"coexist data");
+        assert_eq!(ro2.read_snapshot().unwrap(), b"coexist data");
     }
 }

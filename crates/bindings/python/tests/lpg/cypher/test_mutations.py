@@ -182,3 +182,54 @@ class TestCypherSpecificMutations:
         rows = list(result)
         assert len(rows) == 1
         assert rows[0]["n.level"] == -3
+
+    def test_cypher_create_multiple_negative_properties(self, db):
+        """Test CREATE with multiple negative properties (issue #160)."""
+        db.execute_cypher("CREATE (:Point {x: -1, y: -2.5, z: -3})")
+
+        result = db.execute_cypher("MATCH (n:Point) RETURN n.x, n.y, n.z")
+        rows = list(result)
+        assert len(rows) == 1
+        assert rows[0]["n.x"] == -1
+        assert rows[0]["n.y"] == -2.5
+        assert rows[0]["n.z"] == -3
+
+    def test_cypher_create_edge_with_negative_property(self, db):
+        """Test CREATE edge with negative property (issue #160)."""
+        db.execute_cypher(
+            "CREATE (:Node {name: 'Alix'})-[:LINK {weight: -0.75}]->(:Node {name: 'Gus'})"
+        )
+
+        result = db.execute_cypher("MATCH ()-[r:LINK]->() RETURN r.weight")
+        rows = list(result)
+        assert rows[0]["r.weight"] == -0.75
+
+    def test_cypher_set_negative_value(self, db):
+        """Test Cypher SET with negative value (issue #160)."""
+        db.execute_cypher("CREATE (:Sensor {name: 'Temp', reading: 25})")
+        db.execute_cypher("MATCH (n:Sensor {name: 'Temp'}) SET n.reading = -18.5")
+
+        result = db.execute_cypher("MATCH (n:Sensor {name: 'Temp'}) RETURN n.reading")
+        rows = list(result)
+        assert rows[0]["n.reading"] == -18.5
+
+    def test_cypher_where_with_negative(self, db):
+        """Test Cypher WHERE with negative comparison (issue #160)."""
+        db.execute_cypher("CREATE (:Floor {level: -1, name: 'B1'})")
+        db.execute_cypher("CREATE (:Floor {level: -2, name: 'B2'})")
+        db.execute_cypher("CREATE (:Floor {level: 0, name: 'G'})")
+
+        result = db.execute_cypher("MATCH (n:Floor) WHERE n.level = -2 RETURN n.name")
+        rows = list(result)
+        assert len(rows) == 1
+        assert rows[0]["n.name"] == "B2"
+
+    def test_cypher_merge_with_negative(self, db):
+        """Test Cypher MERGE with negative property (issue #160)."""
+        db.execute_cypher("MERGE (:Floor {level: -1, name: 'Basement'})")
+
+        result = db.execute_cypher("MATCH (n:Floor) RETURN n.level, n.name")
+        rows = list(result)
+        assert len(rows) == 1
+        assert rows[0]["n.level"] == -1
+        assert rows[0]["n.name"] == "Basement"

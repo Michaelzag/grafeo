@@ -5,9 +5,9 @@
 //! 2. If found, return existing element (optionally apply ON MATCH SET)
 //! 3. If not found, create the element (optionally apply ON CREATE SET)
 
-use super::{ConstraintValidator, Operator, OperatorResult};
-use crate::execution::chunk::DataChunkBuilder;
-use crate::graph::GraphStoreMut;
+use super::{ConstraintValidator, Operator, OperatorResult, PropertySource};
+use crate::execution::chunk::{DataChunk, DataChunkBuilder};
+use crate::graph::{GraphStore, GraphStoreMut};
 use grafeo_common::types::{
     EdgeId, EpochId, LogicalType, NodeId, PropertyKey, TransactionId, Value,
 };
@@ -20,15 +20,19 @@ pub struct MergeConfig {
     /// Labels to match/create.
     pub labels: Vec<String>,
     /// Properties that must match (also used for creation).
-    pub match_properties: Vec<(String, Value)>,
+    pub match_properties: Vec<(String, PropertySource)>,
     /// Properties to set on CREATE.
-    pub on_create_properties: Vec<(String, Value)>,
+    pub on_create_properties: Vec<(String, PropertySource)>,
     /// Properties to set on MATCH.
-    pub on_match_properties: Vec<(String, Value)>,
+    pub on_match_properties: Vec<(String, PropertySource)>,
     /// Output schema (input columns + node column).
     pub output_schema: Vec<LogicalType>,
     /// Column index where the merged node ID is placed.
     pub output_column: usize,
+    /// If the merge variable was already bound in the input, this column index
+    /// is used to detect NULL references (e.g., from unmatched OPTIONAL MATCH).
+    /// `None` for standalone MERGE that introduces a new variable.
+    pub bound_variable_column: Option<usize>,
 }
 
 /// Merge operator for MERGE clause.
@@ -96,8 +100,32 @@ impl MergeOperator {
         self
     }
 
-    /// Tries to find a matching node.
-    fn find_matching_node(&self) -> Option<NodeId> {
+    /// Resolves property sources to concrete values for a given row.
+    fn resolve_properties(
+        props: &[(String, PropertySource)],
+        chunk: Option<&DataChunk>,
+        row: usize,
+        store: &dyn GraphStore,
+    ) -> Vec<(String, Value)> {
+        props
+            .iter()
+            .map(|(name, source)| {
+                let value = if let Some(chunk) = chunk {
+                    source.resolve(chunk, row, store)
+                } else {
+                    // Standalone mode: only constants are valid
+                    match source {
+                        PropertySource::Constant(v) => v.clone(),
+                        _ => Value::Null,
+                    }
+                };
+                (name.clone(), value)
+            })
+            .collect()
+    }
+
+    /// Tries to find a matching node with the given resolved properties.
+    fn find_matching_node(&self, resolved_match_props: &[(String, Value)]) -> Option<NodeId> {
         let candidates: Vec<NodeId> = if let Some(first_label) = self.config.labels.first() {
             self.store.nodes_by_label(first_label)
         } else {
@@ -111,15 +139,11 @@ impl MergeOperator {
                     continue;
                 }
 
-                let has_all_props =
-                    self.config
-                        .match_properties
-                        .iter()
-                        .all(|(key, expected_value)| {
-                            node.properties
-                                .get(&PropertyKey::new(key.as_str()))
-                                .is_some_and(|v| v == expected_value)
-                        });
+                let has_all_props = resolved_match_props.iter().all(|(key, expected_value)| {
+                    node.properties
+                        .get(&PropertyKey::new(key.as_str()))
+                        .is_some_and(|v| v == expected_value)
+                });
 
                 if has_all_props {
                     return Some(node_id);
@@ -130,17 +154,19 @@ impl MergeOperator {
         None
     }
 
-    /// Creates a new node with the specified labels and properties.
-    fn create_node(&self) -> Result<NodeId, super::OperatorError> {
+    /// Creates a new node with the specified labels and resolved properties.
+    fn create_node(
+        &self,
+        resolved_match_props: &[(String, Value)],
+        resolved_create_props: &[(String, Value)],
+    ) -> Result<NodeId, super::OperatorError> {
         // Validate constraints before creating the node
         if let Some(ref validator) = self.validator {
             validator.validate_node_labels_allowed(&self.config.labels)?;
 
-            let all_props: Vec<(String, Value)> = self
-                .config
-                .match_properties
+            let all_props: Vec<(String, Value)> = resolved_match_props
                 .iter()
-                .chain(self.config.on_create_properties.iter())
+                .chain(resolved_create_props.iter())
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
             for (name, value) in &all_props {
@@ -150,14 +176,12 @@ impl MergeOperator {
             validator.validate_node_complete(&self.config.labels, &all_props)?;
         }
 
-        let mut all_props: Vec<(PropertyKey, Value)> = self
-            .config
-            .match_properties
+        let mut all_props: Vec<(PropertyKey, Value)> = resolved_match_props
             .iter()
             .map(|(k, v)| (PropertyKey::new(k.as_str()), v.clone()))
             .collect();
 
-        for (k, v) in &self.config.on_create_properties {
+        for (k, v) in resolved_create_props {
             if let Some(existing) = all_props.iter_mut().find(|(key, _)| key.as_str() == k) {
                 existing.1 = v.clone();
             } else {
@@ -169,19 +193,31 @@ impl MergeOperator {
         Ok(self.store.create_node_with_props(&labels, &all_props))
     }
 
-    /// Finds or creates a matching node, applying ON MATCH/ON CREATE as appropriate.
-    fn merge_node(&self) -> Result<NodeId, super::OperatorError> {
-        if let Some(existing_id) = self.find_matching_node() {
-            self.apply_on_match(existing_id);
+    /// Finds or creates a matching node for a single row, applying ON MATCH/ON CREATE.
+    fn merge_node_for_row(
+        &self,
+        chunk: Option<&DataChunk>,
+        row: usize,
+    ) -> Result<NodeId, super::OperatorError> {
+        let store_ref: &dyn GraphStore = self.store.as_ref();
+        let resolved_match =
+            Self::resolve_properties(&self.config.match_properties, chunk, row, store_ref);
+
+        if let Some(existing_id) = self.find_matching_node(&resolved_match) {
+            let resolved_on_match =
+                Self::resolve_properties(&self.config.on_match_properties, chunk, row, store_ref);
+            self.apply_on_match(existing_id, &resolved_on_match);
             Ok(existing_id)
         } else {
-            self.create_node()
+            let resolved_on_create =
+                Self::resolve_properties(&self.config.on_create_properties, chunk, row, store_ref);
+            self.create_node(&resolved_match, &resolved_on_create)
         }
     }
 
     /// Applies ON MATCH properties to an existing node.
-    fn apply_on_match(&self, node_id: NodeId) {
-        for (key, value) in &self.config.on_match_properties {
+    fn apply_on_match(&self, node_id: NodeId, resolved_on_match: &[(String, Value)]) {
+        for (key, value) in resolved_on_match {
             if let Some(tid) = self.transaction_id {
                 self.store
                     .set_node_property_versioned(node_id, key.as_str(), value.clone(), tid);
@@ -199,13 +235,27 @@ impl Operator for MergeOperator {
         // merged node ID appended (used for chained inline MERGE patterns).
         if let Some(ref mut input) = self.input {
             if let Some(chunk) = input.next()? {
-                // Merge the node (once, same node for all input rows)
-                let node_id = self.merge_node()?;
-
                 let mut builder =
                     DataChunkBuilder::with_capacity(&self.config.output_schema, chunk.row_count());
 
                 for row in chunk.selected_indices() {
+                    // Reject NULL bound variables (e.g., from unmatched OPTIONAL MATCH)
+                    if let Some(bound_col) = self.config.bound_variable_column {
+                        let is_null = chunk.column(bound_col).map_or(true, |col| col.is_null(row));
+                        if is_null {
+                            return Err(super::OperatorError::TypeMismatch {
+                                expected: format!(
+                                    "non-null node for MERGE variable '{}'",
+                                    self.config.variable
+                                ),
+                                found: "NULL".to_string(),
+                            });
+                        }
+                    }
+
+                    // Merge the node per-row: resolve properties from this row
+                    let node_id = self.merge_node_for_row(Some(&chunk), row)?;
+
                     // Copy input columns to output
                     for col_idx in 0..chunk.column_count() {
                         if let (Some(src), Some(dst)) =
@@ -238,7 +288,7 @@ impl Operator for MergeOperator {
         }
         self.executed = true;
 
-        let node_id = self.merge_node()?;
+        let node_id = self.merge_node_for_row(None, 0)?;
 
         let mut builder = DataChunkBuilder::new(&self.config.output_schema);
         if let Some(dst) = builder.column_mut(self.config.output_column) {
@@ -267,14 +317,18 @@ pub struct MergeRelationshipConfig {
     pub source_column: usize,
     /// Column index for the target node ID in the input.
     pub target_column: usize,
+    /// Variable name for the source node (for error messages).
+    pub source_variable: String,
+    /// Variable name for the target node (for error messages).
+    pub target_variable: String,
     /// Relationship type to match/create.
     pub edge_type: String,
     /// Properties that must match (also used for creation).
-    pub match_properties: Vec<(String, Value)>,
+    pub match_properties: Vec<(String, PropertySource)>,
     /// Properties to set on CREATE.
-    pub on_create_properties: Vec<(String, Value)>,
+    pub on_create_properties: Vec<(String, PropertySource)>,
     /// Properties to set on MATCH.
-    pub on_match_properties: Vec<(String, Value)>,
+    pub on_match_properties: Vec<(String, PropertySource)>,
     /// Output schema (input columns + edge column).
     pub output_schema: Vec<LogicalType>,
     /// Column index for the edge variable in the output.
@@ -337,7 +391,12 @@ impl MergeRelationshipOperator {
     }
 
     /// Tries to find a matching relationship between source and target.
-    fn find_matching_edge(&self, src: NodeId, dst: NodeId) -> Option<EdgeId> {
+    fn find_matching_edge(
+        &self,
+        src: NodeId,
+        dst: NodeId,
+        resolved_match_props: &[(String, Value)],
+    ) -> Option<EdgeId> {
         use crate::graph::Direction;
 
         for (target, edge_id) in self.store.edges_from(src, Direction::Outgoing) {
@@ -350,10 +409,9 @@ impl MergeRelationshipOperator {
                     continue;
                 }
 
-                let has_all_props =
-                    self.config.match_properties.iter().all(|(key, expected)| {
-                        edge.get_property(key).is_some_and(|v| v == expected)
-                    });
+                let has_all_props = resolved_match_props
+                    .iter()
+                    .all(|(key, expected)| edge.get_property(key).is_some_and(|v| v == expected));
 
                 if has_all_props {
                     return Some(edge_id);
@@ -364,17 +422,21 @@ impl MergeRelationshipOperator {
         None
     }
 
-    /// Creates a new edge with the match properties and on_create properties.
-    fn create_edge(&self, src: NodeId, dst: NodeId) -> Result<EdgeId, super::OperatorError> {
+    /// Creates a new edge with resolved match and on_create properties.
+    fn create_edge(
+        &self,
+        src: NodeId,
+        dst: NodeId,
+        resolved_match_props: &[(String, Value)],
+        resolved_create_props: &[(String, Value)],
+    ) -> Result<EdgeId, super::OperatorError> {
         // Validate constraints before creating the edge
         if let Some(ref validator) = self.validator {
             validator.validate_edge_type_allowed(&self.config.edge_type)?;
 
-            let all_props: Vec<(String, Value)> = self
-                .config
-                .match_properties
+            let all_props: Vec<(String, Value)> = resolved_match_props
                 .iter()
-                .chain(self.config.on_create_properties.iter())
+                .chain(resolved_create_props.iter())
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
             for (name, value) in &all_props {
@@ -383,14 +445,12 @@ impl MergeRelationshipOperator {
             validator.validate_edge_complete(&self.config.edge_type, &all_props)?;
         }
 
-        let mut all_props: Vec<(PropertyKey, Value)> = self
-            .config
-            .match_properties
+        let mut all_props: Vec<(PropertyKey, Value)> = resolved_match_props
             .iter()
             .map(|(k, v)| (PropertyKey::new(k.as_str()), v.clone()))
             .collect();
 
-        for (k, v) in &self.config.on_create_properties {
+        for (k, v) in resolved_create_props {
             if let Some(existing) = all_props.iter_mut().find(|(key, _)| key.as_str() == k) {
                 existing.1 = v.clone();
             } else {
@@ -404,8 +464,8 @@ impl MergeRelationshipOperator {
     }
 
     /// Applies ON MATCH properties to an existing edge.
-    fn apply_on_match(&self, edge_id: EdgeId) {
-        for (key, value) in &self.config.on_match_properties {
+    fn apply_on_match_edge(&self, edge_id: EdgeId, resolved_on_match: &[(String, Value)]) {
+        for (key, value) in resolved_on_match {
             if let Some(tid) = self.transaction_id {
                 self.store
                     .set_edge_property_versioned(edge_id, key.as_str(), value.clone(), tid);
@@ -430,23 +490,51 @@ impl Operator for MergeRelationshipOperator {
                     .column(self.config.source_column)
                     .and_then(|c| c.get_node_id(row))
                     .ok_or_else(|| OperatorError::TypeMismatch {
-                        expected: "NodeId (source)".to_string(),
-                        found: "None".to_string(),
+                        expected: format!(
+                            "non-null node for MERGE variable '{}'",
+                            self.config.source_variable
+                        ),
+                        found: "NULL".to_string(),
                     })?;
 
                 let dst_val = chunk
                     .column(self.config.target_column)
                     .and_then(|c| c.get_node_id(row))
                     .ok_or_else(|| OperatorError::TypeMismatch {
-                        expected: "NodeId (target)".to_string(),
+                        expected: format!(
+                            "non-null node for MERGE variable '{}'",
+                            self.config.target_variable
+                        ),
                         found: "None".to_string(),
                     })?;
 
-                let edge_id = if let Some(existing) = self.find_matching_edge(src_val, dst_val) {
-                    self.apply_on_match(existing);
+                let store_ref: &dyn GraphStore = self.store.as_ref();
+                let resolved_match = MergeOperator::resolve_properties(
+                    &self.config.match_properties,
+                    Some(&chunk),
+                    row,
+                    store_ref,
+                );
+
+                let edge_id = if let Some(existing) =
+                    self.find_matching_edge(src_val, dst_val, &resolved_match)
+                {
+                    let resolved_on_match = MergeOperator::resolve_properties(
+                        &self.config.on_match_properties,
+                        Some(&chunk),
+                        row,
+                        store_ref,
+                    );
+                    self.apply_on_match_edge(existing, &resolved_on_match);
                     existing
                 } else {
-                    self.create_edge(src_val, dst_val)?
+                    let resolved_on_create = MergeOperator::resolve_properties(
+                        &self.config.on_create_properties,
+                        Some(&chunk),
+                        row,
+                        store_ref,
+                    );
+                    self.create_edge(src_val, dst_val, &resolved_match, &resolved_on_create)?
                 };
 
                 // Copy input columns to output, then add the edge column
@@ -486,6 +574,13 @@ mod tests {
     use super::*;
     use crate::graph::lpg::LpgStore;
 
+    fn const_props(props: Vec<(&str, Value)>) -> Vec<(String, PropertySource)> {
+        props
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), PropertySource::Constant(v)))
+            .collect()
+    }
+
     #[test]
     fn test_merge_creates_new_node() {
         let store: Arc<dyn GraphStoreMut> = Arc::new(LpgStore::new().unwrap());
@@ -497,11 +592,12 @@ mod tests {
             MergeConfig {
                 variable: "n".to_string(),
                 labels: vec!["Person".to_string()],
-                match_properties: vec![("name".to_string(), Value::String("Alix".into()))],
+                match_properties: const_props(vec![("name", Value::String("Alix".into()))]),
                 on_create_properties: vec![],
                 on_match_properties: vec![],
                 output_schema: vec![LogicalType::Node],
                 output_column: 0,
+                bound_variable_column: None,
             },
         );
 
@@ -537,11 +633,12 @@ mod tests {
             MergeConfig {
                 variable: "n".to_string(),
                 labels: vec!["Person".to_string()],
-                match_properties: vec![("name".to_string(), Value::String("Gus".into()))],
+                match_properties: const_props(vec![("name", Value::String("Gus".into()))]),
                 on_create_properties: vec![],
                 on_match_properties: vec![],
                 output_schema: vec![LogicalType::Node],
                 output_column: 0,
+                bound_variable_column: None,
             },
         );
 
@@ -564,11 +661,12 @@ mod tests {
             MergeConfig {
                 variable: "n".to_string(),
                 labels: vec!["Person".to_string()],
-                match_properties: vec![("name".to_string(), Value::String("Vincent".into()))],
-                on_create_properties: vec![("created".to_string(), Value::Bool(true))],
+                match_properties: const_props(vec![("name", Value::String("Vincent".into()))]),
+                on_create_properties: const_props(vec![("created", Value::Bool(true))]),
                 on_match_properties: vec![],
                 output_schema: vec![LogicalType::Node],
                 output_column: 0,
+                bound_variable_column: None,
             },
         );
 
@@ -604,11 +702,12 @@ mod tests {
             MergeConfig {
                 variable: "n".to_string(),
                 labels: vec!["Person".to_string()],
-                match_properties: vec![("name".to_string(), Value::String("Jules".into()))],
+                match_properties: const_props(vec![("name", Value::String("Jules".into()))]),
                 on_create_properties: vec![],
-                on_match_properties: vec![("updated".to_string(), Value::Bool(true))],
+                on_match_properties: const_props(vec![("updated", Value::Bool(true))]),
                 output_schema: vec![LogicalType::Node],
                 output_column: 0,
+                bound_variable_column: None,
             },
         );
 

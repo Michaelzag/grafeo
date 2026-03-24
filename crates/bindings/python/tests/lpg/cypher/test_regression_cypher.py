@@ -1,11 +1,7 @@
-"""Regression tests for Cypher bugs fixed in 0.5.17.
+"""Cypher-specific regression tests.
 
-Bug 1: Correlated EXISTS subquery fails in planner (CRITICAL)
-Bug 2: CASE WHEN inside aggregate functions (HIGH)
-Bug 3: any() with IN list returns 0 rows (HIGH)
-Bug 4: CASE WHEN inside reduce() (MEDIUM)
-
-See .claude/todo/5_beta/cypher-bugs-0.5.17.md for details.
+Covers correlated EXISTS subqueries, CASE WHEN inside aggregates,
+any() with IN lists, and CASE WHEN inside reduce().
 """
 
 

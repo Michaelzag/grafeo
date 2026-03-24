@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
+#[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
 use std::time::Instant;
 
 use grafeo_common::types::{TransactionId, Value};
@@ -33,7 +34,8 @@ impl Session {
             transaction_manager: cfg.transaction_manager,
             query_cache: cfg.query_cache,
             current_transaction: parking_lot::Mutex::new(None),
-            read_only_tx: parking_lot::Mutex::new(false),
+            read_only_tx: parking_lot::Mutex::new(cfg.read_only),
+            db_read_only: cfg.read_only,
             auto_commit: true,
             adaptive_config: cfg.adaptive_config,
             factorized_execution: cfg.factorized_execution,
