@@ -2,12 +2,13 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
-## [0.5.25] - Unreleased
+## [0.5.25] - 2026-03-25
 
 ### Added
 
 - **RDF CDC bridge** (`cdc` + `rdf` features): SPARQL `INSERT DATA`, `DELETE DATA`, and `DELETE/INSERT WHERE` mutations now emit `ChangeEvent` records to the CDC log alongside LPG mutations. Triple events carry N-Triples-encoded subject/predicate/object/graph terms and appear in `changes_between()` and `history()` with `EntityId::Triple`. Enables `GET /changes` and `POST /sync` to surface RDF mutations to offline-first clients
 - **CDC structural metadata**: `ChangeEvent` now carries `labels` on node Create events and `edge_type`/`src_id`/`dst_id` on edge Create events, giving sync clients the full information needed to replay creates on a remote database
+- **CRDT counter value types**: `Value::GCounter(HashMap<String, u64>)` and `Value::OnCounter { pos, neg }` added as first-class variants. G-Counter merge is per-replica max (grows monotonically); ON-Counter merge is per-replica max over positive and negative maps separately. All bindings surface these as structured objects: `{$gcounter: {...replicas}, $value: total}` and `{$pncounter: true, $value: net}`. Spill serializer encodes them as opaque TAG_STRING for backward compatibility
 
 ### Fixed
 
