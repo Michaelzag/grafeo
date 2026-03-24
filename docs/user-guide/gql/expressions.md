@@ -274,3 +274,54 @@ Returns the current session user name. In embedded databases, this returns `'def
 ```sql
 RETURN SESSION_USER
 ```
+
+## Introspection Functions
+
+Query session state and database metadata:
+
+```sql
+-- Current schema name
+RETURN CURRENT_SCHEMA
+
+-- Current graph name
+RETURN CURRENT_GRAPH
+
+-- Database metadata (version, node count, edge count)
+RETURN info()
+
+-- Schema information (node types, edge types, indexes, constraints)
+RETURN schema()
+```
+
+## String Concatenation
+
+The `||` operator concatenates strings:
+
+```sql
+MATCH (p:Person)
+RETURN p.firstName || ' ' || p.lastName AS fullName
+```
+
+## LIKE Pattern Matching
+
+Match strings against patterns using `%` (any characters) and `_` (single character):
+
+```sql
+MATCH (p:Person)
+WHERE p.name LIKE 'A%'
+RETURN p.name
+
+MATCH (p:Person)
+WHERE p.email LIKE '%@example.com'
+RETURN p.name, p.email
+```
+
+## IN Operator
+
+Test membership in a list:
+
+```sql
+MATCH (p:Person)
+WHERE p.city IN ['Amsterdam', 'Berlin', 'Paris']
+RETURN p.name, p.city
+```

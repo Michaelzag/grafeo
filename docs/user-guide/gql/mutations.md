@@ -210,4 +210,50 @@ MERGE (p:Person {email: 'alix@example.com'})
 ON CREATE SET p.created = timestamp()
 ON MATCH SET p.lastSeen = timestamp()
 RETURN p
+
+-- Merge relationships
+MATCH (a:Person {name: 'Alix'}), (b:Person {name: 'Gus'})
+MERGE (a)-[r:KNOWS]->(b)
+ON CREATE SET r.since = 2024
+RETURN r
+
+-- Merge with UNWIND for batch upserts
+UNWIND $people AS person
+MERGE (p:Person {email: person.email})
+ON CREATE SET p.name = person.name, p.created = timestamp()
+ON MATCH SET p.lastSeen = timestamp()
+```
+
+## LOAD DATA (Multi-Format Import)
+
+Import data from external files directly in GQL:
+
+```sql
+-- CSV import
+LOAD DATA FROM 'data/people.csv' FORMAT CSV WITH HEADERS AS row
+INSERT (:Person {name: row.name, age: CAST(row.age AS INT)})
+
+-- JSONL import (requires jsonl-import feature)
+LOAD DATA FROM 'data/events.jsonl' FORMAT JSONL AS event
+INSERT (:Event {type: event.type, timestamp: event.ts})
+
+-- Parquet import (requires parquet-import feature)
+LOAD DATA FROM 'data/records.parquet' FORMAT PARQUET AS rec
+INSERT (:Record {id: rec.id, value: rec.value})
+```
+
+## EXPLAIN and PROFILE
+
+Inspect query plans without or with execution:
+
+```sql
+-- Show optimized logical plan (no execution)
+EXPLAIN MATCH (p:Person)-[:KNOWS]->(f:Person)
+WHERE p.name = 'Alix'
+RETURN f.name
+
+-- Execute and return per-operator metrics (rows, time, calls)
+PROFILE MATCH (p:Person)-[:KNOWS]->(f:Person)
+WHERE p.name = 'Alix'
+RETURN f.name
 ```

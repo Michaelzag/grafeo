@@ -146,6 +146,21 @@ FROM GRAPH_TABLE (
     `)
     ```
 
+## LEFT OUTER JOIN MATCH
+
+Use `LEFT [OUTER] JOIN MATCH` or `OPTIONAL MATCH` inside `GRAPH_TABLE` to preserve rows that have no matching pattern. Unmatched columns are filled with NULL:
+
+```sql
+SELECT *
+FROM GRAPH_TABLE (
+    MATCH (p:Person)
+    LEFT JOIN MATCH (p)-[:MANAGES]->(t:Team)
+    COLUMNS (p.name AS person, t.name AS team)
+);
+```
+
+This is equivalent to `OPTIONAL MATCH` in GQL/Cypher: people who do not manage a team still appear in the results with `team = NULL`.
+
 ## Calling Procedures
 
 SQL/PGQ also supports `CALL` statements for invoking built-in graph algorithms:

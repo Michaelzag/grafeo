@@ -137,4 +137,132 @@ RETURN p
 -- Merge relationships
 MATCH (a:Person {name: 'Alix'}), (b:Person {name: 'Gus'})
 MERGE (a)-[:KNOWS]->(b)
+
+-- Merge with inline relationship SET
+MERGE (a:Person {id: 1})-[r:KNOWS]->(b:Person {id: 2})
+SET r.weight = 0.5
+```
+
+## FOREACH
+
+Iterate over a list and execute mutations for each element:
+
+```cypher
+-- Create nodes from a list
+FOREACH (name IN ['Alix', 'Gus', 'Vincent'] |
+    CREATE (:Person {name: name})
+)
+
+-- Update nodes from a list
+MATCH (p:Person)
+WITH collect(p) AS people
+FOREACH (person IN people |
+    SET person.updated = true
+)
+```
+
+## CALL Subqueries
+
+Run a subquery for each input row. Variables from the outer query are visible inside the block.
+
+```cypher
+-- Per-person friend count via subquery
+MATCH (p:Person)
+CALL {
+    WITH p
+    MATCH (p)-[:KNOWS]->(friend)
+    RETURN count(friend) AS friend_count
+}
+RETURN p.name, friend_count
+
+-- Subquery with mutations
+MATCH (p:Person)
+CALL {
+    WITH p
+    MATCH (p)-[:OWNS]->(item:Item)
+    WHERE item.expired = true
+    DETACH DELETE item
+    RETURN count(*) AS deleted
+}
+RETURN p.name, deleted
+```
+
+## UNION
+
+Combine results from multiple queries:
+
+```cypher
+-- UNION (deduplicates rows)
+MATCH (p:Person) WHERE p.city = 'Amsterdam'
+RETURN p.name AS name
+UNION
+MATCH (p:Person) WHERE p.city = 'Berlin'
+RETURN p.name AS name
+
+-- UNION ALL (keeps duplicates)
+MATCH (p:Person)-[:LIVES_IN]->(c:City)
+RETURN c.name AS city
+UNION ALL
+MATCH (p:Person)-[:WORKS_IN]->(c:City)
+RETURN c.name AS city
+```
+
+## LOAD CSV
+
+Import data from CSV files:
+
+```cypher
+-- With headers (access fields by name)
+LOAD CSV WITH HEADERS FROM 'data/people.csv' AS row
+CREATE (:Person {name: row.name, age: toInteger(row.age)})
+
+-- Without headers (access fields by index)
+LOAD CSV FROM 'data/people.csv' AS row
+CREATE (:Person {name: row[0], age: toInteger(row[1])})
+
+-- Custom field terminator
+LOAD CSV WITH HEADERS FROM 'data/people.tsv' AS row FIELDTERMINATOR '\t'
+CREATE (:Person {name: row.name})
+
+-- File URI
+LOAD CSV WITH HEADERS FROM 'file:///data/people.csv' AS row
+RETURN row.name
+```
+
+## Schema DDL
+
+Create and manage indexes and constraints:
+
+```cypher
+-- Create index
+CREATE INDEX FOR (p:Person) ON (p.name)
+
+-- Create vector index
+CREATE INDEX FOR (n:Document) ON (n.embedding) USING VECTOR
+
+-- Create text index
+CREATE INDEX FOR (n:Article) ON (n.content) USING TEXT
+
+-- Create constraint
+CREATE CONSTRAINT FOR (p:Person) REQUIRE p.email IS UNIQUE
+
+-- List indexes and constraints
+SHOW INDEXES
+SHOW CONSTRAINTS
+
+-- Drop
+DROP INDEX index_name
+DROP CONSTRAINT constraint_name
+```
+
+## EXPLAIN and PROFILE
+
+```cypher
+-- Show query plan without executing
+EXPLAIN MATCH (p:Person)-[:KNOWS]->(f:Person)
+RETURN f.name
+
+-- Execute and return per-operator metrics
+PROFILE MATCH (p:Person)-[:KNOWS]->(f:Person)
+RETURN f.name
 ```

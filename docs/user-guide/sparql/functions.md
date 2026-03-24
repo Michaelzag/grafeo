@@ -279,3 +279,100 @@ WHERE {
 ```
 
 See [Custom Functions](../extending/custom-functions.md) for more information.
+
+## EXPLAIN
+
+View the optimized logical plan for a SPARQL query without executing it:
+
+```sparql
+EXPLAIN SELECT ?name ?age
+WHERE {
+    ?person a foaf:Person .
+    ?person foaf:name ?name .
+    ?person foaf:age ?age
+    FILTER(?age > 30)
+}
+```
+
+## Data Mutations
+
+SPARQL supports data modification via INSERT, DELETE and graph management:
+
+### INSERT DATA
+
+```sparql
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+PREFIX ex: <http://example.org/>
+
+INSERT DATA {
+    ex:alix a foaf:Person ;
+        foaf:name "Alix" ;
+        foaf:age 30 .
+}
+
+-- Insert into a named graph
+INSERT DATA {
+    GRAPH <http://example.org/friends> {
+        ex:alix foaf:knows ex:gus .
+    }
+}
+```
+
+### DELETE DATA
+
+```sparql
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+PREFIX ex: <http://example.org/>
+
+DELETE DATA {
+    ex:alix foaf:age 30 .
+}
+```
+
+### DELETE/INSERT (Conditional)
+
+```sparql
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+PREFIX ex: <http://example.org/>
+
+-- Update age
+DELETE { ?person foaf:age ?oldAge }
+INSERT { ?person foaf:age 31 }
+WHERE {
+    ?person foaf:name "Alix" .
+    ?person foaf:age ?oldAge
+}
+```
+
+### CLEAR and DROP
+
+```sparql
+-- Clear all triples from default graph
+CLEAR DEFAULT
+
+-- Clear a named graph
+CLEAR GRAPH <http://example.org/friends>
+
+-- Drop a named graph (removes graph itself)
+DROP GRAPH <http://example.org/friends>
+
+-- SILENT suppresses errors if graph does not exist
+DROP SILENT GRAPH <http://example.org/nonexistent>
+```
+
+### COPY, MOVE and ADD
+
+```sparql
+-- Copy all triples from one graph to another (replaces target)
+COPY <http://example.org/source> TO <http://example.org/target>
+
+-- Move all triples (removes source)
+MOVE <http://example.org/source> TO <http://example.org/target>
+
+-- Add triples from source to target (keeps both)
+ADD <http://example.org/source> TO <http://example.org/target>
+```
+
+All mutation operations are WAL-logged and recovered on restart.
+
+See [Custom Functions](../extending/custom-functions.md) for more information.

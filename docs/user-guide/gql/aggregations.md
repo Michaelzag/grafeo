@@ -24,6 +24,8 @@ GQL provides aggregation functions for computing summaries over query results.
 | `var_pop()` | Population variance |
 | `stdev()` | Sample standard deviation (aliases: `stddev()`, `stddev_samp()`) |
 | `stdevp()` | Population standard deviation (aliases: `stddevp()`, `stddev_pop()`) |
+| `listagg()` | Concatenate values with separator |
+| `group_concat()` | Alias for `listagg()` |
 
 ## Count
 
@@ -193,4 +195,56 @@ RETURN p.department,
 GROUP BY p.department
 HAVING avg(p.salary) > 80000
 ORDER BY avg_salary DESC
+```
+
+## LISTAGG / GROUP_CONCAT
+
+Concatenate values within a group into a single string:
+
+```sql
+-- Default separator (comma)
+MATCH (p:Person)-[:LIVES_IN]->(c:City)
+RETURN c.name, listagg(p.name) AS residents
+GROUP BY c.name
+
+-- Custom separator
+MATCH (t:Tag)<-[:TAGGED]-(a:Article)
+RETURN a.title, listagg(t.name, '; ') AS tags
+GROUP BY a.title
+
+-- group_concat() is an alias
+MATCH (p:Person)-[:KNOWS]->(f:Person)
+RETURN p.name, group_concat(f.name, ', ') AS friends
+GROUP BY p.name
+```
+
+## Binary Set Functions (GF11)
+
+Statistical aggregate functions that operate on pairs of numeric values:
+
+| Function | Description |
+|----------|-------------|
+| `covar_samp(y, x)` | Sample covariance |
+| `covar_pop(y, x)` | Population covariance |
+| `corr(y, x)` | Pearson correlation coefficient |
+| `regr_slope(y, x)` | Slope of least-squares regression line |
+| `regr_intercept(y, x)` | Intercept of least-squares regression line |
+| `regr_r2(y, x)` | Coefficient of determination (R-squared) |
+| `regr_count(y, x)` | Count of non-null pairs |
+| `regr_sxx(y, x)` | Sum of squares of x deviations |
+| `regr_syy(y, x)` | Sum of squares of y deviations |
+| `regr_sxy(y, x)` | Sum of products of deviations |
+| `regr_avgx(y, x)` | Average of x (for non-null pairs) |
+| `regr_avgy(y, x)` | Average of y (for non-null pairs) |
+
+```sql
+-- Correlation between salary and experience
+MATCH (p:Person)
+RETURN corr(p.salary, p.years_experience) AS salary_exp_corr
+
+-- Linear regression
+MATCH (p:Person)
+RETURN regr_slope(p.salary, p.years_experience) AS slope,
+       regr_intercept(p.salary, p.years_experience) AS intercept,
+       regr_r2(p.salary, p.years_experience) AS r_squared
 ```

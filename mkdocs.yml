@@ -4,9 +4,9 @@ site_url: https://grafeo.dev
 site_author: S.T. Grond
 site_description: >-
   A high-performance, embeddable graph database with a Rust core and no required
-  C dependencies. Python, Node.js, Go, and WebAssembly bindings. Supports LPG and
+  C dependencies. Python, Node.js, Go, WebAssembly, C#/.NET and Dart bindings. Supports LPG and
   RDF data models, multiple query languages (GQL, Cypher, Gremlin, GraphQL, SPARQL, SQL/PGQ),
-  ACID transactions, and extensible storage backends.
+  ACID transactions and extensible storage backends.
 
 # Repository
 repo_name: GrafeoDB/grafeo
@@ -268,6 +268,9 @@ nav:
       - Graph Operations: user-guide/rust/operations.md
       - Sessions: user-guide/rust/sessions.md
     - Transactions: user-guide/transactions.md
+    - Named Graphs: user-guide/named-graphs.md
+    - Temporal Properties & Time-Travel: user-guide/temporal.md
+    - Observability: user-guide/observability.md
     - Persistence:
       - user-guide/persistence/index.md
       - In-Memory Mode: user-guide/persistence/in-memory.md
@@ -334,6 +337,10 @@ nav:
       - api/wasm/index.md
     - C API:
       - api/c/index.md
+    - C# / .NET API:
+      - api/csharp/index.md
+    - Dart API:
+      - api/dart/index.md
     - Algorithms:
       - algorithms/index.md
       - Path Finding: algorithms/path-finding.md

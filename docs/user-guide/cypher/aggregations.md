@@ -20,6 +20,10 @@ Cypher provides aggregation functions for computing summaries over query results
 | `min()` | Minimum value |
 | `max()` | Maximum value |
 | `collect()` | Collect into list |
+| `percentile_disc()` | Discrete percentile |
+| `percentile_cont()` | Continuous percentile |
+| `stdev()` | Sample standard deviation |
+| `stdevp()` | Population standard deviation |
 
 ## Count
 
@@ -111,4 +115,27 @@ RETURN x
 UNWIND ['Alix', 'Gus', 'Harm'] AS name
 CREATE (p:Person {name: name})
 RETURN p
+```
+
+## CASE WHEN in Aggregates
+
+CASE expressions work inside aggregate functions:
+
+```cypher
+MATCH (p:Person)
+RETURN
+    count(CASE WHEN p.age >= 18 THEN 1 END) AS adults,
+    count(CASE WHEN p.age < 18 THEN 1 END) AS minors
+```
+
+## DISTINCT Aggregation
+
+All aggregate functions accept DISTINCT to skip duplicate values:
+
+```cypher
+MATCH (p:Person)-[:LIVES_IN]->(c:City)
+RETURN count(DISTINCT c.country) AS countries
+
+MATCH (p:Person)
+RETURN collect(DISTINCT p.department) AS departments
 ```

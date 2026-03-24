@@ -19,9 +19,43 @@ with db.begin_transaction() as tx:
 db.execute("CREATE (n:Person {name: 'Vincent'})")  # Commits immediately
 ```
 
-## Isolation Level: Snapshot Isolation
+## Isolation Levels
 
-Grafeo implements **Snapshot Isolation (SI)**, a widely-used isolation level that provides strong consistency while maintaining high concurrency.
+Grafeo supports three isolation levels, configurable per transaction:
+
+| Level | Description |
+|-------|-------------|
+| `read_committed` | See committed data; non-repeatable reads possible |
+| `snapshot` | Default: consistent snapshot at transaction start |
+| `serializable` | Full SSI with read-write conflict detection |
+
+```python
+# Default (snapshot isolation)
+tx = db.begin_transaction()
+
+# Explicit isolation level
+tx = db.begin_transaction(isolation_level="serializable")
+```
+
+```rust
+use grafeo::IsolationLevel;
+
+let tx = session.begin_transaction_with_isolation(IsolationLevel::Serializable)?;
+```
+
+## Read-Only Transactions
+
+Mark a transaction as read-only to reject mutations at the session level:
+
+```sql
+START TRANSACTION READ ONLY
+```
+
+DDL operations like `CREATE GRAPH` and `DROP GRAPH` are also blocked in read-only transactions.
+
+## Snapshot Isolation
+
+Grafeo's default isolation level is **Snapshot Isolation (SI)**, which provides strong consistency while maintaining high concurrency.
 
 ### Guarantees
 
@@ -262,6 +296,46 @@ In Rust, the same behavior applies when a `Session` is dropped:
 }
 ```
 
+## Two-Phase Commit
+
+For workflows that need to inspect pending mutations before finalizing, use `prepare_commit()`:
+
+```python
+tx = db.begin_transaction()
+tx.execute("INSERT (:Person {name: 'Alix'})")
+tx.execute("MATCH (a:Person {name: 'Alix'}), (b:Person {name: 'Gus'}) INSERT (a)-[:KNOWS]->(b)")
+
+# Inspect what would be committed
+prepared = tx.prepare_commit()
+print(f"Pending: {prepared.node_count} nodes, {prepared.edge_count} edges")
+
+# Finalize
+prepared.commit()
+```
+
+## GQL Transaction Syntax
+
+Transactions can also be managed via GQL statements:
+
+```sql
+-- Start a transaction
+START TRANSACTION
+
+-- Start read-only
+START TRANSACTION READ ONLY
+
+-- Commit
+COMMIT
+
+-- Rollback
+ROLLBACK
+
+-- Savepoints
+SAVEPOINT my_save
+ROLLBACK TO SAVEPOINT my_save
+RELEASE SAVEPOINT my_save
+```
+
 ## API Reference
 
 ### Python
@@ -269,6 +343,9 @@ In Rust, the same behavior applies when a `Session` is dropped:
 ```python
 # Start explicit transaction
 tx = db.begin_transaction()
+
+# With isolation level
+tx = db.begin_transaction(isolation_level="serializable")
 
 # Execute within transaction
 result = tx.execute("MATCH (n) RETURN n")
@@ -288,6 +365,12 @@ with db.begin_transaction() as tx:
 tx.savepoint("sp1")
 tx.rollback_to_savepoint("sp1")
 tx.release_savepoint("sp1")
+
+# Two-phase commit
+tx = db.begin_transaction()
+tx.execute("INSERT (:Person {name: 'Alix'})")
+prepared = tx.prepare_commit()
+prepared.commit()
 ```
 
 ### Rust
@@ -295,6 +378,9 @@ tx.release_savepoint("sp1")
 ```rust
 // Start transaction
 let tx_id = session.begin_transaction()?;
+
+// With isolation level
+let tx_id = session.begin_transaction_with_isolation(IsolationLevel::Serializable)?;
 
 // Execute queries
 let result = session.execute("MATCH (n) RETURN n")?;
@@ -318,15 +404,16 @@ Grafeo automatically garbage collects old transaction metadata and version chain
 - Aborted transactions are cleaned up immediately
 - Committed transaction metadata is retained until no active transaction can see it
 - Version chains are pruned based on the oldest active transaction's start epoch
+- GC runs every N commits (default 100, configurable); manual trigger via `db.gc()`
 
-This happens automatically; no manual intervention is needed.
+## Error Codes
 
-## Future: Serializable Isolation
+Transaction errors use standardized `GRAFEO-TXXX` codes:
 
-Full Serializable isolation (preventing write skew) is planned for a future release. This will include:
+| Code | Description |
+|------|-------------|
+| `GRAFEO-T001` | Write-write conflict detected |
+| `GRAFEO-T002` | Transaction already committed or rolled back |
+| `GRAFEO-T003` | Read-only transaction attempted mutation |
 
-- Read-write conflict detection
-- Serializable Snapshot Isolation (SSI) implementation
-- Configurable isolation levels per transaction
-
-For now, use the workarounds described above if the application requires serializable semantics.
+All transaction errors include `is_retryable()` to indicate whether the operation can be safely retried.
