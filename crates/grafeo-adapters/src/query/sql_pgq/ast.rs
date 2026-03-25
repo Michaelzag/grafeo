@@ -27,6 +27,8 @@ pub enum Statement {
 /// A complete SQL/PGQ SELECT statement.
 #[derive(Debug, Clone)]
 pub struct SelectStatement {
+    /// Whether SELECT DISTINCT was specified.
+    pub distinct: bool,
     /// SELECT list (`None` means `SELECT *`).
     pub select_list: SelectList,
     /// The `GRAPH_TABLE(...)` expression in the FROM clause.
@@ -35,6 +37,10 @@ pub struct SelectStatement {
     pub table_alias: Option<String>,
     /// Optional SQL-level WHERE clause (references output columns).
     pub where_clause: Option<Expression>,
+    /// Optional GROUP BY expressions.
+    pub group_by: Option<Vec<Expression>>,
+    /// Optional HAVING clause (filter on aggregated results).
+    pub having: Option<Expression>,
     /// Optional ORDER BY clause.
     pub order_by: Option<Vec<SortItem>>,
     /// Optional LIMIT.
@@ -68,10 +74,14 @@ pub struct SelectItem {
 /// The `GRAPH_TABLE(...)` expression.
 #[derive(Debug, Clone)]
 pub struct GraphTableExpression {
+    /// Optional graph name reference (e.g., `GRAPH_TABLE(my_graph, MATCH ...)`).
+    pub graph_name: Option<String>,
     /// The inner MATCH clause (GQL pattern syntax).
     pub match_clause: MatchClause,
     /// Optional match clauses (LEFT OUTER JOIN or OPTIONAL MATCH).
     pub optional_matches: Vec<MatchClause>,
+    /// Optional WHERE clause inside GRAPH_TABLE (between MATCH and COLUMNS).
+    pub where_clause: Option<Expression>,
     /// The COLUMNS clause (projection from graph to table).
     pub columns: ColumnsClause,
     /// Source span.

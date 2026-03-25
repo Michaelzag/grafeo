@@ -358,9 +358,14 @@ impl<'a> Parser<'a> {
                     "ALTER" => self.parse_alter(),
                     "SHOW" => self.parse_show().map(Statement::Schema),
                     "LOAD" => self.parse_query().map(Statement::Query),
+                    "SELECT" => {
+                        self.advance(); // consume SELECT
+                        self.parse_select_from_statement()
+                    }
                     _ => Err(self.error(
                         "Expected MATCH, INSERT, DELETE, MERGE, UNWIND, FOR, CREATE, CALL, \
-                         DROP, ALTER, SHOW, LOAD, USE, SESSION, START, COMMIT, ROLLBACK, or SAVEPOINT",
+                         DROP, ALTER, SHOW, LOAD, USE, SESSION, START, COMMIT, ROLLBACK, \
+                         SELECT, or SAVEPOINT",
                     )),
                 }
             }
@@ -1281,6 +1286,32 @@ impl<'a> Parser<'a> {
         let mut patterns = Vec::new();
         patterns.push(self.parse_aliased_pattern()?);
 
+        // Path alternation at MATCH level: pattern | pattern or pattern |+| pattern
+        // (ISO GQL G032/G030)
+        if self.current.kind == TokenKind::Pipe || self.current.kind == TokenKind::PipePlusPipe {
+            let is_multiset = self.current.kind == TokenKind::PipePlusPipe;
+            let first = patterns.pop().expect("just pushed");
+            let mut alt_patterns = vec![first.pattern];
+            while self.current.kind == TokenKind::Pipe
+                || self.current.kind == TokenKind::PipePlusPipe
+            {
+                self.advance();
+                alt_patterns.push(self.parse_aliased_pattern()?.pattern);
+            }
+            let union_pattern = if is_multiset {
+                Pattern::MultisetUnion(alt_patterns)
+            } else {
+                Pattern::Union(alt_patterns)
+            };
+            patterns.push(AliasedPattern {
+                alias: first.alias,
+                path_function: first.path_function,
+                search_prefix: first.search_prefix,
+                keep: first.keep,
+                pattern: union_pattern,
+            });
+        }
+
         while self.current.kind == TokenKind::Comma {
             self.advance();
             patterns.push(self.parse_aliased_pattern()?);
@@ -1362,6 +1393,7 @@ impl<'a> Parser<'a> {
     fn parse_aliased_pattern(&mut self) -> Result<AliasedPattern> {
         let mut alias = None;
         let mut path_function = None;
+        let mut search_prefix = None;
 
         // Check for pattern alias: identifier = ...
         if self.is_identifier() && self.peek_kind() == TokenKind::Eq {
@@ -1381,6 +1413,11 @@ impl<'a> Parser<'a> {
                     self.advance(); // consume function name
                     self.expect(TokenKind::LParen)?;
                 }
+            }
+
+            // Per-pattern path search prefix: p = ANY SHORTEST (...) (ISO GQL)
+            if path_function.is_none() {
+                search_prefix = self.parse_path_search_prefix()?;
             }
         }
 
@@ -1429,6 +1466,7 @@ impl<'a> Parser<'a> {
         Ok(AliasedPattern {
             alias,
             path_function,
+            search_prefix,
             keep,
             pattern,
         })
@@ -1494,6 +1532,9 @@ impl<'a> Parser<'a> {
                     | TokenKind::Trail
                     | TokenKind::Simple
                     | TokenKind::Acyclic
+                    | TokenKind::Minus
+                    | TokenKind::LeftArrow
+                    | TokenKind::Tilde
             ) {
                 return self.parse_parenthesized_pattern();
             }
@@ -1505,7 +1546,28 @@ impl<'a> Parser<'a> {
             }
         }
 
-        let node = self.parse_node_pattern()?;
+        // Edge-first pattern (anonymous source): -[r:KNOWS]->(x)
+        // This occurs inside parenthesized quantified patterns like (-[]->(x)){2,5}
+        let node = if matches!(
+            self.current.kind,
+            TokenKind::Arrow
+                | TokenKind::LeftArrow
+                | TokenKind::DoubleDash
+                | TokenKind::Minus
+                | TokenKind::Tilde
+        ) {
+            // Anonymous source node
+            NodePattern {
+                variable: None,
+                labels: Vec::new(),
+                label_expression: None,
+                properties: Vec::new(),
+                where_clause: None,
+                span: None,
+            }
+        } else {
+            self.parse_node_pattern()?
+        };
 
         // Check for path continuation
         // Handle both `-[...]->`/`<-[...]-` style and `->` style
@@ -1535,8 +1597,76 @@ impl<'a> Parser<'a> {
                 edges,
                 span: None,
             }))
+        } else if self.current.kind == TokenKind::LParen {
+            // G047: Parenthesized quantified path continuation: (a)(-[]->(x)){2,5}(b)
+            // The `(` after a node starts a parenthesized subpattern with a quantifier.
+            let sub = self.parse_parenthesized_pattern()?;
+
+            if let Pattern::Quantified {
+                pattern: inner,
+                min,
+                max,
+                subpath_var,
+                path_mode,
+                where_clause,
+            } = sub
+            {
+                // Parse optional trailing target node: ...{2,5}(b)
+                let trailing_target = if self.current.kind == TokenKind::LParen {
+                    Some(self.parse_node_pattern()?)
+                } else {
+                    None
+                };
+
+                // Merge outer anchors into the inner pattern:
+                // Replace inner source with `node`, replace inner last target with trailing_target.
+                let merged = self.merge_quantified_anchors(node, *inner, trailing_target);
+
+                Ok(Pattern::Quantified {
+                    pattern: Box::new(merged),
+                    min,
+                    max,
+                    subpath_var,
+                    path_mode,
+                    where_clause,
+                })
+            } else {
+                Err(self.error("Expected quantified pattern after node"))
+            }
         } else {
             Ok(Pattern::Node(node))
+        }
+    }
+
+    /// Merges outer anchor nodes into a quantified inner pattern.
+    ///
+    /// For `(a)(-[r:KNOWS]->(x)){2,5}(b)`, this replaces the inner pattern's
+    /// source with `(a)` and the last target with `(b)`.
+    fn merge_quantified_anchors(
+        &self,
+        source: NodePattern,
+        inner: Pattern,
+        trailing_target: Option<NodePattern>,
+    ) -> Pattern {
+        match inner {
+            Pattern::Path(mut path) => {
+                path.source = source;
+                if let (Some(target), Some(last_edge)) = (trailing_target, path.edges.last_mut()) {
+                    last_edge.target = target;
+                }
+                Pattern::Path(path)
+            }
+            Pattern::Node(_) => {
+                // Degenerate case: inner is just a node, not a path.
+                // Wrap source and inner into a path if we have a trailing target.
+                if trailing_target.is_some() {
+                    // Can't meaningfully merge, return source as-is
+                    Pattern::Node(source)
+                } else {
+                    Pattern::Node(source)
+                }
+            }
+            other => other,
         }
     }
 
@@ -1763,7 +1893,7 @@ impl<'a> Parser<'a> {
         // 2. `->` or `<-` or `--` (direction determined by leading arrow)
 
         let mut edge_where_clause = None;
-        let (variable, types, min_hops, max_hops, properties, direction) =
+        let (variable, types, mut min_hops, mut max_hops, properties, direction) =
             if self.current.kind == TokenKind::Minus {
                 // Pattern: -[...]->(target) or -[...]-(target)
                 self.advance();
@@ -2075,6 +2205,26 @@ impl<'a> Parser<'a> {
             false
         };
 
+        // Post-arrow quantifier: ->{m,n}, ->+, ->*  (ISO GQL G036/G060/G061)
+        // Only applies when no in-bracket quantifier was parsed (Cypher *1..3 form).
+        if min_hops.is_none() && max_hops.is_none() {
+            if self.current.kind == TokenKind::Plus {
+                self.advance();
+                min_hops = Some(1);
+                // max_hops stays None (unbounded)
+            } else if self.current.kind == TokenKind::Star {
+                self.advance();
+                min_hops = Some(0);
+                // max_hops stays None (unbounded)
+            } else if self.current.kind == TokenKind::LBrace {
+                let (qmin, qmax) = self.parse_path_quantifier()?;
+                if qmin.is_some() || qmax.is_some() {
+                    min_hops = qmin;
+                    max_hops = qmax;
+                }
+            }
+        }
+
         let target = self.parse_node_pattern()?;
 
         Ok(EdgePattern {
@@ -2319,6 +2469,10 @@ impl<'a> Parser<'a> {
         // Accept both WHERE and FILTER
         if self.current.kind == TokenKind::Filter {
             self.advance();
+            // ISO GQL: FILTER WHERE expr (WHERE is optional after FILTER)
+            if self.current.kind == TokenKind::Where {
+                self.advance();
+            }
         } else {
             self.expect(TokenKind::Where)?;
         }
@@ -2419,6 +2573,133 @@ impl<'a> Parser<'a> {
 
     /// Parses a SELECT clause (SQL-style projection, same semantics as RETURN).
     /// Called after SELECT token has already been consumed.
+    /// Parses a SELECT ... FROM ... MATCH statement (ISO GQL statement-leading form).
+    ///
+    /// ```text
+    /// SELECT [DISTINCT] { * | item [, item]... }
+    ///   FROM graph_ref MATCH pattern
+    ///   [WHERE ...] [GROUP BY ...] [ORDER BY ...] [OFFSET ...] [LIMIT ...]
+    /// ```
+    fn parse_select_from_statement(&mut self) -> Result<Statement> {
+        let span_start = self.current.span.start;
+
+        // Parse DISTINCT
+        let distinct = if self.current.kind == TokenKind::Distinct {
+            self.advance();
+            true
+        } else {
+            false
+        };
+
+        // Parse select items: * or expression list
+        let (is_wildcard, items) = if self.current.kind == TokenKind::Star {
+            self.advance();
+            (true, Vec::new())
+        } else {
+            let mut items = vec![self.parse_return_item()?];
+            while self.current.kind == TokenKind::Comma {
+                self.advance();
+                items.push(self.parse_return_item()?);
+            }
+            (false, items)
+        };
+
+        // Expect FROM
+        if !(self.is_identifier() && self.get_identifier_name().eq_ignore_ascii_case("FROM")) {
+            return Err(self.error("Expected FROM after SELECT"));
+        }
+        self.advance(); // consume FROM
+
+        // Parse graph reference (e.g., CURRENT_GRAPH, or a graph name)
+        // For now, consume identifier(s) until we hit MATCH
+        while self.is_identifier() && self.current.kind != TokenKind::Match {
+            self.advance();
+        }
+
+        // Expect MATCH
+        if self.current.kind != TokenKind::Match {
+            return Err(self.error("Expected MATCH after FROM clause"));
+        }
+
+        // Parse the MATCH clause
+        let match_clause = self.parse_match_clause()?;
+
+        // Optional WHERE
+        let where_clause =
+            if self.current.kind == TokenKind::Where || self.current.kind == TokenKind::Filter {
+                Some(self.parse_where_or_filter_clause()?)
+            } else {
+                None
+            };
+
+        // Optional GROUP BY
+        let group_by = if self.current.kind == TokenKind::Group {
+            self.advance();
+            self.expect(TokenKind::By)?;
+            let mut exprs = vec![self.parse_expression()?];
+            while self.current.kind == TokenKind::Comma {
+                self.advance();
+                exprs.push(self.parse_expression()?);
+            }
+            exprs
+        } else {
+            Vec::new()
+        };
+
+        // Optional ORDER BY
+        let order_by = if self.current.kind == TokenKind::Order {
+            Some(self.parse_order_by()?)
+        } else {
+            None
+        };
+
+        // Optional OFFSET / SKIP
+        let skip = if matches!(self.current.kind, TokenKind::Skip | TokenKind::Offset) {
+            self.advance();
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+
+        // Optional LIMIT / FETCH
+        let limit = if self.current.kind == TokenKind::Limit {
+            self.advance();
+            Some(self.parse_expression()?)
+        } else if self.current.kind == TokenKind::Fetch {
+            Some(self.parse_fetch_first()?)
+        } else {
+            None
+        };
+
+        let return_clause = ReturnClause {
+            distinct,
+            items,
+            is_wildcard,
+            group_by,
+            order_by,
+            skip,
+            limit,
+            is_finish: false,
+            span: None,
+        };
+
+        Ok(Statement::Query(QueryStatement {
+            match_clauses: vec![match_clause],
+            where_clause,
+            set_clauses: Vec::new(),
+            remove_clauses: Vec::new(),
+            with_clauses: Vec::new(),
+            unwind_clauses: Vec::new(),
+            merge_clauses: Vec::new(),
+            create_clauses: Vec::new(),
+            delete_clauses: Vec::new(),
+            return_clause,
+            having_clause: None,
+            ordered_clauses: Vec::new(),
+            span: Some(SourceSpan::new(span_start, self.current.span.end, 1, 1)),
+        }))
+    }
+
     fn parse_select_clause(&mut self) -> Result<ReturnClause> {
         let distinct = if self.current.kind == TokenKind::Distinct {
             self.advance();
@@ -4688,6 +4969,26 @@ impl<'a> Parser<'a> {
     fn parse_graph_type_body(&mut self) -> Result<(Vec<String>, Vec<String>, bool)> {
         self.expect(TokenKind::LBrace)?;
 
+        // Brace-delimited pattern form: { (n: Person {name STRING})-[:KNOWS]->(:Person) }
+        if self.current.kind == TokenKind::LParen {
+            let inline = self.parse_graph_type_brace_pattern_body()?;
+            let nt: Vec<String> = inline
+                .iter()
+                .filter_map(|t| match t {
+                    InlineElementType::Node { name, .. } => Some(name.clone()),
+                    InlineElementType::Edge { .. } => None,
+                })
+                .collect();
+            let et: Vec<String> = inline
+                .iter()
+                .filter_map(|t| match t {
+                    InlineElementType::Edge { name, .. } => Some(name.clone()),
+                    InlineElementType::Node { .. } => None,
+                })
+                .collect();
+            return Ok((nt, et, false));
+        }
+
         let mut node_types = Vec::new();
         let mut edge_types = Vec::new();
         let mut open = false;
@@ -4856,6 +5157,11 @@ impl<'a> Parser<'a> {
 
                 self.expect(TokenKind::LBracket)?;
 
+                // Optional edge variable name: [r: KNOWS] vs [:KNOWS]
+                if self.is_identifier() && self.peek_kind() == TokenKind::Colon {
+                    self.advance(); // skip variable name
+                }
+
                 // Parse edge label: `:EdgeType`
                 self.expect(TokenKind::Colon)?;
                 if !self.is_identifier() && !self.is_label_or_type_name() {
@@ -4949,11 +5255,124 @@ impl<'a> Parser<'a> {
         Ok(types)
     }
 
-    /// Parses a node pattern inside a graph type pattern body: `(:Label {prop TYPE, ...})`.
+    /// Parses the brace-delimited pattern form of a graph type body:
+    /// `{ (:Person {name STRING})-[:KNOWS]->(:Person), ... }`
+    /// (closing `}` included). Same logic as `parse_graph_type_pattern_body` but
+    /// terminated by `}` instead of `)`.
+    fn parse_graph_type_brace_pattern_body(&mut self) -> Result<Vec<InlineElementType>> {
+        let mut types = Vec::new();
+        let mut seen_node_types = std::collections::HashSet::new();
+
+        while self.current.kind != TokenKind::RBrace && self.current.kind != TokenKind::Eof {
+            let (src_label, src_props) = self.parse_graph_type_node_pattern()?;
+
+            if self.current.kind == TokenKind::Minus || self.current.kind == TokenKind::LeftArrow {
+                let backward = self.current.kind == TokenKind::LeftArrow;
+                self.advance(); // consume `-` or `<-`
+
+                self.expect(TokenKind::LBracket)?;
+
+                // Optional edge variable name: [r: KNOWS] vs [:KNOWS]
+                if self.is_identifier() && self.peek_kind() == TokenKind::Colon {
+                    self.advance(); // skip variable name
+                }
+
+                self.expect(TokenKind::Colon)?;
+                if !self.is_identifier() && !self.is_label_or_type_name() {
+                    return Err(self.error("Expected edge type name after `:` in pattern"));
+                }
+                let edge_label = self.get_identifier_name();
+                self.advance();
+
+                let edge_props = if self.current.kind == TokenKind::LBrace {
+                    self.parse_property_definitions_braces()?
+                } else {
+                    Vec::new()
+                };
+
+                self.expect(TokenKind::RBracket)?;
+
+                let forward = if self.current.kind == TokenKind::Arrow {
+                    self.advance();
+                    true
+                } else if self.current.kind == TokenKind::Minus {
+                    self.advance();
+                    false
+                } else {
+                    return Err(self.error("Expected `->` or `-` after edge pattern `]`"));
+                };
+
+                let (tgt_label, tgt_props) = self.parse_graph_type_node_pattern()?;
+
+                let (effective_src, effective_tgt) = if backward {
+                    (tgt_label.clone(), src_label.clone())
+                } else {
+                    (src_label.clone(), tgt_label.clone())
+                };
+
+                let (src_types, tgt_types) = if !forward && !backward {
+                    (
+                        vec![src_label.clone(), tgt_label.clone()],
+                        vec![src_label.clone(), tgt_label.clone()],
+                    )
+                } else {
+                    (vec![effective_src], vec![effective_tgt])
+                };
+
+                if seen_node_types.insert(src_label.clone()) {
+                    types.push(InlineElementType::Node {
+                        name: src_label,
+                        properties: src_props,
+                        key_labels: Vec::new(),
+                    });
+                }
+                if seen_node_types.insert(tgt_label.clone()) {
+                    types.push(InlineElementType::Node {
+                        name: tgt_label,
+                        properties: tgt_props,
+                        key_labels: Vec::new(),
+                    });
+                }
+
+                types.push(InlineElementType::Edge {
+                    name: edge_label,
+                    properties: edge_props,
+                    key_labels: Vec::new(),
+                    source_node_types: src_types,
+                    target_node_types: tgt_types,
+                });
+            } else {
+                // Standalone node pattern
+                if seen_node_types.insert(src_label.clone()) {
+                    types.push(InlineElementType::Node {
+                        name: src_label,
+                        properties: src_props,
+                        key_labels: Vec::new(),
+                    });
+                }
+            }
+
+            if self.current.kind == TokenKind::Comma {
+                self.advance();
+            }
+        }
+
+        self.expect(TokenKind::RBrace)?;
+        Ok(types)
+    }
+
+    /// Parses a node pattern inside a graph type pattern body: `(:Label {prop TYPE, ...})`
+    /// or `(var: Label {prop TYPE, ...})`.
     ///
     /// Returns `(label, properties)`.
     fn parse_graph_type_node_pattern(&mut self) -> Result<(String, Vec<PropertyDefinition>)> {
         self.expect(TokenKind::LParen)?;
+
+        // Optional variable name: (n: Person ...) vs (:Person ...)
+        if self.is_identifier() && self.peek_kind() == TokenKind::Colon {
+            self.advance(); // skip variable name (not used in graph type definitions)
+        }
+
         self.expect(TokenKind::Colon)?;
 
         if !self.is_identifier() && !self.is_label_or_type_name() {

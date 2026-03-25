@@ -106,6 +106,12 @@ pub enum TokenKind {
     /// OPTIONAL
     Optional,
 
+    // Grouping keywords
+    /// GROUP
+    Group,
+    /// HAVING
+    Having,
+
     // Procedure keywords
     /// CALL
     Call,
@@ -485,6 +491,7 @@ impl<'a> Lexer<'a> {
             "PRIMARY" => Some(TokenKind::Primary),
             "KEY" => Some(TokenKind::Key),
             "REFERENCES" => Some(TokenKind::References),
+            "GROUP" => Some(TokenKind::Group),
             _ => None,
         }
     }
@@ -517,6 +524,7 @@ impl<'a> Lexer<'a> {
             CommonKeyword::Call => TokenKind::Call,
             CommonKeyword::Yield => TokenKind::Yield,
             CommonKeyword::Optional => TokenKind::Optional,
+            CommonKeyword::Having => TokenKind::Having,
             // Keywords recognized by CommonKeyword but not used in SQL/PGQ
             // are mapped to Identifier (they can appear as table/column names)
             _ => TokenKind::Identifier,

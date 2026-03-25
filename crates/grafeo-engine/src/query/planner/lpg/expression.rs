@@ -263,9 +263,14 @@ impl super::Planner {
     /// Extracts the pattern from an EXISTS subplan for the simple single-hop fast path.
     ///
     /// Returns `(start_variable, direction, edge_type, end_labels)` only for bare
-    /// single-hop patterns like `(n)-[:TYPE]->()`. Rejects multi-hop patterns,
-    /// inner WHERE filters, and label constraints on target nodes, all of which
-    /// are handled correctly by the semi-join rewrite in `plan_filter`.
+    /// single-hop patterns like `(n)-[:TYPE]->()` or `()-[:TYPE]->(n)`. Rejects
+    /// multi-hop patterns, inner WHERE filters, label constraints on target nodes,
+    /// and non-correlated patterns (both endpoints anonymous), all of which are
+    /// handled correctly by the semi-join rewrite in `plan_filter`.
+    ///
+    /// When the correlated variable appears on the target side of the pattern
+    /// (e.g., `()-[:CALLS]->(m)` where `m` is from the outer scope), the direction
+    /// is flipped so the runtime can evaluate from the correlated node.
     pub(super) fn extract_exists_pattern(
         &self,
         subplan: &LogicalOperator,
@@ -280,18 +285,48 @@ impl super::Planner {
                         "Unsupported EXISTS subquery pattern".to_string(),
                     ));
                 }
-                let end_labels = self.extract_end_labels_from_expand(expand);
-                let direction = match expand.direction {
-                    ExpandDirection::Outgoing => Direction::Outgoing,
-                    ExpandDirection::Incoming => Direction::Incoming,
-                    ExpandDirection::Both => Direction::Both,
-                };
-                Ok((
-                    expand.from_variable.clone(),
-                    direction,
-                    expand.edge_types.clone(),
-                    end_labels,
-                ))
+
+                let from_is_anon = expand.from_variable.starts_with("_anon_");
+                let to_is_anon = expand.to_variable.starts_with("_anon_");
+
+                if from_is_anon && to_is_anon {
+                    // Both endpoints anonymous: non-correlated subquery.
+                    // Must go through the semi-join path.
+                    return Err(Error::Internal(
+                        "Non-correlated EXISTS subquery requires semi-join".to_string(),
+                    ));
+                }
+
+                if from_is_anon {
+                    // Correlated variable is on the target side, e.g. ()-[:CALLS]->(m).
+                    // Flip direction: "does m have an incoming CALLS edge?"
+                    let direction = match expand.direction {
+                        ExpandDirection::Outgoing => Direction::Incoming,
+                        ExpandDirection::Incoming => Direction::Outgoing,
+                        ExpandDirection::Both => Direction::Both,
+                    };
+                    let end_labels = self.extract_source_labels_from_expand(expand);
+                    Ok((
+                        expand.to_variable.clone(),
+                        direction,
+                        expand.edge_types.clone(),
+                        end_labels,
+                    ))
+                } else {
+                    // Normal case: correlated variable on the source side, e.g. (m)-[:CALLS]->()
+                    let end_labels = self.extract_end_labels_from_expand(expand);
+                    let direction = match expand.direction {
+                        ExpandDirection::Outgoing => Direction::Outgoing,
+                        ExpandDirection::Incoming => Direction::Incoming,
+                        ExpandDirection::Both => Direction::Both,
+                    };
+                    Ok((
+                        expand.from_variable.clone(),
+                        direction,
+                        expand.edge_types.clone(),
+                        end_labels,
+                    ))
+                }
             }
             LogicalOperator::NodeScan(scan) => {
                 if let Some(input) = &scan.input {
@@ -313,6 +348,17 @@ impl super::Planner {
     /// Extracts end node labels from an Expand operator if present.
     pub(super) fn extract_end_labels_from_expand(&self, expand: &ExpandOp) -> Option<Vec<String>> {
         // Check if the expand has a NodeScan input with a label filter
+        match expand.input.as_ref() {
+            LogicalOperator::NodeScan(scan) => scan.label.clone().map(|l| vec![l]),
+            _ => None,
+        }
+    }
+
+    /// Extracts source (input) node labels from an Expand for the flipped EXISTS case.
+    ///
+    /// When the pattern is `(:Label)-[:TYPE]->(m)` and we flip to start from `m`,
+    /// the source node's labels become the "end" labels for the reversed traversal.
+    fn extract_source_labels_from_expand(&self, expand: &ExpandOp) -> Option<Vec<String>> {
         match expand.input.as_ref() {
             LogicalOperator::NodeScan(scan) => scan.label.clone().map(|l| vec![l]),
             _ => None,

@@ -9,10 +9,10 @@ use super::common::{
     wrap_return, wrap_skip, wrap_sort,
 };
 use crate::query::plan::{
-    AggregateExpr, AggregateOp, BinaryOp, CallProcedureOp, CreatePropertyGraphOp, ExpandDirection,
-    ExpandOp, LeftJoinOp, LogicalExpression, LogicalOperator, LogicalPlan, NodeScanOp, PathMode,
-    ProcedureYield, PropertyGraphEdgeTable, PropertyGraphNodeTable, ReturnItem, SortKey, SortOrder,
-    UnaryOp,
+    AggregateExpr, AggregateOp, BinaryOp, CallProcedureOp, CreatePropertyGraphOp, DistinctOp,
+    ExpandDirection, ExpandOp, LeftJoinOp, LogicalExpression, LogicalOperator, LogicalPlan,
+    NodeScanOp, PathMode, ProcedureYield, PropertyGraphEdgeTable, PropertyGraphNodeTable,
+    ReturnItem, SortKey, SortOrder, UnaryOp,
 };
 use grafeo_adapters::query::sql_pgq::{self, ast};
 use grafeo_common::types::Value;
@@ -54,7 +54,7 @@ impl SqlPgqTranslator {
             .collect();
         let table_alias = select.table_alias.as_deref();
 
-        // Plan structure: Limit → Skip → Return → Sort → Filter → NodeScan/Expand
+        // Plan structure: Distinct? → Limit → Skip → Return → Aggregate? → Sort → Filter → NodeScan/Expand
         //
         // SQL WHERE and ORDER BY operate on output column aliases, but the binder/planner
         // need graph-level expressions. We resolve aliases back to graph expressions and
@@ -73,7 +73,13 @@ impl SqlPgqTranslator {
             });
         }
 
-        // 2. Translate SQL WHERE → Filter (below Return)
+        // 1c. Translate WHERE inside GRAPH_TABLE (operates on graph-level variables)
+        if let Some(inner_where) = &select.graph_table.where_clause {
+            let predicate = self.translate_expression(inner_where, None)?;
+            plan = wrap_filter(plan, predicate);
+        }
+
+        // 2. Translate SQL-level WHERE → Filter (below Return)
         if let Some(where_expr) = &select.where_clause {
             let predicate = self.translate_sql_expression(where_expr, table_alias, &column_map)?;
             plan = wrap_filter(plan, predicate);
@@ -115,7 +121,7 @@ impl SqlPgqTranslator {
         // 6. Translate COLUMNS clause → Return (outermost projection)
         plan = self.translate_columns(&select.graph_table.columns, plan)?;
 
-        // 7. Handle outer SELECT list with aggregates (e.g., SELECT COUNT(*) AS total)
+        // 7. Handle outer SELECT list with aggregates or explicit GROUP BY
         if let ast::SelectList::Columns(items) = &select.select_list {
             let has_aggregates = items.iter().any(|item| {
                 matches!(
@@ -125,9 +131,33 @@ impl SqlPgqTranslator {
                 )
             });
 
-            if has_aggregates {
+            if has_aggregates || select.group_by.is_some() {
                 let mut aggregates = Vec::new();
                 let mut group_by = Vec::new();
+
+                // If explicit GROUP BY was specified, use those expressions.
+                // GROUP BY references output column names from COLUMNS (post-projection),
+                // so we resolve them as variables, not as graph-level expressions.
+                if let Some(gb_exprs) = &select.group_by {
+                    for gb_expr in gb_exprs {
+                        let expr = match gb_expr {
+                            ast::Expression::Variable(name) => {
+                                // Bare column name: use as-is (it's a COLUMNS output alias)
+                                LogicalExpression::Variable(name.clone())
+                            }
+                            ast::Expression::PropertyAccess { variable, property }
+                                if table_alias.is_some_and(|a| a == variable) =>
+                            {
+                                // Table-qualified column name (e.g., g.source): use property as alias
+                                LogicalExpression::Variable(property.clone())
+                            }
+                            other => {
+                                self.translate_sql_expression(other, table_alias, &column_map)?
+                            }
+                        };
+                        group_by.push(expr);
+                    }
+                }
 
                 for item in items {
                     let alias = item.alias.clone();
@@ -161,25 +191,45 @@ impl SqlPgqTranslator {
                             });
                         }
                         _ => {
-                            // Non-aggregate in SELECT with aggregates → group by
-                            let expr = self.translate_expression(&item.expression, None)?;
-                            group_by.push(expr);
+                            // Non-aggregate in SELECT without explicit GROUP BY → implicit group by
+                            if select.group_by.is_none() {
+                                let expr = self.translate_expression(&item.expression, None)?;
+                                group_by.push(expr);
+                            }
                         }
                     }
                 }
+
+                // Translate HAVING clause
+                let having = if let Some(having_expr) = &select.having {
+                    Some(self.translate_sql_expression(having_expr, table_alias, &column_map)?)
+                } else {
+                    None
+                };
 
                 plan = LogicalOperator::Aggregate(AggregateOp {
                     group_by,
                     aggregates,
                     input: Box::new(plan),
-                    having: None,
+                    having,
                 });
 
                 // Wrap with Return for the aggregate result
                 let return_items: Vec<ReturnItem> = items
                     .iter()
                     .map(|item| {
-                        let alias = item.alias.clone().unwrap_or_else(|| "result".to_string());
+                        let alias = item
+                            .alias
+                            .clone()
+                            .or_else(|| {
+                                // Derive alias from expression (e.g., Variable("source") → "source")
+                                if let ast::Expression::Variable(name) = &item.expression {
+                                    Some(name.clone())
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap_or_else(|| "result".to_string());
                         ReturnItem {
                             expression: LogicalExpression::Variable(alias.clone()),
                             alias: Some(alias),
@@ -188,6 +238,14 @@ impl SqlPgqTranslator {
                     .collect();
                 plan = wrap_return(plan, return_items, false);
             }
+        }
+
+        // 8. SELECT DISTINCT → wrap with Distinct operator
+        if select.distinct {
+            plan = LogicalOperator::Distinct(DistinctOp {
+                input: Box::new(plan),
+                columns: None,
+            });
         }
 
         Ok(LogicalPlan::new(plan))

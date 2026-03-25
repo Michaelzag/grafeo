@@ -738,6 +738,41 @@ mod cypher_tests {
         assert_eq!(result.rows[2][0], Value::String("Harm".into()));
     }
 
+    // Issue #173: EXISTS { MATCH ()-[:TYPE]->(m) } with correlated var on target side
+    #[test]
+    fn test_cypher_exists_target_side_correlation() {
+        // Alix->Gus (KNOWS), Alix->Harm (KNOWS), Gus->Harm (KNOWS)
+        // Gus and Harm have incoming KNOWS edges; Alix does not.
+        let db = create_social_network();
+        let session = db.session();
+
+        let result = session
+            .execute_cypher(
+                "MATCH (n:Person) WHERE EXISTS { MATCH ()-[:KNOWS]->(n) } RETURN n.name ORDER BY n.name",
+            )
+            .unwrap();
+
+        assert_eq!(result.row_count(), 2);
+        assert_eq!(result.rows[0][0], Value::String("Gus".into()));
+        assert_eq!(result.rows[1][0], Value::String("Harm".into()));
+    }
+
+    #[test]
+    fn test_cypher_not_exists_target_side_correlation() {
+        // Alix has no incoming KNOWS edges.
+        let db = create_social_network();
+        let session = db.session();
+
+        let result = session
+            .execute_cypher(
+                "MATCH (n:Person) WHERE NOT EXISTS { MATCH ()-[:KNOWS]->(n) } RETURN n.name",
+            )
+            .unwrap();
+
+        assert_eq!(result.row_count(), 1);
+        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+    }
+
     #[test]
     fn test_anon_nodes_with_edge_variable() {
         let db = create_social_network();
@@ -788,6 +823,52 @@ mod cypher_tests {
             result.is_ok(),
             "WHERE r.since with anon nodes failed: {:?}",
             result.err()
+        );
+    }
+
+    // Regression: GrafeoDB/discussions#155
+    // Incoming edges with target node property filter must not return all edges.
+    #[test]
+    fn test_incoming_edge_target_node_property_filter() {
+        let db = create_social_network();
+        let session = db.session();
+
+        // Harm is the target of 2 KNOWS edges (Alix->Harm, Gus->Harm).
+        // The anonymous source node `()` should not broaden the result set.
+        let result = session
+            .execute_cypher(
+                "MATCH ()-[r:KNOWS]->(o:Person {name: \"Harm\"}) RETURN count(r) AS cnt",
+            )
+            .unwrap();
+        assert_eq!(result.row_count(), 1);
+        assert_eq!(
+            result.rows[0][0],
+            Value::Int64(2),
+            "Only edges targeting Harm should be counted, not all KNOWS edges"
+        );
+
+        // Verify the symmetric outgoing case returns the same count.
+        let result = session
+            .execute_cypher(
+                "MATCH (o:Person {name: \"Harm\"})<-[r:KNOWS]-() RETURN count(r) AS cnt",
+            )
+            .unwrap();
+        assert_eq!(result.row_count(), 1);
+        assert_eq!(
+            result.rows[0][0],
+            Value::Int64(2),
+            "Reversed arrow should match the same 2 edges"
+        );
+
+        // Without type filter: total incoming to Harm is still 2 KNOWS + 0 WORKS_AT = 2.
+        let result = session
+            .execute_cypher("MATCH ()-[r]->(o:Person {name: \"Harm\"}) RETURN count(r) AS cnt")
+            .unwrap();
+        assert_eq!(result.row_count(), 1);
+        assert_eq!(
+            result.rows[0][0],
+            Value::Int64(2),
+            "Untyped edge should still filter by target node property"
         );
     }
 }
@@ -2121,5 +2202,244 @@ mod profile_tests {
             profile_text.contains("rows="),
             "Cypher PROFILE should work, got: {profile_text}"
         );
+    }
+}
+
+// ============================================================================
+// SQL/PGQ Cross-Language Correctness
+// ============================================================================
+
+#[cfg(feature = "sql-pgq")]
+mod gql_conformance_edge_cases {
+    use super::*;
+
+    /// FILTER WHERE is an ISO GQL synonym for WHERE.
+    #[test]
+    fn filter_where_clause() {
+        let db = create_social_network();
+        let session = db.session();
+
+        let result = session
+            .execute(
+                "MATCH (a:Person)-[:KNOWS]->(b:Person) \
+                 FILTER WHERE a.age > 28 \
+                 RETURN a.name AS name ORDER BY name",
+            )
+            .unwrap();
+
+        // Alix (30) satisfies the filter
+        assert!(result.row_count() > 0);
+        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+    }
+
+    /// Post-edge quantifiers: ->{min,max}
+    #[test]
+    fn post_edge_quantifier_bounded() {
+        let db = create_chain();
+        let session = db.session();
+
+        // A ->{1,2} should match 1-hop and 2-hop paths from each node
+        let result = session
+            .execute(
+                "MATCH (a:Node)-[:NEXT]->{1,2}(b:Node) \
+                 RETURN a.id AS src, b.id AS dst ORDER BY src, dst",
+            )
+            .unwrap();
+
+        // 1-hop: A->B, B->C, C->D (3)
+        // 2-hop: A->C, B->D (2)
+        // Total: 5
+        assert_eq!(result.row_count(), 5);
+    }
+
+    /// Post-edge quantifier: ->+ (one or more)
+    #[test]
+    fn post_edge_quantifier_plus() {
+        let db = create_chain();
+        let session = db.session();
+
+        let result = session
+            .execute(
+                "MATCH (a:Node {id: 'A'})-[:NEXT]->{1,}(b:Node) \
+                 RETURN b.id AS dst ORDER BY dst",
+            )
+            .unwrap();
+
+        // From A: B (1-hop), C (2-hop), D (3-hop) = 3 results
+        assert_eq!(result.row_count(), 3);
+    }
+
+    /// SELECT ... FROM GRAPH_TABLE ... MATCH is a GQL ISO construct.
+    #[test]
+    fn select_from_match_statement() {
+        let db = create_social_network();
+        let session = db.session();
+
+        let result = session
+            .execute("SELECT a.name AS name FROM MATCH (a:Person) ORDER BY name")
+            .unwrap();
+
+        assert_eq!(result.row_count(), 3);
+        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+    }
+
+    /// nullIf function works in GQL RETURN.
+    #[test]
+    fn nullif_in_return() {
+        let db = create_social_network();
+        let session = db.session();
+
+        let result = session
+            .execute(
+                "MATCH (a:Person) \
+                 RETURN a.name AS name, nullIf(a.name, 'Gus') AS filtered \
+                 ORDER BY name",
+            )
+            .unwrap();
+
+        // Alix: filtered = 'Alix'
+        assert_eq!(result.rows[0][1], Value::String("Alix".into()));
+        // Gus: filtered = NULL
+        assert!(result.rows[1][1].is_null());
+        // Harm: filtered = 'Harm'
+        assert_eq!(result.rows[2][1], Value::String("Harm".into()));
+    }
+}
+
+mod sql_pgq_correctness {
+    use super::*;
+
+    /// Verify SQL/PGQ and GQL return the same results for equivalent queries.
+    #[test]
+    fn sql_pgq_matches_gql_for_node_query() {
+        let db = create_social_network();
+        let session = db.session();
+
+        let gql = session
+            .execute("MATCH (a:Person) RETURN a.name AS name ORDER BY name")
+            .unwrap();
+        let sql = session
+            .execute_sql(
+                "SELECT * FROM GRAPH_TABLE (
+                    MATCH (a:Person)
+                    COLUMNS (a.name AS name)
+                ) ORDER BY name",
+            )
+            .unwrap();
+
+        assert_eq!(gql.row_count(), sql.row_count());
+        for (g, s) in gql.rows.iter().zip(sql.rows.iter()) {
+            assert_eq!(g[0], s[0], "GQL and SQL/PGQ should return same names");
+        }
+    }
+
+    /// Verify SQL/PGQ WHERE inside GRAPH_TABLE matches GQL WHERE.
+    #[test]
+    fn sql_pgq_inner_where_matches_gql_where() {
+        let db = create_social_network();
+        let session = db.session();
+
+        let gql = session
+            .execute(
+                "MATCH (a:Person)-[:KNOWS]->(b:Person) \
+                 WHERE a.age > 28 \
+                 RETURN a.name AS source, b.name AS target \
+                 ORDER BY source, target",
+            )
+            .unwrap();
+        let sql = session
+            .execute_sql(
+                "SELECT * FROM GRAPH_TABLE (
+                    MATCH (a:Person)-[:KNOWS]->(b:Person)
+                    WHERE a.age > 28
+                    COLUMNS (a.name AS source, b.name AS target)
+                ) ORDER BY source, target",
+            )
+            .unwrap();
+
+        assert_eq!(
+            gql.row_count(),
+            sql.row_count(),
+            "GQL: {}, SQL/PGQ: {}",
+            gql.row_count(),
+            sql.row_count()
+        );
+        for (g, s) in gql.rows.iter().zip(sql.rows.iter()) {
+            assert_eq!(g, s);
+        }
+    }
+
+    /// SQL/PGQ GROUP BY produces correct aggregation.
+    #[test]
+    fn sql_pgq_group_by_aggregate_correctness() {
+        let db = create_social_network();
+        let session = db.session();
+
+        let result = session
+            .execute_sql(
+                "SELECT source, COUNT(*) AS cnt FROM GRAPH_TABLE (
+                    MATCH (a:Person)-[:KNOWS]->(b:Person)
+                    COLUMNS (a.name AS source)
+                ) GROUP BY source ORDER BY source",
+            )
+            .unwrap();
+
+        assert_eq!(result.row_count(), 2);
+        // Alix knows 2, Gus knows 1
+        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows[0][1], Value::Int64(2));
+        assert_eq!(result.rows[1][0], Value::String("Gus".into()));
+        assert_eq!(result.rows[1][1], Value::Int64(1));
+    }
+
+    /// SQL/PGQ SELECT DISTINCT deduplicates correctly.
+    #[test]
+    fn sql_pgq_select_distinct_correctness() {
+        let db = create_social_network();
+        let session = db.session();
+
+        let all = session
+            .execute_sql(
+                "SELECT source FROM GRAPH_TABLE (
+                    MATCH (a:Person)-[:KNOWS]->(b:Person)
+                    COLUMNS (a.name AS source)
+                )",
+            )
+            .unwrap();
+        let distinct = session
+            .execute_sql(
+                "SELECT DISTINCT source FROM GRAPH_TABLE (
+                    MATCH (a:Person)-[:KNOWS]->(b:Person)
+                    COLUMNS (a.name AS source)
+                )",
+            )
+            .unwrap();
+
+        assert_eq!(all.row_count(), 3, "3 KNOWS edges total");
+        assert_eq!(distinct.row_count(), 2, "2 distinct source names");
+    }
+
+    /// nullIf works in SQL/PGQ COLUMNS expressions.
+    #[test]
+    fn sql_pgq_nullif_in_columns() {
+        let db = create_social_network();
+        let session = db.session();
+
+        let result = session
+            .execute_sql(
+                "SELECT * FROM GRAPH_TABLE (
+                    MATCH (a:Person)
+                    COLUMNS (a.name AS name, nullIf(a.name, 'Alix') AS filtered)
+                ) ORDER BY name",
+            )
+            .unwrap();
+
+        assert_eq!(result.row_count(), 3);
+        // Alix: nullIf('Alix', 'Alix') = NULL
+        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+        assert!(result.rows[0][1].is_null());
+        // Gus: nullIf('Gus', 'Alix') = 'Gus'
+        assert_eq!(result.rows[1][0], Value::String("Gus".into()));
+        assert_eq!(result.rows[1][1], Value::String("Gus".into()));
     }
 }

@@ -85,6 +85,14 @@ impl<'a> Parser<'a> {
     fn parse_select_statement(&mut self) -> Result<SelectStatement> {
         self.expect(TokenKind::Select)?;
 
+        // Optional DISTINCT
+        let distinct = if self.current.kind == TokenKind::Distinct {
+            self.advance();
+            true
+        } else {
+            false
+        };
+
         let select_list = self.parse_select_list()?;
 
         self.expect(TokenKind::From)?;
@@ -104,6 +112,28 @@ impl<'a> Parser<'a> {
 
         // Optional WHERE clause
         let where_clause = if self.current.kind == TokenKind::Where {
+            self.advance();
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+
+        // Optional GROUP BY clause
+        let group_by = if self.current.kind == TokenKind::Group {
+            self.advance();
+            self.expect(TokenKind::By)?;
+            let mut exprs = vec![self.parse_expression()?];
+            while self.current.kind == TokenKind::Comma {
+                self.advance();
+                exprs.push(self.parse_expression()?);
+            }
+            Some(exprs)
+        } else {
+            None
+        };
+
+        // Optional HAVING clause
+        let having = if self.current.kind == TokenKind::Having {
             self.advance();
             Some(self.parse_expression()?)
         } else {
@@ -136,10 +166,13 @@ impl<'a> Parser<'a> {
         };
 
         Ok(SelectStatement {
+            distinct,
             select_list,
             graph_table,
             table_alias,
             where_clause,
+            group_by,
+            having,
             order_by,
             limit,
             offset,
@@ -330,6 +363,16 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::GraphTable)?;
         self.expect(TokenKind::LParen)?;
 
+        // Optional graph name reference: GRAPH_TABLE(my_graph, MATCH ...)
+        let graph_name =
+            if self.current.kind == TokenKind::Identifier && self.peek_kind() == TokenKind::Comma {
+                let name = self.expect_identifier()?;
+                self.advance(); // consume comma
+                Some(name)
+            } else {
+                None
+            };
+
         let match_clause = self.parse_match_clause()?;
 
         // Parse optional matches: OPTIONAL MATCH or LEFT [OUTER] JOIN MATCH
@@ -356,13 +399,23 @@ impl<'a> Parser<'a> {
             }
         }
 
+        // Optional WHERE clause inside GRAPH_TABLE (between MATCH and COLUMNS)
+        let where_clause = if self.current.kind == TokenKind::Where {
+            self.advance();
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+
         let columns = self.parse_columns_clause()?;
 
         self.expect(TokenKind::RParen)?;
 
         Ok(GraphTableExpression {
+            graph_name,
             match_clause,
             optional_matches,
+            where_clause,
             columns,
             span: None,
         })
@@ -426,6 +479,7 @@ impl<'a> Parser<'a> {
         Ok(AliasedPattern {
             alias: None,
             path_function: None,
+            search_prefix: None,
             keep: None,
             pattern,
         })

@@ -2,6 +2,32 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
+## [0.5.26] - Unreleased
+
+### Added
+
+- **GQL conformance: GraphGlot cross-validation** (ISO/IEC 39075:2024): 234-query test corpus cross-validated against GraphGlot, a GQL reference parser. 184/234 both-pass, 48 Grafeo-only Cypher superset, 2 both-fail on non-GQL `WITH` chains
+- **SQL/PGQ: WHERE inside GRAPH_TABLE** (SQL:2023): `WHERE` clause between `MATCH` and `COLUMNS` inside `GRAPH_TABLE(...)`, filtering at the graph pattern level before column projection
+- **SQL/PGQ: SELECT DISTINCT**: `SELECT DISTINCT` now wired through parser to `DistinctOp` in the execution plan
+- **SQL/PGQ: GROUP BY / HAVING**: explicit `GROUP BY` with one or more expressions and `HAVING` clause for filtering aggregated groups
+- **SQL/PGQ: graph name reference**: `GRAPH_TABLE(graph_name, MATCH ...)` syntax parsed and stored (session-level routing planned for future release)
+- **CALL block scope isolation tests**: regression tests verifying variable scope isolation between sibling `CALL { }` blocks, including aggregation in subqueries
+- **Cross-language correctness tests**: SQL/PGQ queries cross-validated against GQL equivalents for WHERE, DISTINCT, GROUP BY, and nullIf
+
+### Fixed
+
+- **EXISTS/COUNT subquery with target-side correlation returns wrong results** (#173): `EXISTS { MATCH ()-[:TYPE]->(n) }` and `COUNT { MATCH ()-[:TYPE]->(n) }` silently returned empty/zero when the correlated variable appeared on the target side of the pattern. The fast-path evaluator used the anonymous source node as the lookup key, which never existed in the outer scope. Fixed by detecting the anonymous source and flipping the traversal direction to start from the correlated target variable.
+- **WAL directory-format data loss on reopen** (#174): `close()` wrote `checkpoint.meta` for directory-format databases, causing recovery to skip older WAL files after rotation. Since directory format has no snapshot, this silently lost all pre-rotation data. Fixed by syncing without checkpointing.
+- **UNWIND variable property access in SET clause** (#172): `UNWIND $batch AS item MERGE (:T {k: item.k}) SET x.name = item.name` silently set properties to NULL instead of the UNWIND map value. Root cause: five mutation planner functions (MERGE, MERGE relationship, DELETE node, DELETE edge, SET property) assigned `LogicalType::Node` to all pass-through output columns, causing Map values from UNWIND to be silently dropped. All five now use `LogicalType::Any` for pass-through columns. Both `SET x.prop = item.prop` and `SET x += item` resolve correctly. Present since 0.5.14.
+- **GQL conformance gaps**: closed all 24 ISO GQL conformance gaps identified by GraphGlot cross-validation:
+  - G036/G060/G061: post-edge quantifiers `->{1,3}`, `->+`, `->*`
+  - G047: parenthesized quantified path continuation `(a)(-[]->(x)){2,5}(b)`
+  - G030/G032: path alternation `|` and `|+|` at MATCH level
+  - GQ08: `FILTER WHERE` clause
+  - GG:SS01/GG:GE01: `SELECT ... FROM ... MATCH` statement
+  - GG02/GG22: brace-delimited graph type patterns with variable names
+  - Per-pattern path search prefix `p = ANY SHORTEST (...)`
+
 ## [0.5.25] - 2026-03-25
 
 ### Added

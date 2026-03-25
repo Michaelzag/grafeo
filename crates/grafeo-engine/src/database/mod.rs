@@ -1232,27 +1232,24 @@ impl GrafeoDB {
             fm.close()?;
         }
 
-        // Commit and checkpoint WAL (legacy directory format only)
+        // Commit and sync WAL (legacy directory format only).
+        // We intentionally do NOT call wal.checkpoint() here. Directory format
+        // has no snapshot: the WAL files are the sole source of truth. Writing
+        // checkpoint.meta would cause recovery to skip older WAL files, losing
+        // all data that predates the current log sequence.
         #[cfg(feature = "wal")]
         if !is_single_file && let Some(ref wal) = self.wal {
-            let epoch = self.store.current_epoch();
-
-            // Use the last assigned transaction ID, or create a checkpoint-only tx
-            let checkpoint_tx = self
+            // Use the last assigned transaction ID, or create one for the commit record
+            let commit_tx = self
                 .transaction_manager
                 .last_assigned_transaction_id()
-                .unwrap_or_else(|| {
-                    // No transactions have been started; begin one for checkpoint
-                    self.transaction_manager.begin()
-                });
+                .unwrap_or_else(|| self.transaction_manager.begin());
 
             // Log a TransactionCommit to mark all pending records as committed
             wal.log(&WalRecord::TransactionCommit {
-                transaction_id: checkpoint_tx,
+                transaction_id: commit_tx,
             })?;
 
-            // Then checkpoint
-            wal.checkpoint(checkpoint_tx, epoch)?;
             wal.sync()?;
         }
 

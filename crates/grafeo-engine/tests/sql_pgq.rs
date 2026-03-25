@@ -657,3 +657,214 @@ fn test_left_join_null_values() {
         "Vincent's friend should be NULL (no outgoing KNOWS edges)"
     );
 }
+
+// ============================================================================
+// WHERE inside GRAPH_TABLE (SQL:2023)
+// ============================================================================
+
+#[test]
+fn test_where_inside_graph_table() {
+    let db = create_social_network();
+    let session = db.session();
+
+    // WHERE between MATCH and COLUMNS filters at graph level
+    let result = session
+        .execute_sql(
+            "SELECT * FROM GRAPH_TABLE (
+                MATCH (a:Person)-[:KNOWS]->(b:Person)
+                WHERE a.age > 28
+                COLUMNS (a.name AS source, b.name AS target)
+            )",
+        )
+        .unwrap();
+
+    // Only Alix (age 30) and Harm (age 35) satisfy a.age > 28,
+    // but Harm has no outgoing KNOWS edges. So only Alix's edges match.
+    assert_eq!(result.row_count(), 2, "only Alix's KNOWS edges match");
+    for row in &result.rows {
+        assert_eq!(row[0], Value::String("Alix".into()));
+    }
+}
+
+#[test]
+fn test_where_inside_graph_table_combined_with_sql_where() {
+    let db = create_social_network();
+    let session = db.session();
+
+    // Inner WHERE filters at graph level, outer SQL WHERE filters on output columns
+    let result = session
+        .execute_sql(
+            "SELECT * FROM GRAPH_TABLE (
+                MATCH (a:Person)-[:KNOWS]->(b:Person)
+                WHERE a.age > 28
+                COLUMNS (a.name AS source, b.name AS target)
+            ) g WHERE g.target = 'Harm'",
+        )
+        .unwrap();
+
+    assert_eq!(result.row_count(), 1);
+    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows[0][1], Value::String("Harm".into()));
+}
+
+// ============================================================================
+// SELECT DISTINCT
+// ============================================================================
+
+#[test]
+fn test_select_distinct() {
+    let db = create_social_network();
+    let session = db.session();
+
+    // Without DISTINCT: each edge yields a row, source names repeat
+    let all = session
+        .execute_sql(
+            "SELECT source FROM GRAPH_TABLE (
+                MATCH (a:Person)-[:KNOWS]->(b:Person)
+                COLUMNS (a.name AS source)
+            )",
+        )
+        .unwrap();
+
+    // With DISTINCT: duplicates removed
+    let distinct = session
+        .execute_sql(
+            "SELECT DISTINCT source FROM GRAPH_TABLE (
+                MATCH (a:Person)-[:KNOWS]->(b:Person)
+                COLUMNS (a.name AS source)
+            )",
+        )
+        .unwrap();
+
+    assert!(
+        distinct.row_count() < all.row_count(),
+        "DISTINCT should produce fewer rows: got {} vs {}",
+        distinct.row_count(),
+        all.row_count()
+    );
+    // Alix has 2 edges, Gus has 1, so ALL=3, DISTINCT=2
+    assert_eq!(distinct.row_count(), 2);
+}
+
+// ============================================================================
+// GROUP BY / HAVING
+// ============================================================================
+
+#[test]
+fn test_group_by() {
+    let db = create_social_network();
+    let session = db.session();
+
+    let result = session
+        .execute_sql(
+            "SELECT source, COUNT(*) AS friend_count FROM GRAPH_TABLE (
+                MATCH (a:Person)-[:KNOWS]->(b:Person)
+                COLUMNS (a.name AS source)
+            ) GROUP BY source",
+        )
+        .unwrap();
+
+    assert_eq!(
+        result.row_count(),
+        2,
+        "two people have outgoing KNOWS edges"
+    );
+
+    // Find Alix's row (2 friends) and Gus's row (1 friend)
+    let alix_row = result
+        .rows
+        .iter()
+        .find(|r| r[0].as_str() == Some("Alix"))
+        .expect("Alix should appear");
+    assert_eq!(alix_row[1], Value::Int64(2));
+
+    let gus_row = result
+        .rows
+        .iter()
+        .find(|r| r[0].as_str() == Some("Gus"))
+        .expect("Gus should appear");
+    assert_eq!(gus_row[1], Value::Int64(1));
+}
+
+#[test]
+fn test_group_by_having() {
+    let db = create_social_network();
+    let session = db.session();
+
+    // HAVING references the output alias (friend_count), not the raw aggregate
+    let result = session
+        .execute_sql(
+            "SELECT source, COUNT(*) AS friend_count FROM GRAPH_TABLE (
+                MATCH (a:Person)-[:KNOWS]->(b:Person)
+                COLUMNS (a.name AS source)
+            ) GROUP BY source HAVING friend_count > 1",
+        )
+        .unwrap();
+
+    // Only Alix has more than 1 friend
+    assert_eq!(result.row_count(), 1);
+    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows[0][1], Value::Int64(2));
+}
+
+// ============================================================================
+// Graph name reference in GRAPH_TABLE
+// ============================================================================
+
+#[test]
+fn test_graph_name_reference_parses() {
+    let db = create_social_network();
+    let session = db.session();
+
+    // The parser should accept a graph name before MATCH.
+    // Execution routes to the default graph (named graph routing is session-level).
+    let result = session.execute_sql(
+        "SELECT * FROM GRAPH_TABLE (social_graph, MATCH (a:Person) COLUMNS (a.name AS name))",
+    );
+    // Should parse and execute (graph name is parsed but not yet routed)
+    assert!(
+        result.is_ok(),
+        "graph name reference should parse, got: {result:?}"
+    );
+}
+
+// ============================================================================
+// nullIf function
+// ============================================================================
+
+#[test]
+fn test_nullif_function() {
+    let db = create_social_network();
+    let session = db.session();
+
+    let result = session
+        .execute_sql(
+            "SELECT * FROM GRAPH_TABLE (
+                MATCH (a:Person)
+                COLUMNS (a.name AS name, nullIf(a.name, 'Alix') AS filtered)
+            )",
+        )
+        .unwrap();
+
+    // Alix's filtered value should be NULL, others unchanged
+    let alix_row = result
+        .rows
+        .iter()
+        .find(|r| r[0].as_str() == Some("Alix"))
+        .expect("Alix should appear");
+    assert!(
+        alix_row[1].is_null(),
+        "nullIf('Alix', 'Alix') should be NULL"
+    );
+
+    let gus_row = result
+        .rows
+        .iter()
+        .find(|r| r[0].as_str() == Some("Gus"))
+        .expect("Gus should appear");
+    assert_eq!(
+        gus_row[1],
+        Value::String("Gus".into()),
+        "nullIf('Gus', 'Alix') should be 'Gus'"
+    );
+}

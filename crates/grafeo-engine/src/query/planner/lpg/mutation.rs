@@ -160,7 +160,8 @@ impl super::Planner {
 
         // Preserve input columns so downstream RETURN/aggregate can reference
         // the deleted variable (e.g., DETACH DELETE n RETURN count(n)).
-        let output_schema: Vec<LogicalType> = columns.iter().map(|_| LogicalType::Node).collect();
+        // Use Any to preserve non-Node values (e.g., Map from UNWIND) through the pipeline.
+        let output_schema: Vec<LogicalType> = columns.iter().map(|_| LogicalType::Any).collect();
         let output_columns = columns.clone();
 
         // Auto-detect edge variables and use the correct operator
@@ -209,7 +210,7 @@ impl super::Planner {
 
         // Preserve input columns so downstream clauses can reference the
         // deleted variable (same pass-through pattern as delete_node).
-        let output_schema: Vec<LogicalType> = columns.iter().map(|_| LogicalType::Node).collect();
+        let output_schema: Vec<LogicalType> = columns.iter().map(|_| LogicalType::Any).collect();
         let output_columns = columns.clone();
 
         let mut op = DeleteEdgeOperator::new(
@@ -502,8 +503,11 @@ impl super::Planner {
         let output_column = columns.len();
         columns.push(merge.variable.clone());
 
-        // Build output schema
-        let output_schema: Vec<LogicalType> = columns.iter().map(|_| LogicalType::Node).collect();
+        // Build output schema: preserve input column types (Any for pass-through),
+        // use Node for the newly-added merge variable column.
+        let mut output_schema: Vec<LogicalType> =
+            (0..output_column).map(|_| LogicalType::Any).collect();
+        output_schema.push(LogicalType::Node);
 
         let mut merge_op = MergeOperator::new(
             Arc::clone(&self.store),
@@ -614,10 +618,11 @@ impl super::Planner {
             .borrow_mut()
             .insert(merge_rel.variable.clone());
 
-        // Build output schema: input columns + edge column
+        // Build output schema: preserve input column types (Any for pass-through),
+        // use Edge for the newly-added merge relationship column.
         let mut output_schema: Vec<LogicalType> =
-            columns.iter().map(|_| LogicalType::Node).collect();
-        output_schema[edge_output_column] = LogicalType::Edge;
+            (0..edge_output_column).map(|_| LogicalType::Any).collect();
+        output_schema.push(LogicalType::Edge);
 
         let config = MergeRelationshipConfig {
             source_column,
@@ -1050,18 +1055,26 @@ impl super::Planner {
                 ))
             })?;
 
-        // Convert properties to PropertySource
+        // Convert properties to PropertySource (supports both constants and variables)
         let properties: Vec<(String, PropertySource)> = set_prop
             .properties
             .iter()
             .map(|(name, expr)| {
-                let source = self.expression_to_property_source(expr, &columns)?;
-                Ok((name.clone(), source))
+                let source = self
+                    .expression_to_property_source(expr, &columns)
+                    .unwrap_or_else(|_| {
+                        // Fallback: try constant folding for complex expressions
+                        Self::try_fold_expression(expr).map_or(
+                            PropertySource::Constant(Value::Null),
+                            PropertySource::Constant,
+                        )
+                    });
+                (name.clone(), source)
             })
-            .collect::<Result<Vec<_>>>()?;
+            .collect();
 
-        // Output schema preserves input schema (passes through)
-        let output_schema: Vec<LogicalType> = columns.iter().map(|_| LogicalType::Node).collect();
+        // Output schema preserves input types (Any for pass-through columns).
+        let output_schema: Vec<LogicalType> = columns.iter().map(|_| LogicalType::Any).collect();
         let output_columns = columns.clone();
 
         // Determine if this is a node or edge using tracked edge columns

@@ -383,6 +383,8 @@ pub struct AliasedPattern {
     pub alias: Option<String>,
     /// Optional path function wrapping the pattern.
     pub path_function: Option<PathFunction>,
+    /// Per-pattern path search prefix (e.g., `p = ANY SHORTEST (...)`).
+    pub search_prefix: Option<PathSearchPrefix>,
     /// Per-pattern KEEP clause (ISO GQL sec 16.5).
     pub keep: Option<MatchMode>,
     /// The underlying pattern.

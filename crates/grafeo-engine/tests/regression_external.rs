@@ -938,4 +938,111 @@ mod call_block_scope {
             "second CALL referencing internal var of first CALL should fail, got: {result:?}"
         );
     }
+
+    /// Same-named variables in sibling CALL blocks should not conflict.
+    /// Each block defines its own `n`, but exports under different aliases.
+    ///
+    /// Known issue: the second CALL block's internal `n` overwrites the binding
+    /// context from the first, causing person_name to resolve to NULL. This is
+    /// tracked as a binder scope isolation bug.
+    #[test]
+    #[ignore = "known binder scope collision with same-named variables across sibling CALL blocks"]
+    fn same_variable_name_in_sibling_calls_is_independent() {
+        let db = db();
+        let s = db.session();
+        s.execute("INSERT (:Person {name: 'Alix'})").unwrap();
+        s.execute("INSERT (:Company {name: 'TechCorp'})").unwrap();
+
+        let result = s
+            .execute(
+                "CALL { MATCH (n:Person) RETURN n.name AS person_name } \
+                 CALL { MATCH (n:Company) RETURN n.name AS company_name } \
+                 RETURN person_name, company_name",
+            )
+            .unwrap();
+        assert_eq!(result.row_count(), 1);
+        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows[0][1], Value::String("TechCorp".into()));
+    }
+
+    /// Aggregation inside a CALL subquery should produce a single row.
+    #[test]
+    fn aggregation_inside_call_subquery_returns_single_row() {
+        let db = db();
+        let s = db.session();
+        s.execute("INSERT (:Person {name: 'Alix'})").unwrap();
+        s.execute("INSERT (:Person {name: 'Gus'})").unwrap();
+        s.execute("INSERT (:Person {name: 'Harm'})").unwrap();
+
+        let result = s
+            .execute("CALL { MATCH (n:Person) RETURN count(n) AS cnt } RETURN cnt")
+            .unwrap();
+        assert_eq!(result.row_count(), 1);
+        assert_eq!(result.rows[0][0], Value::Int64(3));
+    }
+}
+
+// ============================================================================
+// UNWIND + MERGE + SET: property access on UNWIND variable (#172)
+// ============================================================================
+
+#[cfg(feature = "cypher")]
+mod unwind_merge_set {
+    use super::*;
+
+    /// UNWIND variable property access in SET clause should resolve correctly.
+    /// Regression: item.name in SET evaluated to NULL instead of the map value.
+    /// GitHub issue #172.
+    #[test]
+    fn unwind_merge_set_property_from_map() {
+        let db = db();
+        let s = db.session();
+
+        s.execute_cypher(
+            "UNWIND [{qn: 'test://foo', name: 'Foo'}, {qn: 'test://bar', name: 'Bar'}] AS item \
+             MERGE (x:Test {qn: item.qn}) \
+             SET x.name = item.name",
+        )
+        .unwrap();
+
+        let result = s
+            .execute("MATCH (n:Test) RETURN n.qn AS qn, n.name AS name ORDER BY qn")
+            .unwrap();
+
+        assert_eq!(result.row_count(), 2);
+        assert_eq!(result.rows[0][0], Value::String("test://bar".into()));
+        assert_eq!(
+            result.rows[0][1],
+            Value::String("Bar".into()),
+            "SET x.name = item.name should resolve item.name from UNWIND map (#172)"
+        );
+        assert_eq!(result.rows[1][0], Value::String("test://foo".into()));
+        assert_eq!(result.rows[1][1], Value::String("Foo".into()));
+    }
+
+    /// SET x += item (map merge) should also work with UNWIND variables.
+    #[test]
+    fn unwind_merge_set_map_merge() {
+        let db = db();
+        let s = db.session();
+
+        s.execute_cypher(
+            "UNWIND [{qn: 'test://baz', name: 'Baz', kind: 'module'}] AS item \
+             MERGE (x:Test {qn: item.qn}) \
+             SET x += item",
+        )
+        .unwrap();
+
+        let result = s
+            .execute("MATCH (n:Test {qn: 'test://baz'}) RETURN n.name AS name, n.kind AS kind")
+            .unwrap();
+
+        assert_eq!(result.row_count(), 1);
+        assert_eq!(
+            result.rows[0][0],
+            Value::String("Baz".into()),
+            "SET x += item should merge all map properties (#172)"
+        );
+        assert_eq!(result.rows[0][1], Value::String("module".into()));
+    }
 }

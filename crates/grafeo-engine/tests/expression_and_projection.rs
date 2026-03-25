@@ -113,6 +113,44 @@ fn test_exists_subquery_no_match() {
     assert!(result.rows.is_empty(), "No MANAGES edges exist");
 }
 
+// Issue #173: EXISTS with correlated variable on the target side of the pattern.
+// Pattern ()-[:TYPE]->(n) where n comes from the outer MATCH.
+#[test]
+fn test_exists_target_side_correlation() {
+    let db = create_test_graph();
+    let session = db.session();
+
+    // Alix->Gus, Alix->Harm, Gus->Harm (KNOWS)
+    // Gus has incoming from Alix; Harm has incoming from Alix and Gus; Alix has none.
+    let result = session
+        .execute(
+            "MATCH (n:Person) WHERE EXISTS { MATCH ()-[:KNOWS]->(n) } \
+             RETURN n.name ORDER BY n.name",
+        )
+        .unwrap();
+
+    assert_eq!(result.row_count(), 2);
+    assert_eq!(result.rows[0][0], Value::String("Gus".into()));
+    assert_eq!(result.rows[1][0], Value::String("Harm".into()));
+}
+
+#[test]
+fn test_not_exists_target_side_correlation() {
+    let db = create_test_graph();
+    let session = db.session();
+
+    // Alix has no incoming KNOWS edges.
+    let result = session
+        .execute(
+            "MATCH (n:Person) WHERE NOT EXISTS { MATCH ()-[:KNOWS]->(n) } \
+             RETURN n.name",
+        )
+        .unwrap();
+
+    assert_eq!(result.row_count(), 1);
+    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+}
+
 // ============================================================================
 // Complex EXISTS subquery: covers semi-join rewrite in planner/filter.rs
 // ============================================================================
@@ -1369,6 +1407,26 @@ mod cypher_filter_ops {
             .collect();
         names.sort();
         assert_eq!(names, vec!["Alix", "Gus"]);
+    }
+
+    // Issue #173: COUNT with correlated variable on the target side
+    #[test]
+    fn test_count_subquery_target_side_correlation() {
+        let db = create_test_graph();
+        let session = db.session();
+
+        // Alix->Gus, Alix->Harm, Gus->Harm (KNOWS)
+        // Incoming KNOWS: Alix=0, Gus=1, Harm=2
+        let result = session
+            .execute(
+                "MATCH (n:Person) \
+                 WHERE COUNT { MATCH ()-[:KNOWS]->(n) } > 1 \
+                 RETURN n.name",
+            )
+            .unwrap();
+
+        assert_eq!(result.row_count(), 1);
+        assert_eq!(result.rows[0][0], Value::String("Harm".into()));
     }
 }
 
