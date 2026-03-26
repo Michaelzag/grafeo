@@ -32,10 +32,14 @@ internal sealed class TransactionHandle : SafeHandle
 
     public override bool IsInvalid => handle == nint.Zero;
 
+    internal volatile bool Committed;
+
     protected override bool ReleaseHandle()
     {
-        // The C side auto-rolls back if not committed, but be explicit.
-        NativeMethods.grafeo_rollback(handle);
+        if (!Committed)
+        {
+            NativeMethods.grafeo_rollback(handle);
+        }
         NativeMethods.grafeo_free_transaction(handle);
         return true;
     }

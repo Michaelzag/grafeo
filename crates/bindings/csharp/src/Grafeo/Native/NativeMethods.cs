@@ -21,6 +21,14 @@ internal static partial class NativeMethods
     [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial nint grafeo_open(string path);
 
+    /// <summary>Open an existing database in read-only mode. Returns null on error.</summary>
+    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint grafeo_open_read_only(string path);
+
+    /// <summary>Open or create a single-file database (no WAL sidecar). Returns null on error.</summary>
+    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint grafeo_open_single_file(string path);
+
     /// <summary>Close the database, flushing pending writes. Returns status code.</summary>
     [LibraryImport(LibName)]
     internal static partial int grafeo_close(nint db);
@@ -65,6 +73,30 @@ internal static partial class NativeMethods
     [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial nint grafeo_execute_sql(nint db, string query);
 
+    /// <summary>Execute a Cypher query with JSON-encoded parameters.</summary>
+    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint grafeo_execute_cypher_with_params(nint db, string query, string paramsJson);
+
+    /// <summary>Execute a Gremlin query with JSON-encoded parameters.</summary>
+    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint grafeo_execute_gremlin_with_params(nint db, string query, string paramsJson);
+
+    /// <summary>Execute a GraphQL query with JSON-encoded parameters.</summary>
+    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint grafeo_execute_graphql_with_params(nint db, string query, string paramsJson);
+
+    /// <summary>Execute a SPARQL query with JSON-encoded parameters.</summary>
+    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint grafeo_execute_sparql_with_params(nint db, string query, string paramsJson);
+
+    /// <summary>Execute a SQL/PGQ query with JSON-encoded parameters.</summary>
+    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint grafeo_execute_sql_with_params(nint db, string query, string paramsJson);
+
+    /// <summary>Execute a query in any supported language. Language: "gql", "cypher", "sparql", "gremlin", "graphql", "sql".</summary>
+    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint grafeo_execute_language(nint db, string language, string query, string? paramsJson);
+
     // =========================================================================
     // Result Access
     // =========================================================================
@@ -84,6 +116,14 @@ internal static partial class NativeMethods
     /// <summary>Get the number of rows scanned.</summary>
     [LibraryImport(LibName)]
     internal static partial ulong grafeo_result_rows_scanned(nint result);
+
+    /// <summary>Get pre-extracted nodes as JSON. Valid until grafeo_free_result.</summary>
+    [LibraryImport(LibName)]
+    internal static partial nint grafeo_result_nodes_json(nint result);
+
+    /// <summary>Get pre-extracted edges as JSON. Valid until grafeo_free_result.</summary>
+    [LibraryImport(LibName)]
+    internal static partial nint grafeo_result_edges_json(nint result);
 
     /// <summary>Free a query result.</summary>
     [LibraryImport(LibName)]
@@ -209,22 +249,22 @@ internal static partial class NativeMethods
     // Indexes
     // =========================================================================
 
-    /// <summary>Create a property index on a label and property.</summary>
+    /// <summary>Create a property index on a property key.</summary>
     [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial int grafeo_create_property_index(nint db, string label, string property);
+    internal static partial int grafeo_create_property_index(nint db, string property);
 
     /// <summary>Drop a property index.</summary>
     [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial int grafeo_drop_property_index(nint db, string label, string property);
+    internal static partial int grafeo_drop_property_index(nint db, string property);
 
     /// <summary>Check if a property index exists. Returns 1 if exists, 0 if not.</summary>
     [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial int grafeo_has_property_index(nint db, string label, string property);
+    internal static partial int grafeo_has_property_index(nint db, string property);
 
     /// <summary>Find nodes by property value. Writes IDs and count to out pointers.</summary>
     [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int grafeo_find_nodes_by_property(
-        nint db, string label, string property, string valueJson,
+        nint db, string property, string valueJson,
         out nint idsOut, out nuint countOut);
 
     /// <summary>Free node IDs returned by grafeo_find_nodes_by_property.</summary>
@@ -239,7 +279,7 @@ internal static partial class NativeMethods
     [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int grafeo_create_vector_index(
         nint db, string label, string property,
-        uint dimensions, uint m, uint efConstruction, uint ef);
+        int dimensions, string metric, int m, int efConstruction);
 
     /// <summary>Drop a vector index.</summary>
     [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
@@ -272,9 +312,12 @@ internal static partial class NativeMethods
     // Batch Operations
     // =========================================================================
 
-    /// <summary>Batch create nodes. Returns number of nodes created.</summary>
+    /// <summary>Batch create nodes with vector properties.</summary>
     [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial long grafeo_batch_create_nodes(nint db, string batchJson);
+    internal static unsafe partial int grafeo_batch_create_nodes(
+        nint db, string label, string property,
+        float* vectors, nuint vectorCount, nuint dimensions,
+        out nint outIds, out nuint outCount);
 
     // =========================================================================
     // Admin
@@ -308,9 +351,9 @@ internal static partial class NativeMethods
     [LibraryImport(LibName)]
     internal static partial nint grafeo_begin_transaction(nint db);
 
-    /// <summary>Begin a transaction with a specific isolation level.</summary>
-    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial nint grafeo_begin_transaction_with_isolation(nint db, string isolationLevel);
+    /// <summary>Begin a transaction with a specific isolation level (0=ReadCommitted, 1=Snapshot, 2=Serializable).</summary>
+    [LibraryImport(LibName)]
+    internal static partial nint grafeo_begin_transaction_with_isolation(nint db, int isolationLevel);
 
     /// <summary>Execute a query within a transaction.</summary>
     [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
@@ -319,6 +362,10 @@ internal static partial class NativeMethods
     /// <summary>Execute a query with parameters within a transaction.</summary>
     [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial nint grafeo_transaction_execute_with_params(nint tx, string query, string paramsJson);
+
+    /// <summary>Execute a query in any language within a transaction.</summary>
+    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint grafeo_transaction_execute_language(nint tx, string language, string query, string? paramsJson);
 
     /// <summary>Commit a transaction.</summary>
     [LibraryImport(LibName)]

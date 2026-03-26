@@ -26,6 +26,8 @@ package grafeo
 */
 import "C"
 import (
+	"encoding/json"
+	"fmt"
 	"runtime"
 	"unsafe"
 )
@@ -60,6 +62,21 @@ func Open(path string) (*Database, error) {
 	return db, nil
 }
 
+// OpenSingleFile opens or creates a persistent database in single-file
+// `.grafeo` format at the given path, bypassing the Auto storage-format
+// detection based on path extension.
+func OpenSingleFile(path string) (*Database, error) {
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+	h := C.grafeo_open_single_file(cPath)
+	if h == nil {
+		return nil, lastError()
+	}
+	db := &Database{handle: h}
+	runtime.SetFinalizer(db, (*Database).free)
+	return db, nil
+}
+
 // Close flushes any pending writes and releases the database handle.
 func (db *Database) Close() error {
 	if db.handle == nil {
@@ -85,12 +102,28 @@ func (db *Database) free() {
 func (db *Database) Execute(query string) (*QueryResult, error) {
 	cQuery := C.CString(query)
 	defer C.free(unsafe.Pointer(cQuery))
+	runtime.LockOSThread()
 	r := C.grafeo_execute(db.handle, cQuery)
+	var err error
 	if r == nil {
-		return nil, lastError()
+		err = lastError()
+	}
+	runtime.UnlockOSThread()
+	if err != nil {
+		return nil, err
 	}
 	defer C.grafeo_free_result(r)
 	return parseResult(r)
+}
+
+// ExecuteParams runs a GQL query with parameters as a Go map.
+// The map is marshaled to JSON internally.
+func (db *Database) ExecuteParams(query string, params map[string]any) (*QueryResult, error) {
+	data, err := json.Marshal(params)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to marshal params: %v", ErrDatabase, err)
+	}
+	return db.ExecuteWithParams(query, string(data))
 }
 
 // ExecuteWithParams runs a GQL query with parameters encoded as a JSON object.
@@ -160,6 +193,99 @@ func (db *Database) ExecuteSQL(query string) (*QueryResult, error) {
 	cQuery := C.CString(query)
 	defer C.free(unsafe.Pointer(cQuery))
 	r := C.grafeo_execute_sql(db.handle, cQuery)
+	if r == nil {
+		return nil, lastError()
+	}
+	defer C.grafeo_free_result(r)
+	return parseResult(r)
+}
+
+// ExecuteCypherWithParams runs a Cypher query with JSON-encoded parameters.
+func (db *Database) ExecuteCypherWithParams(query, paramsJSON string) (*QueryResult, error) {
+	cQuery := C.CString(query)
+	defer C.free(unsafe.Pointer(cQuery))
+	cParams := C.CString(paramsJSON)
+	defer C.free(unsafe.Pointer(cParams))
+	r := C.grafeo_execute_cypher_with_params(db.handle, cQuery, cParams)
+	if r == nil {
+		return nil, lastError()
+	}
+	defer C.grafeo_free_result(r)
+	return parseResult(r)
+}
+
+// ExecuteGremlinWithParams runs a Gremlin query with JSON-encoded parameters.
+func (db *Database) ExecuteGremlinWithParams(query, paramsJSON string) (*QueryResult, error) {
+	cQuery := C.CString(query)
+	defer C.free(unsafe.Pointer(cQuery))
+	cParams := C.CString(paramsJSON)
+	defer C.free(unsafe.Pointer(cParams))
+	r := C.grafeo_execute_gremlin_with_params(db.handle, cQuery, cParams)
+	if r == nil {
+		return nil, lastError()
+	}
+	defer C.grafeo_free_result(r)
+	return parseResult(r)
+}
+
+// ExecuteGraphQLWithParams runs a GraphQL query with JSON-encoded parameters.
+func (db *Database) ExecuteGraphQLWithParams(query, paramsJSON string) (*QueryResult, error) {
+	cQuery := C.CString(query)
+	defer C.free(unsafe.Pointer(cQuery))
+	cParams := C.CString(paramsJSON)
+	defer C.free(unsafe.Pointer(cParams))
+	r := C.grafeo_execute_graphql_with_params(db.handle, cQuery, cParams)
+	if r == nil {
+		return nil, lastError()
+	}
+	defer C.grafeo_free_result(r)
+	return parseResult(r)
+}
+
+// ExecuteSPARQLWithParams runs a SPARQL query with JSON-encoded parameters.
+func (db *Database) ExecuteSPARQLWithParams(query, paramsJSON string) (*QueryResult, error) {
+	cQuery := C.CString(query)
+	defer C.free(unsafe.Pointer(cQuery))
+	cParams := C.CString(paramsJSON)
+	defer C.free(unsafe.Pointer(cParams))
+	r := C.grafeo_execute_sparql_with_params(db.handle, cQuery, cParams)
+	if r == nil {
+		return nil, lastError()
+	}
+	defer C.grafeo_free_result(r)
+	return parseResult(r)
+}
+
+// ExecuteSQLWithParams runs a SQL/PGQ query with JSON-encoded parameters.
+func (db *Database) ExecuteSQLWithParams(query, paramsJSON string) (*QueryResult, error) {
+	cQuery := C.CString(query)
+	defer C.free(unsafe.Pointer(cQuery))
+	cParams := C.CString(paramsJSON)
+	defer C.free(unsafe.Pointer(cParams))
+	r := C.grafeo_execute_sql_with_params(db.handle, cQuery, cParams)
+	if r == nil {
+		return nil, lastError()
+	}
+	defer C.grafeo_free_result(r)
+	return parseResult(r)
+}
+
+// ExecuteLanguage runs a query in the given language with optional JSON-encoded
+// parameters. language is one of: "gql", "cypher", "gremlin", "graphql",
+// "sparql", "sql". Pass "" for paramsJSON if no parameters are needed.
+func (db *Database) ExecuteLanguage(language, query, paramsJSON string) (*QueryResult, error) {
+	cLang := C.CString(language)
+	defer C.free(unsafe.Pointer(cLang))
+	cQuery := C.CString(query)
+	defer C.free(unsafe.Pointer(cQuery))
+	var r *C.GrafeoResult
+	if paramsJSON == "" {
+		r = C.grafeo_execute_language(db.handle, cLang, cQuery, nil)
+	} else {
+		cParams := C.CString(paramsJSON)
+		defer C.free(unsafe.Pointer(cParams))
+		r = C.grafeo_execute_language(db.handle, cLang, cQuery, cParams)
+	}
 	if r == nil {
 		return nil, lastError()
 	}

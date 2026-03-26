@@ -99,6 +99,7 @@ public sealed class Transaction : IDisposable, IAsyncDisposable
         var status = NativeMethods.grafeo_commit(h);
         if (status != (int)GrafeoStatus.Ok)
             throw GrafeoException.FromLastError(GrafeoStatus.Transaction);
+        _handle.Committed = true;
     }
 
     /// <summary>Roll back the transaction, discarding all changes.</summary>

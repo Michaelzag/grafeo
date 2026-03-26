@@ -116,7 +116,9 @@ grafeo_commit(tx);   // or grafeo_rollback(tx)
 ```c
 grafeo_create_vector_index(db, "Document", "embedding", 384, "cosine", 16, 200);
 grafeo_vector_search(db, "Document", "embedding", query_vec, dims, k, ef, &result);
-grafeo_batch_create_nodes(db, "Document", "embedding", vectors, count, dims, &ids);
+size_t n;
+grafeo_batch_create_nodes(db, "Document", "embedding", vectors, count, dims, &ids, &n);
+grafeo_free_node_ids(ids, n);
 ```
 
 ### Error Handling

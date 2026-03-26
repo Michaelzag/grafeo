@@ -30,10 +30,9 @@ class Transaction implements Finalizable {
   /// Typically called by [GrafeoDB.beginTransaction], not directly.
   Transaction(this._handle, this._bindings) {
     _finalizer ??= NativeFinalizer(
-      _bindings.library
-          .lookup<NativeFunction<Void Function(Pointer<Void>)>>(
-            'grafeo_free_transaction',
-          ),
+      _bindings.library.lookup<NativeFunction<Void Function(Pointer<Void>)>>(
+        'grafeo_free_transaction',
+      ),
     );
     _finalizer!.attach(this, _handle.cast(), detach: this);
   }
@@ -83,6 +82,38 @@ class Transaction implements Finalizable {
     }
   }
 
+  /// Execute a query in the given [language] within this transaction.
+  ///
+  /// [language] is one of: `"gql"`, `"cypher"`, `"gremlin"`, `"graphql"`,
+  /// `"sparql"`, `"sql"`. Omit [params] for queries without parameters.
+  QueryResult executeLanguage(
+    String language,
+    String query, {
+    Map<String, dynamic>? params,
+  }) {
+    _checkActive();
+    final langPtr = language.toNativeUtf8(allocator: malloc);
+    final queryPtr = query.toNativeUtf8(allocator: malloc);
+    Pointer<Utf8>? paramsPtr;
+    if (params != null) {
+      paramsPtr = encodeParams(params).toNativeUtf8(allocator: malloc);
+    }
+    try {
+      final resultPtr = _bindings.grafeoTransactionExecuteLanguage(
+        _handle,
+        langPtr,
+        queryPtr,
+        paramsPtr ?? nullptr.cast<Utf8>(),
+      );
+      if (resultPtr == nullptr) throwLastError(_bindings);
+      return _buildResult(resultPtr);
+    } finally {
+      malloc.free(langPtr);
+      malloc.free(queryPtr);
+      if (paramsPtr != null) malloc.free(paramsPtr);
+    }
+  }
+
   /// Commit the transaction, making all changes permanent.
   void commit() {
     _checkActive();
@@ -113,8 +144,7 @@ class Transaction implements Finalizable {
     try {
       final jsonPtr = _bindings.grafeoResultJson(resultPtr);
       final jsonString = jsonPtr.toDartString();
-      final executionTimeMs =
-          _bindings.grafeoResultExecutionTimeMs(resultPtr);
+      final executionTimeMs = _bindings.grafeoResultExecutionTimeMs(resultPtr);
       final rowsScanned = _bindings.grafeoResultRowsScanned(resultPtr);
 
       final rows = parseRows(jsonString);

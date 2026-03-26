@@ -136,4 +136,76 @@ public sealed class TransactionTests : IDisposable
         Assert.Equal("Berlin", result.Rows[0]["c.name"]);
         tx.Commit();
     }
+
+    // -- Isolation level overloads --
+
+    [Fact]
+    public void BeginsTransactionWithReadCommittedString()
+    {
+        using var db = GrafeoDB.Memory();
+        using var tx = db.BeginTransaction("read_committed");
+        tx.Execute("INSERT (:Person {name: 'Alix'})");
+        tx.Commit();
+
+        Assert.Equal(1, db.NodeCount);
+    }
+
+    [Fact]
+    public void BeginsTransactionWithSnapshotString()
+    {
+        using var db = GrafeoDB.Memory();
+        using var tx = db.BeginTransaction("snapshot");
+        tx.Execute("INSERT (:Person {name: 'Gus'})");
+        tx.Commit();
+
+        Assert.Equal(1, db.NodeCount);
+    }
+
+    [Fact]
+    public void BeginsTransactionWithSerializableString()
+    {
+        using var db = GrafeoDB.Memory();
+        using var tx = db.BeginTransaction("serializable");
+        tx.Execute("INSERT (:Person {name: 'Vincent'})");
+        tx.Commit();
+
+        Assert.Equal(1, db.NodeCount);
+    }
+
+    [Fact]
+    public void BeginsTransactionWithEnum()
+    {
+        using var db = GrafeoDB.Memory();
+        using var tx = db.BeginTransaction(IsolationLevel.Serializable);
+        tx.Execute("INSERT (:Person {name: 'Jules'})");
+        tx.Commit();
+
+        Assert.Equal(1, db.NodeCount);
+    }
+
+    // -- Double-rollback / dispose-after-commit safety --
+
+    [Fact]
+    public void DisposeAfterCommitDoesNotThrow()
+    {
+        using var db = GrafeoDB.Memory();
+        var tx = db.BeginTransaction();
+        tx.Execute("INSERT (:Person {name: 'Mia'})");
+        tx.Commit();
+        tx.Dispose(); // should not throw (double-rollback fix)
+
+        Assert.Equal(1, db.NodeCount);
+    }
+
+    [Fact]
+    public void DoubleRollbackIsNoOp()
+    {
+        using var db = GrafeoDB.Memory();
+        var tx = db.BeginTransaction();
+        tx.Execute("INSERT (:Person {name: 'Butch'})");
+        tx.Rollback();
+        tx.Rollback(); // second rollback is a no-op
+
+        Assert.Equal(0, db.NodeCount);
+    }
 }

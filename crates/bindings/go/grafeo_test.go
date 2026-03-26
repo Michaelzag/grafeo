@@ -1,6 +1,8 @@
 package grafeo
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 )
 
@@ -651,4 +653,309 @@ func TestTransactionWithParams(t *testing.T) {
 	}
 
 	tx.Rollback()
+}
+
+// --- Column Order ---
+
+func TestColumnOrder(t *testing.T) {
+	db, err := OpenInMemory()
+	if err != nil {
+		t.Skip("native library not available")
+	}
+	defer db.Close()
+
+	db.CreateNode([]string{"Person"}, map[string]any{"name": "Alix", "age": 30})
+	db.CreateNode([]string{"Person"}, map[string]any{"name": "Gus", "age": 25})
+
+	result, err := db.Execute("MATCH (n:Person) RETURN n.name, n.age")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Columns) < 2 {
+		t.Fatalf("expected at least 2 columns, got %d", len(result.Columns))
+	}
+	if result.Columns[0] != "n.name" {
+		t.Errorf("expected first column 'n.name', got %q", result.Columns[0])
+	}
+	if result.Columns[1] != "n.age" {
+		t.Errorf("expected second column 'n.age', got %q", result.Columns[1])
+	}
+}
+
+func TestColumnOrderMultiColumn(t *testing.T) {
+	db, err := OpenInMemory()
+	if err != nil {
+		t.Skip("native library not available")
+	}
+	defer db.Close()
+
+	db.CreateNode([]string{"Item"}, map[string]any{
+		"alpha": 1, "bravo": 2, "charlie": 3, "delta": 4, "echo": 5,
+	})
+
+	result, err := db.Execute("MATCH (n:Item) RETURN n.alpha, n.bravo, n.charlie, n.delta, n.echo")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expected := []string{"n.alpha", "n.bravo", "n.charlie", "n.delta", "n.echo"}
+	if len(result.Columns) != len(expected) {
+		t.Fatalf("expected %d columns, got %d", len(expected), len(result.Columns))
+	}
+	for i, col := range expected {
+		if result.Columns[i] != col {
+			t.Errorf("column %d: expected %q, got %q", i, col, result.Columns[i])
+		}
+	}
+}
+
+// --- ExecuteParams ---
+
+func TestExecuteParams(t *testing.T) {
+	db, err := OpenInMemory()
+	if err != nil {
+		t.Skip("native library not available")
+	}
+	defer db.Close()
+
+	db.CreateNode([]string{"Person"}, map[string]any{"name": "Alix", "age": 30})
+	db.CreateNode([]string{"Person"}, map[string]any{"name": "Gus", "age": 25})
+	db.CreateNode([]string{"Person"}, map[string]any{"name": "Vincent", "age": 20})
+
+	result, err := db.ExecuteParams(
+		"MATCH (n:Person) WHERE n.age > $min RETURN n.name",
+		map[string]any{"min": 25},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Alix (30) matches, Gus (25) does not (> not >=), Vincent (20) does not.
+	if len(result.Rows) != 1 {
+		t.Errorf("expected 1 row, got %d", len(result.Rows))
+	}
+}
+
+func TestExecuteParamsEmptyMap(t *testing.T) {
+	db, err := OpenInMemory()
+	if err != nil {
+		t.Skip("native library not available")
+	}
+	defer db.Close()
+
+	db.CreateNode([]string{"Person"}, map[string]any{"name": "Alix"})
+
+	result, err := db.ExecuteParams("MATCH (n) RETURN n", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Rows) != 1 {
+		t.Errorf("expected 1 row, got %d", len(result.Rows))
+	}
+}
+
+func TestExecuteParamsNilMap(t *testing.T) {
+	db, err := OpenInMemory()
+	if err != nil {
+		t.Skip("native library not available")
+	}
+	defer db.Close()
+
+	db.CreateNode([]string{"Person"}, map[string]any{"name": "Alix"})
+
+	// nil map marshals to JSON "null", which the engine should treat as no params.
+	result, err := db.ExecuteParams("MATCH (n) RETURN n", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Rows) != 1 {
+		t.Errorf("expected 1 row, got %d", len(result.Rows))
+	}
+}
+
+// --- Aggregation ---
+
+func TestAggregateCount(t *testing.T) {
+	db, err := OpenInMemory()
+	if err != nil {
+		t.Skip("native library not available")
+	}
+	defer db.Close()
+
+	db.CreateNode([]string{"Person"}, map[string]any{"name": "Alix"})
+	db.CreateNode([]string{"Person"}, map[string]any{"name": "Gus"})
+	db.CreateNode([]string{"Person"}, map[string]any{"name": "Vincent"})
+
+	result, err := db.Execute("MATCH (n:Person) RETURN count(n) AS cnt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(result.Rows))
+	}
+
+	cnt, ok := result.Rows[0]["cnt"]
+	if !ok {
+		t.Fatal("expected 'cnt' column in result row")
+	}
+	// The count value may come back as float64 (JSON number) or int.
+	var countVal float64
+	switch v := cnt.(type) {
+	case float64:
+		countVal = v
+	case int:
+		countVal = float64(v)
+	case int64:
+		countVal = float64(v)
+	default:
+		t.Fatalf("unexpected type for cnt: %T (%v)", cnt, cnt)
+	}
+	if countVal != 3 {
+		t.Errorf("expected count 3, got %v", countVal)
+	}
+}
+
+func TestAggregateGroupBy(t *testing.T) {
+	db, err := OpenInMemory()
+	if err != nil {
+		t.Skip("native library not available")
+	}
+	defer db.Close()
+
+	db.CreateNode([]string{"Person"}, map[string]any{"name": "Alix"})
+	db.CreateNode([]string{"Person"}, map[string]any{"name": "Gus"})
+	db.CreateNode([]string{"City"}, map[string]any{"name": "Berlin"})
+
+	result, err := db.Execute("MATCH (n) RETURN labels(n)[0] AS label, count(n) AS cnt ORDER BY label")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Rows) < 2 {
+		t.Fatalf("expected at least 2 groups, got %d rows", len(result.Rows))
+	}
+
+	// First group should be "City" (alphabetically before "Person").
+	firstLabel, ok := result.Rows[0]["label"]
+	if !ok {
+		t.Fatal("expected 'label' column in result row")
+	}
+	if firstLabel != "City" {
+		t.Errorf("expected first group label 'City', got %v", firstLabel)
+	}
+}
+
+func TestOrderByProperty(t *testing.T) {
+	db, err := OpenInMemory()
+	if err != nil {
+		t.Skip("native library not available")
+	}
+	defer db.Close()
+
+	db.CreateNode([]string{"Person"}, map[string]any{"name": "Vincent", "age": 40})
+	db.CreateNode([]string{"Person"}, map[string]any{"name": "Alix", "age": 30})
+	db.CreateNode([]string{"Person"}, map[string]any{"name": "Gus", "age": 25})
+
+	result, err := db.Execute("MATCH (n:Person) RETURN n.name ORDER BY n.age")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Rows) != 3 {
+		t.Fatalf("expected 3 rows, got %d", len(result.Rows))
+	}
+
+	// Ordered by age ascending: Gus (25), Alix (30), Vincent (40).
+	expectedOrder := []string{"Gus", "Alix", "Vincent"}
+	for i, expected := range expectedOrder {
+		name, ok := result.Rows[i]["n.name"]
+		if !ok {
+			t.Fatalf("row %d: expected 'n.name' column", i)
+		}
+		if name != expected {
+			t.Errorf("row %d: expected %q, got %v", i, expected, name)
+		}
+	}
+}
+
+// --- Concurrent Tests (LockOSThread fix) ---
+
+func TestConcurrentQueries(t *testing.T) {
+	db, err := OpenInMemory()
+	if err != nil {
+		t.Skip("native library not available")
+	}
+	defer db.Close()
+
+	db.CreateNode([]string{"Person"}, map[string]any{"name": "Alix", "age": 30})
+	db.CreateNode([]string{"Person"}, map[string]any{"name": "Gus", "age": 25})
+
+	const goroutines = 10
+	const queriesPerGoroutine = 50
+
+	var wg sync.WaitGroup
+	errs := make(chan error, goroutines*queriesPerGoroutine)
+
+	for g := range goroutines {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for q := range queriesPerGoroutine {
+				result, err := db.Execute("MATCH (n:Person) RETURN n.name")
+				if err != nil {
+					errs <- fmt.Errorf("goroutine %d, query %d: %w", id, q, err)
+					return
+				}
+				if len(result.Rows) != 2 {
+					errs <- fmt.Errorf("goroutine %d, query %d: expected 2 rows, got %d", id, q, len(result.Rows))
+					return
+				}
+			}
+		}(g)
+	}
+
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentErrorMessages(t *testing.T) {
+	db, err := OpenInMemory()
+	if err != nil {
+		t.Skip("native library not available")
+	}
+	defer db.Close()
+
+	// Each goroutine runs a unique invalid query and checks that it gets
+	// the correct error message (not another goroutine's error).
+	const goroutines = 10
+
+	var wg sync.WaitGroup
+	errs := make(chan error, goroutines)
+
+	for g := range goroutines {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			// Each goroutine uses a distinct invalid keyword so errors are distinguishable.
+			badQuery := fmt.Sprintf("INVALID_QUERY_%d XYZZY", id)
+			_, err := db.Execute(badQuery)
+			if err == nil {
+				errs <- fmt.Errorf("goroutine %d: expected error for invalid query, got nil", id)
+				return
+			}
+			// The error should not be empty.
+			if err.Error() == "" {
+				errs <- fmt.Errorf("goroutine %d: got empty error message", id)
+				return
+			}
+		}(g)
+	}
+
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		t.Error(err)
+	}
 }

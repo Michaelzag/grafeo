@@ -7,6 +7,22 @@ using Grafeo.Native;
 namespace Grafeo;
 
 /// <summary>
+/// Transaction isolation levels supported by Grafeo.
+/// Values match the <c>GrafeoIsolationLevel</c> C enum.
+/// </summary>
+public enum IsolationLevel
+{
+    /// <summary>Read committed: each statement sees the latest committed data.</summary>
+    ReadCommitted = 0,
+
+    /// <summary>Snapshot isolation: the transaction sees a consistent snapshot taken at begin.</summary>
+    Snapshot = 1,
+
+    /// <summary>Serializable: full serializability, the strongest isolation guarantee.</summary>
+    Serializable = 2,
+}
+
+/// <summary>
 /// Primary handle to a Grafeo graph database.
 /// Thread-safe: the underlying engine uses <c>Arc&lt;RwLock&gt;</c>.
 /// Implements <see cref="IDisposable"/> and <see cref="IAsyncDisposable"/>
@@ -208,11 +224,26 @@ public sealed class GrafeoDB : IDisposable, IAsyncDisposable
     }
 
     /// <summary>Begin a transaction with a specific isolation level.</summary>
-    /// <param name="isolationLevel">E.g. "read_committed", "repeatable_read", "serializable".</param>
+    /// <param name="isolationLevel">
+    /// Accepted values (case-insensitive): "read_committed" / "ReadCommitted",
+    /// "snapshot" / "Snapshot" / "snapshot_isolation" / "SnapshotIsolation",
+    /// "serializable" / "Serializable".
+    /// </param>
     public Transaction BeginTransaction(string isolationLevel)
     {
         ThrowIfDisposed();
-        var txPtr = NativeMethods.grafeo_begin_transaction_with_isolation(Handle, isolationLevel);
+        var level = ParseIsolationLevel(isolationLevel);
+        var txPtr = NativeMethods.grafeo_begin_transaction_with_isolation(Handle, level);
+        if (txPtr == nint.Zero)
+            throw GrafeoException.FromLastError(GrafeoStatus.Transaction);
+        return new Transaction(txPtr);
+    }
+
+    /// <summary>Begin a transaction with a specific isolation level.</summary>
+    public Transaction BeginTransaction(IsolationLevel isolationLevel)
+    {
+        ThrowIfDisposed();
+        var txPtr = NativeMethods.grafeo_begin_transaction_with_isolation(Handle, (int)isolationLevel);
         if (txPtr == nint.Zero)
             throw GrafeoException.FromLastError(GrafeoStatus.Transaction);
         return new Transaction(txPtr);
@@ -412,11 +443,14 @@ public sealed class GrafeoDB : IDisposable, IAsyncDisposable
     // =========================================================================
 
     /// <summary>Drop a vector index on the given label and property.</summary>
-    public void DropVectorIndex(string label, string property)
+    /// <returns><c>true</c> if the index was dropped, <c>false</c> if no such index existed.</returns>
+    public bool DropVectorIndex(string label, string property)
     {
         ThrowIfDisposed();
-        GrafeoException.ThrowIfFailed(
-            NativeMethods.grafeo_drop_vector_index(Handle, label, property));
+        var result = NativeMethods.grafeo_drop_vector_index(Handle, label, property);
+        if (result < 0)
+            throw GrafeoException.FromLastError();
+        return result == 1;
     }
 
     /// <summary>Rebuild a vector index on the given label and property.</summary>
@@ -505,6 +539,19 @@ public sealed class GrafeoDB : IDisposable, IAsyncDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
     }
+
+    /// <summary>Parse a string isolation level name to the integer value expected by the C API.</summary>
+    private static int ParseIsolationLevel(string isolationLevel) =>
+        isolationLevel.ToLowerInvariant() switch
+        {
+            "read_committed" or "readcommitted" => (int)IsolationLevel.ReadCommitted,
+            "snapshot" or "snapshot_isolation" or "snapshotisolation" => (int)IsolationLevel.Snapshot,
+            "serializable" => (int)IsolationLevel.Serializable,
+            _ => throw new ArgumentException(
+                $"Unknown isolation level: '{isolationLevel}'. " +
+                "Use \"read_committed\", \"snapshot\", or \"serializable\".",
+                nameof(isolationLevel)),
+        };
 
     /// <summary>Parse a native result pointer into a QueryResult, then free the native result.</summary>
     private static QueryResult BuildResult(nint resultPtr)

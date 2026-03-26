@@ -177,12 +177,16 @@ dependencies:
 ### Python
 
 ```bash
+pip install grafeo
+# or with uv
 uv add grafeo
 ```
 
 With CLI support:
 
 ```bash
+pip install grafeo[cli]
+# or with uv
 uv add grafeo[cli]
 ```
 

@@ -78,7 +78,8 @@ GrafeoException classifyError(int statusCode, String message) {
   return switch (status) {
     GrafeoStatus.query => QueryException(message, status),
     GrafeoStatus.transaction => TransactionException(message, status),
-    GrafeoStatus.storage || GrafeoStatus.io =>
+    GrafeoStatus.storage ||
+    GrafeoStatus.io =>
       StorageException(message, status),
     GrafeoStatus.serialization => SerializationException(message, status),
     _ => DatabaseException(message, status),

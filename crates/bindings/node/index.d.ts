@@ -6,6 +6,12 @@ export declare class GrafeoDB {
   static create(path?: string | undefined | null): GrafeoDB
   /** Open an existing database at the given path. */
   static open(path: string): GrafeoDB
+  /**
+   * Open an existing database in read-only mode.
+   * Multiple processes can read the same .grafeo file concurrently.
+   * Mutations will throw an error.
+   */
+  static openReadOnly(path: string): GrafeoDB
   /** Execute a GQL query. Returns a Promise<QueryResult>. */
   execute(query: string, params?: any | undefined | null): Promise<QueryResult>
   /** Create a node with labels and optional properties. */
@@ -88,6 +94,20 @@ export declare class GrafeoDB {
   schema(): any
   /** Returns the Grafeo engine version string. */
   version(): string
+  /**
+   * Clear the query plan cache. Called automatically after DDL operations,
+   * but can be invoked manually.
+   */
+  clearPlanCache(): void
+  /**
+   * Set a schema context for subsequent queries. All execute() calls will
+   * use this schema until resetSchema() is called.
+   */
+  setSchema(name: string): void
+  /** Clear the schema context. Subsequent execute() calls use the default namespace. */
+  resetSchema(): void
+  /** Returns the current schema name, or null if no schema is set. */
+  currentSchema(): string | null
   /** Close the database. */
   close(): void
   /** Returns the full change history for a node. */
@@ -166,7 +186,9 @@ export declare class QueryResult {
   /** Get edges found in the result. */
   edges(): Array<JsEdge>
   /** Get all rows as an array of arrays (no column names). */
-  rows(): object
+  rows(): Array<Array<unknown>>
+  /** Returns the result formatted as a Unicode table. */
+  toString(): string
 }
 
 /**

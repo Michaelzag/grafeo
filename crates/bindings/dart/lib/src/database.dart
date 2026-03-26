@@ -31,10 +31,9 @@ class GrafeoDB implements Finalizable {
     // Lazily create a finalizer that calls grafeo_free_database on the handle.
     // The Rust Drop impl for the inner Arc<RwLock<GrafeoDB>> flushes writes.
     _finalizer ??= NativeFinalizer(
-      _bindings.library
-          .lookup<NativeFunction<Void Function(Pointer<Void>)>>(
-            'grafeo_free_database',
-          ),
+      _bindings.library.lookup<NativeFunction<Void Function(Pointer<Void>)>>(
+        'grafeo_free_database',
+      ),
     );
     _finalizer!.attach(this, _handle.cast(), detach: this);
   }
@@ -59,6 +58,41 @@ class GrafeoDB implements Finalizable {
     final pathPtr = path.toNativeUtf8(allocator: malloc);
     try {
       final ptr = bindings.grafeoOpen(pathPtr);
+      if (ptr == nullptr) throwLastError(bindings);
+      return GrafeoDB._(ptr, bindings);
+    } finally {
+      malloc.free(pathPtr);
+    }
+  }
+
+  /// Open or create a single-file `.grafeo` database at [path].
+  ///
+  /// Recommended for embedded use (desktop apps, mobile apps). All data is
+  /// stored in one file with a sidecar WAL for crash safety, similar to
+  /// DuckDB's `.duckdb` format.
+  static GrafeoDB openSingleFile(String path, {String? libraryPath}) {
+    final lib = loadNativeLibrary(libraryPath);
+    final bindings = GrafeoBindings(lib);
+    final pathPtr = path.toNativeUtf8(allocator: malloc);
+    try {
+      final ptr = bindings.grafeoOpenSingleFile(pathPtr);
+      if (ptr == nullptr) throwLastError(bindings);
+      return GrafeoDB._(ptr, bindings);
+    } finally {
+      malloc.free(pathPtr);
+    }
+  }
+
+  /// Open an existing database at [path] in read-only mode.
+  ///
+  /// Multiple read-only handles may be opened concurrently on the same path.
+  /// Write operations on a read-only database will throw [DatabaseException].
+  static GrafeoDB openReadOnly(String path, {String? libraryPath}) {
+    final lib = loadNativeLibrary(libraryPath);
+    final bindings = GrafeoBindings(lib);
+    final pathPtr = path.toNativeUtf8(allocator: malloc);
+    try {
+      final ptr = bindings.grafeoOpenReadOnly(pathPtr);
       if (ptr == nullptr) throwLastError(bindings);
       return GrafeoDB._(ptr, bindings);
     } finally {
@@ -144,27 +178,103 @@ class GrafeoDB implements Finalizable {
 
   /// Execute a Cypher query (requires `cypher` feature in grafeo-c).
   QueryResult executeCypher(String query) => _executeLanguage(
-    query,
-    _bindings.grafeoExecuteCypher,
-  );
+        query,
+        _bindings.grafeoExecuteCypher,
+      );
 
   /// Execute a Gremlin query (requires `gremlin` feature in grafeo-c).
   QueryResult executeGremlin(String query) => _executeLanguage(
-    query,
-    _bindings.grafeoExecuteGremlin,
-  );
+        query,
+        _bindings.grafeoExecuteGremlin,
+      );
 
   /// Execute a GraphQL query (requires `graphql` feature in grafeo-c).
   QueryResult executeGraphql(String query) => _executeLanguage(
-    query,
-    _bindings.grafeoExecuteGraphql,
-  );
+        query,
+        _bindings.grafeoExecuteGraphql,
+      );
 
   /// Execute a SPARQL query (requires `sparql` feature in grafeo-c).
   QueryResult executeSparql(String query) => _executeLanguage(
-    query,
-    _bindings.grafeoExecuteSparql,
-  );
+        query,
+        _bindings.grafeoExecuteSparql,
+      );
+
+  /// Execute a Cypher query with parameters (requires `cypher` feature in grafeo-c).
+  QueryResult executeCypherWithParams(
+    String query,
+    Map<String, dynamic> params,
+  ) =>
+      _executeLanguageWithParams(
+        query,
+        params,
+        _bindings.grafeoExecuteCypherWithParams,
+      );
+
+  /// Execute a Gremlin query with parameters (requires `gremlin` feature in grafeo-c).
+  QueryResult executeGremlinWithParams(
+    String query,
+    Map<String, dynamic> params,
+  ) =>
+      _executeLanguageWithParams(
+        query,
+        params,
+        _bindings.grafeoExecuteGremlinWithParams,
+      );
+
+  /// Execute a GraphQL query with parameters (requires `graphql` feature in grafeo-c).
+  QueryResult executeGraphqlWithParams(
+    String query,
+    Map<String, dynamic> params,
+  ) =>
+      _executeLanguageWithParams(
+        query,
+        params,
+        _bindings.grafeoExecuteGraphqlWithParams,
+      );
+
+  /// Execute a SPARQL query with parameters (requires `sparql` feature in grafeo-c).
+  QueryResult executeSparqlWithParams(
+    String query,
+    Map<String, dynamic> params,
+  ) =>
+      _executeLanguageWithParams(
+        query,
+        params,
+        _bindings.grafeoExecuteSparqlWithParams,
+      );
+
+  /// Execute a query in the given [language] with optional [params].
+  ///
+  /// [language] is one of: `"gql"`, `"cypher"`, `"gremlin"`, `"graphql"`,
+  /// `"sparql"`, `"sql"`. Omit [params] for queries without parameters.
+  QueryResult executeLanguage(
+    String language,
+    String query, {
+    Map<String, dynamic>? params,
+  }) {
+    _checkOpen();
+    final langPtr = language.toNativeUtf8(allocator: malloc);
+    final queryPtr = query.toNativeUtf8(allocator: malloc);
+    Pointer<Utf8>? paramsPtr;
+    if (params != null) {
+      paramsPtr = encodeParams(params).toNativeUtf8(allocator: malloc);
+    }
+    try {
+      final resultPtr = _bindings.grafeoExecuteLanguage(
+        _handle,
+        langPtr,
+        queryPtr,
+        paramsPtr ?? nullptr.cast<Utf8>(),
+      );
+      if (resultPtr == nullptr) throwLastError(_bindings);
+      return _buildResult(resultPtr);
+    } finally {
+      malloc.free(langPtr);
+      malloc.free(queryPtr);
+      if (paramsPtr != null) malloc.free(paramsPtr);
+    }
+  }
 
   QueryResult _executeLanguage(
     String query,
@@ -178,6 +288,24 @@ class GrafeoDB implements Finalizable {
       return _buildResult(resultPtr);
     } finally {
       malloc.free(queryPtr);
+    }
+  }
+
+  QueryResult _executeLanguageWithParams(
+    String query,
+    Map<String, dynamic> params,
+    Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>) fn,
+  ) {
+    _checkOpen();
+    final queryPtr = query.toNativeUtf8(allocator: malloc);
+    final paramsPtr = encodeParams(params).toNativeUtf8(allocator: malloc);
+    try {
+      final resultPtr = fn(_handle, queryPtr, paramsPtr);
+      if (resultPtr == nullptr) throwLastError(_bindings);
+      return _buildResult(resultPtr);
+    } finally {
+      malloc.free(queryPtr);
+      malloc.free(paramsPtr);
     }
   }
 
@@ -207,6 +335,47 @@ class GrafeoDB implements Finalizable {
     if (ptr == nullptr) throwLastError(_bindings);
     try {
       return parseObject(ptr.toDartString());
+    } finally {
+      _bindings.grafeoFreeString(ptr);
+    }
+  }
+
+  // ===========================================================================
+  // Schema context
+  // ===========================================================================
+
+  /// Set the active schema for subsequent execute calls on this database.
+  ///
+  /// Equivalent to running `SESSION SET SCHEMA 'schemaName'` via GQL, but
+  /// without requiring a round-trip query. All queries issued after this call
+  /// will be scoped to [schemaName] until [resetSchema] is called.
+  ///
+  /// Throws [DatabaseException] if the schema does not exist.
+  void setSchema(String schemaName) {
+    _checkOpen();
+    final schemaPtr = schemaName.toNativeUtf8(allocator: malloc);
+    try {
+      final status = _bindings.grafeoSetSchema(_handle, schemaPtr);
+      if (status != GrafeoStatus.ok.code) throwStatus(_bindings, status);
+    } finally {
+      malloc.free(schemaPtr);
+    }
+  }
+
+  /// Clear the active schema context, reverting to the default graph store.
+  void resetSchema() {
+    _checkOpen();
+    final status = _bindings.grafeoResetSchema(_handle);
+    if (status != GrafeoStatus.ok.code) throwStatus(_bindings, status);
+  }
+
+  /// Return the currently active schema name, or `null` if none is set.
+  String? currentSchema() {
+    _checkOpen();
+    final ptr = _bindings.grafeoCurrentSchema(_handle);
+    if (ptr == nullptr) return null;
+    try {
+      return ptr.toDartString();
     } finally {
       _bindings.grafeoFreeString(ptr);
     }
@@ -282,6 +451,20 @@ class GrafeoDB implements Finalizable {
       }
     } finally {
       malloc.free(outPtr);
+    }
+  }
+
+  /// Return the labels of node [id] without fetching the full node.
+  ///
+  /// More efficient than [getNode] when only labels are needed.
+  List<String> getNodeLabels(int id) {
+    _checkOpen();
+    final ptr = _bindings.grafeoGetNodeLabels(_handle, id);
+    if (ptr == nullptr) throwLastError(_bindings);
+    try {
+      return parseStringArray(ptr.toDartString());
+    } finally {
+      _bindings.grafeoFreeString(ptr);
     }
   }
 
@@ -454,8 +637,235 @@ class GrafeoDB implements Finalizable {
   }
 
   // ===========================================================================
+  // Property indexes
+  // ===========================================================================
+
+  /// Create a property index on [propertyKey] for fast point-lookup queries.
+  ///
+  /// After creation, `MATCH (n {name: $name})` style queries use the index
+  /// instead of a full scan. [propertyKey] is the bare property name (e.g.
+  /// `"name"`, not `"n.name"`).
+  void createPropertyIndex(String propertyKey) {
+    _checkOpen();
+    final keyPtr = propertyKey.toNativeUtf8(allocator: malloc);
+    try {
+      final status = _bindings.grafeoCreatePropertyIndex(_handle, keyPtr);
+      if (status != GrafeoStatus.ok.code) throwStatus(_bindings, status);
+    } finally {
+      malloc.free(keyPtr);
+    }
+  }
+
+  /// Drop the property index on [propertyKey]. Returns true if it existed.
+  bool dropPropertyIndex(String propertyKey) {
+    _checkOpen();
+    final keyPtr = propertyKey.toNativeUtf8(allocator: malloc);
+    try {
+      final result = _bindings.grafeoDropPropertyIndex(_handle, keyPtr);
+      if (result < 0) throwLastError(_bindings);
+      return result == 1;
+    } finally {
+      malloc.free(keyPtr);
+    }
+  }
+
+  /// Returns true if a property index exists for [propertyKey].
+  bool hasPropertyIndex(String propertyKey) {
+    _checkOpen();
+    final keyPtr = propertyKey.toNativeUtf8(allocator: malloc);
+    try {
+      return _bindings.grafeoHasPropertyIndex(_handle, keyPtr) != 0;
+    } finally {
+      malloc.free(keyPtr);
+    }
+  }
+
+  /// Find all node IDs where [propertyKey] equals [value].
+  ///
+  /// Requires that a property index exists for [propertyKey] (see
+  /// [createPropertyIndex]). Returns the matching node IDs; call [getNode]
+  /// to retrieve full node data.
+  List<int> findNodesByProperty(String propertyKey, dynamic value) {
+    _checkOpen();
+    final keyPtr = propertyKey.toNativeUtf8(allocator: malloc);
+    final valueJson = encodeValue(value);
+    final valuePtr = valueJson.toNativeUtf8(allocator: malloc);
+    final outIdsPtr = malloc<Pointer<Uint64>>();
+    final outCountPtr = malloc<IntPtr>();
+    try {
+      final status = _bindings.grafeoFindNodesByProperty(
+        _handle,
+        keyPtr,
+        valuePtr,
+        outIdsPtr,
+        outCountPtr,
+      );
+      if (status != GrafeoStatus.ok.code) throwStatus(_bindings, status);
+      final count = outCountPtr.value;
+      if (count == 0) return [];
+      final ids = outIdsPtr.value;
+      final result = [for (var i = 0; i < count; i++) ids[i]];
+      _bindings.grafeoFreeNodeIds(ids, count);
+      return result;
+    } finally {
+      malloc.free(keyPtr);
+      malloc.free(valuePtr);
+      malloc.free(outIdsPtr);
+      malloc.free(outCountPtr);
+    }
+  }
+
+  // ===========================================================================
   // Vector operations
   // ===========================================================================
+
+  /// Create an HNSW vector index on nodes with [label] for the [property]
+  /// field, which must contain a list of [dimensions] floats.
+  ///
+  /// [metric] is one of: `"cosine"`, `"euclidean"`, `"dot"`.
+  /// [m] is the number of bidirectional links per node (typical: 16).
+  /// [efConstruction] controls index quality vs. build time (typical: 200).
+  void createVectorIndex(
+    String label,
+    String property,
+    int dimensions,
+    String metric, {
+    int m = 16,
+    int efConstruction = 200,
+  }) {
+    _checkOpen();
+    final labelPtr = label.toNativeUtf8(allocator: malloc);
+    final propertyPtr = property.toNativeUtf8(allocator: malloc);
+    final metricPtr = metric.toNativeUtf8(allocator: malloc);
+    try {
+      final status = _bindings.grafeoCreateVectorIndex(
+        _handle,
+        labelPtr,
+        propertyPtr,
+        dimensions,
+        metricPtr,
+        m,
+        efConstruction,
+      );
+      if (status != GrafeoStatus.ok.code) throwStatus(_bindings, status);
+    } finally {
+      malloc.free(labelPtr);
+      malloc.free(propertyPtr);
+      malloc.free(metricPtr);
+    }
+  }
+
+  /// Perform a k-nearest-neighbour vector search.
+  ///
+  /// Returns up to [k] results ordered by similarity. [ef] controls the
+  /// search quality vs. speed trade-off (typical: 64). For diversity-aware
+  /// search, use [mmrSearch] instead.
+  List<VectorResult> vectorSearch(
+    String label,
+    String property,
+    List<double> query, {
+    required int k,
+    int ef = 64,
+  }) {
+    _checkOpen();
+    final labelPtr = label.toNativeUtf8(allocator: malloc);
+    final propertyPtr = property.toNativeUtf8(allocator: malloc);
+    final queryPtr = malloc<Float>(query.length);
+    for (var i = 0; i < query.length; i++) {
+      queryPtr[i] = query[i];
+    }
+    final outIdsPtr = malloc<Pointer<Uint64>>();
+    final outDistsPtr = malloc<Pointer<Float>>();
+    final outCountPtr = malloc<IntPtr>();
+
+    try {
+      final status = _bindings.grafeoVectorSearch(
+        _handle,
+        labelPtr,
+        propertyPtr,
+        queryPtr,
+        query.length,
+        k,
+        ef,
+        outIdsPtr,
+        outDistsPtr,
+        outCountPtr,
+      );
+      if (status != GrafeoStatus.ok.code) throwStatus(_bindings, status);
+
+      final count = outCountPtr.value;
+      if (count == 0) return [];
+
+      final ids = outIdsPtr.value;
+      final dists = outDistsPtr.value;
+      final results = <VectorResult>[
+        for (var i = 0; i < count; i++) VectorResult(ids[i], dists[i]),
+      ];
+
+      _bindings.grafeoFreeVectorResults(ids, dists, count);
+      return results;
+    } finally {
+      malloc.free(labelPtr);
+      malloc.free(propertyPtr);
+      malloc.free(queryPtr);
+      malloc.free(outIdsPtr);
+      malloc.free(outDistsPtr);
+      malloc.free(outCountPtr);
+    }
+  }
+
+  /// Bulk-create [vectors.length] nodes, each labelled [label], with the
+  /// embedding stored under [embeddingProperty].
+  ///
+  /// [vectors] is a list of N equal-length float vectors (one per node).
+  /// Returns the list of created node IDs in insertion order.
+  ///
+  /// Requires the `vector-index` feature in grafeo-c.
+  List<int> batchCreateNodes(
+    String label,
+    String embeddingProperty,
+    List<List<double>> vectors,
+  ) {
+    _checkOpen();
+    if (vectors.isEmpty) return [];
+    final dimensions = vectors.first.length;
+    final count = vectors.length;
+    final labelPtr = label.toNativeUtf8(allocator: malloc);
+    final propertyPtr = embeddingProperty.toNativeUtf8(allocator: malloc);
+    final vectorPtr = malloc<Float>(count * dimensions);
+    for (var i = 0; i < count; i++) {
+      for (var j = 0; j < dimensions; j++) {
+        vectorPtr[i * dimensions + j] = vectors[i][j];
+      }
+    }
+    final outIdsPtr = malloc<Pointer<Uint64>>();
+    final outCountPtr = malloc<IntPtr>();
+    try {
+      final status = _bindings.grafeoBatchCreateNodes(
+        _handle,
+        labelPtr,
+        propertyPtr,
+        vectorPtr,
+        count,
+        dimensions,
+        outIdsPtr,
+        outCountPtr,
+      );
+      if (status != GrafeoStatus.ok.code) throwStatus(_bindings, status);
+      final resultCount = outCountPtr.value;
+      if (resultCount == 0) return [];
+      final ids = outIdsPtr.value;
+      final result = [for (var i = 0; i < resultCount; i++) ids[i]];
+      _bindings.grafeoFreeNodeIds(ids, resultCount);
+      return result;
+    } finally {
+      malloc.free(labelPtr);
+      malloc.free(propertyPtr);
+      malloc.free(vectorPtr);
+      malloc.free(outIdsPtr);
+      malloc.free(outCountPtr);
+    }
+  }
 
   /// Drop a vector index. Returns true if the index existed.
   bool dropVectorIndex(String label, String property) {
@@ -584,8 +994,7 @@ class GrafeoDB implements Finalizable {
     try {
       final jsonPtr = _bindings.grafeoResultJson(resultPtr);
       final jsonString = jsonPtr.toDartString();
-      final executionTimeMs =
-          _bindings.grafeoResultExecutionTimeMs(resultPtr);
+      final executionTimeMs = _bindings.grafeoResultExecutionTimeMs(resultPtr);
       final rowsScanned = _bindings.grafeoResultRowsScanned(resultPtr);
 
       final rows = parseRows(jsonString);

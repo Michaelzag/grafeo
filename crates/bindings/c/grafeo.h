@@ -38,6 +38,14 @@ typedef enum {
     GRAFEO_ERROR_INVALID_UTF8  = 9
 } GrafeoStatus;
 
+/* ---- Transaction isolation levels ---------------------------------------- */
+
+typedef enum {
+    GRAFEO_ISOLATION_READ_COMMITTED = 0,
+    GRAFEO_ISOLATION_SNAPSHOT       = 1,
+    GRAFEO_ISOLATION_SERIALIZABLE   = 2
+} GrafeoIsolationLevel;
+
 /* ---- Opaque types -------------------------------------------------------- */
 
 typedef struct GrafeoDatabase    GrafeoDatabase;
@@ -66,9 +74,21 @@ const char*     grafeo_version(void);
 GrafeoResult* grafeo_execute(GrafeoDatabase* db, const char* query);
 GrafeoResult* grafeo_execute_with_params(GrafeoDatabase* db, const char* query, const char* params_json);
 GrafeoResult* grafeo_execute_cypher(GrafeoDatabase* db, const char* query);
+GrafeoResult* grafeo_execute_cypher_with_params(GrafeoDatabase* db, const char* query, const char* params_json);
 GrafeoResult* grafeo_execute_gremlin(GrafeoDatabase* db, const char* query);
+GrafeoResult* grafeo_execute_gremlin_with_params(GrafeoDatabase* db, const char* query, const char* params_json);
 GrafeoResult* grafeo_execute_graphql(GrafeoDatabase* db, const char* query);
+GrafeoResult* grafeo_execute_graphql_with_params(GrafeoDatabase* db, const char* query, const char* params_json);
 GrafeoResult* grafeo_execute_sparql(GrafeoDatabase* db, const char* query);
+GrafeoResult* grafeo_execute_sparql_with_params(GrafeoDatabase* db, const char* query, const char* params_json);
+
+/* Requires sql-pgq feature. */
+GrafeoResult* grafeo_execute_sql(GrafeoDatabase* db, const char* query);
+GrafeoResult* grafeo_execute_sql_with_params(GrafeoDatabase* db, const char* query, const char* params_json);
+
+/* Unified language dispatcher: language is "gql", "cypher", "gremlin", "graphql", "sparql", or "sql".
+ * params_json may be NULL. */
+GrafeoResult* grafeo_execute_language(GrafeoDatabase* db, const char* language, const char* query, const char* params_json);
 
 /* ---- Result access ------------------------------------------------------- */
 
@@ -132,7 +152,8 @@ int32_t      grafeo_drop_vector_index(GrafeoDatabase* db, const char* label, con
 GrafeoStatus grafeo_rebuild_vector_index(GrafeoDatabase* db, const char* label, const char* property);
 GrafeoStatus grafeo_vector_search(GrafeoDatabase* db, const char* label, const char* property, const float* query, size_t query_len, size_t k, int32_t ef, uint64_t** out_ids, float** out_distances, size_t* out_count);
 GrafeoStatus grafeo_mmr_search(GrafeoDatabase* db, const char* label, const char* property, const float* query, size_t query_len, size_t k, int32_t fetch_k, float lambda, int32_t ef, uint64_t** out_ids, float** out_distances, size_t* out_count);
-GrafeoStatus grafeo_batch_create_nodes(GrafeoDatabase* db, const char* label, const char* property, const float* vectors, size_t vector_count, size_t dimensions, uint64_t** out_ids);
+/* Requires vector-index feature. *out_ids has *out_count entries; free with grafeo_free_node_ids(*out_ids, *out_count). */
+GrafeoStatus grafeo_batch_create_nodes(GrafeoDatabase* db, const char* label, const char* property, const float* vectors, size_t vector_count, size_t dimensions, uint64_t** out_ids, size_t* out_count);
 void         grafeo_free_vector_results(uint64_t* ids, float* distances, size_t count);
 
 /* ---- Statistics ---------------------------------------------------------- */
@@ -143,9 +164,11 @@ size_t grafeo_edge_count(GrafeoDatabase* db);
 /* ---- Transactions -------------------------------------------------------- */
 
 GrafeoTransaction* grafeo_begin_transaction(GrafeoDatabase* db);
-GrafeoTransaction* grafeo_begin_transaction_with_isolation(GrafeoDatabase* db, int32_t isolation);
+GrafeoTransaction* grafeo_begin_transaction_with_isolation(GrafeoDatabase* db, GrafeoIsolationLevel isolation);
 GrafeoResult*      grafeo_transaction_execute(GrafeoTransaction* tx, const char* query);
 GrafeoResult*      grafeo_transaction_execute_with_params(GrafeoTransaction* tx, const char* query, const char* params_json);
+/* Execute in a specific language within a transaction; params_json may be NULL. */
+GrafeoResult*      grafeo_transaction_execute_language(GrafeoTransaction* tx, const char* language, const char* query, const char* params_json);
 GrafeoStatus       grafeo_commit(GrafeoTransaction* tx);
 GrafeoStatus       grafeo_rollback(GrafeoTransaction* tx);
 void               grafeo_free_transaction(GrafeoTransaction* tx);

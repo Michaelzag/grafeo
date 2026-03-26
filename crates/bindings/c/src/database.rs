@@ -394,6 +394,174 @@ pub extern "C" fn grafeo_execute_sql(
 }
 
 // =========================================================================
+// Language-specific _with_params variants
+// =========================================================================
+
+/// Execute a Cypher query with named parameters (JSON object).
+#[cfg(feature = "cypher")]
+#[unsafe(no_mangle)]
+pub extern "C" fn grafeo_execute_cypher_with_params(
+    db: *mut GrafeoDatabase,
+    query: *const c_char,
+    params_json: *const c_char,
+) -> *mut GrafeoResult {
+    let db = db_ref_or_null!(db);
+    let Ok(query_str) = str_from_ptr(query) else {
+        return std::ptr::null_mut();
+    };
+    let params = crate::types::parse_params(params_json);
+    match db
+        .inner
+        .read()
+        .execute_language(query_str, "cypher", params)
+    {
+        Ok(r) => build_result(&r),
+        Err(e) => {
+            set_error(&e);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Execute a Gremlin query with named parameters (JSON object).
+#[cfg(feature = "gremlin")]
+#[unsafe(no_mangle)]
+pub extern "C" fn grafeo_execute_gremlin_with_params(
+    db: *mut GrafeoDatabase,
+    query: *const c_char,
+    params_json: *const c_char,
+) -> *mut GrafeoResult {
+    let db = db_ref_or_null!(db);
+    let Ok(query_str) = str_from_ptr(query) else {
+        return std::ptr::null_mut();
+    };
+    let params = crate::types::parse_params(params_json);
+    match db
+        .inner
+        .read()
+        .execute_language(query_str, "gremlin", params)
+    {
+        Ok(r) => build_result(&r),
+        Err(e) => {
+            set_error(&e);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Execute a GraphQL query with named parameters (JSON object).
+#[cfg(feature = "graphql")]
+#[unsafe(no_mangle)]
+pub extern "C" fn grafeo_execute_graphql_with_params(
+    db: *mut GrafeoDatabase,
+    query: *const c_char,
+    params_json: *const c_char,
+) -> *mut GrafeoResult {
+    let db = db_ref_or_null!(db);
+    let Ok(query_str) = str_from_ptr(query) else {
+        return std::ptr::null_mut();
+    };
+    let params = crate::types::parse_params(params_json);
+    match db
+        .inner
+        .read()
+        .execute_language(query_str, "graphql", params)
+    {
+        Ok(r) => build_result(&r),
+        Err(e) => {
+            set_error(&e);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Execute a SPARQL query with named parameters (JSON object).
+#[cfg(feature = "sparql")]
+#[unsafe(no_mangle)]
+pub extern "C" fn grafeo_execute_sparql_with_params(
+    db: *mut GrafeoDatabase,
+    query: *const c_char,
+    params_json: *const c_char,
+) -> *mut GrafeoResult {
+    let db = db_ref_or_null!(db);
+    let Ok(query_str) = str_from_ptr(query) else {
+        return std::ptr::null_mut();
+    };
+    let params = crate::types::parse_params(params_json);
+    match db
+        .inner
+        .read()
+        .execute_language(query_str, "sparql", params)
+    {
+        Ok(r) => build_result(&r),
+        Err(e) => {
+            set_error(&e);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Execute a SQL/PGQ query with named parameters (JSON object).
+#[cfg(feature = "sql-pgq")]
+#[unsafe(no_mangle)]
+pub extern "C" fn grafeo_execute_sql_with_params(
+    db: *mut GrafeoDatabase,
+    query: *const c_char,
+    params_json: *const c_char,
+) -> *mut GrafeoResult {
+    let db = db_ref_or_null!(db);
+    let Ok(query_str) = str_from_ptr(query) else {
+        return std::ptr::null_mut();
+    };
+    let params = crate::types::parse_params(params_json);
+    match db.inner.read().execute_language(query_str, "sql", params) {
+        Ok(r) => build_result(&r),
+        Err(e) => {
+            set_error(&e);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+// =========================================================================
+// Unified language dispatcher
+// =========================================================================
+
+/// Execute a query in the given language with optional parameters.
+///
+/// `language` is one of: `"gql"`, `"cypher"`, `"gremlin"`, `"graphql"`,
+/// `"sparql"`, `"sql"`. `params_json` may be null (no parameters).
+///
+/// Returns null on error; call `grafeo_last_error()` for details.
+#[unsafe(no_mangle)]
+pub extern "C" fn grafeo_execute_language(
+    db: *mut GrafeoDatabase,
+    language: *const c_char,
+    query: *const c_char,
+    params_json: *const c_char,
+) -> *mut GrafeoResult {
+    let db = db_ref_or_null!(db);
+    let Ok(lang_str) = str_from_ptr(language) else {
+        return std::ptr::null_mut();
+    };
+    let Ok(query_str) = str_from_ptr(query) else {
+        return std::ptr::null_mut();
+    };
+    let params = crate::types::parse_params(params_json);
+    match db
+        .inner
+        .read()
+        .execute_language(query_str, lang_str, params)
+    {
+        Ok(r) => build_result(&r),
+        Err(e) => {
+            set_error(&e);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+// =========================================================================
 // Result Access
 // =========================================================================
 
@@ -1311,9 +1479,10 @@ pub extern "C" fn grafeo_mmr_search(
     }
 }
 
-/// Bulk-insert nodes with vector properties. Returns node IDs in `out_ids`.
+/// Bulk-insert nodes with vector properties. Returns node IDs in `out_ids`
+/// and the number of created nodes in `out_count`.
 /// `vectors` is a flat array of `vector_count * dimensions` f32 values.
-/// Caller must free `*out_ids` with `grafeo_free_node_ids`.
+/// Caller must free `*out_ids` with `grafeo_free_node_ids(*out_ids, *out_count)`.
 #[cfg(feature = "vector-index")]
 #[unsafe(no_mangle)]
 pub extern "C" fn grafeo_batch_create_nodes(
@@ -1324,9 +1493,10 @@ pub extern "C" fn grafeo_batch_create_nodes(
     vector_count: usize,
     dimensions: usize,
     out_ids: *mut *mut u64,
+    out_count: *mut usize,
 ) -> GrafeoStatus {
     let db = db_ref!(db);
-    if vectors.is_null() || out_ids.is_null() {
+    if vectors.is_null() || out_ids.is_null() || out_count.is_null() {
         set_last_error("Null pointer argument");
         return GrafeoStatus::ErrorNullPointer;
     }
@@ -1348,12 +1518,15 @@ pub extern "C" fn grafeo_batch_create_nodes(
         .batch_create_nodes(label_str, prop_str, vecs);
     let mut raw_ids: Vec<u64> = node_ids.iter().map(|id| id.as_u64()).collect();
     raw_ids.shrink_to_fit();
+    let count = raw_ids.len();
     let ptr = raw_ids.as_mut_ptr();
-    let _count = raw_ids.len();
     std::mem::forget(raw_ids);
 
-    // SAFETY: We checked out_ids is not null.
-    unsafe { *out_ids = ptr };
+    // SAFETY: We checked out_ids and out_count are not null.
+    unsafe {
+        *out_ids = ptr;
+        *out_count = count;
+    }
     GrafeoStatus::Ok
 }
 
@@ -1530,6 +1703,48 @@ pub extern "C" fn grafeo_transaction_execute_with_params(
         session.execute(query_str)
     };
     match result {
+        Ok(r) => build_result(&r),
+        Err(e) => {
+            set_error(&e);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Execute a query in the given language within a transaction.
+///
+/// `language` is one of: `"gql"`, `"cypher"`, `"gremlin"`, `"graphql"`,
+/// `"sparql"`, `"sql"`. `params_json` may be null (no parameters).
+#[unsafe(no_mangle)]
+pub extern "C" fn grafeo_transaction_execute_language(
+    tx: *mut GrafeoTransaction,
+    language: *const c_char,
+    query: *const c_char,
+    params_json: *const c_char,
+) -> *mut GrafeoResult {
+    if tx.is_null() {
+        set_last_error("Null transaction pointer");
+        return std::ptr::null_mut();
+    }
+    // SAFETY: Caller guarantees valid pointer.
+    let tx = unsafe { &*tx };
+    if tx.committed || tx.rolled_back {
+        set_last_error("Transaction is no longer active");
+        return std::ptr::null_mut();
+    }
+    let Ok(lang_str) = str_from_ptr(language) else {
+        return std::ptr::null_mut();
+    };
+    let Ok(query_str) = str_from_ptr(query) else {
+        return std::ptr::null_mut();
+    };
+    let guard = tx.session.lock();
+    let Some(session) = guard.as_ref() else {
+        set_last_error("Transaction is no longer active");
+        return std::ptr::null_mut();
+    };
+    let params = crate::types::parse_params(params_json);
+    match session.execute_language(query_str, lang_str, params) {
         Ok(r) => build_result(&r),
         Err(e) => {
             set_error(&e);

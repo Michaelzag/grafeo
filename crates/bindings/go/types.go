@@ -6,6 +6,7 @@ package grafeo
 import "C"
 import (
 	"encoding/json"
+	"strings"
 )
 
 // QueryResult holds the result of a query execution.
@@ -111,12 +112,12 @@ func parseResult(r *C.GrafeoResult) (*QueryResult, error) {
 		return nil, err
 	}
 
-	// Extract column names from first row if available.
+	// Extract column names from first row, preserving JSON key order.
+	// Go map iteration is random, so we parse the first row's keys manually
+	// using json.Decoder to maintain the original order from the engine.
 	var columns []string
 	if len(rawRows) > 0 {
-		for k := range rawRows[0] {
-			columns = append(columns, k)
-		}
+		columns = extractOrderedKeys([]byte(jsonStr))
 	}
 
 	rows := make([]Row, len(rawRows))
@@ -130,4 +131,39 @@ func parseResult(r *C.GrafeoResult) (*QueryResult, error) {
 		ExecutionTimeMs: float64(C.grafeo_result_execution_time_ms(r)),
 		RowsScanned:     uint64(C.grafeo_result_rows_scanned(r)),
 	}, nil
+}
+
+// extractOrderedKeys parses the first object in a JSON array and returns
+// its keys in the order they appear, avoiding Go map's random iteration.
+func extractOrderedKeys(data []byte) []string {
+	dec := json.NewDecoder(strings.NewReader(string(data)))
+
+	// Skip opening '['
+	t, err := dec.Token()
+	if err != nil || t != json.Delim('[') {
+		return nil
+	}
+
+	// Skip opening '{'
+	t, err = dec.Token()
+	if err != nil || t != json.Delim('{') {
+		return nil
+	}
+
+	var keys []string
+	for dec.More() {
+		t, err = dec.Token()
+		if err != nil {
+			break
+		}
+		if key, ok := t.(string); ok {
+			keys = append(keys, key)
+			// Skip the value
+			var skip json.RawMessage
+			if err := dec.Decode(&skip); err != nil {
+				break
+			}
+		}
+	}
+	return keys
 }

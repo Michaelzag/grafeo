@@ -65,6 +65,29 @@ func (tx *Transaction) ExecuteWithParams(query string, paramsJSON string) (*Quer
 	return parseResult(r)
 }
 
+// ExecuteLanguage runs a query in the given language within this transaction.
+// language is one of: "gql", "cypher", "gremlin", "graphql", "sparql", "sql".
+// Pass "" for paramsJSON if no parameters are needed.
+func (tx *Transaction) ExecuteLanguage(language, query, paramsJSON string) (*QueryResult, error) {
+	cLang := C.CString(language)
+	defer C.free(unsafe.Pointer(cLang))
+	cQuery := C.CString(query)
+	defer C.free(unsafe.Pointer(cQuery))
+	var r *C.GrafeoResult
+	if paramsJSON == "" {
+		r = C.grafeo_transaction_execute_language(tx.handle, cLang, cQuery, nil)
+	} else {
+		cParams := C.CString(paramsJSON)
+		defer C.free(unsafe.Pointer(cParams))
+		r = C.grafeo_transaction_execute_language(tx.handle, cLang, cQuery, cParams)
+	}
+	if r == nil {
+		return nil, lastError()
+	}
+	defer C.grafeo_free_result(r)
+	return parseResult(r)
+}
+
 // Commit commits the transaction.
 func (tx *Transaction) Commit() error {
 	err := statusToError(C.grafeo_commit(tx.handle))

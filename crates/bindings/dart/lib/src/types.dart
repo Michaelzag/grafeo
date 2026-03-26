@@ -62,8 +62,7 @@ class Edge {
   const Edge(this.id, this.type, this.sourceId, this.targetId, this.properties);
 
   @override
-  String toString() =>
-      'Edge($id, $type, $sourceId->$targetId, $properties)';
+  String toString() => 'Edge($id, $type, $sourceId->$targetId, $properties)';
 
   @override
   bool operator ==(Object other) =>

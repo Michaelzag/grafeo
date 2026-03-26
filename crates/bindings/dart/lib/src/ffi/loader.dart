@@ -24,6 +24,11 @@ DynamicLibrary _load(String? path) {
     return DynamicLibrary.open(path);
   }
 
+  if (Platform.isIOS) {
+    // On iOS the native code is statically linked into the runner.
+    return DynamicLibrary.process();
+  }
+
   final String libraryName;
   if (Platform.isWindows) {
     libraryName = 'grafeo_c.dll';

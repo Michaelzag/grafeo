@@ -39,8 +39,8 @@ dynamic _encodeValue(dynamic value) {
     Uint8List bytes => base64Encode(bytes),
     List list => list.map(_encodeValue).toList(),
     Map map => {
-      for (final e in map.entries) e.key.toString(): _encodeValue(e.value),
-    },
+        for (final e in map.entries) e.key.toString(): _encodeValue(e.value),
+      },
     _ => value.toString(),
   };
 }
@@ -54,6 +54,16 @@ String _formatIsoDuration(Duration d) {
   if (minutes > 0) buf.write('${minutes}M');
   if (seconds > 0 || (hours == 0 && minutes == 0)) buf.write('${seconds}S');
   return buf.toString();
+}
+
+Duration _parseIsoDuration(String iso) {
+  final re = RegExp(r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?');
+  final match = re.firstMatch(iso);
+  if (match == null) return Duration.zero;
+  final hours = int.tryParse(match.group(1) ?? '') ?? 0;
+  final minutes = int.tryParse(match.group(2) ?? '') ?? 0;
+  final seconds = int.tryParse(match.group(3) ?? '') ?? 0;
+  return Duration(hours: hours, minutes: minutes, seconds: seconds);
 }
 
 // =============================================================================
@@ -99,10 +109,8 @@ List<String> extractColumns(List<Map<String, dynamic>> rows) {
 
       if (value.containsKey('_labels')) {
         if (!nodeIds.add(id)) continue;
-        final labels = (value['_labels'] as List?)
-                ?.whereType<String>()
-                .toList() ??
-            [];
+        final labels =
+            (value['_labels'] as List?)?.whereType<String>().toList() ?? [];
         nodes.add(Node(id, labels, _extractProperties(value)));
       } else if (value.containsKey('_type')) {
         if (!edgeIds.add(id)) continue;
@@ -164,7 +172,7 @@ dynamic _decodeMap(Map m) {
     return m[r'$time'] as String? ?? '';
   }
   if (m.containsKey(r'$duration')) {
-    return m[r'$duration'] as String? ?? '';
+    return _parseIsoDuration(m[r'$duration'] as String? ?? 'PT0S');
   }
 
   // Regular map

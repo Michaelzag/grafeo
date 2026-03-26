@@ -262,6 +262,13 @@ nav:
       - Working with Edges: user-guide/python/edges.md
       - Transactions: user-guide/python/transactions.md
       - Query Results: user-guide/python/results.md
+    - Node.js / TypeScript:
+      - user-guide/node/index.md
+      - Database Operations: user-guide/node/database.md
+      - Queries: user-guide/node/queries.md
+      - Nodes & Edges: user-guide/node/nodes-edges.md
+      - Transactions: user-guide/node/transactions.md
+      - Query Results: user-guide/node/results.md
     - Rust API:
       - user-guide/rust/index.md
       - Database Setup: user-guide/rust/database.md

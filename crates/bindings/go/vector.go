@@ -93,19 +93,21 @@ func (db *Database) BatchCreateNodes(label, property string, vectors [][]float32
 	defer C.free(unsafe.Pointer(cProp))
 
 	var outIDs *C.uint64_t
+	var outCount C.size_t
 	status := C.grafeo_batch_create_nodes(
 		db.handle, cLabel, cProp,
 		(*C.float)(unsafe.Pointer(&flat[0])),
 		C.size_t(len(vectors)), C.size_t(dims),
-		&outIDs,
+		&outIDs, &outCount,
 	)
 	if status != C.GRAFEO_OK {
 		return nil, statusToError(status)
 	}
-	defer C.grafeo_free_node_ids(outIDs, C.size_t(len(vectors)))
+	count := int(outCount)
+	defer C.grafeo_free_node_ids(outIDs, outCount)
 
-	ids := make([]uint64, len(vectors))
-	raw := unsafe.Slice((*uint64)(unsafe.Pointer(outIDs)), len(vectors))
+	ids := make([]uint64, count)
+	raw := unsafe.Slice((*uint64)(unsafe.Pointer(outIDs)), count)
 	copy(ids, raw)
 	return ids, nil
 }

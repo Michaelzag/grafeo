@@ -111,7 +111,8 @@ void main() {
     });
 
     test('query result contains extracted edges', () {
-      db.execute("INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})");
+      db.execute(
+          "INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})");
       final result = db.execute('MATCH ()-[e:KNOWS]->() RETURN e');
       expect(result.edges, hasLength(1));
       expect(result.edges.first.type, equals('KNOWS'));

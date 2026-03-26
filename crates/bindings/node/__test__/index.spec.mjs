@@ -342,6 +342,113 @@ describe('aggregations', () => {
     expect(values).toContain(90) // 30 + 25 + 35
     expect(values).toContain(30) // 90 / 3
   })
+
+  it('should GROUP BY with COUNT', async () => {
+    const db = GrafeoDB.create()
+    db.createNode(['Person'], { name: 'Alix' })
+    db.createNode(['Person'], { name: 'Gus' })
+    db.createNode(['City'], { name: 'Amsterdam' })
+
+    const result = await db.execute(
+      'MATCH (n) RETURN labels(n)[0] AS label, count(n) AS cnt ORDER BY label'
+    )
+    const rows = result.toArray()
+    expect(rows.length).toBe(2)
+    // City group first (alphabetical), then Person
+    expect(rows[0].label).toBe('City')
+    expect(rows[0].cnt).toBe(1)
+    expect(rows[1].label).toBe('Person')
+    expect(rows[1].cnt).toBe(2)
+  })
+
+  it('should GROUP BY type(r) with COUNT', async () => {
+    const db = GrafeoDB.create()
+    const alix = db.createNode(['Person'], { name: 'Alix' })
+    const gus = db.createNode(['Person'], { name: 'Gus' })
+    const acme = db.createNode(['Company'], { name: 'Acme' })
+    db.createEdge(alix.id, gus.id, 'KNOWS')
+    db.createEdge(alix.id, acme.id, 'WORKS_AT')
+    db.createEdge(gus.id, acme.id, 'WORKS_AT')
+
+    const result = await db.execute(
+      'MATCH ()-[r]->() RETURN type(r) AS t, count(r) AS cnt ORDER BY t'
+    )
+    const rows = result.toArray()
+    expect(rows.length).toBe(2)
+    expect(rows[0].t).toBe('KNOWS')
+    expect(rows[0].cnt).toBe(1)
+    expect(rows[1].t).toBe('WORKS_AT')
+    expect(rows[1].cnt).toBe(2)
+  })
+
+  it('should ORDER BY property', async () => {
+    const db = GrafeoDB.create()
+    await db.execute("INSERT (:Person {name: 'Vincent', age: 35})")
+    await db.execute("INSERT (:Person {name: 'Alix', age: 30})")
+    await db.execute("INSERT (:Person {name: 'Gus', age: 25})")
+
+    const result = await db.execute(
+      'MATCH (n:Person) RETURN n.name ORDER BY n.age'
+    )
+    const rows = result.toArray()
+    expect(rows.length).toBe(3)
+    expect(rows[0]['n.name']).toBe('Gus')     // age 25
+    expect(rows[1]['n.name']).toBe('Alix')    // age 30
+    expect(rows[2]['n.name']).toBe('Vincent') // age 35
+  })
+
+  it('should ORDER BY DESC', async () => {
+    const db = GrafeoDB.create()
+    await db.execute("INSERT (:Person {name: 'Vincent', age: 35})")
+    await db.execute("INSERT (:Person {name: 'Alix', age: 30})")
+    await db.execute("INSERT (:Person {name: 'Gus', age: 25})")
+
+    const result = await db.execute(
+      'MATCH (n:Person) RETURN n.name ORDER BY n.age DESC'
+    )
+    const rows = result.toArray()
+    expect(rows.length).toBe(3)
+    expect(rows[0]['n.name']).toBe('Vincent') // age 35
+    expect(rows[1]['n.name']).toBe('Alix')    // age 30
+    expect(rows[2]['n.name']).toBe('Gus')     // age 25
+  })
+
+  it('should handle empty GROUP BY result', async () => {
+    const db = GrafeoDB.create()
+    db.createNode(['Person'], { name: 'Alix' })
+
+    const result = await db.execute(
+      'MATCH (n:NonExistentLabel) RETURN labels(n)[0] AS label, count(n) AS cnt ORDER BY label'
+    )
+    const rows = result.toArray()
+    expect(rows.length).toBe(0)
+  })
+})
+
+// ── Previously undeclared methods ───────────────────────────────────
+
+describe('previously undeclared methods', () => {
+  it('should call clearPlanCache without error', () => {
+    const db = GrafeoDB.create()
+    expect(() => db.clearPlanCache()).not.toThrow()
+  })
+
+  it('should set and get schema', () => {
+    const db = GrafeoDB.create()
+    db.setSchema('test')
+    expect(db.currentSchema()).toBe('test')
+    db.resetSchema()
+    expect(db.currentSchema()).toBeNull()
+  })
+
+  it('should call toString on QueryResult', async () => {
+    const db = GrafeoDB.create()
+    await db.execute("INSERT (:Person {name: 'Alix'})")
+    const result = await db.execute('MATCH (p:Person) RETURN p.name')
+    const str = result.toString()
+    expect(typeof str).toBe('string')
+    expect(str.length).toBeGreaterThan(0)
+  })
 })
 
 // ── Transactions ─────────────────────────────────────────────────────
