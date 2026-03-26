@@ -486,12 +486,37 @@ impl super::Planner {
     /// that case we inject a property projection BEFORE the Return so the sort
     /// key is available in the output columns.
     pub(super) fn plan_sort(&self, sort: &SortOp) -> Result<(Box<dyn Operator>, Vec<String>)> {
-        // Check if we need pre-Return property projections. This is necessary
-        // when ORDER BY references a property on an entity variable (e.g. p.age)
-        // that is not included in the RETURN clause (e.g. RETURN p.name).
+        // Collect variable references from an expression tree (e.g., `n` in `labels(n)[0]`).
+        fn collect_vars(expr: &LogicalExpression, out: &mut Vec<String>) {
+            match expr {
+                LogicalExpression::Variable(v)
+                | LogicalExpression::Property { variable: v, .. }
+                | LogicalExpression::Labels(v)
+                | LogicalExpression::Type(v)
+                | LogicalExpression::Id(v) => out.push(v.clone()),
+                LogicalExpression::FunctionCall { args, .. } => {
+                    for a in args {
+                        collect_vars(a, out);
+                    }
+                }
+                LogicalExpression::IndexAccess { base, .. } => collect_vars(base, out),
+                LogicalExpression::Binary { left, right, .. } => {
+                    collect_vars(left, out);
+                    collect_vars(right, out);
+                }
+                LogicalExpression::Unary { operand, .. } => collect_vars(operand, out),
+                _ => {}
+            }
+        }
+
+        // Check if we need pre-Return property/entity projections. This is
+        // necessary when ORDER BY references a variable (e.g. p.age, labels(n))
+        // that is not included in the RETURN clause.
         let needs_pre_return = if let LogicalOperator::Return(ret) = sort.input.as_ref() {
             sort.keys.iter().any(|key| {
-                if let LogicalExpression::Property { variable, .. } = &key.expression {
+                let mut vars = Vec::new();
+                collect_vars(&key.expression, &mut vars);
+                vars.iter().any(|variable| {
                     // Check if the Return items produce a column matching this variable
                     !ret.items.iter().any(|item| {
                         item.alias.as_deref() == Some(variable)
@@ -500,9 +525,7 @@ impl super::Planner {
                                 LogicalExpression::Variable(v) if v == variable
                             )
                     })
-                } else {
-                    false
-                }
+                })
             })
         } else {
             false
@@ -524,32 +547,40 @@ impl super::Planner {
                 .map(|(i, n)| (n.clone(), i))
                 .collect();
 
-            // Collect ORDER BY property keys that need extra projection
-            let mut extra_items: Vec<(String, String, String)> = Vec::new();
-            let mut seen = std::collections::HashSet::new();
-            for key in &sort.keys {
-                if let LogicalExpression::Property { variable, property } = &key.expression
-                    && inner_vars.contains_key(variable)
-                {
-                    let col_name = format!("{}_{}", variable, property);
-                    if seen.insert(col_name.clone()) {
-                        extra_items.push((variable.clone(), property.clone(), col_name));
-                    }
-                }
-            }
-
-            // Build an augmented ReturnOp that includes the extra sort-key items
+            // Build augmented Return items: original items plus ORDER BY
+            // expressions that reference variables available in the Match but
+            // not in the Return. This includes both property accesses and
+            // complex expressions (labels(n)[0], type(r), etc.).
             let mut augmented_items = ret.items.clone();
             let mut extra_columns = Vec::new();
-            for (variable, property, col_name) in &extra_items {
-                augmented_items.push(crate::query::plan::ReturnItem {
-                    expression: LogicalExpression::Property {
-                        variable: variable.clone(),
-                        property: property.clone(),
-                    },
-                    alias: Some(col_name.clone()),
-                });
-                extra_columns.push(col_name.clone());
+            let mut seen = std::collections::HashSet::new();
+            for key in &sort.keys {
+                match &key.expression {
+                    LogicalExpression::Variable(_) => continue,
+                    LogicalExpression::Property { variable, property } => {
+                        if !inner_vars.contains_key(variable) {
+                            continue;
+                        }
+                        let col_name = format!("{}_{}", variable, property);
+                        if seen.insert(col_name.clone()) {
+                            augmented_items.push(crate::query::plan::ReturnItem {
+                                expression: key.expression.clone(),
+                                alias: Some(col_name.clone()),
+                            });
+                            extra_columns.push(col_name);
+                        }
+                    }
+                    expr => {
+                        let col_name = format!("__expr_{expr:?}");
+                        if seen.insert(col_name.clone()) {
+                            augmented_items.push(crate::query::plan::ReturnItem {
+                                expression: expr.clone(),
+                                alias: Some(col_name.clone()),
+                            });
+                            extra_columns.push(col_name);
+                        }
+                    }
+                }
             }
 
             let augmented_ret = crate::query::plan::ReturnOp {
@@ -589,6 +620,7 @@ impl super::Planner {
         }
         let mut extra_projections: Vec<SortExtraProjection> = Vec::new();
         let mut next_col_idx = input_columns.len();
+        let mut expr_extra_count: usize = 0;
 
         for key in &sort.keys {
             match &key.expression {
@@ -618,6 +650,7 @@ impl super::Planner {
                         });
                         variable_columns.insert(col_name, next_col_idx);
                         next_col_idx += 1;
+                        expr_extra_count += 1;
                     }
                 }
             }
@@ -711,9 +744,12 @@ impl super::Planner {
         let mut operator: Box<dyn Operator> =
             Box::new(SortOperator::new(input_op, physical_keys, output_schema));
 
-        // Strip extra sort-key columns that were injected for ORDER BY resolution
-        if sort_extra_count > 0 {
-            let keep_count = output_columns.len() - sort_extra_count;
+        // Strip extra columns injected for ORDER BY resolution: both pre-Return
+        // property projections (sort_extra_count) and synthetic __expr_ columns
+        // for complex expressions like labels(n)[0] or type(r).
+        let total_extra = sort_extra_count + expr_extra_count;
+        if total_extra > 0 {
+            let keep_count = output_columns.len() - total_extra;
             let strip_projections: Vec<ProjectExpr> =
                 (0..keep_count).map(ProjectExpr::Column).collect();
             let strip_types: Vec<LogicalType> = (0..keep_count).map(|_| LogicalType::Any).collect();

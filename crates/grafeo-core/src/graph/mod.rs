@@ -16,7 +16,7 @@ pub mod traits;
 #[cfg(feature = "rdf")]
 pub mod rdf;
 
-pub use traits::{GraphStore, GraphStoreMut};
+pub use traits::{GraphStore, GraphStoreMut, NullGraphStore};
 
 /// Controls which edges to follow during traversal.
 ///

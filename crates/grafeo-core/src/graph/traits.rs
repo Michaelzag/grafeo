@@ -534,3 +534,122 @@ pub trait GraphStoreMut: GraphStore {
         id
     }
 }
+
+/// A no-op [`GraphStore`] that returns empty results for all queries.
+///
+/// Used by the RDF planner to satisfy [`ExpressionPredicate`]'s store
+/// requirement. SPARQL expression functions (STR, LANG, DATATYPE, etc.)
+/// operate on already-materialized values in DataChunk columns and never
+/// call store methods.
+pub struct NullGraphStore;
+
+impl GraphStore for NullGraphStore {
+    fn get_node(&self, _: NodeId) -> Option<Node> {
+        None
+    }
+    fn get_edge(&self, _: EdgeId) -> Option<Edge> {
+        None
+    }
+    fn get_node_versioned(&self, _: NodeId, _: EpochId, _: TransactionId) -> Option<Node> {
+        None
+    }
+    fn get_edge_versioned(&self, _: EdgeId, _: EpochId, _: TransactionId) -> Option<Edge> {
+        None
+    }
+    fn get_node_at_epoch(&self, _: NodeId, _: EpochId) -> Option<Node> {
+        None
+    }
+    fn get_edge_at_epoch(&self, _: EdgeId, _: EpochId) -> Option<Edge> {
+        None
+    }
+    fn get_node_property(&self, _: NodeId, _: &PropertyKey) -> Option<Value> {
+        None
+    }
+    fn get_edge_property(&self, _: EdgeId, _: &PropertyKey) -> Option<Value> {
+        None
+    }
+    fn get_node_property_batch(&self, ids: &[NodeId], _: &PropertyKey) -> Vec<Option<Value>> {
+        vec![None; ids.len()]
+    }
+    fn get_nodes_properties_batch(&self, ids: &[NodeId]) -> Vec<FxHashMap<PropertyKey, Value>> {
+        vec![FxHashMap::default(); ids.len()]
+    }
+    fn get_nodes_properties_selective_batch(
+        &self,
+        ids: &[NodeId],
+        _: &[PropertyKey],
+    ) -> Vec<FxHashMap<PropertyKey, Value>> {
+        vec![FxHashMap::default(); ids.len()]
+    }
+    fn get_edges_properties_selective_batch(
+        &self,
+        ids: &[EdgeId],
+        _: &[PropertyKey],
+    ) -> Vec<FxHashMap<PropertyKey, Value>> {
+        vec![FxHashMap::default(); ids.len()]
+    }
+    fn neighbors(&self, _: NodeId, _: Direction) -> Vec<NodeId> {
+        Vec::new()
+    }
+    fn edges_from(&self, _: NodeId, _: Direction) -> Vec<(NodeId, EdgeId)> {
+        Vec::new()
+    }
+    fn out_degree(&self, _: NodeId) -> usize {
+        0
+    }
+    fn in_degree(&self, _: NodeId) -> usize {
+        0
+    }
+    fn has_backward_adjacency(&self) -> bool {
+        false
+    }
+    fn node_ids(&self) -> Vec<NodeId> {
+        Vec::new()
+    }
+    fn nodes_by_label(&self, _: &str) -> Vec<NodeId> {
+        Vec::new()
+    }
+    fn node_count(&self) -> usize {
+        0
+    }
+    fn edge_count(&self) -> usize {
+        0
+    }
+    fn edge_type(&self, _: EdgeId) -> Option<ArcStr> {
+        None
+    }
+    fn find_nodes_by_property(&self, _: &str, _: &Value) -> Vec<NodeId> {
+        Vec::new()
+    }
+    fn find_nodes_by_properties(&self, _: &[(&str, Value)]) -> Vec<NodeId> {
+        Vec::new()
+    }
+    fn find_nodes_in_range(
+        &self,
+        _: &str,
+        _: Option<&Value>,
+        _: Option<&Value>,
+        _: bool,
+        _: bool,
+    ) -> Vec<NodeId> {
+        Vec::new()
+    }
+    fn node_property_might_match(&self, _: &PropertyKey, _: CompareOp, _: &Value) -> bool {
+        false
+    }
+    fn edge_property_might_match(&self, _: &PropertyKey, _: CompareOp, _: &Value) -> bool {
+        false
+    }
+    fn statistics(&self) -> Arc<Statistics> {
+        Arc::new(Statistics::default())
+    }
+    fn estimate_label_cardinality(&self, _: &str) -> f64 {
+        0.0
+    }
+    fn estimate_avg_degree(&self, _: &str, _: bool) -> f64 {
+        0.0
+    }
+    fn current_epoch(&self) -> EpochId {
+        EpochId(0)
+    }
+}

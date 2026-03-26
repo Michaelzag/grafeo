@@ -194,10 +194,12 @@ mod relationship_isomorphism {
             )
             .unwrap();
         let cnt = &r.rows[0][0];
-        // With 3 directed edges in a chain/triangle, verify no edge appears twice
-        if let Value::Int64(n) = cnt {
-            assert!(*n > 0, "Should find at least one two-hop path");
-        }
+        // Triangle: Alix->Gus->Vincent->Alix gives exactly 3 two-hop paths.
+        assert_eq!(
+            *cnt,
+            Value::Int64(3),
+            "Triangle should yield exactly 3 two-hop paths"
+        );
     }
 
     #[test]
@@ -704,17 +706,12 @@ mod cyclic_traversal {
                  RETURN b.name",
             )
             .unwrap();
-        // In a 3-node directed triangle where each node has exactly one
-        // outgoing edge, paths of length 1..5 from Alix yield at most one
-        // path per length (5 paths total). Allow some headroom for
-        // implementation-specific traversal semantics.
-        assert!(
-            r.row_count() > 0,
-            "Should find reachable nodes through cycle"
-        );
-        assert!(
-            r.row_count() < 20,
-            "Should not explode: got {} rows (expected ~5 for a 3-node triangle with *1..5)",
+        // Walk mode on a 3-node directed triangle with one outgoing edge each:
+        // exactly 1 path per hop length (1..=5), so exactly 5 rows.
+        assert_eq!(
+            r.row_count(),
+            5,
+            "Expected exactly 5 paths (one per hop 1..=5), got {}",
             r.row_count()
         );
     }
@@ -809,14 +806,25 @@ mod merge_null_node_reference {
             result.is_ok(),
             "MERGE with non-null node should succeed: {result:?}"
         );
+        // Verify the relationship was actually created.
+        let check = s
+            .execute(
+                "MATCH (v:Person {name: 'Vincent'})-[:KNOWS]->(j:Person {name: 'Jules'}) RETURN j.name",
+            )
+            .unwrap();
+        assert_eq!(check.row_count(), 1);
+        assert_eq!(check.rows[0][0], Value::String("Jules".into()));
     }
 
     #[test]
     fn standalone_merge_unaffected() {
         let db = db();
         let s = db.session();
-        let result = s.execute("MERGE (:Person {name: 'Mia'}) RETURN 1 AS ok");
-        assert!(result.is_ok(), "Standalone MERGE should still work");
+        let result = s
+            .execute("MERGE (:Person {name: 'Mia'}) RETURN 1 AS ok")
+            .unwrap();
+        assert_eq!(result.row_count(), 1);
+        assert_eq!(result.rows[0][0], Value::Int64(1));
     }
 }
 
@@ -917,6 +925,10 @@ mod call_block_scope {
             result.is_ok(),
             "sibling CALL outputs should be accessible in outer RETURN, got: {result:?}"
         );
+        // TODO: sibling CALL block outputs currently return Null instead of
+        // the actual values. Once the binder propagates outputs correctly:
+        //   assert_eq!(result.rows[0][0], Value::Int64(30));  // age_a
+        //   assert_eq!(result.rows[0][1], Value::Int64(25));  // age_b
     }
 
     /// Internal variable `a` from CALL block 1 must not be visible in CALL block 2.
@@ -1120,10 +1132,13 @@ mod issue_187_labels_type_aggregation {
         s.execute_cypher("CREATE (:Foo), (:Bar)").unwrap();
 
         let result = s
-            .execute_cypher("MATCH (n) RETURN labels(n) AS lbls, count(n) AS cnt ORDER BY cnt")
+            .execute_cypher("MATCH (n) RETURN labels(n) AS lbls, count(n) AS cnt ORDER BY lbls")
             .unwrap();
 
         assert_eq!(result.row_count(), 2);
+        // Each single-label node forms its own group with count 1.
+        assert_eq!(result.rows[0][1], Value::Int64(1));
+        assert_eq!(result.rows[1][1], Value::Int64(1));
     }
 
     #[test]
@@ -1133,12 +1148,14 @@ mod issue_187_labels_type_aggregation {
         s.execute_cypher("CREATE (:Zebra {name: 'Z'}), (:Apple {name: 'A'})")
             .unwrap();
 
-        // Just verify it doesn't error; ORDER BY labels(n)[0] is a complex expression
         let result = s
             .execute_cypher("MATCH (n) RETURN n.name ORDER BY labels(n)[0]")
             .unwrap();
 
         assert_eq!(result.row_count(), 2);
+        // "Apple" < "Zebra" alphabetically
+        assert_eq!(result.rows[0][0], Value::String("A".into()));
+        assert_eq!(result.rows[1][0], Value::String("Z".into()));
     }
 
     #[test]
@@ -1184,12 +1201,13 @@ mod issue_187_labels_type_aggregation {
         s.execute("INSERT (:Zebra {name: 'Z'}), (:Apple {name: 'A'})")
             .unwrap();
 
-        // ORDER BY labels(n) in GQL should not error
         let result = s
             .execute("MATCH (n) RETURN n.name ORDER BY labels(n)[0]")
             .unwrap();
 
         assert_eq!(result.row_count(), 2);
+        assert_eq!(result.rows[0][0], Value::String("A".into()));
+        assert_eq!(result.rows[1][0], Value::String("Z".into()));
     }
 }
 
@@ -1208,20 +1226,17 @@ mod issue_187_extended {
         s.execute_cypher("CREATE (:Alpha {val: 10}), (:Alpha {val: 20}), (:Beta {val: 5})")
             .unwrap();
 
-        // Each node has exactly one label, so labels(n)[0] is deterministic:
-        // exactly 2 groups (Alpha, Beta).
         let result = s
             .execute_cypher(
                 "MATCH (n) RETURN labels(n)[0] AS label, sum(n.val) AS total ORDER BY label",
             )
             .unwrap();
 
-        assert_eq!(
-            result.row_count(),
-            2,
-            "Should produce exactly 2 rows (Alpha, Beta), got {}",
-            result.row_count()
-        );
+        assert_eq!(result.row_count(), 2);
+        assert_eq!(result.rows[0][0], Value::String("Alpha".into()));
+        assert_eq!(result.rows[0][1], Value::Int64(30));
+        assert_eq!(result.rows[1][0], Value::String("Beta".into()));
+        assert_eq!(result.rows[1][1], Value::Int64(5));
     }
 
     #[test]
@@ -1249,16 +1264,14 @@ mod issue_187_extended {
         )
         .unwrap();
 
-        // Groups by the full label list. Ideally [A,B] and [C,D] form
-        // exactly 2 groups, but list-valued GROUP BY keys may produce
-        // extra rows when the engine hashes list elements individually.
         let result = s
             .execute_cypher("MATCH (n) RETURN labels(n) AS lbls, count(n) AS cnt")
             .unwrap();
 
-        assert!(
-            result.row_count() >= 2,
-            "Expected at least 2 rows (one per distinct label-set), got {}",
+        assert_eq!(
+            result.row_count(),
+            2,
+            "Expected exactly 2 rows (one per distinct label-set), got {}",
             result.row_count()
         );
     }

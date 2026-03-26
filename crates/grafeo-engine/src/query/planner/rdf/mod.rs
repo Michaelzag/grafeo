@@ -18,6 +18,7 @@ use grafeo_core::execution::operators::{
     OperatorError, Predicate, ProjectExpr, ProjectOperator, SimpleAggregateOperator,
     SingleRowOperator, SortOperator, UnaryFilterOp,
 };
+use grafeo_core::graph::GraphStore;
 use grafeo_core::graph::rdf::{Literal, RdfStore, Term, Triple, TriplePattern};
 
 use crate::query::plan::{
@@ -531,7 +532,12 @@ impl RdfPlanner {
                 output_types.push(LogicalType::Any);
             }
 
-            input_op = Box::new(ProjectOperator::new(input_op, projections, output_types));
+            input_op = Box::new(ProjectOperator::with_store(
+                input_op,
+                projections,
+                output_types,
+                Arc::new(grafeo_core::graph::NullGraphStore) as Arc<dyn GraphStore>,
+            ));
         }
 
         let physical_keys: Vec<SortKey> = sort
@@ -707,7 +713,12 @@ impl RdfPlanner {
                 output_types.push(LogicalType::Any);
             }
 
-            input_op = Box::new(ProjectOperator::new(input_op, projections, output_types));
+            input_op = Box::new(ProjectOperator::with_store(
+                input_op,
+                projections,
+                output_types,
+                Arc::new(grafeo_core::graph::NullGraphStore) as Arc<dyn GraphStore>,
+            ));
         }
 
         let group_columns: Vec<usize> = agg

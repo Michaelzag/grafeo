@@ -146,6 +146,12 @@ fn hash_value(value: &Value) -> u64 {
         Value::Int64(i) => i.hash(&mut hasher),
         Value::Float64(f) => f.to_bits().hash(&mut hasher),
         Value::String(s) => s.hash(&mut hasher),
+        Value::List(list) => {
+            list.len().hash(&mut hasher);
+            for elem in list.iter() {
+                hash_value(elem).hash(&mut hasher);
+            }
+        }
         _ => 0u8.hash(&mut hasher),
     }
     hasher.finish()

@@ -1219,6 +1219,11 @@ pub extern "C" fn grafeo_find_nodes_by_property(
         set_last_error("Null output pointer");
         return GrafeoStatus::ErrorNullPointer;
     }
+    // Defensively zero so error paths never leave outputs uninitialized.
+    unsafe {
+        *out_count = 0;
+        *out_ids = std::ptr::null_mut();
+    }
     let prop_str = match str_from_ptr(property) {
         Ok(s) => s,
         Err(e) => return e,
@@ -1379,8 +1384,12 @@ pub extern "C" fn grafeo_vector_search(
         set_last_error("Null pointer argument");
         return GrafeoStatus::ErrorNullPointer;
     }
-    // Defensively zero so error paths never leave out_count uninitialized.
-    unsafe { *out_count = 0 };
+    // Defensively zero so error paths never leave outputs uninitialized.
+    unsafe {
+        *out_count = 0;
+        *out_ids = std::ptr::null_mut();
+        *out_distances = std::ptr::null_mut();
+    }
     let label_str = match str_from_ptr(label) {
         Ok(s) => s,
         Err(e) => return e,
@@ -1446,8 +1455,12 @@ pub extern "C" fn grafeo_mmr_search(
         set_last_error("Null pointer argument");
         return GrafeoStatus::ErrorNullPointer;
     }
-    // Defensively zero so error paths never leave out_count uninitialized.
-    unsafe { *out_count = 0 };
+    // Defensively zero so error paths never leave outputs uninitialized.
+    unsafe {
+        *out_count = 0;
+        *out_ids = std::ptr::null_mut();
+        *out_distances = std::ptr::null_mut();
+    }
     let label_str = match str_from_ptr(label) {
         Ok(s) => s,
         Err(e) => return e,
@@ -1520,8 +1533,11 @@ pub extern "C" fn grafeo_batch_create_nodes(
         set_last_error("Null pointer argument");
         return GrafeoStatus::ErrorNullPointer;
     }
-    // Defensively zero so error paths never leave out_count uninitialized.
-    unsafe { *out_count = 0 };
+    // Defensively zero so error paths never leave outputs uninitialized.
+    unsafe {
+        *out_count = 0;
+        *out_ids = std::ptr::null_mut();
+    }
     let label_str = match str_from_ptr(label) {
         Ok(s) => s,
         Err(e) => return e,

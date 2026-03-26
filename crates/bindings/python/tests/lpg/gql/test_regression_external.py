@@ -441,14 +441,17 @@ class TestIssue187LabelsTypeAggregation:
         assert result[1]["cnt"] == 2
 
     def test_labels_order_by(self, db):
-        """ORDER BY labels(n)[0] should not error."""
+        """ORDER BY labels(n)[0] sorts by first label alphabetically."""
         db.create_node(["Person"], {"name": "Alix"})
         db.create_node(["City"], {"name": "Amsterdam"})
         result = list(db.execute("MATCH (n) RETURN n.name ORDER BY labels(n)[0]"))
         assert len(result) == 2
+        # "City" < "Person" alphabetically
+        assert result[0]["n.name"] == "Amsterdam"
+        assert result[1]["n.name"] == "Alix"
 
     def test_type_order_by(self, db):
-        """ORDER BY type(r) should not error."""
+        """ORDER BY type(r) sorts by edge type alphabetically."""
         alix = db.create_node(["Person"], {"name": "Alix"})
         gus = db.create_node(["Person"], {"name": "Gus"})
         acme = db.create_node(["Company"], {"name": "Acme"})
@@ -456,30 +459,25 @@ class TestIssue187LabelsTypeAggregation:
         db.create_edge(alix.id, acme.id, "WORKS_AT")
         result = list(db.execute("MATCH ()-[r]->() RETURN type(r) AS t ORDER BY t"))
         assert len(result) == 2
+        assert result[0]["t"] == "KNOWS"
+        assert result[1]["t"] == "WORKS_AT"
 
     def test_labels_group_by_sum(self, db):
-        """GROUP BY labels(n)[0] with SUM on a numeric property.
-
-        The engine may not yet fully resolve labels(n)[0] as a grouping key
-        when combined with sum(), so we check that the query executes without
-        error and produces at least 2 rows (matching the Rust-side assertion).
-        """
+        """GROUP BY labels(n)[0] with SUM on a numeric property."""
         db.create_node(["Person"], {"name": "Alix", "val": 10})
         db.create_node(["Person"], {"name": "Gus", "val": 20})
         db.create_node(["City"], {"name": "Amsterdam", "val": 5})
         result = list(
             db.execute("MATCH (n) RETURN labels(n)[0] AS label, sum(n.val) AS total ORDER BY label")
         )
-        assert len(result) >= 2, f"Should produce at least 2 rows, got {len(result)}"
+        assert len(result) == 2
+        assert result[0]["label"] == "City"
+        assert result[0]["total"] == 5
+        assert result[1]["label"] == "Person"
+        assert result[1]["total"] == 30
 
     def test_combined_group_by_and_order_by(self, db):
-        """Both GROUP BY and ORDER BY use labels().
-
-        When both GROUP BY (implicit from labels(n)[0] in RETURN) and ORDER BY
-        use the same complex expression, the engine may not fully collapse
-        groups. We verify the query runs without error and produces at least
-        2 rows (matching the Rust-side assertion).
-        """
+        """Both GROUP BY and ORDER BY use labels(), descending."""
         db.create_node(["Person"], {"name": "Alix"})
         db.create_node(["Person"], {"name": "Gus"})
         db.create_node(["Person"], {"name": "Vincent"})
@@ -490,4 +488,8 @@ class TestIssue187LabelsTypeAggregation:
                 "MATCH (n) RETURN labels(n)[0] AS label, count(n) AS cnt ORDER BY labels(n)[0] DESC"
             )
         )
-        assert len(result) >= 2, f"Should produce at least 2 rows, got {len(result)}"
+        assert len(result) == 2
+        assert result[0]["label"] == "Person"
+        assert result[0]["cnt"] == 3
+        assert result[1]["label"] == "City"
+        assert result[1]["cnt"] == 2

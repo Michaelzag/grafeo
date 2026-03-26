@@ -254,7 +254,7 @@ class TestTemporalPropertyVersioning:
         node_id = node.id if hasattr(node, "id") else node
         db.set_node_property(node_id, "name", "Alicia")
         history = db.get_node_property_history(node_id, "name")
-        assert len(history) >= 2
+        assert len(history) == 2
         assert history[0][1] == "Alix"
         assert history[1][1] == "Alicia"
 
@@ -286,7 +286,7 @@ class TestTemporalPropertyVersioning:
         all_hist = db.get_all_node_property_history(node_id)
         assert "name" in all_hist
         assert "age" in all_hist
-        assert len(all_hist["age"]) >= 2
+        assert len(all_hist["age"]) == 2
 
     def test_property_history_empty_for_nonexistent(self, db):
         if not hasattr(db, "get_node_property_history"):
@@ -343,7 +343,7 @@ class TestCDCNodeHistory:
         node = db.create_node(["Memory"], {"text": "hello"})
         node_id = node.id if hasattr(node, "id") else node
         events = db.node_history(node_id)
-        assert len(events) >= 1
+        assert len(events) == 1
 
     def test_node_history_after_property_change(self, db):
         if not hasattr(db, "node_history"):
@@ -352,7 +352,7 @@ class TestCDCNodeHistory:
         node_id = node.id if hasattr(node, "id") else node
         db.set_node_property(node_id, "text", "v2")
         events = db.node_history(node_id)
-        assert len(events) >= 2
+        assert len(events) == 2
 
     def test_node_history_empty_for_nonexistent(self, db):
         if not hasattr(db, "node_history"):

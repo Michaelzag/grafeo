@@ -9,6 +9,7 @@
 
 use indexmap::IndexMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use arcstr::ArcStr;
 use grafeo_common::types::{LogicalType, Value};
@@ -624,6 +625,34 @@ enum GroupKeyPart {
     Bool(bool),
     Int64(i64),
     String(ArcStr),
+    List(Vec<GroupKeyPart>),
+}
+
+impl GroupKeyPart {
+    fn from_value(v: Value) -> Self {
+        match v {
+            Value::Null => Self::Null,
+            Value::Bool(b) => Self::Bool(b),
+            Value::Int64(i) => Self::Int64(i),
+            Value::Float64(f) => Self::Int64(f.to_bits() as i64),
+            Value::String(s) => Self::String(s.clone()),
+            Value::List(items) => Self::List(items.iter().cloned().map(Self::from_value).collect()),
+            other => Self::String(ArcStr::from(format!("{other:?}"))),
+        }
+    }
+
+    fn to_value(&self) -> Value {
+        match self {
+            Self::Null => Value::Null,
+            Self::Bool(b) => Value::Bool(*b),
+            Self::Int64(i) => Value::Int64(*i),
+            Self::String(s) => Value::String(s.clone()),
+            Self::List(parts) => {
+                let values: Vec<Value> = parts.iter().map(Self::to_value).collect();
+                Value::List(Arc::from(values.into_boxed_slice()))
+            }
+        }
+    }
 }
 
 impl GroupKey {
@@ -635,14 +664,7 @@ impl GroupKey {
                 chunk
                     .column(col_idx)
                     .and_then(|col| col.get_value(row))
-                    .map_or(GroupKeyPart::Null, |v| match v {
-                        Value::Null => GroupKeyPart::Null,
-                        Value::Bool(b) => GroupKeyPart::Bool(b),
-                        Value::Int64(i) => GroupKeyPart::Int64(i),
-                        Value::Float64(f) => GroupKeyPart::Int64(f.to_bits() as i64),
-                        Value::String(s) => GroupKeyPart::String(s.clone()),
-                        _ => GroupKeyPart::String(ArcStr::from(format!("{v:?}"))),
-                    })
+                    .map_or(GroupKeyPart::Null, GroupKeyPart::from_value)
             })
             .collect();
         GroupKey(parts)
@@ -650,15 +672,7 @@ impl GroupKey {
 
     /// Converts the group key back to values.
     fn to_values(&self) -> Vec<Value> {
-        self.0
-            .iter()
-            .map(|part| match part {
-                GroupKeyPart::Null => Value::Null,
-                GroupKeyPart::Bool(b) => Value::Bool(*b),
-                GroupKeyPart::Int64(i) => Value::Int64(*i),
-                GroupKeyPart::String(s) => Value::String(s.clone()),
-            })
-            .collect()
+        self.0.iter().map(GroupKeyPart::to_value).collect()
     }
 }
 
