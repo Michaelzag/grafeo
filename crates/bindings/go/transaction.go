@@ -30,7 +30,7 @@ func (db *Database) BeginTransaction() (*Transaction, error) {
 
 // BeginTransactionWith starts a transaction with a specific isolation level.
 func (db *Database) BeginTransactionWith(level IsolationLevel) (*Transaction, error) {
-	h := C.grafeo_begin_transaction_with_isolation(db.handle, C.int32_t(level))
+	h := C.grafeo_begin_transaction_with_isolation(db.handle, C.GrafeoIsolationLevel(level))
 	if h == nil {
 		return nil, lastError()
 	}
