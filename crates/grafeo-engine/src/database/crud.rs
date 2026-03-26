@@ -826,6 +826,12 @@ impl super::GrafeoDB {
     /// acquires internal locks once and loops in Rust rather than crossing
     /// the FFI boundary per vector.
     ///
+    /// **Atomicity note:** Individual node creations within the batch are NOT
+    /// atomic as a group. If a failure occurs mid-batch (e.g. WAL write error),
+    /// nodes created before the failure will persist while later nodes may not.
+    /// If you need all-or-nothing semantics, wrap the call in an explicit
+    /// transaction.
+    ///
     /// # Arguments
     ///
     /// * `label` - Label applied to all created nodes
@@ -885,8 +891,13 @@ impl super::GrafeoDB {
             for &id in &ids {
                 if let Some(node) = self.store.get_node(id) {
                     let pk = grafeo_common::types::PropertyKey::new(property);
-                    if let Some(grafeo_common::types::Value::Vector(v)) = node.properties.get(&pk) {
-                        index.insert(id, v, &accessor);
+                    if let Some(grafeo_common::types::Value::Vector(v)) = node.properties.get(&pk)
+                        && std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            index.insert(id, v, &accessor);
+                        }))
+                        .is_err()
+                    {
+                        grafeo_warn!("Vector index insert panicked for node {}", id.as_u64());
                     }
                 }
             }
@@ -901,6 +912,12 @@ impl super::GrafeoDB {
     /// Vector values (`Value::Vector`) are automatically inserted into matching
     /// vector indexes. Text values are automatically inserted into matching text
     /// indexes.
+    ///
+    /// **Atomicity note:** Individual node creations within the batch are NOT
+    /// atomic as a group. If a failure occurs mid-batch (e.g. WAL write error),
+    /// nodes created before the failure will persist while later nodes may not.
+    /// If you need all-or-nothing semantics, wrap the call in an explicit
+    /// transaction.
     ///
     /// # Arguments
     ///
@@ -991,10 +1008,29 @@ impl super::GrafeoDB {
                     grafeo_core::index::vector::PropertyVectorAccessor::new(&*self.store, property);
                 let pk = grafeo_common::types::PropertyKey::new(property);
                 for &id in &ids {
-                    if let Some(node) = self.store.get_node(id)
-                        && let Some(Value::Vector(v)) = node.properties.get(&pk)
-                    {
-                        index.insert(id, v, &accessor);
+                    if let Some(node) = self.store.get_node(id) {
+                        match node.properties.get(&pk) {
+                            Some(Value::Vector(v)) => {
+                                if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    index.insert(id, v, &accessor);
+                                }))
+                                .is_err()
+                                {
+                                    grafeo_warn!(
+                                        "Vector index insert panicked for node {}",
+                                        id.as_u64()
+                                    );
+                                }
+                            }
+                            Some(_other) => {
+                                grafeo_warn!(
+                                    "Node {} property '{}' expected Vector, skipping vector index insert",
+                                    id.as_u64(),
+                                    property
+                                );
+                            }
+                            None => {} // No property, nothing to index
+                        }
                     }
                 }
             }

@@ -86,6 +86,46 @@ public sealed class Transaction : IDisposable, IAsyncDisposable
         }, ct);
     }
 
+    /// <summary>
+    /// Execute a query in the specified language within this transaction.
+    /// </summary>
+    /// <param name="language">Query language: "gql", "cypher", "gremlin", "graphql", "sparql", or "sql".</param>
+    /// <param name="query">The query string.</param>
+    /// <param name="paramsJson">Optional JSON-encoded parameters (null for none).</param>
+    public QueryResult ExecuteLanguage(string language, string query, string? paramsJson = null)
+    {
+        ThrowIfFinished();
+        var resultPtr = NativeMethods.grafeo_transaction_execute_language(Handle, language, query, paramsJson);
+        if (resultPtr == nint.Zero)
+            throw GrafeoException.FromLastError(GrafeoStatus.Query);
+        return BuildResult(resultPtr);
+    }
+
+    /// <summary>
+    /// Execute a query in the specified language within this transaction on the thread pool.
+    /// </summary>
+    /// <param name="language">Query language: "gql", "cypher", "gremlin", "graphql", "sparql", or "sql".</param>
+    /// <param name="query">The query string.</param>
+    /// <param name="paramsJson">Optional JSON-encoded parameters (null for none).</param>
+    /// <param name="ct">Cancellation token.</param>
+    public Task<QueryResult> ExecuteLanguageAsync(
+        string language,
+        string query,
+        string? paramsJson = null,
+        CancellationToken ct = default)
+    {
+        ThrowIfFinished();
+        var h = Handle;
+        return Task.Run(() =>
+        {
+            ct.ThrowIfCancellationRequested();
+            var resultPtr = NativeMethods.grafeo_transaction_execute_language(h, language, query, paramsJson);
+            if (resultPtr == nint.Zero)
+                throw GrafeoException.FromLastError(GrafeoStatus.Query);
+            return BuildResult(resultPtr);
+        }, ct);
+    }
+
     // =========================================================================
     // Commit / Rollback
     // =========================================================================

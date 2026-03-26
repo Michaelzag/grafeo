@@ -734,33 +734,11 @@ impl super::Planner {
         expr: &LogicalExpression,
         variable_columns: &HashMap<String, usize>,
     ) -> Result<usize> {
-        match expr {
-            LogicalExpression::Variable(name) => {
-                variable_columns.get(name).copied().ok_or_else(|| {
-                    Error::Internal(format!("Variable '{}' not found for ORDER BY", name))
-                })
-            }
-            LogicalExpression::Property { variable, property } => {
-                // Look up the projected property column (e.g., "p_age" for p.age)
-                let col_name = format!("{}_{}", variable, property);
-                variable_columns.get(&col_name).copied().ok_or_else(|| {
-                    Error::Internal(format!(
-                        "Property column '{}' not found for ORDER BY (from {}.{})",
-                        col_name, variable, property
-                    ))
-                })
-            }
-            _ => {
-                // Complex expression (Labels, Type, FunctionCall, IndexAccess, etc.)
-                let col_name = format!("__expr_{:?}", expr);
-                variable_columns.get(&col_name).copied().ok_or_else(|| {
-                    Error::Internal(format!(
-                        "Cannot resolve ORDER BY expression to column: {:?}",
-                        expr
-                    ))
-                })
-            }
-        }
+        crate::query::planner::common::resolve_expression_to_column(
+            expr,
+            variable_columns,
+            " for ORDER BY",
+        )
     }
 
     /// Derives a schema from column names using the planner's type tracking.

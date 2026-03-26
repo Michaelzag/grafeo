@@ -151,12 +151,23 @@ func (db *Database) RemoveNodeLabel(id uint64, label string) (bool, error) {
 	return result == 1, nil
 }
 
-// GetNodeLabels returns all labels for a node.
+// GetNodeLabels returns all labels for a node. Returns (nil, nil) if the node
+// does not exist.
 func (db *Database) GetNodeLabels(id uint64) ([]string, error) {
+	runtime.LockOSThread()
+	C.grafeo_clear_error()
 	cLabels := C.grafeo_get_node_labels(db.handle, C.uint64_t(id))
 	if cLabels == nil {
+		// Distinguish "not found" (no error set) from a real error.
+		if C.grafeo_last_error() != nil {
+			err := lastError()
+			runtime.UnlockOSThread()
+			return nil, err
+		}
+		runtime.UnlockOSThread()
 		return nil, nil
 	}
+	runtime.UnlockOSThread()
 	defer C.grafeo_free_string(cLabels)
 	var labels []string
 	_ = json.Unmarshal([]byte(C.GoString(cLabels)), &labels)

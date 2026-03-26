@@ -782,7 +782,7 @@ impl ChunkedAdjacency {
             for cold in &list.cold_chunks {
                 list_bytes += cold.memory_size();
             }
-            // Delta buffer (SmallVec inline when < 16 entries)
+            // Delta buffer (SmallVec inline when < 4 entries)
             if list.delta_inserts.spilled() {
                 list_bytes += list.delta_inserts.capacity() * 16;
             }

@@ -1,5 +1,6 @@
 //! All `#[no_mangle] extern "C"` functions exposed by the Grafeo C API.
 
+use std::cell::RefCell;
 use std::ffi::CString;
 use std::os::raw::c_char;
 use std::sync::Arc;
@@ -12,6 +13,15 @@ use grafeo_engine::database::GrafeoDB;
 
 use crate::error::{GrafeoStatus, set_error, set_last_error, str_from_ptr};
 use crate::types::{GrafeoDatabase, GrafeoEdge, GrafeoNode, GrafeoResult, GrafeoTransaction};
+
+// ===== Thread-local storage =====
+
+thread_local! {
+    /// Stores the most recent schema name returned by [`grafeo_current_schema`].
+    /// The pointer is valid until the next call to `grafeo_current_schema`,
+    /// `grafeo_set_schema`, or `grafeo_reset_schema` on this thread.
+    static LAST_SCHEMA: RefCell<Option<CString>> = const { RefCell::new(None) };
+}
 
 // ===== Helpers =====
 
@@ -695,8 +705,9 @@ pub extern "C" fn grafeo_reset_schema(db: *mut GrafeoDatabase) -> GrafeoStatus {
 
 /// Returns the current schema name, or NULL if no schema is set.
 ///
-/// The returned string is valid until the next call that modifies schema context
-/// on this database. Copy it if you need it to outlive the call.
+/// The returned string is valid until the next call to `grafeo_current_schema`,
+/// `grafeo_set_schema`, or `grafeo_reset_schema` on this thread.
+/// The caller must NOT free this pointer.
 ///
 /// # Safety
 /// `db` must be a valid pointer returned by `grafeo_open*`.
@@ -708,11 +719,16 @@ pub extern "C" fn grafeo_current_schema(db: *const GrafeoDatabase) -> *const c_c
     // SAFETY: Caller guarantees valid pointer.
     let db = unsafe { &*db };
     match db.inner.read().current_schema() {
-        Some(name) => match std::ffi::CString::new(name) {
-            Ok(s) => s.into_raw(),
-            Err(_) => std::ptr::null(),
-        },
-        None => std::ptr::null(),
+        Some(name) => LAST_SCHEMA.with(|cell| {
+            *cell.borrow_mut() = CString::new(name).ok();
+            cell.borrow()
+                .as_ref()
+                .map_or(std::ptr::null(), |s| s.as_ptr())
+        }),
+        None => {
+            LAST_SCHEMA.with(|cell| *cell.borrow_mut() = None);
+            std::ptr::null()
+        }
     }
 }
 
@@ -1363,6 +1379,8 @@ pub extern "C" fn grafeo_vector_search(
         set_last_error("Null pointer argument");
         return GrafeoStatus::ErrorNullPointer;
     }
+    // Defensively zero so error paths never leave out_count uninitialized.
+    unsafe { *out_count = 0 };
     let label_str = match str_from_ptr(label) {
         Ok(s) => s,
         Err(e) => return e,
@@ -1428,6 +1446,8 @@ pub extern "C" fn grafeo_mmr_search(
         set_last_error("Null pointer argument");
         return GrafeoStatus::ErrorNullPointer;
     }
+    // Defensively zero so error paths never leave out_count uninitialized.
+    unsafe { *out_count = 0 };
     let label_str = match str_from_ptr(label) {
         Ok(s) => s,
         Err(e) => return e,
@@ -1500,6 +1520,8 @@ pub extern "C" fn grafeo_batch_create_nodes(
         set_last_error("Null pointer argument");
         return GrafeoStatus::ErrorNullPointer;
     }
+    // Defensively zero so error paths never leave out_count uninitialized.
+    unsafe { *out_count = 0 };
     let label_str = match str_from_ptr(label) {
         Ok(s) => s,
         Err(e) => return e,

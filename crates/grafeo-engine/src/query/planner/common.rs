@@ -340,6 +340,47 @@ fn find_shared_join_keys(left: &[String], right: &[String]) -> (Vec<usize>, Vec<
     (probe_keys, build_keys)
 }
 
+/// Resolves a logical expression to a column index in the given variable-column map.
+///
+/// Handles three expression kinds:
+/// - `Variable(name)`: direct lookup in `variable_columns`
+/// - `Property { variable, property }`: lookup of `"{variable}_{property}"` (LPG projections)
+/// - Complex expressions: lookup of `"__expr_{expr:?}"` (synthetic columns)
+///
+/// `context` is appended to error messages (e.g. `" for ORDER BY"`, or `""` for aggregations).
+///
+/// NOTE: The expression *collection* loops (which build the synthetic columns that this
+/// function resolves) are intentionally NOT shared, because the LPG and RDF planners use
+/// different `convert_expression` signatures (method on `&self` vs free function).
+pub(crate) fn resolve_expression_to_column(
+    expr: &LogicalExpression,
+    variable_columns: &std::collections::HashMap<String, usize>,
+    context: &str,
+) -> Result<usize> {
+    match expr {
+        LogicalExpression::Variable(name) => variable_columns
+            .get(name)
+            .copied()
+            .ok_or_else(|| Error::Internal(format!("Variable '{name}' not found{context}"))),
+        LogicalExpression::Property { variable, property } => {
+            let col_name = format!("{variable}_{property}");
+            variable_columns.get(&col_name).copied().ok_or_else(|| {
+                Error::Internal(format!(
+                    "Property column '{col_name}' not found{context} (from {variable}.{property})"
+                ))
+            })
+        }
+        _ => {
+            let col_name = format!("__expr_{expr:?}");
+            variable_columns.get(&col_name).copied().ok_or_else(|| {
+                Error::Internal(format!(
+                    "Cannot resolve expression to column{context}: {expr:?}"
+                ))
+            })
+        }
+    }
+}
+
 /// Converts a logical expression to a human-readable string for column naming.
 pub(crate) fn expression_to_string(expr: &LogicalExpression) -> String {
     match expr {

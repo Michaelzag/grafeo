@@ -3785,19 +3785,7 @@ fn resolve_expression(
     expr: &LogicalExpression,
     variable_columns: &HashMap<String, usize>,
 ) -> Result<usize> {
-    match expr {
-        LogicalExpression::Variable(name) => variable_columns
-            .get(name)
-            .copied()
-            .ok_or_else(|| Error::Internal(format!("Variable '{}' not found", name))),
-        _ => {
-            // Complex expression (CASE, Binary, etc.): look up synthetic column
-            let col_name = format!("__expr_{:?}", expr);
-            variable_columns.get(&col_name).copied().ok_or_else(|| {
-                Error::Internal(format!("Cannot resolve expression to column: {:?}", expr))
-            })
-        }
-    }
+    crate::query::planner::common::resolve_expression_to_column(expr, variable_columns, "")
 }
 
 // expression_to_string is now in planner/common.rs

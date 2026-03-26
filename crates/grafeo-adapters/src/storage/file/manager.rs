@@ -379,8 +379,10 @@ impl GrafeoFileManager {
     ///
     /// Returns an error if sync fails.
     pub fn sync(&self) -> Result<()> {
-        let file = self.file.lock();
-        file.sync_all()?;
+        if !self.read_only {
+            let file = self.file.lock();
+            file.sync_all()?;
+        }
         Ok(())
     }
 

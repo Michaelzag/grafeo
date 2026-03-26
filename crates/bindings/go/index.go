@@ -39,7 +39,10 @@ func (db *Database) DropPropertyIndex(property string) (bool, error) {
 func (db *Database) HasPropertyIndex(property string) bool {
 	cProp := C.CString(property)
 	defer C.free(unsafe.Pointer(cProp))
-	return int(C.grafeo_has_property_index(db.handle, cProp)) == 1
+	runtime.LockOSThread()
+	result := int(C.grafeo_has_property_index(db.handle, cProp)) == 1
+	runtime.UnlockOSThread()
+	return result
 }
 
 // FindNodesByProperty finds nodes with a matching property value.
