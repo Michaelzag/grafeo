@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.27
+
+- Version bump to match workspace release
+
 ## 0.5.26
 
 - Version bump to match workspace release
