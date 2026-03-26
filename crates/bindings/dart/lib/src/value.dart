@@ -86,7 +86,7 @@ List<Map<String, dynamic>> parseRows(String json) {
       // Wrap the decoded scalar so the row stays Map<String, dynamic>.
       return <String, dynamic>{row.keys.first.toString(): asDecoded};
     }
-    return (asDecoded as Map).map<String, dynamic>(
+    return asDecoded.map<String, dynamic>(
       (key, value) => MapEntry(key.toString(), value),
     );
   }).toList();
