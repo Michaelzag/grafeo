@@ -40,6 +40,45 @@ db.close();
 | [JsNode](node.md) | Graph node with labels and properties |
 | [JsEdge](edge.md) | Graph edge with type, endpoints and properties |
 
+## GrafeoDB
+
+### openReadOnly(path)
+
+Open an existing database in read-only mode. Multiple processes can read concurrently.
+
+```typescript
+const db = GrafeoDB.openReadOnly('./my_graph.db');
+```
+
+### clearPlanCache()
+
+Clear the query plan cache. Called automatically after DDL.
+
+```typescript
+db.clearPlanCache();
+```
+
+### setSchema(name) / resetSchema() / currentSchema()
+
+Set, clear, or read the schema context for subsequent queries.
+
+```typescript
+db.setSchema('reporting');
+const name = db.currentSchema();  // 'reporting'
+db.resetSchema();
+```
+
+## QueryResult
+
+### toString()
+
+Format the result as a Unicode table string.
+
+```typescript
+const result = await db.execute('MATCH (n:Person) RETURN n.name, n.age');
+console.log(result.toString());
+```
+
 ## Query Languages
 
 All query methods return `Promise<QueryResult>` and accept an optional `params` object:

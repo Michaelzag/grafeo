@@ -11,8 +11,8 @@ tags:
 
 Comparing the ISO standard GQL with W3C standard SPARQL.
 
-!!! info "Grafeo Query Language"
-    Grafeo uses **GQL** as its query language. **SPARQL is not supported**. This guide is for users familiar with SPARQL/RDF who want to understand how GQL differs and how to accomplish similar tasks in Grafeo.
+!!! info "Grafeo Query Languages"
+    Grafeo supports both **GQL** (default) and **SPARQL** (via the `sparql` feature flag). GQL targets LPG data, SPARQL targets RDF data. This guide is for users familiar with SPARQL/RDF who want to understand how GQL differs. For SPARQL usage, see the [SPARQL user guide](../sparql/index.md).
 
 ## Overview
 

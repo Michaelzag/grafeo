@@ -69,6 +69,12 @@ result, err := db.ExecuteGremlin(query)    // Gremlin
 result, err := db.ExecuteGraphQL(query)    // GraphQL
 result, err := db.ExecuteSPARQL(query)     // SPARQL
 result, err := db.ExecuteSQL(query)        // SQL/PGQ
+
+// Parameterized queries (accepts map[string]any, marshals to JSON internally)
+result, err := db.ExecuteParams(
+    "MATCH (p:Person) WHERE p.age > $min RETURN p.name",
+    map[string]any{"min": 25},
+)
 ```
 
 ## Node & Edge CRUD

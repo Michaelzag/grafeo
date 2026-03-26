@@ -135,8 +135,9 @@ using var tx = db.BeginTransaction("serializable");
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `BeginTransaction()` | `Transaction` | Begin a transaction with the default isolation level |
-| `BeginTransaction(string isolationLevel)` | `Transaction` | Begin a transaction with a specific isolation level (`"read_committed"`, `"repeatable_read"`, `"serializable"`) |
+| `BeginTransaction()` | `Transaction` | Begin with default isolation (snapshot) |
+| `BeginTransaction(string)` | `Transaction` | Begin with isolation level: `"read_committed"`, `"snapshot"`, `"serializable"` |
+| `BeginTransaction(IsolationLevel)` | `Transaction` | Type-safe overload: `IsolationLevel.ReadCommitted`, `.Snapshot`, `.Serializable` |
 
 ### Node CRUD
 
@@ -256,7 +257,7 @@ db.DropVectorIndex("Document", "embedding");
 |--------|---------|-------------|
 | `VectorSearch(string label, string property, float[] query, int k, uint ef = 0)` | `IReadOnlyList<VectorResult>` | k-NN similarity search ordered by distance |
 | `MmrSearch(string label, string property, float[] query, int k, int fetchK, float lambda, int ef = 0)` | `IReadOnlyList<VectorResult>` | Maximal Marginal Relevance search for diverse results |
-| `DropVectorIndex(string label, string property)` | `void` | Drop a vector index |
+| `DropVectorIndex(string label, string property)` | `bool` | Drop a vector index. Returns `true` if dropped, `false` if not found |
 | `RebuildVectorIndex(string label, string property)` | `void` | Rebuild a vector index |
 
 ## Transaction Class

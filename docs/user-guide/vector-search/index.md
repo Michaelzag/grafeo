@@ -27,7 +27,7 @@ Vector search finds nodes based on the semantic similarity of their embeddings r
 | **HNSW Index** | O(log n) approximate nearest neighbor search |
 | **Distance Metrics** | Cosine, Euclidean, Dot Product, Manhattan |
 | **Quantization** | Scalar (4x), Binary (32x), Product (8-192x) compression |
-| **Filtered Search** | Property equality filters via pre-computed ID allowlists |
+| **Filtered Search** | Property filters: equality, `$gt`, `$gte`, `$lt`, `$lte`, `$ne`, `$in`, `$nin`, `$contains` |
 | **MMR Search** | Maximal Marginal Relevance for diverse RAG retrieval |
 | **Incremental Indexing** | Indexes stay in sync automatically as nodes change |
 | **Batch Operations** | `batch_create_nodes()` and `batch_vector_search()` |

@@ -85,6 +85,33 @@ static GrafeoDB open(String path, {String? libraryPath})
 final db = GrafeoDB.open('/tmp/my_graph.db');
 ```
 
+#### GrafeoDB.openSingleFile()
+
+Open or create a single-file `.grafeo` database. Recommended for embedded use
+(desktop apps, mobile apps). All data is stored in one file with a sidecar WAL
+for crash safety.
+
+```dart
+static GrafeoDB openSingleFile(String path, {String? libraryPath})
+```
+
+```dart
+final db = GrafeoDB.openSingleFile('/home/user/my_graph.grafeo');
+```
+
+#### GrafeoDB.openReadOnly()
+
+Open an existing database in read-only mode. Multiple read-only handles may be
+opened concurrently on the same path. Write operations throw `DatabaseException`.
+
+```dart
+static GrafeoDB openReadOnly(String path, {String? libraryPath})
+```
+
+```dart
+final db = GrafeoDB.openReadOnly('/home/user/my_graph.grafeo');
+```
+
 #### close()
 
 Close the database, flushing all writes. Safe to call multiple times. After closing, all other methods throw a `DatabaseException`.
@@ -169,6 +196,54 @@ Execute a GraphQL query. Requires the `graphql` feature in grafeo-c.
 QueryResult executeGraphql(String query)
 ```
 
+#### executeCypherWithParams()
+
+Execute a Cypher query with named parameters.
+
+```dart
+QueryResult executeCypherWithParams(String query, Map<String, dynamic> params)
+```
+
+#### executeGremlinWithParams()
+
+Execute a Gremlin query with named parameters.
+
+```dart
+QueryResult executeGremlinWithParams(String query, Map<String, dynamic> params)
+```
+
+#### executeGraphqlWithParams()
+
+Execute a GraphQL query with named parameters.
+
+```dart
+QueryResult executeGraphqlWithParams(String query, Map<String, dynamic> params)
+```
+
+#### executeSparqlWithParams()
+
+Execute a SPARQL query with named parameters.
+
+```dart
+QueryResult executeSparqlWithParams(String query, Map<String, dynamic> params)
+```
+
+#### executeLanguage()
+
+Execute a query in any supported language with optional parameters. The `language` parameter is one of: `"gql"`, `"cypher"`, `"gremlin"`, `"graphql"`, `"sparql"`, `"sql"`.
+
+```dart
+QueryResult executeLanguage(String language, String query, {Map<String, dynamic>? params})
+```
+
+```dart
+final result = db.executeLanguage('cypher', 'MATCH (n) RETURN n LIMIT 10');
+final result2 = db.executeLanguage('gql',
+  r'MATCH (p:Person) WHERE p.age > $min RETURN p',
+  params: {'min': 25},
+);
+```
+
 ### Statistics
 
 | Member | Type | Description |
@@ -187,6 +262,44 @@ Map<String, dynamic> info()
 ```dart
 final dbInfo = db.info();
 print(dbInfo['node_count']); // 42
+```
+
+### Schema Context
+
+#### setSchema()
+
+Set the active schema for subsequent queries. Equivalent to `SESSION SET SCHEMA` in GQL.
+
+```dart
+void setSchema(String schemaName)
+```
+
+```dart
+db.setSchema('analytics');
+db.execute('MATCH (n) RETURN n');  // scoped to 'analytics' schema
+```
+
+#### resetSchema()
+
+Clear the active schema, reverting to the default graph store.
+
+```dart
+void resetSchema()
+```
+
+#### currentSchema()
+
+Return the currently active schema name, or `null` if none is set.
+
+```dart
+String? currentSchema()
+```
+
+```dart
+db.setSchema('analytics');
+print(db.currentSchema()); // 'analytics'
+db.resetSchema();
+print(db.currentSchema()); // null
 ```
 
 ### Transactions
@@ -249,6 +362,19 @@ Node getNode(int id)
 final node = db.getNode(0);
 print(node.labels);     // ['Person']
 print(node.properties); // {'name': 'Alix', 'age': 30}
+```
+
+#### getNodeLabels()
+
+Return the labels of a node without fetching full node data. More efficient than `getNode()` when only labels are needed.
+
+```dart
+List<String> getNodeLabels(int id)
+```
+
+```dart
+final labels = db.getNodeLabels(0);
+print(labels); // ['Person', 'Employee']
 ```
 
 #### deleteNode()
@@ -352,7 +478,130 @@ Remove a property from an edge.
 void removeEdgeProperty(int id, String key)
 ```
 
+### Property Indexes
+
+#### createPropertyIndex()
+
+Create a property index for fast point-lookup queries.
+
+```dart
+void createPropertyIndex(String propertyKey)
+```
+
+```dart
+db.createPropertyIndex('name');
+```
+
+#### dropPropertyIndex()
+
+Drop a property index. Returns `true` if it existed.
+
+```dart
+bool dropPropertyIndex(String propertyKey)
+```
+
+#### hasPropertyIndex()
+
+Check if a property index exists.
+
+```dart
+bool hasPropertyIndex(String propertyKey)
+```
+
+#### findNodesByProperty()
+
+Find all node IDs where the given property equals the given value. Requires a property index.
+
+```dart
+List<int> findNodesByProperty(String propertyKey, dynamic value)
+```
+
+```dart
+db.createPropertyIndex('name');
+final ids = db.findNodesByProperty('name', 'Alix');
+for (final id in ids) {
+  final node = db.getNode(id);
+  print(node.properties);
+}
+```
+
 ### Vector Search
+
+#### createVectorIndex()
+
+Create an HNSW vector index on nodes with the given label.
+
+```dart
+void createVectorIndex(
+  String label,
+  String property,
+  int dimensions,
+  String metric, {
+  int m = 16,
+  int efConstruction = 200,
+})
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `label` | Node label to index |
+| `property` | Property name containing the float vector |
+| `dimensions` | Vector dimensions (e.g. 384, 768, 1536) |
+| `metric` | Distance metric: `"cosine"`, `"euclidean"`, or `"dot"` |
+| `m` | Bidirectional links per HNSW node (default: 16) |
+| `efConstruction` | Index build quality (default: 200) |
+
+```dart
+db.createVectorIndex('Document', 'embedding', 384, 'cosine');
+```
+
+#### vectorSearch()
+
+Perform a k-nearest-neighbour vector search. For diversity-aware results, use `mmrSearch()` instead.
+
+```dart
+List<VectorResult> vectorSearch(
+  String label,
+  String property,
+  List<double> query, {
+  required int k,
+  int ef = 64,
+})
+```
+
+```dart
+final results = db.vectorSearch('Document', 'embedding', queryVec, k: 10);
+for (final r in results) {
+  print('Node ${r.nodeId}: distance ${r.distance}');
+}
+```
+
+#### batchCreateNodes()
+
+Bulk-create nodes with vector embeddings. All nodes get the same label; each
+receives a unique embedding vector stored under the given property.
+
+```dart
+List<int> batchCreateNodes(
+  String label,
+  String embeddingProperty,
+  List<List<double>> vectors,
+)
+```
+
+```dart
+final vectors = [
+  [0.1, 0.2, 0.3],
+  [0.4, 0.5, 0.6],
+  [0.7, 0.8, 0.9],
+];
+final ids = db.batchCreateNodes('Document', 'embedding', vectors);
+print(ids); // [0, 1, 2]
+```
+
+!!! note "Requires `vector-index` feature"
+    `batchCreateNodes` is only available when grafeo-c is built with
+    `--features vector-index` (included in the `embedded` and `full` profiles).
 
 #### mmrSearch()
 
@@ -444,6 +693,20 @@ Execute a parameterized GQL query within this transaction.
 
 ```dart
 QueryResult executeWithParams(String query, Map<String, dynamic> params)
+```
+
+### Transaction.executeLanguage()
+
+Execute a query in any supported language within this transaction.
+
+```dart
+QueryResult executeLanguage(String language, String query, {Map<String, dynamic>? params})
+```
+
+```dart
+final tx = db.beginTransaction();
+tx.executeLanguage('cypher', "CREATE (n:Person {name: 'Alix'})");
+tx.commit();
 ```
 
 ### commit()
@@ -651,5 +914,6 @@ try {
 
 ## Links
 
+- [Flutter Integration Guide](../../user-guide/dart/flutter.md)
 - [pub.dev package](https://pub.dev/packages/grafeo)
 - [GitHub](https://github.com/GrafeoDB/grafeo/tree/main/crates/bindings/dart)

@@ -20,8 +20,8 @@ Grafeo is written in Rust and provides a native Rust API.
 use grafeo::GrafeoDB;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let db = GrafeoDB::new_in_memory()?;
-    let session = db.session()?;
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
 
     session.execute("INSERT (:Person {name: 'Alix'})")?;
 

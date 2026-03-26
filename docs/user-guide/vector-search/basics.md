@@ -149,6 +149,28 @@ WHERE d.category = 'technology'
 RETURN d.title, d.published
 ```
 
+### Python API Filters
+
+The `vector_search()` and `mmr_search()` methods accept a `filters` dict for
+pre-filtering candidates before HNSW search:
+
+```python
+# Equality filter
+results = db.vector_search("Doc", "embedding", query, k=10,
+    filters={"category": "technology"})
+
+# Operator filters ($gt, $gte, $lt, $lte, $ne, $in, $nin, $contains)
+results = db.vector_search("Doc", "embedding", query, k=10,
+    filters={"created_at": {"$gte": 1700000000}})
+
+# Combined filters (all must match)
+results = db.vector_search("Doc", "embedding", query, k=10,
+    filters={"user_id": "u1", "created_at": {"$gte": 1700000000}})
+```
+
+Filters are evaluated before the HNSW search, narrowing the candidate set for
+better relevance and performance.
+
 ## Best Practices
 
 ### 1. Use Consistent Dimensions

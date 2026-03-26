@@ -18,7 +18,7 @@ use grafeo::GrafeoDB;
 // In-memory database
 let db = GrafeoDB::new_in_memory();
 
-// Persistent database
+// Persistent database (requires `wal` or `storage` feature)
 let db = GrafeoDB::open("my_graph.db")?;
 ```
 
@@ -27,12 +27,11 @@ let db = GrafeoDB::open("my_graph.db")?;
 ```rust
 use grafeo::{GrafeoDB, Config};
 
-let config = Config::builder()
-    .memory_limit(4 * 1024 * 1024 * 1024)  // 4 GB
-    .threads(8)
-    .build()?;
+let config = Config::in_memory()
+    .with_memory_limit(4 * 1024 * 1024 * 1024)  // 4 GB
+    .with_threads(8);
 
-let db = GrafeoDB::with_config(config);
+let db = GrafeoDB::with_config(config)?;
 ```
 
 ## Database Lifecycle

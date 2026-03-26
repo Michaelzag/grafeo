@@ -143,7 +143,7 @@ Grafeo primarily uses the **LPG model** because:
 4. **Rich Relationships** - First-class properties on edges
 
 !!! note "RDF Support Status"
-    Grafeo currently focuses on the **LPG model**. RDF support is planned for future releases. This comparison is provided for users evaluating which data model fits their needs.
+    Grafeo supports both **LPG** (default) and **RDF** (via the `rdf` feature flag). The LPG model is the primary focus, with RDF available for SPARQL workloads. Enable both `rdf` and `sparql` features for full RDF support. See the [SPARQL user guide](../sparql/index.md) for details.
 
 ## Converting Between Models
 

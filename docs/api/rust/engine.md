@@ -22,11 +22,10 @@ let db = GrafeoDB::new_in_memory();
 let db = GrafeoDB::open("path/to/db")?;
 
 // With config
-let config = Config::builder()
-    .memory_limit(4 * 1024 * 1024 * 1024)
-    .threads(8)
-    .build()?;
-let db = GrafeoDB::with_config(config);
+let config = Config::in_memory()
+    .with_memory_limit(4 * 1024 * 1024 * 1024)
+    .with_threads(8);
+let db = GrafeoDB::with_config(config)?;
 ```
 
 ## Session
@@ -46,7 +45,7 @@ for row in result.rows {
 
 ```rust
 let mut session = db.session();
-session.begin_tx()?;
+session.begin_transaction()?;
 session.execute("...")?;
 session.commit()?;
 // or

@@ -13,7 +13,7 @@ Learn how to perform CRUD operations using the Rust API.
 ## Creating Data
 
 ```rust
-let session = db.session()?;
+let session = db.session();
 
 // Create nodes
 session.execute(r#"
@@ -31,7 +31,7 @@ session.execute(r#"
 ## Reading Data
 
 ```rust
-let session = db.session()?;
+let session = db.session();
 
 // Query with results
 let result = session.execute(r#"
@@ -40,8 +40,8 @@ let result = session.execute(r#"
 "#)?;
 
 for row in result {
-    let name: String = row.get("p.name")?;
-    let age: i64 = row.get("p.age")?;
+    let name = row[0].as_str();
+    let age = row[1].as_i64();
     println!("{}: {}", name, age);
 }
 ```
@@ -49,7 +49,7 @@ for row in result {
 ## Updating Data
 
 ```rust
-let session = db.session()?;
+let session = db.session();
 
 session.execute(r#"
     MATCH (p:Person {name: 'Alix'})
@@ -60,7 +60,7 @@ session.execute(r#"
 ## Deleting Data
 
 ```rust
-let session = db.session()?;
+let session = db.session();
 
 // Delete edges
 session.execute(r#"
@@ -78,14 +78,16 @@ session.execute(r#"
 ## Parameterized Queries
 
 ```rust
-use grafeo::params;
+use std::collections::HashMap;
+use grafeo::Value;
 
-let session = db.session()?;
+let session = db.session();
+
+let mut params = HashMap::new();
+params.insert("name".to_string(), Value::from("Alix"));
 
 let result = session.execute_with_params(
     "MATCH (p:Person {name: $name}) RETURN p",
-    params! {
-        "name" => "Alix"
-    }
+    params,
 )?;
 ```

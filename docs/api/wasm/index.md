@@ -87,9 +87,8 @@ const results = db.hybridSearch(
 );
 ```
 
-!!! note "Vector Index Creation"
-    The `createVectorIndex` method is not available in the WASM bindings.
-    Use a GQL `CREATE VECTOR INDEX` query via `db.execute()` instead.
+!!! tip "Vector Index Creation"
+    Both `createVectorIndex()` and GQL `CREATE VECTOR INDEX` queries via `db.execute()` are supported in WASM.
 
 ## Batch Import
 
