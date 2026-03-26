@@ -43,6 +43,10 @@ pub struct GrafeoResult {
     pub(crate) row_count: usize,
     pub(crate) execution_time_ms: f64,
     pub(crate) rows_scanned: u64,
+    /// JSON array of extracted node objects (deduplicated, metadata stripped).
+    pub(crate) nodes_json: CString,
+    /// JSON array of extracted edge objects (deduplicated, metadata stripped).
+    pub(crate) edges_json: CString,
 }
 
 /// Structured node returned by CRUD operations.

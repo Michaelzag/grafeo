@@ -5,7 +5,9 @@ use crate::execution::{ChunkZoneHints, DataChunk, SelectionVector};
 use crate::graph::Direction;
 use crate::graph::GraphStore;
 use crate::graph::lpg::{Edge, Node};
-use grafeo_common::types::{EpochId, HashableValue, NodeId, PropertyKey, TransactionId, Value};
+use grafeo_common::types::{
+    EdgeId, EpochId, HashableValue, NodeId, PropertyKey, TransactionId, Value,
+};
 #[cfg(feature = "regex")]
 use regex::Regex;
 #[cfg(all(feature = "regex-lite", not(feature = "regex")))]
@@ -361,6 +363,8 @@ pub enum FilterExpression {
         direction: Direction,
         /// Edge type filter (empty = match all types, multiple = match any).
         edge_types: Vec<String>,
+        /// Optional end node labels filter.
+        end_labels: Option<Vec<String>>,
     },
     /// reduce() accumulator: `reduce(acc = init, x IN list | expr)`.
     Reduce {
@@ -494,6 +498,43 @@ impl ExpressionPredicate {
             self.store.get_node_at_epoch(node_id, ep)
         } else {
             self.store.get_node(node_id)
+        }
+    }
+
+    /// Returns true if an edge (and its other endpoint) matches the type and label filters.
+    ///
+    /// Used by both `ExistsSubquery` and `CountSubquery` fast-path evaluation.
+    fn edge_matches(
+        &self,
+        other_node_id: NodeId,
+        edge_id: EdgeId,
+        edge_types: &[String],
+        end_labels: &Option<Vec<String>>,
+    ) -> bool {
+        // Check edge type if specified
+        if !edge_types.is_empty() {
+            let type_ok = if let Some(actual_type) = self.store.edge_type(edge_id) {
+                edge_types
+                    .iter()
+                    .any(|t| actual_type.as_str().eq_ignore_ascii_case(t.as_str()))
+            } else {
+                false
+            };
+            if !type_ok {
+                return false;
+            }
+        }
+
+        // Check end node labels if specified (e.g., (:Person)-[:KNOWS]->(n) requires
+        // the other endpoint to have the Person label after direction flipping).
+        if let Some(labels) = end_labels {
+            if let Some(node) = self.resolve_node(other_node_id) {
+                labels.iter().all(|l| node.has_label(l))
+            } else {
+                false
+            }
+        } else {
+            true
         }
     }
 
@@ -827,6 +868,9 @@ impl ExpressionPredicate {
                 start_var,
                 direction,
                 edge_types,
+                end_labels,
+                // min_hops/max_hops are always None from the fast path
+                // (extract_exists_pattern rejects multi-hop patterns).
                 ..
             } => {
                 // Get the start node ID from the current row
@@ -839,19 +883,8 @@ impl ExpressionPredicate {
                     .store
                     .edges_from(start_node_id, *direction)
                     .into_iter()
-                    .any(|(_, edge_id)| {
-                        // Check edge type if specified
-                        if !edge_types.is_empty() {
-                            if let Some(actual_type) = self.store.edge_type(edge_id) {
-                                edge_types
-                                    .iter()
-                                    .any(|t| actual_type.as_str().eq_ignore_ascii_case(t.as_str()))
-                            } else {
-                                false
-                            }
-                        } else {
-                            true
-                        }
+                    .any(|(other_node_id, edge_id)| {
+                        self.edge_matches(other_node_id, edge_id, edge_types, end_labels)
                     });
 
                 Some(Value::Bool(exists))
@@ -860,6 +893,7 @@ impl ExpressionPredicate {
                 start_var,
                 direction,
                 edge_types,
+                end_labels,
             } => {
                 let col_idx = *self.variable_columns.get(start_var)?;
                 let col = chunk.column(col_idx)?;
@@ -869,18 +903,8 @@ impl ExpressionPredicate {
                     .store
                     .edges_from(start_node_id, *direction)
                     .into_iter()
-                    .filter(|(_, edge_id)| {
-                        if !edge_types.is_empty() {
-                            if let Some(actual_type) = self.store.edge_type(*edge_id) {
-                                edge_types
-                                    .iter()
-                                    .any(|t| actual_type.as_str().eq_ignore_ascii_case(t.as_str()))
-                            } else {
-                                false
-                            }
-                        } else {
-                            true
-                        }
+                    .filter(|(other_node_id, edge_id)| {
+                        self.edge_matches(*other_node_id, *edge_id, edge_types, end_labels)
                     })
                     .count();
 
@@ -1743,6 +1767,34 @@ impl ExpressionPredicate {
                     }
                 }
                 Some(Value::Bool(false))
+            }
+            "startnode" | "start_node" => {
+                // startNode(edge) - returns the source node ID
+                if args.len() != 1 {
+                    return None;
+                }
+                if let FilterExpression::Variable(var) = &args[0] {
+                    let col_idx = *self.variable_columns.get(var)?;
+                    let col = chunk.column(col_idx)?;
+                    let edge_id = col.get_edge_id(row)?;
+                    let edge = self.resolve_edge(edge_id)?;
+                    return Some(Value::Int64(edge.src.0 as i64));
+                }
+                None
+            }
+            "endnode" | "end_node" => {
+                // endNode(edge) - returns the destination node ID
+                if args.len() != 1 {
+                    return None;
+                }
+                if let FilterExpression::Variable(var) = &args[0] {
+                    let col_idx = *self.variable_columns.get(var)?;
+                    let col = chunk.column(col_idx)?;
+                    let edge_id = col.get_edge_id(row)?;
+                    let edge = self.resolve_edge(edge_id)?;
+                    return Some(Value::Int64(edge.dst.0 as i64));
+                }
+                None
             }
             "issource" => {
                 // isSource(node, edge) - checks if node is the source of edge
@@ -2751,6 +2803,9 @@ impl ExpressionPredicate {
             "now" | "current_timestamp" | "currenttimestamp" => {
                 Some(Value::Timestamp(grafeo_common::types::Timestamp::now()))
             }
+            "timestamp" => Some(Value::Int64(
+                grafeo_common::types::Timestamp::now().as_millis(),
+            )),
             // Component extraction
             "year" => {
                 let val = self.eval_expr(args.first()?, chunk, row)?;

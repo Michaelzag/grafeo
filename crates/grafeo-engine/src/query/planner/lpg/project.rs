@@ -708,8 +708,24 @@ impl super::Planner {
         }
     }
 
-    /// Derives a schema from column names (uses Any type to handle all value types).
+    /// Derives a schema from column names using the planner's type tracking.
+    ///
+    /// Defaults to `Any` (safe for all value types: scalars, maps, property
+    /// projections, etc.). Columns explicitly tracked in `edge_columns` get
+    /// `Edge` for compact `Vec<EdgeId>` storage. Mutation operators that add
+    /// new entity-ID columns (CREATE, MERGE) should append `Node`/`Edge`
+    /// explicitly after calling this for pass-through columns.
     pub(super) fn derive_schema_from_columns(&self, columns: &[String]) -> Vec<LogicalType> {
-        columns.iter().map(|_| LogicalType::Any).collect()
+        let edges = self.edge_columns.borrow();
+        columns
+            .iter()
+            .map(|name| {
+                if edges.contains(name) {
+                    LogicalType::Edge
+                } else {
+                    LogicalType::Any
+                }
+            })
+            .collect()
     }
 }

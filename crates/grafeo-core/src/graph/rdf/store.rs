@@ -81,6 +81,8 @@ pub struct RdfStore {
     tx_buffer: RwLock<TransactionBuffer>,
     /// Named graphs, each a separate `RdfStore` partition.
     named_graphs: RwLock<HashMap<String, Arc<RdfStore>>>,
+    /// Cached RDF statistics for query optimization. Invalidated on any mutation.
+    statistics_cache: RwLock<Option<Arc<crate::statistics::RdfStatistics>>>,
 }
 
 impl RdfStore {
@@ -125,6 +127,7 @@ impl RdfStore {
             )),
             tx_buffer: RwLock::new(TransactionBuffer::default()),
             named_graphs: RwLock::new(HashMap::new()),
+            statistics_cache: RwLock::new(None),
             config,
         }
     }
@@ -200,6 +203,7 @@ impl RdfStore {
                 .push(triple);
         }
 
+        self.invalidate_statistics_cache();
         true
     }
 
@@ -295,6 +299,9 @@ impl RdfStore {
             }
         }
 
+        if count > 0 {
+            self.invalidate_statistics_cache();
+        }
         count
     }
 
@@ -379,6 +386,7 @@ impl RdfStore {
             }
         }
 
+        self.invalidate_statistics_cache();
         true
     }
 
@@ -576,6 +584,29 @@ impl RdfStore {
         collector.build()
     }
 
+    /// Returns cached RDF statistics, computing them on first call.
+    ///
+    /// The cache is invalidated by any mutation (insert, delete, bulk load).
+    /// This avoids the full-table-scan overhead of `collect_statistics()` on
+    /// every query, which was a measurable regression for larger datasets.
+    #[must_use]
+    pub fn get_or_collect_statistics(&self) -> Arc<crate::statistics::RdfStatistics> {
+        // Fast path: return cached statistics if available.
+        if let Some(cached) = self.statistics_cache.read().as_ref() {
+            return Arc::clone(cached);
+        }
+
+        // Slow path: compute and cache.
+        let stats = Arc::new(self.collect_statistics());
+        *self.statistics_cache.write() = Some(Arc::clone(&stats));
+        stats
+    }
+
+    /// Invalidates the cached RDF statistics. Called after any mutation.
+    fn invalidate_statistics_cache(&self) {
+        *self.statistics_cache.write() = None;
+    }
+
     // =========================================================================
     // Bulk loading
     // =========================================================================
@@ -666,9 +697,12 @@ impl RdfStore {
         *self.po_index.write() = po_idx;
         *self.os_index.write() = os_idx;
 
+        let stats = stats_collector.build();
+        // Cache the freshly-computed statistics from the bulk load pass.
+        *self.statistics_cache.write() = Some(Arc::new(stats.clone()));
         BulkLoadResult {
             triple_count: count,
-            statistics: stats_collector.build(),
+            statistics: stats,
         }
     }
 

@@ -27,6 +27,17 @@ impl super::Planner {
             (None, vec![])
         };
 
+        // If the variable already exists in input columns and no labels/properties
+        // are specified, this is a reference to an existing node (e.g., from MATCH).
+        // Skip creating a new node and just pass through.
+        if columns.contains(&create.variable)
+            && create.labels.is_empty()
+            && create.properties.is_empty()
+            && let Some(op) = input_op
+        {
+            return Ok((op, columns));
+        }
+
         // Output column for the created node
         let output_column = columns.len();
         columns.push(create.variable.clone());
@@ -41,7 +52,10 @@ impl super::Planner {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        let output_schema = self.derive_schema_from_columns(&columns);
+        // Input pass-through columns use generic types (Any); the new node column
+        // gets Node for compact VectorData::NodeId storage.
+        let mut output_schema = self.derive_schema_from_columns(&columns[..output_column]);
+        output_schema.push(LogicalType::Node);
 
         let mut op = CreateNodeOperator::new(
             Arc::clone(&self.store),
@@ -160,8 +174,7 @@ impl super::Planner {
 
         // Preserve input columns so downstream RETURN/aggregate can reference
         // the deleted variable (e.g., DETACH DELETE n RETURN count(n)).
-        // Use Any to preserve non-Node values (e.g., Map from UNWIND) through the pipeline.
-        let output_schema: Vec<LogicalType> = columns.iter().map(|_| LogicalType::Any).collect();
+        let output_schema = self.derive_schema_from_columns(&columns);
         let output_columns = columns.clone();
 
         // Auto-detect edge variables and use the correct operator
@@ -210,7 +223,7 @@ impl super::Planner {
 
         // Preserve input columns so downstream clauses can reference the
         // deleted variable (same pass-through pattern as delete_node).
-        let output_schema: Vec<LogicalType> = columns.iter().map(|_| LogicalType::Any).collect();
+        let output_schema = self.derive_schema_from_columns(&columns);
         let output_columns = columns.clone();
 
         let mut op = DeleteEdgeOperator::new(
@@ -503,10 +516,10 @@ impl super::Planner {
         let output_column = columns.len();
         columns.push(merge.variable.clone());
 
-        // Build output schema: preserve input column types (Any for pass-through),
-        // use Node for the newly-added merge variable column.
-        let mut output_schema: Vec<LogicalType> =
-            (0..output_column).map(|_| LogicalType::Any).collect();
+        // Build output schema: type-aware pass-through for input columns,
+        // Node for the newly-added merge variable column.
+        let input_cols = &columns[..output_column];
+        let mut output_schema = self.derive_schema_from_columns(input_cols);
         output_schema.push(LogicalType::Node);
 
         let mut merge_op = MergeOperator::new(
@@ -618,10 +631,10 @@ impl super::Planner {
             .borrow_mut()
             .insert(merge_rel.variable.clone());
 
-        // Build output schema: preserve input column types (Any for pass-through),
-        // use Edge for the newly-added merge relationship column.
-        let mut output_schema: Vec<LogicalType> =
-            (0..edge_output_column).map(|_| LogicalType::Any).collect();
+        // Build output schema: type-aware pass-through for input columns,
+        // Edge for the newly-added merge relationship column.
+        let input_cols = &columns[..edge_output_column];
+        let mut output_schema = self.derive_schema_from_columns(input_cols);
         output_schema.push(LogicalType::Edge);
 
         let config = MergeRelationshipConfig {
@@ -981,9 +994,11 @@ impl super::Planner {
                 ))
             })?;
 
-        // Output schema for update count
-        let output_schema = vec![LogicalType::Int64];
-        let output_columns = vec!["labels_added".to_string()];
+        // Preserve input columns (like SetPropertyOperator) and append update count
+        let mut output_schema = self.derive_schema_from_columns(&columns);
+        output_schema.push(LogicalType::Int64);
+        let mut output_columns = columns.clone();
+        output_columns.push("labels_added".to_string());
 
         let mut op = AddLabelOperator::new(
             Arc::clone(&self.store),
@@ -1018,9 +1033,11 @@ impl super::Planner {
                 ))
             })?;
 
-        // Output schema for update count
-        let output_schema = vec![LogicalType::Int64];
-        let output_columns = vec!["labels_removed".to_string()];
+        // Preserve input columns (like SetPropertyOperator) and append update count
+        let mut output_schema = self.derive_schema_from_columns(&columns);
+        output_schema.push(LogicalType::Int64);
+        let mut output_columns = columns.clone();
+        output_columns.push("labels_removed".to_string());
 
         let mut op = RemoveLabelOperator::new(
             Arc::clone(&self.store),
@@ -1060,21 +1077,31 @@ impl super::Planner {
             .properties
             .iter()
             .map(|(name, expr)| {
-                let source = self
-                    .expression_to_property_source(expr, &columns)
-                    .unwrap_or_else(|_| {
+                let source = match self.expression_to_property_source(expr, &columns) {
+                    Ok(s) => s,
+                    Err(_) => {
                         // Fallback: try constant folding for complex expressions
-                        Self::try_fold_expression(expr).map_or(
-                            PropertySource::Constant(Value::Null),
-                            PropertySource::Constant,
-                        )
-                    });
-                (name.clone(), source)
+                        // (e.g., vector([1,2,3]), date('2024-01-01')).
+                        Self::try_fold_expression(expr).map_or_else(
+                            || {
+                                // Expression references a variable not in scope or is
+                                // otherwise unsupported. Return error instead of silently
+                                // writing NULL.
+                                Err(Error::Internal(format!(
+                                    "Cannot resolve SET expression for property '{name}': \
+                                     variable not in scope or unsupported expression"
+                                )))
+                            },
+                            |v| Ok(PropertySource::Constant(v)),
+                        )?
+                    }
+                };
+                Ok((name.clone(), source))
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
 
-        // Output schema preserves input types (Any for pass-through columns).
-        let output_schema: Vec<LogicalType> = columns.iter().map(|_| LogicalType::Any).collect();
+        // Output schema: type-aware pass-through for input columns.
+        let output_schema = self.derive_schema_from_columns(&columns);
         let output_columns = columns.clone();
 
         // Determine if this is a node or edge using tracked edge columns
@@ -1205,7 +1232,24 @@ impl super::Planner {
                             _ => None,
                         }
                     }
-                    "date" | "todate" => {
+                    "timestamp" => {
+                        if !args.is_empty() {
+                            return None;
+                        }
+                        Some(Value::Int64(
+                            grafeo_common::types::Timestamp::now().as_millis(),
+                        ))
+                    }
+                    "now" | "current_timestamp" | "currenttimestamp" => {
+                        if !args.is_empty() {
+                            return None;
+                        }
+                        Some(Value::Timestamp(grafeo_common::types::Timestamp::now()))
+                    }
+                    "date" | "todate" | "current_date" | "currentdate" => {
+                        if args.is_empty() {
+                            return Some(Value::Date(grafeo_common::types::Date::today()));
+                        }
                         if args.len() != 1 {
                             return None;
                         }
@@ -1217,7 +1261,10 @@ impl super::Planner {
                             _ => None,
                         }
                     }
-                    "time" | "totime" | "local_time" => {
+                    "time" | "totime" | "local_time" | "current_time" | "currenttime" => {
+                        if args.is_empty() {
+                            return Some(Value::Time(grafeo_common::types::Time::now()));
+                        }
                         if args.len() != 1 {
                             return None;
                         }
@@ -1230,6 +1277,9 @@ impl super::Planner {
                         }
                     }
                     "datetime" | "localdatetime" | "local_datetime" | "todatetime" => {
+                        if args.is_empty() {
+                            return Some(Value::Timestamp(grafeo_common::types::Timestamp::now()));
+                        }
                         if args.len() != 1 {
                             return None;
                         }

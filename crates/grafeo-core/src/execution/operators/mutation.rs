@@ -934,6 +934,8 @@ pub struct AddLabelOperator {
     labels: Vec<String>,
     /// Output schema.
     output_schema: Vec<LogicalType>,
+    /// Column index for the update count (last column).
+    count_column: usize,
     /// Epoch for MVCC versioning.
     viewing_epoch: Option<EpochId>,
     /// Transaction ID for undo log tracking.
@@ -951,11 +953,13 @@ impl AddLabelOperator {
         labels: Vec<String>,
         output_schema: Vec<LogicalType>,
     ) -> Self {
+        let count_column = output_schema.len() - 1;
         Self {
             store,
             input,
             node_column,
             labels,
+            count_column,
             output_schema,
             viewing_epoch: None,
             transaction_id: None,
@@ -984,7 +988,8 @@ impl AddLabelOperator {
 impl Operator for AddLabelOperator {
     fn next(&mut self) -> OperatorResult {
         if let Some(chunk) = self.input.next()? {
-            let mut updated_count = 0;
+            let mut builder =
+                DataChunkBuilder::with_capacity(&self.output_schema, chunk.row_count());
 
             for row in chunk.selected_indices() {
                 let node_val = chunk
@@ -1010,6 +1015,7 @@ impl Operator for AddLabelOperator {
                 }
 
                 // Add all labels
+                let mut row_count: i64 = 0;
                 for label in &self.labels {
                     let added = if let Some(tid) = self.transaction_id {
                         self.store.add_label_versioned(node_id, label, tid)
@@ -1017,17 +1023,29 @@ impl Operator for AddLabelOperator {
                         self.store.add_label(node_id, label)
                     };
                     if added {
-                        updated_count += 1;
+                        row_count += 1;
                     }
                 }
-            }
 
-            // Return a chunk with the update count
-            let mut builder = DataChunkBuilder::with_capacity(&self.output_schema, 1);
-            if let Some(dst) = builder.column_mut(0) {
-                dst.push_value(Value::Int64(updated_count));
+                // Copy input columns to output (pass-through)
+                for col_idx in 0..chunk.column_count() {
+                    if let (Some(src), Some(dst)) =
+                        (chunk.column(col_idx), builder.column_mut(col_idx))
+                    {
+                        if let Some(val) = src.get_value(row) {
+                            dst.push_value(val);
+                        } else {
+                            dst.push_value(Value::Null);
+                        }
+                    }
+                }
+                // Append the update count column
+                if let Some(dst) = builder.column_mut(self.count_column) {
+                    dst.push_value(Value::Int64(row_count));
+                }
+
+                builder.advance_row();
             }
-            builder.advance_row();
 
             return Ok(Some(builder.finish()));
         }
@@ -1055,6 +1073,8 @@ pub struct RemoveLabelOperator {
     labels: Vec<String>,
     /// Output schema.
     output_schema: Vec<LogicalType>,
+    /// Column index for the update count (last column).
+    count_column: usize,
     /// Epoch for MVCC versioning.
     viewing_epoch: Option<EpochId>,
     /// Transaction ID for undo log tracking.
@@ -1072,11 +1092,13 @@ impl RemoveLabelOperator {
         labels: Vec<String>,
         output_schema: Vec<LogicalType>,
     ) -> Self {
+        let count_column = output_schema.len() - 1;
         Self {
             store,
             input,
             node_column,
             labels,
+            count_column,
             output_schema,
             viewing_epoch: None,
             transaction_id: None,
@@ -1105,7 +1127,8 @@ impl RemoveLabelOperator {
 impl Operator for RemoveLabelOperator {
     fn next(&mut self) -> OperatorResult {
         if let Some(chunk) = self.input.next()? {
-            let mut updated_count = 0;
+            let mut builder =
+                DataChunkBuilder::with_capacity(&self.output_schema, chunk.row_count());
 
             for row in chunk.selected_indices() {
                 let node_val = chunk
@@ -1131,6 +1154,7 @@ impl Operator for RemoveLabelOperator {
                 }
 
                 // Remove all labels
+                let mut row_count: i64 = 0;
                 for label in &self.labels {
                     let removed = if let Some(tid) = self.transaction_id {
                         self.store.remove_label_versioned(node_id, label, tid)
@@ -1138,17 +1162,29 @@ impl Operator for RemoveLabelOperator {
                         self.store.remove_label(node_id, label)
                     };
                     if removed {
-                        updated_count += 1;
+                        row_count += 1;
                     }
                 }
-            }
 
-            // Return a chunk with the update count
-            let mut builder = DataChunkBuilder::with_capacity(&self.output_schema, 1);
-            if let Some(dst) = builder.column_mut(0) {
-                dst.push_value(Value::Int64(updated_count));
+                // Copy input columns to output (pass-through)
+                for col_idx in 0..chunk.column_count() {
+                    if let (Some(src), Some(dst)) =
+                        (chunk.column(col_idx), builder.column_mut(col_idx))
+                    {
+                        if let Some(val) = src.get_value(row) {
+                            dst.push_value(val);
+                        } else {
+                            dst.push_value(Value::Null);
+                        }
+                    }
+                }
+                // Append the update count column
+                if let Some(dst) = builder.column_mut(self.count_column) {
+                    dst.push_value(Value::Int64(row_count));
+                }
+
+                builder.advance_row();
             }
-            builder.advance_row();
 
             return Ok(Some(builder.finish()));
         }
@@ -1725,11 +1761,11 @@ mod tests {
             MockInput::boxed(node_id_chunk(&[node])),
             0,
             vec!["Employee".to_string()],
-            vec![LogicalType::Int64],
+            vec![LogicalType::Int64, LogicalType::Int64],
         );
 
         let chunk = op.next().unwrap().unwrap();
-        let updated = chunk.column(0).unwrap().get_int64(0).unwrap();
+        let updated = chunk.column(1).unwrap().get_int64(0).unwrap();
         assert_eq!(updated, 1);
 
         // Verify label was added
@@ -1750,11 +1786,11 @@ mod tests {
             MockInput::boxed(node_id_chunk(&[node])),
             0,
             vec!["LabelA".to_string(), "LabelB".to_string()],
-            vec![LogicalType::Int64],
+            vec![LogicalType::Int64, LogicalType::Int64],
         );
 
         let chunk = op.next().unwrap().unwrap();
-        let updated = chunk.column(0).unwrap().get_int64(0).unwrap();
+        let updated = chunk.column(1).unwrap().get_int64(0).unwrap();
         assert_eq!(updated, 2); // 2 labels added
 
         let node_data = store.get_node(node).unwrap();
@@ -1772,7 +1808,7 @@ mod tests {
             Box::new(EmptyInput),
             0,
             vec!["Foo".to_string()],
-            vec![LogicalType::Int64],
+            vec![LogicalType::Int64, LogicalType::Int64],
         );
 
         assert!(op.next().unwrap().is_none());
@@ -1791,11 +1827,11 @@ mod tests {
             MockInput::boxed(node_id_chunk(&[node])),
             0,
             vec!["Employee".to_string()],
-            vec![LogicalType::Int64],
+            vec![LogicalType::Int64, LogicalType::Int64],
         );
 
         let chunk = op.next().unwrap().unwrap();
-        let updated = chunk.column(0).unwrap().get_int64(0).unwrap();
+        let updated = chunk.column(1).unwrap().get_int64(0).unwrap();
         assert_eq!(updated, 1);
 
         // Verify label was removed
@@ -1816,11 +1852,11 @@ mod tests {
             MockInput::boxed(node_id_chunk(&[node])),
             0,
             vec!["NonExistent".to_string()],
-            vec![LogicalType::Int64],
+            vec![LogicalType::Int64, LogicalType::Int64],
         );
 
         let chunk = op.next().unwrap().unwrap();
-        let updated = chunk.column(0).unwrap().get_int64(0).unwrap();
+        let updated = chunk.column(1).unwrap().get_int64(0).unwrap();
         assert_eq!(updated, 0); // nothing removed
     }
 

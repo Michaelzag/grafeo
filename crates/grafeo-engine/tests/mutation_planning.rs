@@ -546,6 +546,106 @@ fn test_remove_label() {
     assert!(result.rows.is_empty());
 }
 
+// ── Regression: SET/REMOVE label variable binding (#178, #182) ──────────────
+
+#[test]
+fn test_set_label_preserves_variable_binding() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+    session.execute("INSERT (:Person {name: 'Alix'})").unwrap();
+    let r = session
+        .execute("MATCH (n:Person {name: 'Alix'}) SET n:Employee RETURN n.name")
+        .unwrap();
+    assert_eq!(r.row_count(), 1);
+    assert_eq!(r.rows[0][0], Value::String("Alix".into()));
+}
+
+#[test]
+fn test_remove_label_preserves_variable_binding() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+    session
+        .execute("INSERT (:Person:Employee {name: 'Alix'})")
+        .unwrap();
+    let r = session
+        .execute("MATCH (n:Person {name: 'Alix'}) REMOVE n:Employee RETURN n.name")
+        .unwrap();
+    assert_eq!(r.row_count(), 1);
+    assert_eq!(r.rows[0][0], Value::String("Alix".into()));
+}
+
+#[test]
+fn test_count_star_after_set_label() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+    session.execute("INSERT (:Node {id: '1'})").unwrap();
+    session.execute("INSERT (:Node {id: '2'})").unwrap();
+    session.execute("INSERT (:Node {id: '3'})").unwrap();
+    let r = session
+        .execute("MATCH (n:Node) SET n:Tagged RETURN count(*) AS cnt")
+        .unwrap();
+    assert_eq!(r.row_count(), 1);
+    assert_eq!(r.rows[0][0], Value::Int64(3));
+}
+
+#[test]
+fn test_set_label_then_set_property() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+    session.execute("INSERT (:Person {name: 'Alix'})").unwrap();
+    session
+        .execute("MATCH (n:Person {name: 'Alix'}) SET n:Employee SET n.role = 'Engineer'")
+        .unwrap();
+    let r = session
+        .execute("MATCH (n:Employee {name: 'Alix'}) RETURN n.role")
+        .unwrap();
+    assert_eq!(r.row_count(), 1);
+    assert_eq!(r.rows[0][0], Value::String("Engineer".into()));
+}
+
+// ── Regression: phantom nodes from MATCH...CREATE edge (#181) ───────────────
+
+#[test]
+#[cfg(feature = "cypher")]
+fn test_match_create_edge_no_phantom_nodes() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+    session
+        .execute_cypher("CREATE (:Person {name: 'Alix'})")
+        .unwrap();
+    session
+        .execute_cypher("CREATE (:Person {name: 'Gus'})")
+        .unwrap();
+
+    let before = session
+        .execute_cypher("MATCH (n) RETURN count(n) AS cnt")
+        .unwrap();
+    let count_before = match &before.rows[0][0] {
+        Value::Int64(n) => *n,
+        other => panic!("expected Int64, got {other:?}"),
+    };
+
+    session
+        .execute_cypher(
+            "MATCH (a:Person {name: 'Alix'}), (b:Person {name: 'Gus'}) CREATE (a)-[:KNOWS]->(b)",
+        )
+        .unwrap();
+
+    let after = session
+        .execute_cypher("MATCH (n) RETURN count(n) AS cnt")
+        .unwrap();
+    assert_eq!(
+        after.rows[0][0],
+        Value::Int64(count_before),
+        "phantom nodes created"
+    );
+
+    let edges = session
+        .execute_cypher("MATCH ()-[r:KNOWS]->() RETURN count(r) AS cnt")
+        .unwrap();
+    assert_eq!(edges.rows[0][0], Value::Int64(1));
+}
+
 // ============================================================================
 // OPTIONAL MATCH: covers plan_left_join
 // ============================================================================

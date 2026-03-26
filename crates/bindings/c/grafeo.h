@@ -75,6 +75,8 @@ const char* grafeo_result_json(const GrafeoResult* result);
 size_t      grafeo_result_row_count(const GrafeoResult* result);
 double      grafeo_result_execution_time_ms(const GrafeoResult* result);
 uint64_t    grafeo_result_rows_scanned(const GrafeoResult* result);
+const char* grafeo_result_nodes_json(const GrafeoResult* result);
+const char* grafeo_result_edges_json(const GrafeoResult* result);
 void        grafeo_free_result(GrafeoResult* result);
 
 /* ---- Schema context ------------------------------------------------------ */

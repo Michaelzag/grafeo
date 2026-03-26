@@ -157,6 +157,46 @@ class TestSet:
         result = list(db.execute_cypher("MATCH (n:Developer:Senior) RETURN n.name"))
         assert len(result) >= 1
 
+    def test_set_label_preserves_variable_binding(self, db):
+        """SET n:Label must not drop variable for subsequent clauses (#178)."""
+        db.create_node(["Person"], {"name": "Alix"})
+        result = list(
+            db.execute_cypher("MATCH (n:Person {name: 'Alix'}) SET n:Employee RETURN n.name")
+        )
+        assert len(result) == 1
+        assert result[0]["n.name"] == "Alix"
+
+    def test_set_label_then_remove_property(self, db):
+        """SET n:Label then REMOVE n.prop on same variable (#178)."""
+        db.create_node(["AWSAccount"], {"id": "123", "foreign": True})
+        db.execute_cypher("MATCH (n:AWSAccount {id: '123'}) SET n:Tenant REMOVE n.foreign")
+        result = list(db.execute_cypher("MATCH (n:Tenant) RETURN n.id"))
+        assert len(result) == 1
+        assert result[0]["n.id"] == "123"
+
+    def test_count_star_after_set_label(self, db):
+        """count(*) after SET n:Label returns correct count (#182)."""
+        db.create_node(["Node"], {"id": "1"})
+        db.create_node(["Node"], {"id": "2"})
+        db.create_node(["Node"], {"id": "3"})
+        result = list(db.execute_cypher("MATCH (n:Node) SET n:Tagged RETURN count(*) AS cnt"))
+        assert result[0]["cnt"] == 3
+
+    def test_count_var_after_set_label(self, db):
+        """count(n) after SET n:Label returns correct count (#182)."""
+        db.create_node(["Node"], {"id": "1"})
+        db.create_node(["Node"], {"id": "2"})
+        result = list(db.execute_cypher("MATCH (n:Node) SET n:Tagged RETURN count(n) AS cnt"))
+        assert result[0]["cnt"] == 2
+
+    def test_set_property_to_timestamp(self, db):
+        """SET n.prop = timestamp() stores non-null millis (#179)."""
+        db.create_node(["Event"], {"name": "launch"})
+        db.execute_cypher("MATCH (e:Event) SET e.created_at = timestamp()")
+        result = list(db.execute_cypher("MATCH (e:Event) RETURN e.created_at"))
+        assert result[0]["e.created_at"] is not None
+        assert result[0]["e.created_at"] > 1_577_836_800_000
+
 
 # =============================================================================
 # REMOVE (sec 3.4)
@@ -183,6 +223,106 @@ class TestRemove:
         db.execute_cypher("MATCH (n:Person {name: 'Alix'}) REMOVE n:Developer:Senior")
         result = list(db.execute_cypher("MATCH (n:Developer) RETURN count(n) AS cnt"))
         assert result[0]["cnt"] == 0
+
+    def test_remove_label_preserves_variable_binding(self, db):
+        """REMOVE n:Label must not drop variable for subsequent clauses (#178)."""
+        db.create_node(["Person", "Employee"], {"name": "Alix"})
+        result = list(
+            db.execute_cypher("MATCH (n:Person {name: 'Alix'}) REMOVE n:Employee RETURN n.name")
+        )
+        assert len(result) == 1
+        assert result[0]["n.name"] == "Alix"
+
+
+# =============================================================================
+# MATCH + CREATE edge (phantom node regression, #181)
+# =============================================================================
+
+
+class TestCreateEdgePhantom:
+    """Verify MATCH...CREATE edge does not create phantom nodes (#181)."""
+
+    def test_match_create_edge_no_phantoms(self, db):
+        """Creating edge between matched nodes must not create extra nodes."""
+        db.create_node(["Person"], {"name": "Alix"})
+        db.create_node(["Person"], {"name": "Gus"})
+        before = list(db.execute_cypher("MATCH (n) RETURN count(n) AS cnt"))
+        count_before = before[0]["cnt"]
+
+        db.execute_cypher(
+            "MATCH (a:Person {name: 'Alix'}), (b:Person {name: 'Gus'}) CREATE (a)-[:KNOWS]->(b)"
+        )
+
+        after = list(db.execute_cypher("MATCH (n) RETURN count(n) AS cnt"))
+        assert after[0]["cnt"] == count_before, "phantom nodes were created"
+
+        edges = list(db.execute_cypher("MATCH ()-[r:KNOWS]->() RETURN count(r) AS cnt"))
+        assert edges[0]["cnt"] == 1
+
+    def test_match_create_multiple_edges_no_phantoms(self, db):
+        """Multiple edges between matched nodes must not multiply phantoms."""
+        db.create_node(["Person"], {"name": "Alix"})
+        db.create_node(["Person"], {"name": "Gus"})
+        db.create_node(["Person"], {"name": "Mia"})
+
+        db.execute_cypher(
+            "MATCH (a:Person {name: 'Alix'}), (b:Person {name: 'Gus'}) CREATE (a)-[:KNOWS]->(b)"
+        )
+        db.execute_cypher(
+            "MATCH (a:Person {name: 'Alix'}), (c:Person {name: 'Mia'}) CREATE (a)-[:KNOWS]->(c)"
+        )
+
+        nodes = list(db.execute_cypher("MATCH (n) RETURN count(n) AS cnt"))
+        assert nodes[0]["cnt"] == 3
+
+        edges = list(db.execute_cypher("MATCH ()-[r:KNOWS]->() RETURN count(r) AS cnt"))
+        assert edges[0]["cnt"] == 2
+
+    def test_match_create_edge_correct_endpoints(self, db):
+        """Edge connects the correct nodes."""
+        db.create_node(["Person"], {"name": "Alix"})
+        db.create_node(["Person"], {"name": "Gus"})
+        db.execute_cypher(
+            "MATCH (a:Person {name: 'Alix'}), (b:Person {name: 'Gus'}) CREATE (a)-[:KNOWS]->(b)"
+        )
+        result = list(
+            db.execute_cypher("MATCH (s)-[:KNOWS]->(t) RETURN s.name AS src, t.name AS dst")
+        )
+        assert len(result) == 1
+        assert result[0]["src"] == "Alix"
+        assert result[0]["dst"] == "Gus"
+
+    def test_startnode_endnode(self, db):
+        """startNode(r) and endNode(r) return node IDs (#180)."""
+        db.execute_cypher("CREATE (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})")
+        result = list(
+            db.execute_cypher("MATCH ()-[r:KNOWS]->() RETURN startNode(r) AS sn, endNode(r) AS en")
+        )
+        assert len(result) == 1
+        assert result[0]["sn"] is not None
+        assert result[0]["en"] is not None
+        assert isinstance(result[0]["sn"], int)
+        assert isinstance(result[0]["en"], int)
+
+    def test_startnode_equals_source(self, db):
+        """startNode(r) == id(s) and endNode(r) == id(t) (#180)."""
+        db.execute_cypher("CREATE (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})")
+        result = list(
+            db.execute_cypher(
+                "MATCH (s)-[r:KNOWS]->(t) "
+                "RETURN startNode(r) = id(s) AS src_ok, endNode(r) = id(t) AS dst_ok"
+            )
+        )
+        assert result[0]["src_ok"] is True
+        assert result[0]["dst_ok"] is True
+
+    def test_timestamp_returns_millis(self, db):
+        """timestamp() returns millisecond epoch as integer (#179)."""
+        result = list(db.execute_cypher("RETURN timestamp() AS ts"))
+        assert len(result) == 1
+        assert result[0]["ts"] is not None
+        assert isinstance(result[0]["ts"], int)
+        assert result[0]["ts"] > 1_577_836_800_000
 
 
 # =============================================================================

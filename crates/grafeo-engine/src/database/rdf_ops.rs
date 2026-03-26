@@ -45,8 +45,8 @@ impl GrafeoDB {
         let logical_plan = sparql::translate(query)?;
 
         // Optimize the plan using RDF-specific statistics
-        let rdf_stats = self.rdf_store.collect_statistics();
-        let optimizer = Optimizer::from_rdf_statistics(rdf_stats);
+        let rdf_stats = self.rdf_store.get_or_collect_statistics();
+        let optimizer = Optimizer::from_rdf_statistics((*rdf_stats).clone());
         let optimized_plan = optimizer.optimize(logical_plan)?;
 
         // EXPLAIN: return the logical plan tree without executing

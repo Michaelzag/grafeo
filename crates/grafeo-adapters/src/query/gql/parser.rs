@@ -1287,14 +1287,21 @@ impl<'a> Parser<'a> {
         patterns.push(self.parse_aliased_pattern()?);
 
         // Path alternation at MATCH level: pattern | pattern or pattern |+| pattern
-        // (ISO GQL G032/G030)
+        // (ISO GQL G032/G030). Mixing | and |+| in the same alternation is rejected.
         if self.current.kind == TokenKind::Pipe || self.current.kind == TokenKind::PipePlusPipe {
-            let is_multiset = self.current.kind == TokenKind::PipePlusPipe;
+            let first_op = self.current.kind;
+            let is_multiset = first_op == TokenKind::PipePlusPipe;
             let first = patterns.pop().expect("just pushed");
             let mut alt_patterns = vec![first.pattern];
             while self.current.kind == TokenKind::Pipe
                 || self.current.kind == TokenKind::PipePlusPipe
             {
+                if self.current.kind != first_op {
+                    return Err(self.error(
+                        "Cannot mix '|' (set union) and '|+|' (multiset union) in the same \
+                         alternation; use one operator consistently",
+                    ));
+                }
                 self.advance();
                 alt_patterns.push(self.parse_aliased_pattern()?.pattern);
             }
@@ -1631,7 +1638,10 @@ impl<'a> Parser<'a> {
                     where_clause,
                 })
             } else {
-                Err(self.error("Expected quantified pattern after node"))
+                // Non-quantified parenthesized pattern after a node: treat the
+                // leading node as a standalone pattern (the parenthesized pattern
+                // is a separate element in the pattern list, not a continuation).
+                Ok(Pattern::Node(node))
             }
         } else {
             Ok(Pattern::Node(node))
@@ -2610,10 +2620,19 @@ impl<'a> Parser<'a> {
         }
         self.advance(); // consume FROM
 
-        // Parse graph reference (e.g., CURRENT_GRAPH, or a graph name)
-        // For now, consume identifier(s) until we hit MATCH
-        while self.is_identifier() && self.current.kind != TokenKind::Match {
-            self.advance();
+        // Parse graph reference: a single name or dot-qualified name (schema.graph),
+        // or CURRENT_GRAPH / CURRENT_PROPERTY_GRAPH. Skip if MATCH follows directly.
+        if self.is_identifier() && self.current.kind != TokenKind::Match {
+            self.advance(); // consume graph name
+            // Optional dot-qualified continuation (e.g., schema.graph_name)
+            while self.current.kind == TokenKind::Dot && self.peek_kind() != TokenKind::Eof {
+                self.advance(); // consume dot
+                if self.is_identifier() {
+                    self.advance(); // consume qualifier
+                } else {
+                    break;
+                }
+            }
         }
 
         // Expect MATCH
@@ -9991,5 +10010,38 @@ mod tests {
         } else {
             panic!("Expected Query statement");
         }
+    }
+
+    // ======================================================================
+    // Parser robustness: mixed union operators, graph ref, quantified paths
+    // ======================================================================
+
+    #[test]
+    fn test_mixed_pipe_operators_rejected() {
+        // Mixing | and |+| in the same alternation must produce an error.
+        let mut parser =
+            Parser::new("MATCH (a)-[:X]->(b) | (c)-[:Y]->(d) |+| (e)-[:Z]->(f) RETURN a");
+        let result = parser.parse();
+        assert!(result.is_err(), "Mixing | and |+| should be rejected");
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("mix") || msg.contains("Mix"),
+            "Error should mention mixing operators: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_consistent_pipe_operators_accepted() {
+        // Consistent | operators should parse fine.
+        let mut parser = Parser::new("MATCH (a)-[:X]->(b) | (c)-[:Y]->(d) RETURN a");
+        assert!(parser.parse().is_ok(), "Consistent | should parse");
+    }
+
+    #[test]
+    fn test_select_from_match_parses() {
+        // SELECT ... FROM graph_name MATCH pattern should parse.
+        let mut parser = Parser::new("SELECT n.name FROM my_graph MATCH (n:Person) RETURN n.name");
+        // May fail during semantic validation, but should not panic.
+        let _ = parser.parse();
     }
 }

@@ -185,13 +185,14 @@ impl super::Planner {
             }
             LogicalExpression::CountSubquery(subplan) => {
                 // Reuse the same pattern extraction as EXISTS (fast path for simple edges)
-                let (start_var, direction, edge_types, _end_labels) =
+                let (start_var, direction, edge_types, end_labels) =
                     self.extract_exists_pattern(subplan)?;
 
                 Ok(FilterExpression::CountSubquery {
                     start_var,
                     direction,
                     edge_types,
+                    end_labels,
                 })
             }
             LogicalExpression::ValueSubquery(_) => {
@@ -314,7 +315,11 @@ impl super::Planner {
                     ))
                 } else {
                     // Normal case: correlated variable on the source side, e.g. (m)-[:CALLS]->()
-                    let end_labels = self.extract_end_labels_from_expand(expand);
+                    //
+                    // No end_labels: the Expand's input is the source NodeScan, whose labels
+                    // belong to the correlated variable (already filtered by the outer scope).
+                    // Target labels would create a Filter wrapping the Expand, which is
+                    // rejected above and correctly routed to the semi-join path.
                     let direction = match expand.direction {
                         ExpandDirection::Outgoing => Direction::Outgoing,
                         ExpandDirection::Incoming => Direction::Incoming,
@@ -324,7 +329,7 @@ impl super::Planner {
                         expand.from_variable.clone(),
                         direction,
                         expand.edge_types.clone(),
-                        end_labels,
+                        None,
                     ))
                 }
             }
@@ -342,15 +347,6 @@ impl super::Planner {
             _ => Err(Error::Internal(
                 "Unsupported EXISTS subquery pattern".to_string(),
             )),
-        }
-    }
-
-    /// Extracts end node labels from an Expand operator if present.
-    pub(super) fn extract_end_labels_from_expand(&self, expand: &ExpandOp) -> Option<Vec<String>> {
-        // Check if the expand has a NodeScan input with a label filter
-        match expand.input.as_ref() {
-            LogicalOperator::NodeScan(scan) => scan.label.clone().map(|l| vec![l]),
-            _ => None,
         }
     }
 

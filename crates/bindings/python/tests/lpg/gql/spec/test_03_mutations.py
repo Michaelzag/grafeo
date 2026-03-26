@@ -64,6 +64,35 @@ class TestInsert:
         result = list(db.execute("MATCH (a)-[:KNOWS]->(b) RETURN a.name, b.name"))
         assert len(result) == 1
 
+    def test_match_create_edge_no_phantom_nodes(self, db):
+        """MATCH (a), (b) CREATE (a)-[:REL]->(b) must not create phantom nodes (#181)."""
+        db.create_node(["Person"], {"name": "Alix"})
+        db.create_node(["Person"], {"name": "Gus"})
+        before = list(db.execute("MATCH (n) RETURN count(n) AS cnt"))
+        count_before = before[0]["cnt"]
+
+        db.execute(
+            "MATCH (a:Person {name: 'Alix'}), (b:Person {name: 'Gus'}) CREATE (a)-[:KNOWS]->(b)"
+        )
+
+        after = list(db.execute("MATCH (n) RETURN count(n) AS cnt"))
+        assert after[0]["cnt"] == count_before, "phantom nodes were created"
+
+        edges = list(db.execute("MATCH ()-[r:KNOWS]->() RETURN count(r) AS cnt"))
+        assert edges[0]["cnt"] == 1
+
+    def test_match_create_edge_correct_endpoints(self, db):
+        """Edge between matched nodes connects the correct endpoints (#181)."""
+        db.create_node(["Person"], {"name": "Alix"})
+        db.create_node(["Person"], {"name": "Gus"})
+        db.execute(
+            "MATCH (a:Person {name: 'Alix'}), (b:Person {name: 'Gus'}) CREATE (a)-[:KNOWS]->(b)"
+        )
+        result = list(db.execute("MATCH (s)-[:KNOWS]->(t) RETURN s.name AS src, t.name AS dst"))
+        assert len(result) == 1
+        assert result[0]["src"] == "Alix"
+        assert result[0]["dst"] == "Gus"
+
 
 # =============================================================================
 # SET (sec 13.3)
@@ -109,6 +138,52 @@ class TestSet:
         db.execute("MATCH (n:Person {name: 'Alix'}) SET n:Admin:Verified")
         result = list(db.execute("MATCH (n:Admin:Verified) RETURN n.name"))
         assert len(result) == 1
+
+    def test_set_label_preserves_variable_binding(self, db):
+        """SET n:Label must not drop variable for subsequent clauses (#178)."""
+        db.create_node(["Person"], {"name": "Alix"})
+        result = list(db.execute("MATCH (n:Person {name: 'Alix'}) SET n:Employee RETURN n.name"))
+        assert len(result) == 1
+        assert result[0]["n.name"] == "Alix"
+
+    def test_set_label_then_remove_property(self, db):
+        """SET n:Label then REMOVE n.prop on same variable (#178)."""
+        db.create_node(["Person"], {"name": "Alix", "temp": "delete_me"})
+        db.execute("MATCH (n:Person {name: 'Alix'}) SET n:Employee REMOVE n.temp")
+        result = list(db.execute("MATCH (n:Employee) RETURN n.name"))
+        assert len(result) == 1
+        assert result[0]["n.name"] == "Alix"
+
+    def test_set_label_then_set_property(self, db):
+        """SET n:Label then SET n.prop chained (#178)."""
+        db.create_node(["Person"], {"name": "Alix"})
+        db.execute("MATCH (n:Person {name: 'Alix'}) SET n:Employee SET n.role = 'Engineer'")
+        result = list(db.execute("MATCH (n:Employee {name: 'Alix'}) RETURN n.role"))
+        assert len(result) == 1
+        assert result[0]["n.role"] == "Engineer"
+
+    def test_count_star_after_set_label(self, db):
+        """count(*) after SET n:Label returns correct count (#182)."""
+        db.create_node(["Node"], {"id": "1"})
+        db.create_node(["Node"], {"id": "2"})
+        db.create_node(["Node"], {"id": "3"})
+        result = list(db.execute("MATCH (n:Node) SET n:Tagged RETURN count(*) AS cnt"))
+        assert result[0]["cnt"] == 3
+
+    def test_count_var_after_set_label(self, db):
+        """count(n) after SET n:Label returns correct count (#182)."""
+        db.create_node(["Node"], {"id": "1"})
+        db.create_node(["Node"], {"id": "2"})
+        result = list(db.execute("MATCH (n:Node) SET n:Tagged RETURN count(n) AS cnt"))
+        assert result[0]["cnt"] == 2
+
+    def test_set_property_to_timestamp(self, db):
+        """SET n.prop = timestamp() stores a non-null value (#179)."""
+        db.create_node(["Event"], {"name": "launch"})
+        db.execute("MATCH (e:Event) SET e.created_at = timestamp()")
+        result = list(db.execute("MATCH (e:Event) RETURN e.created_at"))
+        assert result[0]["e.created_at"] is not None
+        assert result[0]["e.created_at"] > 1_577_836_800_000
 
     def test_set_map_replace(self, db):
         """SET n = {map} replaces all properties."""
@@ -187,6 +262,13 @@ class TestDelete:
         # Still exists as Person
         result = list(db.execute("MATCH (n:Person {name: 'Alix'}) RETURN n.name"))
         assert len(result) == 1
+
+    def test_remove_label_preserves_variable_binding(self, db):
+        """REMOVE n:Label must not drop variable for subsequent clauses (#178)."""
+        db.create_node(["Person", "Employee"], {"name": "Alix"})
+        result = list(db.execute("MATCH (n:Person {name: 'Alix'}) REMOVE n:Employee RETURN n.name"))
+        assert len(result) == 1
+        assert result[0]["n.name"] == "Alix"
 
 
 # =============================================================================

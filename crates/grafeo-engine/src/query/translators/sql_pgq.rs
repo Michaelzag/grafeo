@@ -191,11 +191,11 @@ impl SqlPgqTranslator {
                             });
                         }
                         _ => {
-                            // Non-aggregate in SELECT without explicit GROUP BY → implicit group by
-                            if select.group_by.is_none() {
-                                let expr = self.translate_expression(&item.expression, None)?;
-                                group_by.push(expr);
-                            }
+                            // Non-aggregate SELECT items pass through as group-by keys.
+                            // With explicit GROUP BY they should already be listed there,
+                            // but we add them anyway to avoid silently dropping columns.
+                            let expr = self.translate_expression(&item.expression, None)?;
+                            group_by.push(expr);
                         }
                     }
                 }

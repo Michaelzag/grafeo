@@ -27,6 +27,14 @@ All notable changes to Grafeo, for future reference (and enjoyment).
   - GG:SS01/GG:GE01: `SELECT ... FROM ... MATCH` statement
   - GG02/GG22: brace-delimited graph type patterns with variable names
   - Per-pattern path search prefix `p = ANY SHORTEST (...)`
+- **EXISTS/COUNT subquery end-node labels ignored**: the fast-path evaluator extracted `end_labels` at plan time but never checked them at runtime, silently accepting edges to nodes with wrong labels. Both `ExistsSubquery` and `CountSubquery` now verify the other endpoint's labels.
+- **Complex EXISTS inside OR predicates**: `WHERE EXISTS { multi-hop } OR property > value` errored because the semi-join rewrite only handled AND trees. OR branches are now split into semi-join + filter, unioned, and deduplicated.
+- **SQL/PGQ GROUP BY drops non-aggregate columns**: `SELECT col, COUNT(*) ... GROUP BY col` silently omitted `col` from the aggregate output. Non-aggregate SELECT items are now always passed through as group-by keys.
+- **C API: typed entity access** (#177): `grafeo_result_nodes_json()` and `grafeo_result_edges_json()` return JSON arrays with explicit `element_type`, `id`, `labels`/`type`, and `properties` fields, eliminating ambiguity between nodes, edges, and user maps.
+- **`SET n:Label` drops variable binding for subsequent clauses** (#178, #182): `AddLabelOperator` and `RemoveLabelOperator` discarded all input columns, returning only a single-row update count. Any clause after `SET n:Label` that referenced the same variable failed with "Variable not found", and `count(*)` always returned 1. Both operators now preserve input columns per-row, matching `SetPropertyOperator` behavior.
+- **`timestamp()` returns `null` instead of millisecond epoch** (#179): `timestamp()` was missing from the expression evaluator, falling through to the default `None` case. In SET clauses, zero-argument temporal functions (`timestamp()`, `now()`, `datetime()`, `date()`, `time()`) failed with "Unsupported expression type". Added `timestamp()` returning epoch milliseconds as Int64, and extended `try_fold_expression` to support zero-argument temporal functions.
+- **`startNode(r)` and `endNode(r)` return `None`** (#180): both functions were unimplemented. Added `startNode(r)` and `endNode(r)` to the expression evaluator, returning the source/destination node ID as Int64.
+- **`MATCH ... CREATE (a)-[:REL]->(b)` creates phantom nodes** (#181): the planner always created new physical nodes for every node in a CREATE path, even when the variable was already bound from a prior MATCH. Added a guard in `plan_create_node` that skips node creation when the variable already exists in the column list with no labels or properties.
 
 ## [0.5.25] - 2026-03-25
 

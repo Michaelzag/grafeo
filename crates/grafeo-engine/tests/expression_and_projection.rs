@@ -152,6 +152,170 @@ fn test_not_exists_target_side_correlation() {
 }
 
 // ============================================================================
+// EXISTS / COUNT with end_labels: ensures the fast-path checks the other
+// endpoint's labels after direction flipping (Bug #1 / #2).
+// ============================================================================
+
+/// Mixed-type graph for end_labels tests:
+///   (Alix:Person)-[:MENTORS]->(Gus:Person)
+///   (Fritz:Bot)-[:MENTORS]->(Gus:Person)
+///   (Alix:Person)-[:MENTORS]->(Harm:Person)
+///
+/// Gus has incoming MENTORS from both a Person and a Bot.
+/// Harm has incoming MENTORS only from a Person.
+fn create_mixed_label_graph() -> GrafeoDB {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    let alix =
+        session.create_node_with_props(&["Person"], [("name", Value::String("Alix".into()))]);
+    let gus = session.create_node_with_props(&["Person"], [("name", Value::String("Gus".into()))]);
+    let harm =
+        session.create_node_with_props(&["Person"], [("name", Value::String("Harm".into()))]);
+    let fritz = session.create_node_with_props(&["Bot"], [("name", Value::String("Fritz".into()))]);
+
+    session.create_edge(alix, gus, "MENTORS"); // Person -> Person
+    session.create_edge(fritz, gus, "MENTORS"); // Bot    -> Person
+    session.create_edge(alix, harm, "MENTORS"); // Person -> Person
+
+    drop(session);
+    db
+}
+
+#[test]
+fn test_exists_end_labels_flipped_direction() {
+    // (:Person)-[:MENTORS]->(n) flips to: "does n have an incoming MENTORS from a Person?"
+    // Gus: incoming from Alix(Person) and Fritz(Bot) -> Person exists, true
+    // Harm: incoming from Alix(Person) -> true
+    // Alix: no incoming MENTORS -> false
+    let db = create_mixed_label_graph();
+    let session = db.session();
+
+    let result = session
+        .execute(
+            "MATCH (n:Person) WHERE EXISTS { MATCH (:Person)-[:MENTORS]->(n) } \
+             RETURN n.name ORDER BY n.name",
+        )
+        .unwrap();
+
+    assert_eq!(result.row_count(), 2);
+    assert_eq!(result.rows[0][0], Value::String("Gus".into()));
+    assert_eq!(result.rows[1][0], Value::String("Harm".into()));
+}
+
+#[test]
+fn test_exists_end_labels_no_match() {
+    // (:Bot)-[:MENTORS]->(n): only Gus has an incoming MENTORS from Fritz(Bot).
+    let db = create_mixed_label_graph();
+    let session = db.session();
+
+    let result = session
+        .execute(
+            "MATCH (n:Person) WHERE EXISTS { MATCH (:Bot)-[:MENTORS]->(n) } \
+             RETURN n.name ORDER BY n.name",
+        )
+        .unwrap();
+
+    assert_eq!(result.row_count(), 1);
+    assert_eq!(result.rows[0][0], Value::String("Gus".into()));
+}
+
+#[test]
+fn test_not_exists_end_labels() {
+    // NOT EXISTS { (:Bot)-[:MENTORS]->(n) }: Alix and Harm have no Bot mentors.
+    let db = create_mixed_label_graph();
+    let session = db.session();
+
+    let result = session
+        .execute(
+            "MATCH (n:Person) WHERE NOT EXISTS { MATCH (:Bot)-[:MENTORS]->(n) } \
+             RETURN n.name ORDER BY n.name",
+        )
+        .unwrap();
+
+    assert_eq!(result.row_count(), 2);
+    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows[1][0], Value::String("Harm".into()));
+}
+
+#[test]
+fn test_count_subquery_end_labels() {
+    // COUNT { (:Person)-[:MENTORS]->(n) }: count only Person mentors.
+    // Gus: 1 (Alix only, Fritz is a Bot), Harm: 1 (Alix), Alix: 0
+    let db = create_mixed_label_graph();
+    let session = db.session();
+
+    let result = session
+        .execute(
+            "MATCH (n:Person) \
+             WHERE COUNT { MATCH (:Person)-[:MENTORS]->(n) } >= 1 \
+             RETURN n.name ORDER BY n.name",
+        )
+        .unwrap();
+
+    assert_eq!(result.row_count(), 2);
+    assert_eq!(result.rows[0][0], Value::String("Gus".into()));
+    assert_eq!(result.rows[1][0], Value::String("Harm".into()));
+}
+
+// ============================================================================
+// EXISTS normal-case: correlated variable has label, target is different type.
+// Regression test for extract_end_labels_from_expand reading source labels.
+// ============================================================================
+
+#[test]
+fn test_exists_source_label_not_leaked_to_end_labels() {
+    // Alix:Person -[:MENTORS]-> Gus:Person, Alix:Person -[:MENTORS]-> Fritz:Bot
+    // Query: MATCH (n:Person) WHERE EXISTS { MATCH (n)-[:MENTORS]->() } RETURN n.name
+    // The (:Person) label is on n (the source). The target is anonymous.
+    // Without the fix, the source label "Person" leaks into end_labels, causing the
+    // runtime to check that the OTHER endpoint also has label "Person". Fritz is a Bot,
+    // so the edge to Fritz would be wrongly excluded, and Alix would still match
+    // (she also mentors Gus:Person). But a cleaner scenario:
+    //
+    // Setup: Jules:Person -[:FOLLOWS]-> Mia:Bot (only edge)
+    // Query: MATCH (n:Person) WHERE EXISTS { MATCH (n)-[:FOLLOWS]->() }
+    // With the bug: end_labels=["Person"], the runtime checks the Bot target for "Person"
+    //   → no match → EXISTS=false → Jules not returned. WRONG.
+    // Fixed: end_labels=None → EXISTS checks only edge type → true → Jules returned.
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    let jules =
+        session.create_node_with_props(&["Person"], [("name", Value::String("Jules".into()))]);
+    let mia = session.create_node_with_props(&["Bot"], [("name", Value::String("Mia".into()))]);
+    session.create_edge(jules, mia, "FOLLOWS");
+    drop(session);
+
+    let session = db.session();
+
+    // Case 1: inner pattern re-labels the correlated variable: (n:Person).
+    // The source label "Person" must NOT leak to end_labels, which would
+    // incorrectly require the anonymous target to also have label "Person".
+    let result = session
+        .execute(
+            "MATCH (n:Person) WHERE EXISTS { MATCH (n:Person)-[:FOLLOWS]->() } \
+             RETURN n.name",
+        )
+        .unwrap();
+    assert_eq!(
+        result.row_count(),
+        1,
+        "Jules follows Mia(Bot); source label Person must not constrain target"
+    );
+    assert_eq!(result.rows[0][0], Value::String("Jules".into()));
+
+    // Case 2: sanity check without inner label (should behave identically).
+    let result2 = session
+        .execute(
+            "MATCH (n:Person) WHERE EXISTS { MATCH (n)-[:FOLLOWS]->() } \
+             RETURN n.name",
+        )
+        .unwrap();
+    assert_eq!(result2.row_count(), 1);
+}
+
+// ============================================================================
 // Complex EXISTS subquery: covers semi-join rewrite in planner/filter.rs
 // ============================================================================
 
@@ -339,6 +503,63 @@ fn test_exists_complex_gql_syntax() {
         .collect();
     names.sort();
     assert_eq!(names, vec!["Alix", "Dave", "Gus"]);
+}
+
+// ============================================================================
+// EXISTS inside OR: covers the boolean-flag Apply path in planner/filter.rs
+// ============================================================================
+
+#[test]
+fn test_complex_exists_or_property() {
+    let db = create_multi_hop_graph();
+
+    // Complex EXISTS (multi-hop) OR simple property predicate.
+    // EXISTS { (n)-[:KNOWS]->(m)-[:LIVES_IN]->(c:City) } matches Alix, Gus, Dave.
+    // n.age > 35 matches Dave (40).
+    // Combined with OR: Alix, Dave, Gus (union of both).
+    let names = sorted_names(
+        &db,
+        "MATCH (n:Person) \
+         WHERE EXISTS { MATCH (n)-[:KNOWS]->(m)-[:LIVES_IN]->(c:City) } \
+            OR n.age > 35 \
+         RETURN n.name",
+    );
+    assert_eq!(names, vec!["Alix", "Dave", "Gus"]);
+}
+
+#[test]
+fn test_complex_exists_or_only_property_matches() {
+    let db = create_multi_hop_graph();
+
+    // Harm has no multi-hop KNOWS->LIVES_IN path, but age is 35 (not > 35).
+    // Only age > 35 picks up Dave (40), who also has the EXISTS path.
+    // Harm has no EXISTS match and age 35 is not > 35.
+    let names = sorted_names(
+        &db,
+        "MATCH (n:Person) \
+         WHERE EXISTS { MATCH (n)-[:KNOWS]->(m)-[:LIVES_IN]->(c:City) WHERE c.name = 'Paris' } \
+            OR n.age > 35 \
+         RETURN n.name",
+    );
+    // No one has a path to Paris, so only Dave (age 40 > 35) matches.
+    assert_eq!(names, vec!["Dave"]);
+}
+
+#[test]
+fn test_not_exists_complex_in_or() {
+    let db = create_multi_hop_graph();
+
+    // NOT EXISTS { multi-hop } OR n.age < 30
+    // NOT EXISTS matches Harm (no outgoing KNOWS).
+    // age < 30 matches Gus (25).
+    let names = sorted_names(
+        &db,
+        "MATCH (n:Person) \
+         WHERE NOT EXISTS { MATCH (n)-[:KNOWS]->(m)-[:LIVES_IN]->(c:City) } \
+            OR n.age < 30 \
+         RETURN n.name",
+    );
+    assert_eq!(names, vec!["Gus", "Harm"]);
 }
 
 // ---------- Deriva-pattern EXISTS reproduction ----------
@@ -1583,4 +1804,71 @@ fn test_gql_profile_returns_metrics() {
         !r.rows.is_empty(),
         "PROFILE should return execution metrics"
     );
+}
+
+// ── Regression: timestamp() (#179) ──────────────────────────────────────────
+
+#[test]
+fn test_timestamp_returns_millis() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+    let r = session.execute("RETURN timestamp() AS ts").unwrap();
+    assert_eq!(r.row_count(), 1);
+    match &r.rows[0][0] {
+        Value::Int64(ts) => assert!(*ts > 1_577_836_800_000, "timestamp too small: {ts}"),
+        other => panic!("expected Int64, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_set_property_to_timestamp() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+    session.execute("INSERT (:Event {name: 'launch'})").unwrap();
+    session
+        .execute("MATCH (e:Event) SET e.created_at = timestamp()")
+        .unwrap();
+    let r = session
+        .execute("MATCH (e:Event) RETURN e.created_at")
+        .unwrap();
+    assert_eq!(r.row_count(), 1);
+    match &r.rows[0][0] {
+        Value::Int64(ts) => assert!(*ts > 1_577_836_800_000),
+        other => panic!("expected Int64, got {other:?}"),
+    }
+}
+
+// ── Regression: startNode/endNode (#180) ────────────────────────────────────
+
+#[test]
+fn test_start_node_end_node_gql() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+    session
+        .execute("INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})")
+        .unwrap();
+    let r = session
+        .execute("MATCH ()-[r:KNOWS]->() RETURN startNode(r) AS sn, endNode(r) AS en")
+        .unwrap();
+    assert_eq!(r.row_count(), 1);
+    assert!(matches!(&r.rows[0][0], Value::Int64(_)));
+    assert!(matches!(&r.rows[0][1], Value::Int64(_)));
+}
+
+#[test]
+#[cfg(feature = "cypher")]
+fn test_start_node_equals_source_id() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+    session
+        .execute_cypher("CREATE (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})")
+        .unwrap();
+    let r = session
+        .execute_cypher(
+            "MATCH (s)-[r:KNOWS]->(t) RETURN startNode(r) = id(s) AS src_match, endNode(r) = id(t) AS dst_match",
+        )
+        .unwrap();
+    assert_eq!(r.row_count(), 1);
+    assert_eq!(r.rows[0][0], Value::Bool(true), "startNode(r) != id(s)");
+    assert_eq!(r.rows[0][1], Value::Bool(true), "endNode(r) != id(t)");
 }

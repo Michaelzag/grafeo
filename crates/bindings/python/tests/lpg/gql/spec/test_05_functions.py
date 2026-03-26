@@ -384,6 +384,21 @@ class TestTemporalFunctions:
         result = list(db.execute("MATCH (n:N) RETURN now() AS r"))
         assert result[0]["r"] is not None
 
+    def test_timestamp_returns_millis(self, db):
+        """timestamp() returns millisecond epoch as integer (#179)."""
+        result = list(db.execute("RETURN timestamp() AS ts"))
+        assert len(result) == 1
+        assert result[0]["ts"] is not None
+        assert isinstance(result[0]["ts"], int)
+        assert result[0]["ts"] > 1_577_836_800_000  # after 2020-01-01
+
+    def test_timestamp_in_on_create_set(self, db):
+        """MERGE ON CREATE SET n.ts = timestamp() stores non-null value (#179)."""
+        db.execute("MERGE (n:T {id: 'x'}) ON CREATE SET n.ts = timestamp()")
+        result = list(db.execute("MATCH (n:T) RETURN n.ts"))
+        assert result[0]["n.ts"] is not None
+        assert result[0]["n.ts"] > 1_577_836_800_000
+
     def test_year_extraction(self, db):
         """year(date) extracts year."""
         db.create_node(["N"], {"v": 1})
@@ -568,6 +583,34 @@ class TestGraphElementFunctions:
         db.create_node(["Person"], {"name": "Alix"})
         result = list(db.execute("MATCH (n:Person) RETURN hasLabel(n, 'Person') AS r"))
         assert result[0]["r"] is True
+
+    def test_start_node(self, db):
+        """startNode(r) returns source node ID (#180)."""
+        db.execute("INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})")
+        result = list(db.execute("MATCH ()-[r:KNOWS]->() RETURN startNode(r) AS sn"))
+        assert len(result) == 1
+        assert result[0]["sn"] is not None
+        assert isinstance(result[0]["sn"], int)
+
+    def test_end_node(self, db):
+        """endNode(r) returns destination node ID (#180)."""
+        db.execute("INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})")
+        result = list(db.execute("MATCH ()-[r:KNOWS]->() RETURN endNode(r) AS en"))
+        assert len(result) == 1
+        assert result[0]["en"] is not None
+        assert isinstance(result[0]["en"], int)
+
+    def test_start_node_matches_source(self, db):
+        """startNode(r) == id(s) and endNode(r) == id(t) (#180)."""
+        db.execute("INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})")
+        result = list(
+            db.execute(
+                "MATCH (s)-[r:KNOWS]->(t) "
+                "RETURN startNode(r) = id(s) AS src_ok, endNode(r) = id(t) AS dst_ok"
+            )
+        )
+        assert result[0]["src_ok"] is True
+        assert result[0]["dst_ok"] is True
 
 
 # =============================================================================

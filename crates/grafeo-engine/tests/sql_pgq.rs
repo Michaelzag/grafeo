@@ -868,3 +868,38 @@ fn test_nullif_function() {
         "nullIf('Gus', 'Alix') should be 'Gus'"
     );
 }
+
+// ============================================================================
+// GROUP BY
+// ============================================================================
+
+#[test]
+fn test_group_by_with_non_aggregate_column() {
+    let db = create_social_network();
+    let session = db.session();
+
+    // Explicit GROUP BY with a non-aggregate SELECT column.
+    // Before the fix, 'source' would be silently dropped from output.
+    let result = session
+        .execute_sql(
+            "SELECT source, COUNT(*) AS friend_count \
+             FROM GRAPH_TABLE ( \
+                 MATCH (a:Person)-[:KNOWS]->(b:Person) \
+                 COLUMNS (a.name AS source) \
+             ) \
+             GROUP BY source \
+             ORDER BY source",
+        )
+        .unwrap();
+
+    // Alix -> Gus, Alix -> Harm, Gus -> Harm
+    assert_eq!(result.row_count(), 2);
+    // Alix has 2 KNOWS edges, Gus has 1
+    let alix_row = result.rows.iter().find(|r| r[0].as_str() == Some("Alix"));
+    assert!(alix_row.is_some(), "Alix should appear in results");
+    assert_eq!(alix_row.unwrap()[1], Value::Int64(2));
+
+    let gus_row = result.rows.iter().find(|r| r[0].as_str() == Some("Gus"));
+    assert!(gus_row.is_some(), "Gus should appear in results");
+    assert_eq!(gus_row.unwrap()[1], Value::Int64(1));
+}

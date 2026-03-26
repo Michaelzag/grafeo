@@ -170,8 +170,8 @@ impl Session {
         let start_time = Instant::now();
 
         let logical_plan = sparql::translate(query)?;
-        let rdf_stats = self.rdf_store.collect_statistics();
-        let optimizer = Optimizer::from_rdf_statistics(rdf_stats);
+        let rdf_stats = self.rdf_store.get_or_collect_statistics();
+        let optimizer = Optimizer::from_rdf_statistics((*rdf_stats).clone());
         let optimized_plan = optimizer.optimize(logical_plan)?;
 
         // EXPLAIN: return the logical plan tree without executing
@@ -227,8 +227,8 @@ impl Session {
         let mut logical_plan = sparql::translate(query)?;
         substitute_params(&mut logical_plan, &params)?;
 
-        let rdf_stats = self.rdf_store.collect_statistics();
-        let optimizer = Optimizer::from_rdf_statistics(rdf_stats);
+        let rdf_stats = self.rdf_store.get_or_collect_statistics();
+        let optimizer = Optimizer::from_rdf_statistics((*rdf_stats).clone());
         let optimized_plan = optimizer.optimize(logical_plan)?;
 
         // EXPLAIN: return the logical plan tree without executing

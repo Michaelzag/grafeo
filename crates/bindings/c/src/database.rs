@@ -59,11 +59,78 @@ fn build_result(result: &grafeo_engine::database::QueryResult) -> *mut GrafeoRes
     let json_str = serde_json::to_string(&json_rows).unwrap_or_default();
     let c_json = CString::new(json_str).unwrap_or_default();
 
+    // Extract typed entities (nodes and edges) from the result.
+    let (raw_nodes, raw_edges) = grafeo_bindings_common::entity::extract_entities(result);
+
+    let nodes_json_val: Vec<serde_json::Value> = raw_nodes
+        .iter()
+        .map(|n| {
+            let mut obj = serde_json::Map::new();
+            obj.insert(
+                "element_type".to_string(),
+                serde_json::Value::String("node".to_string()),
+            );
+            obj.insert("id".to_string(), serde_json::json!(n.id.as_u64()));
+            obj.insert(
+                "labels".to_string(),
+                serde_json::Value::Array(
+                    n.labels
+                        .iter()
+                        .map(|l| serde_json::Value::String(l.clone()))
+                        .collect(),
+                ),
+            );
+            let props: serde_json::Map<String, serde_json::Value> = n
+                .properties
+                .iter()
+                .map(|(k, v)| (k.as_str().to_string(), crate::types::value_to_json(v)))
+                .collect();
+            obj.insert("properties".to_string(), serde_json::Value::Object(props));
+            serde_json::Value::Object(obj)
+        })
+        .collect();
+
+    let edges_json_val: Vec<serde_json::Value> = raw_edges
+        .iter()
+        .map(|e| {
+            let mut obj = serde_json::Map::new();
+            obj.insert(
+                "element_type".to_string(),
+                serde_json::Value::String("edge".to_string()),
+            );
+            obj.insert("id".to_string(), serde_json::json!(e.id.as_u64()));
+            obj.insert(
+                "type".to_string(),
+                serde_json::Value::String(e.edge_type.clone()),
+            );
+            obj.insert(
+                "source_id".to_string(),
+                serde_json::json!(e.source_id.as_u64()),
+            );
+            obj.insert(
+                "target_id".to_string(),
+                serde_json::json!(e.target_id.as_u64()),
+            );
+            let props: serde_json::Map<String, serde_json::Value> = e
+                .properties
+                .iter()
+                .map(|(k, v)| (k.as_str().to_string(), crate::types::value_to_json(v)))
+                .collect();
+            obj.insert("properties".to_string(), serde_json::Value::Object(props));
+            serde_json::Value::Object(obj)
+        })
+        .collect();
+
+    let nodes_str = serde_json::to_string(&nodes_json_val).unwrap_or_default();
+    let edges_str = serde_json::to_string(&edges_json_val).unwrap_or_default();
+
     Box::into_raw(Box::new(GrafeoResult {
         json: c_json,
         row_count: result.rows.len(),
         execution_time_ms: result.execution_time_ms.unwrap_or(0.0),
         rows_scanned: result.rows_scanned.unwrap_or(0),
+        nodes_json: CString::new(nodes_str).unwrap_or_default(),
+        edges_json: CString::new(edges_str).unwrap_or_default(),
     }))
 }
 
@@ -343,6 +410,38 @@ pub extern "C" fn grafeo_result_rows_scanned(result: *const GrafeoResult) -> u64
     }
     // SAFETY: Caller guarantees valid pointer.
     unsafe { &*result }.rows_scanned
+}
+
+/// Get a JSON array of typed node objects extracted from the result.
+///
+/// Each node object has the structure:
+/// `{"element_type": "node", "id": <u64>, "labels": [...], "properties": {...}}`
+///
+/// Returns an empty array `"[]"` when the result contains no node entities.
+/// The returned pointer is valid until `grafeo_free_result` is called.
+#[unsafe(no_mangle)]
+pub extern "C" fn grafeo_result_nodes_json(result: *const GrafeoResult) -> *const c_char {
+    if result.is_null() {
+        return std::ptr::null();
+    }
+    // SAFETY: Caller guarantees valid pointer from grafeo_execute*.
+    unsafe { &*result }.nodes_json.as_ptr()
+}
+
+/// Get a JSON array of typed edge objects extracted from the result.
+///
+/// Each edge object has the structure:
+/// `{"element_type": "edge", "id": <u64>, "type": "...", "source_id": <u64>, "target_id": <u64>, "properties": {...}}`
+///
+/// Returns an empty array `"[]"` when the result contains no edge entities.
+/// The returned pointer is valid until `grafeo_free_result` is called.
+#[unsafe(no_mangle)]
+pub extern "C" fn grafeo_result_edges_json(result: *const GrafeoResult) -> *const c_char {
+    if result.is_null() {
+        return std::ptr::null();
+    }
+    // SAFETY: Caller guarantees valid pointer from grafeo_execute*.
+    unsafe { &*result }.edges_json.as_ptr()
 }
 
 /// Free a query result.

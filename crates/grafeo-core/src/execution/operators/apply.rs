@@ -40,6 +40,10 @@ pub struct ApplyOperator {
     /// Some(false) = anti-join (keep if inner has NO rows).
     /// Inner columns are NOT appended in EXISTS mode.
     exists_mode: Option<bool>,
+    /// EXISTS flag mode: instead of filtering rows, append a boolean column
+    /// indicating whether the inner plan produced results. All outer rows
+    /// are preserved. Used for EXISTS inside OR predicates.
+    exists_flag: bool,
     /// Buffered outer rows waiting to be combined with inner results.
     state: ApplyState,
 }
@@ -70,6 +74,7 @@ impl ApplyOperator {
             optional: false,
             inner_column_count: 0,
             exists_mode: None,
+            exists_flag: false,
             state: ApplyState::Init,
         }
     }
@@ -92,6 +97,7 @@ impl ApplyOperator {
             optional: false,
             inner_column_count: 0,
             exists_mode: None,
+            exists_flag: false,
             state: ApplyState::Init,
         }
     }
@@ -110,6 +116,15 @@ impl ApplyOperator {
     /// (`keep_matches=false`). Inner columns are NOT appended to the output.
     pub fn with_exists_mode(mut self, keep_matches: bool) -> Self {
         self.exists_mode = Some(keep_matches);
+        self
+    }
+
+    /// Enables EXISTS flag mode: instead of filtering, appends a boolean
+    /// column indicating whether the inner plan produced results. All outer
+    /// rows are preserved. Used for EXISTS inside OR predicates where
+    /// semi-join filtering would be incorrect.
+    pub fn with_exists_flag(mut self) -> Self {
+        self.exists_flag = true;
         self
     }
 
@@ -187,8 +202,15 @@ impl Operator for ApplyOperator {
                         // Reset and run inner plan for this outer row
                         self.inner.reset();
 
+                        // EXISTS flag mode: append boolean column, keep all rows
+                        if self.exists_flag {
+                            let has_results = self.inner.next()?.is_some();
+                            let mut combined = outer_values;
+                            combined.push(Value::Bool(has_results));
+                            output.push(combined);
+                        }
                         // EXISTS mode: check for row existence without appending inner columns
-                        if let Some(keep_matches) = self.exists_mode {
+                        else if let Some(keep_matches) = self.exists_mode {
                             let has_results = self.inner.next()?.is_some();
                             if has_results == keep_matches {
                                 output.push(outer_values);

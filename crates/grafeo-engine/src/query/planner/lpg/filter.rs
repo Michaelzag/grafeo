@@ -1,11 +1,11 @@
 //! Filter planning with zone map pre-filtering and index lookups.
 
 use super::{
-    ApplyOperator, Arc, BinaryOp, EmptyOperator, ExpressionPredicate, FilterExpression, FilterOp,
-    FilterOperator, GraphStore, HashAggregateOperator, HashJoinOperator, HashMap,
-    LogicalExpression, LogicalOperator, NodeListOperator, Operator, PhysicalAggregateExpr,
-    PhysicalJoinType, RangeBounds, Result, TransactionId, UnaryOp, Value, convert_binary_op,
-    convert_filter_expression,
+    ApplyOperator, Arc, BinaryOp, DistinctOperator, EmptyOperator, ExpressionPredicate,
+    FilterExpression, FilterOp, FilterOperator, GraphStore, HashAggregateOperator,
+    HashJoinOperator, HashMap, LogicalExpression, LogicalOperator, NodeListOperator, Operator,
+    PhysicalAggregateExpr, PhysicalJoinType, RangeBounds, Result, TransactionId, UnaryOp,
+    UnionOperator, Value, convert_binary_op, convert_filter_expression,
 };
 
 /// Cross-type equality comparison with Int64/Float64 coercion.
@@ -35,6 +35,15 @@ impl super::Planner {
             self.extract_complex_exists(&filter.predicate)
         {
             return self.plan_exists_as_semi_join(&filter.input, subquery, is_negated, remaining);
+        }
+
+        // Complex EXISTS inside OR predicates can't use semi-join (which filters).
+        // Instead, split the OR into two branches (EXISTS via semi-join, scalar
+        // via filter), union the results, and deduplicate.
+        if let Some((subquery, is_negated, other_pred)) =
+            self.extract_exists_from_or(&filter.predicate)
+        {
+            return self.plan_exists_or_as_union(&filter.input, subquery, is_negated, other_pred);
         }
 
         // Check for COUNT subquery comparisons and rewrite as Apply + Aggregate + Filter.
@@ -204,6 +213,73 @@ impl super::Planner {
             }
             _ => None,
         }
+    }
+
+    /// Checks if a top-level OR predicate contains a complex EXISTS subquery that
+    /// cannot use the inline fast path. Returns the EXISTS subplan, its negation
+    /// flag, and the other side of the OR.
+    fn extract_exists_from_or<'a>(
+        &self,
+        predicate: &'a LogicalExpression,
+    ) -> Option<(&'a LogicalOperator, bool, &'a LogicalExpression)> {
+        let LogicalExpression::Binary {
+            op: BinaryOp::Or,
+            left,
+            right,
+        } = predicate
+        else {
+            return None;
+        };
+
+        // Check left side for complex EXISTS
+        if let Some((subplan, negated)) = Self::extract_exists_from_expr(left)
+            && self.extract_exists_pattern(subplan).is_err()
+        {
+            return Some((subplan, negated, right));
+        }
+        // Check right side for complex EXISTS
+        if let Some((subplan, negated)) = Self::extract_exists_from_expr(right)
+            && self.extract_exists_pattern(subplan).is_err()
+        {
+            return Some((subplan, negated, left));
+        }
+        None
+    }
+
+    /// Plans a filter with `complex_EXISTS OR other_pred` using Union + Distinct.
+    ///
+    /// The OR is split into two branches:
+    /// 1. Semi-join (or anti-join for NOT EXISTS) for the EXISTS branch
+    /// 2. Normal filter for the scalar predicate branch
+    ///
+    /// The results are combined with UNION ALL and deduplicated.
+    fn plan_exists_or_as_union(
+        &self,
+        input: &LogicalOperator,
+        subquery: &LogicalOperator,
+        is_negated: bool,
+        other_predicate: &LogicalExpression,
+    ) -> Result<(Box<dyn Operator>, Vec<String>)> {
+        // Branch 1: rows matching EXISTS (via semi-join / anti-join)
+        let (exists_op, exists_cols) =
+            self.plan_exists_as_semi_join(input, subquery, is_negated, None)?;
+
+        // Branch 2: rows matching the scalar predicate (via normal filter)
+        let other_filter = super::FilterOp {
+            predicate: other_predicate.clone(),
+            input: Box::new(input.clone()),
+            pushdown_hint: None,
+        };
+        let (other_op, _other_cols) = self.plan_filter(&other_filter)?;
+
+        // Union both branches
+        let schema = self.derive_schema_from_columns(&exists_cols);
+        let union_op = UnionOperator::new(vec![exists_op, other_op], schema.clone());
+
+        // Deduplicate (OR semantics: each row appears at most once)
+        let distinct_op = DistinctOperator::new(Box::new(union_op), schema);
+
+        Ok((Box::new(distinct_op), exists_cols))
     }
 
     /// Plans a complex EXISTS/NOT EXISTS as a hash-based semi-join or anti-join.
