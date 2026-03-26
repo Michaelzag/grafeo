@@ -653,3 +653,154 @@ impl GraphStore for NullGraphStore {
         EpochId(0)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn null_graph_store_point_lookups() {
+        let store = NullGraphStore;
+        let nid = NodeId(1);
+        let eid = EdgeId(1);
+        let epoch = EpochId(0);
+        let txn = TransactionId(1);
+
+        assert!(store.get_node(nid).is_none());
+        assert!(store.get_edge(eid).is_none());
+        assert!(store.get_node_versioned(nid, epoch, txn).is_none());
+        assert!(store.get_edge_versioned(eid, epoch, txn).is_none());
+        assert!(store.get_node_at_epoch(nid, epoch).is_none());
+        assert!(store.get_edge_at_epoch(eid, epoch).is_none());
+    }
+
+    #[test]
+    fn null_graph_store_property_access() {
+        let store = NullGraphStore;
+        let nid = NodeId(1);
+        let eid = EdgeId(1);
+        let key = PropertyKey::from("name");
+
+        assert!(store.get_node_property(nid, &key).is_none());
+        assert!(store.get_edge_property(eid, &key).is_none());
+        assert_eq!(
+            store.get_node_property_batch(&[nid, NodeId(2)], &key),
+            vec![None, None]
+        );
+
+        let node_props = store.get_nodes_properties_batch(&[nid]);
+        assert_eq!(node_props.len(), 1);
+        assert!(node_props[0].is_empty());
+
+        let selective =
+            store.get_nodes_properties_selective_batch(&[nid], std::slice::from_ref(&key));
+        assert_eq!(selective.len(), 1);
+        assert!(selective[0].is_empty());
+
+        let edge_selective = store.get_edges_properties_selective_batch(&[eid], &[key]);
+        assert_eq!(edge_selective.len(), 1);
+        assert!(edge_selective[0].is_empty());
+    }
+
+    #[test]
+    fn null_graph_store_traversal() {
+        let store = NullGraphStore;
+        let nid = NodeId(1);
+
+        assert!(store.neighbors(nid, Direction::Outgoing).is_empty());
+        assert!(store.edges_from(nid, Direction::Incoming).is_empty());
+        assert_eq!(store.out_degree(nid), 0);
+        assert_eq!(store.in_degree(nid), 0);
+        assert!(!store.has_backward_adjacency());
+    }
+
+    #[test]
+    fn null_graph_store_scans_and_counts() {
+        let store = NullGraphStore;
+
+        assert!(store.node_ids().is_empty());
+        assert!(store.all_node_ids().is_empty());
+        assert!(store.nodes_by_label("Person").is_empty());
+        assert_eq!(store.node_count(), 0);
+        assert_eq!(store.edge_count(), 0);
+    }
+
+    #[test]
+    fn null_graph_store_metadata_and_schema() {
+        let store = NullGraphStore;
+        let eid = EdgeId(1);
+        let epoch = EpochId(0);
+        let txn = TransactionId(1);
+
+        assert!(store.edge_type(eid).is_none());
+        assert!(store.edge_type_versioned(eid, epoch, txn).is_none());
+        assert!(!store.has_property_index("name"));
+        assert!(store.all_labels().is_empty());
+        assert!(store.all_edge_types().is_empty());
+        assert!(store.all_property_keys().is_empty());
+    }
+
+    #[test]
+    fn null_graph_store_search() {
+        let store = NullGraphStore;
+        let key = PropertyKey::from("age");
+        let val = Value::Int64(30);
+
+        assert!(store.find_nodes_by_property("age", &val).is_empty());
+        assert!(
+            store
+                .find_nodes_by_properties(&[("age", val.clone())])
+                .is_empty()
+        );
+        assert!(
+            store
+                .find_nodes_in_range("age", Some(&val), None, true, false)
+                .is_empty()
+        );
+        assert!(!store.node_property_might_match(&key, CompareOp::Eq, &val));
+        assert!(!store.edge_property_might_match(&key, CompareOp::Eq, &val));
+    }
+
+    #[test]
+    fn null_graph_store_statistics() {
+        let store = NullGraphStore;
+
+        let _stats = store.statistics();
+        assert_eq!(store.estimate_label_cardinality("Person"), 0.0);
+        assert_eq!(store.estimate_avg_degree("KNOWS", true), 0.0);
+        assert_eq!(store.current_epoch(), EpochId(0));
+    }
+
+    #[test]
+    fn null_graph_store_visibility() {
+        let store = NullGraphStore;
+        let nid = NodeId(1);
+        let eid = EdgeId(1);
+        let epoch = EpochId(0);
+        let txn = TransactionId(1);
+
+        assert!(!store.is_node_visible_at_epoch(nid, epoch));
+        assert!(!store.is_node_visible_versioned(nid, epoch, txn));
+        assert!(!store.is_edge_visible_at_epoch(eid, epoch));
+        assert!(!store.is_edge_visible_versioned(eid, epoch, txn));
+
+        assert!(
+            store
+                .filter_visible_node_ids(&[nid, NodeId(2)], epoch)
+                .is_empty()
+        );
+        assert!(
+            store
+                .filter_visible_node_ids_versioned(&[nid], epoch, txn)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn null_graph_store_history() {
+        let store = NullGraphStore;
+
+        assert!(store.get_node_history(NodeId(1)).is_empty());
+        assert!(store.get_edge_history(EdgeId(1)).is_empty());
+    }
+}
