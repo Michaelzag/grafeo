@@ -522,7 +522,7 @@ class TestIntegerOverflow:
             result = list(db.execute("RETURN -9223372036854775808 - 1 AS r"))
             assert result[0]["r"] != 9223372036854775807
         except RuntimeError:
-            pass
+            pass  # Overflow error is acceptable
 
 
 # =============================================================================
@@ -581,7 +581,7 @@ class TestUnwindNull:
         try:
             db.execute("UNWIND NULL AS x INSERT (:Ghost {val: x})")
         except RuntimeError:
-            pass
+            pass  # Error on UNWIND NULL is acceptable
         result = list(db.execute("MATCH (n:Ghost) RETURN count(n) AS cnt"))
         assert result[0]["cnt"] == 0
 
@@ -657,7 +657,7 @@ class TestDoubleDelete:
         try:
             db.execute("MATCH (n:Temp) DELETE n")
         except RuntimeError:
-            pass
+            pass  # Double-delete may error, which is acceptable
         result = list(db.execute("MATCH (n) RETURN count(n) AS cnt"))
         assert result[0]["cnt"] == 0
 

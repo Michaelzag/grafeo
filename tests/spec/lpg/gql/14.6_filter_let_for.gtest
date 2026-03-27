@@ -1,0 +1,256 @@
+# GQL FILTER, LET, FOR statements: ISO/IEC 39075:2024 sec 14.6-14.8
+#
+# Covers: FILTER statement (14.6), LET statement (14.7), FOR statement (14.8),
+# FOR WITH ORDINALITY, FOR WITH OFFSET, linear query composition via NEXT-style
+# chaining of simple query statements.
+
+meta:
+  language: gql
+  model: lpg
+  section: "14.6"
+  title: FILTER, LET, FOR statements
+  dataset: empty
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # FILTER statement (sec 14.6)
+  # Spec: FILTER { WHERE condition | condition }
+  # Selects a subset of current working table records.
+  # ---------------------------------------------------------------------------
+
+  # Sec 14.6: FILTER with bare condition (no WHERE keyword)
+  - name: iso_14_6_filter_bare_condition
+    setup:
+      - "INSERT (:Person {name: 'Alix', age: 30})"
+      - "INSERT (:Person {name: 'Gus', age: 25})"
+      - "INSERT (:Person {name: 'Vincent', age: 35})"
+    query: MATCH (n:Person) FILTER n.age > 28 RETURN n.name
+    expect:
+      rows:
+        - [Alix]
+        - [Vincent]
+
+  # Sec 14.6: FILTER WHERE (explicit WHERE keyword after FILTER)
+  - name: iso_14_6_filter_where_explicit
+    setup:
+      - "INSERT (:Person {name: 'Alix', age: 30})"
+      - "INSERT (:Person {name: 'Gus', age: 25})"
+    query: MATCH (n:Person) FILTER WHERE n.age > 28 RETURN n.name
+    expect:
+      rows:
+        - [Alix]
+
+  # Sec 14.6: FILTER with equality comparison
+  - name: iso_14_6_filter_equality
+    setup:
+      - "INSERT (:City {name: 'Amsterdam'})"
+      - "INSERT (:City {name: 'Berlin'})"
+      - "INSERT (:City {name: 'Paris'})"
+    query: "MATCH (c:City) FILTER c.name = 'Berlin' RETURN c.name"
+    expect:
+      rows:
+        - [Berlin]
+
+  # Sec 14.6: FILTER with compound boolean expression
+  - name: iso_14_6_filter_compound_boolean
+    setup:
+      - "INSERT (:Person {name: 'Alix', age: 30, city: 'Amsterdam'})"
+      - "INSERT (:Person {name: 'Gus', age: 25, city: 'Berlin'})"
+      - "INSERT (:Person {name: 'Vincent', age: 35, city: 'Paris'})"
+    query: "MATCH (n:Person) FILTER n.age > 28 AND n.city = 'Amsterdam' RETURN n.name"
+    expect:
+      rows:
+        - [Alix]
+
+  # Sec 14.6: FILTER after MATCH with edge pattern
+  - name: iso_14_6_filter_after_edge_match
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:Person {name: 'Gus'})"
+      - "INSERT (:Person {name: 'Vincent'})"
+      - "MATCH (a:Person {name: 'Alix'}), (g:Person {name: 'Gus'}) INSERT (a)-[:KNOWS {since: 2020}]->(g)"
+      - "MATCH (a:Person {name: 'Alix'}), (v:Person {name: 'Vincent'}) INSERT (a)-[:KNOWS {since: 2023}]->(v)"
+    query: MATCH (a:Person)-[e:KNOWS]->(b:Person) FILTER e.since >= 2022 RETURN b.name
+    expect:
+      rows:
+        - [Vincent]
+
+  # Sec 14.6: FILTER that removes all rows yields empty result
+  - name: iso_14_6_filter_removes_all
+    setup:
+      - "INSERT (:N {v: 1})"
+      - "INSERT (:N {v: 2})"
+    query: MATCH (n:N) FILTER n.v > 100 RETURN n.v
+    expect:
+      empty: true
+
+  # ---------------------------------------------------------------------------
+  # LET statement (sec 14.7)
+  # Spec: LET var = expression [, var2 = expression2 ...]
+  # Adds columns to the current working table.
+  # ---------------------------------------------------------------------------
+
+  # Sec 14.7: Basic LET binding with arithmetic expression
+  - name: iso_14_7_let_basic
+    setup:
+      - "INSERT (:Person {name: 'Alix', age: 30})"
+    query: MATCH (n:Person) LET doubled = n.age * 2 RETURN n.name, doubled
+    expect:
+      rows:
+        - [Alix, 60]
+
+  # Sec 14.7: LET with multiple bindings in one statement
+  - name: iso_14_7_let_multiple_bindings
+    setup:
+      - "INSERT (:Person {name: 'Alix', age: 30})"
+    query: MATCH (n:Person) LET doubled = n.age * 2, next_year = n.age + 1 RETURN n.name, doubled, next_year
+    expect:
+      rows:
+        - [Alix, 60, 31]
+
+  # Sec 14.7: LET with string concatenation
+  - name: iso_14_7_let_string_expression
+    setup:
+      - "INSERT (:Person {name: 'Alix', city: 'Amsterdam'})"
+    query: "MATCH (n:Person) LET greeting = 'Hello ' + n.name RETURN greeting"
+    expect:
+      rows:
+        - [Hello Alix]
+
+  # Sec 14.7: LET bindings available in subsequent RETURN
+  - name: iso_14_7_let_with_filter
+    setup:
+      - "INSERT (:Person {name: 'Alix', age: 30})"
+      - "INSERT (:Person {name: 'Gus', age: 25})"
+      - "INSERT (:Person {name: 'Vincent', age: 35})"
+    query: MATCH (n:Person) LET score = n.age * 10 FILTER score > 280 RETURN n.name, score
+    expect:
+      rows:
+        - [Alix, 300]
+        - [Vincent, 350]
+
+  # Sec 14.7: LET with NULL propagation
+  - name: iso_14_7_let_null_propagation
+    setup:
+      - "INSERT (:N {name: 'Alix'})"
+    query: MATCH (n:N) LET result = n.missing + 1 RETURN result
+    expect:
+      rows:
+        - [null]
+
+  # Sec 14.7: LET with boolean expression
+  - name: iso_14_7_let_boolean
+    setup:
+      - "INSERT (:Person {name: 'Alix', age: 30})"
+      - "INSERT (:Person {name: 'Gus', age: 25})"
+    query: MATCH (n:Person) LET is_senior = n.age >= 30 RETURN n.name, is_senior
+    expect:
+      rows:
+        - [Alix, true]
+        - [Gus, false]
+
+  # ---------------------------------------------------------------------------
+  # FOR statement (sec 14.8)
+  # Spec: FOR variable IN list_expression [WITH ORDINALITY var | WITH OFFSET var]
+  # Unnests a list, expanding the current working table.
+  # ---------------------------------------------------------------------------
+
+  # Sec 14.8: Basic FOR iteration over a list literal
+  - name: iso_14_8_for_basic_list
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) FOR x IN [10, 20, 30] RETURN x"
+    expect:
+      rows:
+        - [10]
+        - [20]
+        - [30]
+
+  # Sec 14.8: FOR over a property that is a list
+  - name: iso_14_8_for_property_list
+    setup:
+      - "INSERT (:N {tags: ['alpha', 'beta', 'gamma']})"
+    query: MATCH (n:N) FOR t IN n.tags RETURN t
+    expect:
+      rows:
+        - [alpha]
+        - [beta]
+        - [gamma]
+
+  # Sec 14.8: FOR WITH ORDINALITY (1-based position per spec)
+  - name: iso_14_8_for_with_ordinality
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) FOR x IN ['a', 'b', 'c'] WITH ORDINALITY pos RETURN x, pos"
+    expect:
+      ordered: true
+      rows:
+        - [a, 1]
+        - [b, 2]
+        - [c, 3]
+
+  # Sec 14.8: FOR WITH OFFSET (0-based position per spec)
+  - name: iso_14_8_for_with_offset
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) FOR x IN ['a', 'b', 'c'] WITH OFFSET idx RETURN x, idx"
+    expect:
+      ordered: true
+      rows:
+        - [a, 0]
+        - [b, 1]
+        - [c, 2]
+
+  # Sec 14.8: FOR cross-product with multiple input rows
+  - name: iso_14_8_for_cross_product
+    setup:
+      - "INSERT (:N {name: 'Alix'})"
+      - "INSERT (:N {name: 'Gus'})"
+    query: "MATCH (n:N) FOR x IN [1, 2] RETURN n.name, x"
+    expect:
+      rows:
+        - [Alix, 1]
+        - [Alix, 2]
+        - [Gus, 1]
+        - [Gus, 2]
+
+  # Sec 14.8: FOR over empty list yields no rows
+  - name: iso_14_8_for_empty_list
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) FOR x IN [] RETURN x"
+    expect:
+      empty: true
+
+  # ---------------------------------------------------------------------------
+  # Linear query composition (sec 14.3)
+  # Spec: simple query statements compose linearly, each receiving the
+  # working table from the previous statement.
+  # ---------------------------------------------------------------------------
+
+  # Sec 14.3: MATCH followed by LET followed by FILTER as linear composition
+  - name: iso_14_3_linear_composition_let_filter
+    setup:
+      - "INSERT (:Product {name: 'Widget', price: 25})"
+      - "INSERT (:Product {name: 'Gadget', price: 50})"
+      - "INSERT (:Product {name: 'Doohickey', price: 10})"
+    query: |
+      MATCH (p:Product)
+      LET total = p.price * 2
+      FILTER total > 30
+      RETURN p.name, total
+    expect:
+      rows:
+        - [Widget, 50]
+        - [Gadget, 100]
+
+  # Sec 14.3: MATCH followed by FOR followed by RETURN
+  - name: iso_14_3_linear_match_for_return
+    setup:
+      - "INSERT (:Person {name: 'Alix', hobbies: ['reading', 'coding']})"
+    query: MATCH (p:Person) FOR h IN p.hobbies RETURN p.name, h
+    expect:
+      rows:
+        - [Alix, reading]
+        - [Alix, coding]

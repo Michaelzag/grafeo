@@ -1,0 +1,66 @@
+# GraphQL on RDF model
+#
+# Covers: type-based queries on RDF-like data (Resource/Person nodes with URIs),
+# field selection, filters by property and URI, nested relationship traversals.
+
+meta:
+  language: graphql
+  model: rdf
+  section: queries
+  title: GraphQL queries on RDF data
+  dataset: rdf_people
+  requires: [graphql]
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # Basic type queries
+  # ---------------------------------------------------------------------------
+
+  - name: query_all_resources
+    query: "query { resource { uri name } }"
+    expect:
+      count: 2
+
+  - name: query_all_persons
+    query: "query { person { name age } }"
+    expect:
+      count: 2
+
+  # ---------------------------------------------------------------------------
+  # Filters
+  # ---------------------------------------------------------------------------
+
+  - name: filter_person_by_age
+    query: "query { person(age: 30) { name } }"
+    expect:
+      count: 1
+
+  - name: filter_resource_by_uri
+    query: |
+      query {
+        resource(uri: "http://example.org/person/alix") {
+          name
+          age
+        }
+      }
+    expect:
+      count: 1
+
+  # ---------------------------------------------------------------------------
+  # Nested traversals
+  # ---------------------------------------------------------------------------
+
+  - name: nested_knows_traversal
+    # Only Alix has a knows edge, so only 1 result with nested data
+    query: |
+      query {
+        person {
+          name
+          knows {
+            name
+          }
+        }
+      }
+    expect:
+      count: 1

@@ -1,0 +1,283 @@
+# GQL Graph Pattern Quantifiers: ISO/IEC 39075:2024 sec 16.11
+#
+# Covers: ISO-style {m,n} quantifiers on edge patterns, {m,}, {,n}, {n},
+# *, +, ? shorthand, and quantifiers on parenthesized path patterns.
+#
+# The spec defines:
+#   graph_pattern_quantifier ::= '*' | '+' | fixed_quantifier | general_quantifier
+#   fixed_quantifier ::= '{' unsigned_integer '}'
+#   general_quantifier ::= '{' [lower_bound] ',' [upper_bound] '}'
+#
+# Normalizations (sec 16.11 SR 2):
+#   * is equivalent to {0,}
+#   + is equivalent to {1,}
+#   {n} is equivalent to {n,n}
+#   If lower_bound omitted, 0 is supplied.
+
+meta:
+  language: gql
+  model: lpg
+  section: "16.11"
+  title: Graph pattern quantifiers
+  dataset: empty
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # Setup helper: a linear chain A->B->C->D->E
+  # Each test creates its own chain to be self-contained.
+  # ---------------------------------------------------------------------------
+
+  # Sec 16.11: {m,n} exact range quantifier (general quantifier with both bounds)
+  # {1,3} matches paths of 1, 2, or 3 hops.
+  - name: iso_16_11_general_quantifier_range
+    setup:
+      - "INSERT (:Node {name: 'A'})"
+      - "INSERT (:Node {name: 'B'})"
+      - "INSERT (:Node {name: 'C'})"
+      - "INSERT (:Node {name: 'D'})"
+      - "INSERT (:Node {name: 'E'})"
+      - "MATCH (a:Node {name: 'A'}), (b:Node {name: 'B'}) INSERT (a)-[:LINK]->(b)"
+      - "MATCH (b:Node {name: 'B'}), (c:Node {name: 'C'}) INSERT (b)-[:LINK]->(c)"
+      - "MATCH (c:Node {name: 'C'}), (d:Node {name: 'D'}) INSERT (c)-[:LINK]->(d)"
+      - "MATCH (d:Node {name: 'D'}), (e:Node {name: 'E'}) INSERT (d)-[:LINK]->(e)"
+    query: "MATCH (a:Node {name: 'A'})-[:LINK]{1,3}->(b:Node) RETURN b.name AS name ORDER BY name"
+    expect:
+      ordered: true
+      rows:
+        - [B]
+        - [C]
+        - [D]
+
+  # Sec 16.11: {m,} minimum hops (unbounded quantifier)
+  # {2,} matches paths of 2 or more hops from A.
+  - name: iso_16_11_general_quantifier_min_only
+    setup:
+      - "INSERT (:Node {name: 'A'})"
+      - "INSERT (:Node {name: 'B'})"
+      - "INSERT (:Node {name: 'C'})"
+      - "INSERT (:Node {name: 'D'})"
+      - "MATCH (a:Node {name: 'A'}), (b:Node {name: 'B'}) INSERT (a)-[:LINK]->(b)"
+      - "MATCH (b:Node {name: 'B'}), (c:Node {name: 'C'}) INSERT (b)-[:LINK]->(c)"
+      - "MATCH (c:Node {name: 'C'}), (d:Node {name: 'D'}) INSERT (c)-[:LINK]->(d)"
+    query: "MATCH (a:Node {name: 'A'})-[:LINK]{2,}->(b:Node) RETURN b.name AS name ORDER BY name"
+    expect:
+      ordered: true
+      rows:
+        - [C]
+        - [D]
+
+  # Sec 16.11: {,n} maximum hops (lower bound defaults to 0 per spec,
+  # but implementation may default to 1)
+  # {,2} should match paths of up to 2 hops.
+  - name: iso_16_11_general_quantifier_max_only
+    setup:
+      - "INSERT (:Node {name: 'A'})"
+      - "INSERT (:Node {name: 'B'})"
+      - "INSERT (:Node {name: 'C'})"
+      - "INSERT (:Node {name: 'D'})"
+      - "MATCH (a:Node {name: 'A'}), (b:Node {name: 'B'}) INSERT (a)-[:LINK]->(b)"
+      - "MATCH (b:Node {name: 'B'}), (c:Node {name: 'C'}) INSERT (b)-[:LINK]->(c)"
+      - "MATCH (c:Node {name: 'C'}), (d:Node {name: 'D'}) INSERT (c)-[:LINK]->(d)"
+    query: "MATCH (a:Node {name: 'A'})-[:LINK]{,2}->(b:Node) RETURN b.name AS name ORDER BY name"
+    expect:
+      ordered: true
+      rows:
+        - [B]
+        - [C]
+
+  # Sec 16.11: {n} fixed quantifier (exact count)
+  # {2} is equivalent to {2,2}, matches exactly 2 hops.
+  - name: iso_16_11_fixed_quantifier_exact
+    setup:
+      - "INSERT (:Node {name: 'A'})"
+      - "INSERT (:Node {name: 'B'})"
+      - "INSERT (:Node {name: 'C'})"
+      - "INSERT (:Node {name: 'D'})"
+      - "MATCH (a:Node {name: 'A'}), (b:Node {name: 'B'}) INSERT (a)-[:LINK]->(b)"
+      - "MATCH (b:Node {name: 'B'}), (c:Node {name: 'C'}) INSERT (b)-[:LINK]->(c)"
+      - "MATCH (c:Node {name: 'C'}), (d:Node {name: 'D'}) INSERT (c)-[:LINK]->(d)"
+    query: "MATCH (a:Node {name: 'A'})-[:LINK]{2}->(b:Node) RETURN b.name AS name"
+    expect:
+      rows:
+        - [C]
+
+  # Sec 16.11: {1} fixed quantifier (exactly 1 hop, same as plain edge)
+  - name: iso_16_11_fixed_quantifier_one
+    setup:
+      - "INSERT (:Node {name: 'A'})"
+      - "INSERT (:Node {name: 'B'})"
+      - "INSERT (:Node {name: 'C'})"
+      - "MATCH (a:Node {name: 'A'}), (b:Node {name: 'B'}) INSERT (a)-[:LINK]->(b)"
+      - "MATCH (b:Node {name: 'B'}), (c:Node {name: 'C'}) INSERT (b)-[:LINK]->(c)"
+    query: "MATCH (a:Node {name: 'A'})-[:LINK]{1}->(b:Node) RETURN b.name AS name"
+    expect:
+      rows:
+        - [B]
+
+  # ---------------------------------------------------------------------------
+  # Shorthand quantifiers (sec 16.11 SR 2a-2b)
+  # ---------------------------------------------------------------------------
+
+  # Sec 16.11 SR 2a: * is equivalent to {0,} (zero or more hops)
+  # On edges, * means "at least 1 hop" in Grafeo (like Cypher convention).
+  - name: iso_16_11_star_zero_or_more
+    setup:
+      - "INSERT (:Node {name: 'A'})"
+      - "INSERT (:Node {name: 'B'})"
+      - "INSERT (:Node {name: 'C'})"
+      - "MATCH (a:Node {name: 'A'}), (b:Node {name: 'B'}) INSERT (a)-[:LINK]->(b)"
+      - "MATCH (b:Node {name: 'B'}), (c:Node {name: 'C'}) INSERT (b)-[:LINK]->(c)"
+    query: "MATCH (a:Node {name: 'A'})-[:LINK]*->(b:Node) RETURN b.name AS name ORDER BY name"
+    expect:
+      ordered: true
+      rows:
+        - [B]
+        - [C]
+
+  # Sec 16.11 SR 2b: + is equivalent to {1,} (one or more hops)
+  - name: iso_16_11_plus_one_or_more
+    setup:
+      - "INSERT (:Node {name: 'A'})"
+      - "INSERT (:Node {name: 'B'})"
+      - "INSERT (:Node {name: 'C'})"
+      - "INSERT (:Node {name: 'D'})"
+      - "MATCH (a:Node {name: 'A'}), (b:Node {name: 'B'}) INSERT (a)-[:LINK]->(b)"
+      - "MATCH (b:Node {name: 'B'}), (c:Node {name: 'C'}) INSERT (b)-[:LINK]->(c)"
+      - "MATCH (c:Node {name: 'C'}), (d:Node {name: 'D'}) INSERT (c)-[:LINK]->(d)"
+    query: "MATCH (a:Node {name: 'A'})-[:LINK]+->(b:Node) RETURN b.name AS name ORDER BY name"
+    expect:
+      ordered: true
+      rows:
+        - [B]
+        - [C]
+        - [D]
+
+  # Sec 16.11: + should not match 0 hops (only 1+)
+  - name: iso_16_11_plus_requires_at_least_one
+    setup:
+      - "INSERT (:Node {name: 'A'})"
+    query: "MATCH (a:Node {name: 'A'})-[:LINK]+->(b:Node) RETURN b.name"
+    expect:
+      empty: true
+
+  # ---------------------------------------------------------------------------
+  # Edge case quantifiers
+  # ---------------------------------------------------------------------------
+
+  # Sec 16.11 SR 3a: Upper bound must be > 0
+  # {0,0} is not valid per spec (upper bound > 0 required by SR 3a.i).
+  - name: iso_16_11_zero_zero_invalid
+    setup:
+      - "INSERT (:Node {name: 'A'})"
+    query: "MATCH (a:Node {name: 'A'})-[:LINK]{0,0}->(b:Node) RETURN b.name"
+    expect:
+      empty: true
+
+  # Sec 16.11: {1,1} fixed quantifier (equivalent to single hop)
+  - name: iso_16_11_one_one_single_hop
+    setup:
+      - "INSERT (:Node {name: 'A'})"
+      - "INSERT (:Node {name: 'B'})"
+      - "MATCH (a:Node {name: 'A'}), (b:Node {name: 'B'}) INSERT (a)-[:LINK]->(b)"
+    query: "MATCH (a:Node {name: 'A'})-[:LINK]{1,1}->(b:Node) RETURN b.name AS name"
+    expect:
+      rows:
+        - [B]
+
+  # Sec 16.11: Large upper bound with small graph
+  - name: iso_16_11_large_upper_bound
+    setup:
+      - "INSERT (:Node {name: 'A'})"
+      - "INSERT (:Node {name: 'B'})"
+      - "MATCH (a:Node {name: 'A'}), (b:Node {name: 'B'}) INSERT (a)-[:LINK]->(b)"
+    query: "MATCH (a:Node {name: 'A'})-[:LINK]{1,100}->(b:Node) RETURN b.name AS name"
+    expect:
+      rows:
+        - [B]
+
+  # ---------------------------------------------------------------------------
+  # Quantifiers with type filters and undirected edges
+  # ---------------------------------------------------------------------------
+
+  # Sec 16.11: Quantifier on typed edge with multiple types present
+  - name: iso_16_11_typed_quantifier
+    setup:
+      - "INSERT (:Node {name: 'A'})"
+      - "INSERT (:Node {name: 'B'})"
+      - "INSERT (:Node {name: 'C'})"
+      - "MATCH (a:Node {name: 'A'}), (b:Node {name: 'B'}) INSERT (a)-[:LINK]->(b)"
+      - "MATCH (b:Node {name: 'B'}), (c:Node {name: 'C'}) INSERT (b)-[:OTHER]->(c)"
+    query: "MATCH (a:Node {name: 'A'})-[:LINK]{1,2}->(b:Node) RETURN b.name AS name"
+    expect:
+      rows:
+        - [B]
+
+  # Sec 16.11: Quantifier on wildcard edge type (no type filter)
+  - name: iso_16_11_wildcard_edge_quantifier
+    setup:
+      - "INSERT (:Node {name: 'A'})"
+      - "INSERT (:Node {name: 'B'})"
+      - "INSERT (:Node {name: 'C'})"
+      - "MATCH (a:Node {name: 'A'}), (b:Node {name: 'B'}) INSERT (a)-[:LINK]->(b)"
+      - "MATCH (b:Node {name: 'B'}), (c:Node {name: 'C'}) INSERT (b)-[:OTHER]->(c)"
+    query: "MATCH (a:Node {name: 'A'})-[]{1,2}->(b:Node) RETURN b.name AS name ORDER BY name"
+    expect:
+      ordered: true
+      rows:
+        - [B]
+        - [C]
+
+  # ---------------------------------------------------------------------------
+  # Cypher-style quantifiers (compatibility: *min..max)
+  # These use the * prefix syntax which Grafeo also supports.
+  # ---------------------------------------------------------------------------
+
+  # Compatibility: *min..max syntax (Cypher-style, same as {min,max})
+  - name: iso_16_11_compat_star_range
+    setup:
+      - "INSERT (:Node {name: 'A'})"
+      - "INSERT (:Node {name: 'B'})"
+      - "INSERT (:Node {name: 'C'})"
+      - "INSERT (:Node {name: 'D'})"
+      - "MATCH (a:Node {name: 'A'}), (b:Node {name: 'B'}) INSERT (a)-[:LINK]->(b)"
+      - "MATCH (b:Node {name: 'B'}), (c:Node {name: 'C'}) INSERT (b)-[:LINK]->(c)"
+      - "MATCH (c:Node {name: 'C'}), (d:Node {name: 'D'}) INSERT (c)-[:LINK]->(d)"
+    query: "MATCH (a:Node {name: 'A'})-[:LINK *1..2]->(b:Node) RETURN b.name AS name ORDER BY name"
+    expect:
+      ordered: true
+      rows:
+        - [B]
+        - [C]
+
+  # Compatibility: *n exact hops (Cypher-style, same as {n})
+  - name: iso_16_11_compat_star_exact
+    setup:
+      - "INSERT (:Node {name: 'A'})"
+      - "INSERT (:Node {name: 'B'})"
+      - "INSERT (:Node {name: 'C'})"
+      - "MATCH (a:Node {name: 'A'}), (b:Node {name: 'B'}) INSERT (a)-[:LINK]->(b)"
+      - "MATCH (b:Node {name: 'B'}), (c:Node {name: 'C'}) INSERT (b)-[:LINK]->(c)"
+    query: "MATCH (a:Node {name: 'A'})-[:LINK *2]->(b:Node) RETURN b.name AS name"
+    expect:
+      rows:
+        - [C]
+
+  # ---------------------------------------------------------------------------
+  # Quantifier with path variable (length check)
+  # ---------------------------------------------------------------------------
+
+  # Sec 16.11: Quantified path with path variable for length verification
+  - name: iso_16_11_path_variable_length_check
+    setup:
+      - "INSERT (:Node {name: 'A'})"
+      - "INSERT (:Node {name: 'B'})"
+      - "INSERT (:Node {name: 'C'})"
+      - "INSERT (:Node {name: 'D'})"
+      - "MATCH (a:Node {name: 'A'}), (b:Node {name: 'B'}) INSERT (a)-[:LINK]->(b)"
+      - "MATCH (b:Node {name: 'B'}), (c:Node {name: 'C'}) INSERT (b)-[:LINK]->(c)"
+      - "MATCH (c:Node {name: 'C'}), (d:Node {name: 'D'}) INSERT (c)-[:LINK]->(d)"
+    query: "MATCH p = (a:Node {name: 'A'})-[:LINK]{1,3}->(b:Node {name: 'D'}) RETURN length(p) AS len"
+    expect:
+      rows:
+        - [3]

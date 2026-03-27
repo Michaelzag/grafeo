@@ -99,3 +99,94 @@ tests:
     query: MATCH (n:Nothing1) RETURN n.v OTHERWISE MATCH (n:Nothing2) RETURN n.v
     expect:
       empty: true
+
+  # ---------------------------------------------------------------------------
+  # Additional set operation edge cases (sec 14.2)
+  # ---------------------------------------------------------------------------
+
+  # Sec 14.2: EXCEPT on disjoint sets returns all rows from the left operand
+  # When right operand shares no values with left, all left rows are kept.
+  - name: iso_14_2_except_disjoint_sets
+    setup:
+      - "INSERT (:N {v: 1})"
+      - "INSERT (:N {v: 2})"
+      - "INSERT (:N {v: 3})"
+      - "INSERT (:M {v: 10})"
+      - "INSERT (:M {v: 20})"
+    query: MATCH (n:N) RETURN n.v EXCEPT MATCH (m:M) RETURN m.v
+    expect:
+      rows:
+        - [1]
+        - [2]
+        - [3]
+
+  # Sec 14.2: INTERSECT on disjoint sets returns empty result
+  # When left and right share no common values, result is empty.
+  - name: iso_14_2_intersect_disjoint_sets
+    setup:
+      - "INSERT (:N {v: 1})"
+      - "INSERT (:N {v: 2})"
+      - "INSERT (:M {v: 10})"
+      - "INSERT (:M {v: 20})"
+    query: MATCH (n:N) RETURN n.v INTERSECT MATCH (m:M) RETURN m.v
+    expect:
+      empty: true
+
+  # Sec 14.2: UNION implicit DISTINCT (default when no set quantifier given)
+  # Per spec SR 1: if set quantifier is not specified, DISTINCT is implicit.
+  - name: iso_14_2_union_implicit_distinct
+    setup:
+      - "INSERT (:N {v: 1})"
+      - "INSERT (:M {v: 1})"
+    query: MATCH (n:N) RETURN n.v UNION MATCH (m:M) RETURN m.v
+    expect:
+      rows:
+        - [1]
+
+  # Sec 14.2: INTERSECT ALL preserves duplicate counts (min of M, N)
+  - name: iso_14_2_intersect_all_multiset
+    setup:
+      - "INSERT (:N {v: 1})"
+      - "INSERT (:N {v: 1})"
+      - "INSERT (:N {v: 1})"
+      - "INSERT (:N {v: 2})"
+      - "INSERT (:M {v: 1})"
+      - "INSERT (:M {v: 1})"
+      - "INSERT (:M {v: 3})"
+    query: MATCH (n:N) RETURN n.v INTERSECT ALL MATCH (m:M) RETURN m.v
+    expect:
+      rows:
+        - [1]
+        - [1]
+
+  # Sec 14.2: UNION ALL preserves all duplicates (M + N)
+  - name: iso_14_2_union_all_full_duplicates
+    setup:
+      - "INSERT (:N {v: 1})"
+      - "INSERT (:N {v: 1})"
+      - "INSERT (:M {v: 1})"
+    query: MATCH (n:N) RETURN n.v UNION ALL MATCH (m:M) RETURN m.v
+    expect:
+      rows:
+        - [1]
+        - [1]
+        - [1]
+
+  # Sec 14.2: EXCEPT with empty left operand returns empty
+  - name: iso_14_2_except_empty_left
+    setup:
+      - "INSERT (:M {v: 1})"
+    query: MATCH (n:NonExistent) RETURN n.v EXCEPT MATCH (m:M) RETURN m.v
+    expect:
+      empty: true
+
+  # Sec 14.2: EXCEPT with empty right operand returns all left rows
+  - name: iso_14_2_except_empty_right
+    setup:
+      - "INSERT (:N {v: 1})"
+      - "INSERT (:N {v: 2})"
+    query: MATCH (n:N) RETURN n.v EXCEPT MATCH (m:NonExistent) RETURN m.v
+    expect:
+      rows:
+        - [1]
+        - [2]

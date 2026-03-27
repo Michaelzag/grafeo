@@ -8,7 +8,7 @@ Query engine correctness improvements and unified declarative test suite.
 
 ### Added
 
-- **Declarative `.gtest` spec test framework**: new `grafeo-spec-tests` crate with a YAML-based test format, build.rs code generator, and runtime comparison library. 1000+ tests across all 7 language/model combinations (GQL, Cypher, Gremlin, GraphQL, SQL/PGQ, SPARQL, Rosetta cross-language) from a single source of truth
+- **Declarative `.gtest` spec test framework**: new `grafeo-spec-tests` crate with a YAML-based test format, build.rs code generator, and runtime comparison library. 850+ tests across all 7 language/model combinations (GQL, Cypher, Gremlin, GraphQL (LPG+RDF), SQL/PGQ, SPARQL and Rosetta cross-language) from a single source of truth
 - **EXISTS subquery in RETURN**: `RETURN EXISTS { MATCH (n)-[:R]->(:Label) } AS flag` now works for single-hop correlated patterns, including label-filtered endpoints
 - **Aggregate detection in GQL WITH**: `WITH count(n) AS cnt, max(n.val) AS mx` now correctly produces an aggregate operator instead of treating aggregates as scalar expressions
 

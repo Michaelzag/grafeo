@@ -1,0 +1,354 @@
+# Gremlin advanced steps: valueMap, elementMap, path, select, project, choose,
+#                        optional, coalesce, order, property, drop, predicates
+#
+# Based on the Apache TinkerPop Gremlin reference documentation.
+# Social network topology (from dataset):
+#   Persons: Alix(30, Amsterdam), Gus(25, Berlin), Vincent(35, Paris)
+#   Company: Grafeo OSS (founded 2025)
+#   Edges: Alix-KNOWS->Gus, Gus-KNOWS->Vincent, Alix-WORKS_AT->Grafeo OSS
+
+meta:
+  language: gremlin
+  model: lpg
+  section: "advanced"
+  title: Advanced Steps
+  dataset: social_network
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # order().by()
+  # ---------------------------------------------------------------------------
+
+  - name: order_by_property_asc
+    query: "g.V().hasLabel('Person').values('name').order()"
+    expect:
+      ordered: true
+      rows:
+        - [Alix]
+        - [Gus]
+        - [Vincent]
+
+  - name: order_by_age_asc
+    query: "g.V().hasLabel('Person').order().by('age', asc).values('name')"
+    expect:
+      ordered: true
+      rows:
+        - [Gus]
+        - [Alix]
+        - [Vincent]
+
+  - name: order_by_age_desc
+    query: "g.V().hasLabel('Person').order().by('age', desc).values('name')"
+    expect:
+      ordered: true
+      rows:
+        - [Vincent]
+        - [Alix]
+        - [Gus]
+
+  # ---------------------------------------------------------------------------
+  # project().by()
+  # ---------------------------------------------------------------------------
+
+  - name: project_name_and_age
+    query: "g.V().has('Person', 'name', 'Alix').project('name', 'age').by('name').by('age')"
+    expect:
+      count: 1
+
+  - name: project_single_key
+    query: "g.V().has('Person', 'name', 'Alix').project('name').by('name')"
+    expect:
+      count: 1
+
+  # ---------------------------------------------------------------------------
+  # Mutation: property(), drop()
+  # ---------------------------------------------------------------------------
+
+  - name: property_add_to_vertex
+    setup:
+      - "g.addV('Robot').property('name', 'R2D2')"
+    query: "g.V().has('Robot', 'name', 'R2D2').property('height', 96).values('height')"
+    expect:
+      rows:
+        - [96]
+
+  - name: property_update_existing
+    setup:
+      - "g.addV('Robot').property('name', 'R2D2').property('height', 96)"
+    query: "g.V().has('Robot', 'name', 'R2D2').property('height', 110).values('height')"
+    expect:
+      rows:
+        - [110]
+
+  - name: drop_vertex
+    setup:
+      - "g.addV('Temp').property('name', 'delete_me')"
+    query: "g.V().hasLabel('Temp').drop()"
+    expect:
+      empty: true
+
+  - name: drop_vertex_verify
+    statements:
+      - "g.addV('Temp').property('name', 'delete_me')"
+      - "g.V().hasLabel('Temp').drop()"
+      - "g.V().hasLabel('Temp').count()"
+    expect:
+      rows:
+        - [0]
+
+  # ---------------------------------------------------------------------------
+  # Predicates: eq(), neq(), within(), without(), between()
+  # ---------------------------------------------------------------------------
+
+  - name: predicate_eq
+    query: "g.V().has('age', eq(30)).values('name')"
+    expect:
+      rows:
+        - [Alix]
+
+  - name: predicate_neq
+    query: "g.V().has('age', neq(30)).values('name')"
+    expect:
+      rows:
+        - [Gus]
+        - [Vincent]
+
+  - name: predicate_within
+    query: "g.V().has('city', within('Amsterdam', 'Paris')).values('name')"
+    expect:
+      rows:
+        - [Alix]
+        - [Vincent]
+
+  - name: predicate_without
+    query: "g.V().has('city', without('Amsterdam')).hasLabel('Person').values('name')"
+    expect:
+      rows:
+        - [Gus]
+        - [Vincent]
+
+  - name: predicate_between
+    query: "g.V().has('age', between(25, 31)).values('name')"
+    expect:
+      rows:
+        - [Alix]
+        - [Gus]
+
+  # ---------------------------------------------------------------------------
+  # Text Predicates: containing(), startingWith(), endingWith()
+  # ---------------------------------------------------------------------------
+
+  - name: text_containing
+    query: "g.V().has('name', containing('li')).values('name')"
+    expect:
+      rows:
+        - [Alix]
+
+  - name: text_starting_with
+    query: "g.V().has('name', startingWith('Gu')).values('name')"
+    expect:
+      rows:
+        - [Gus]
+
+  - name: text_ending_with
+    query: "g.V().has('name', endingWith('ent')).values('name')"
+    expect:
+      rows:
+        - [Vincent]
+
+  # ---------------------------------------------------------------------------
+  # choose() conditional branching
+  # ---------------------------------------------------------------------------
+
+  - name: choose_if_then_else
+    query: "g.V().hasLabel('Person').choose(has('age', gt(28)), values('name'), values('city'))"
+    expect:
+      count: 3
+
+  - name: choose_with_has_key
+    query: "g.V().choose(has('age'), values('name'), values('name')).dedup()"
+    expect:
+      count: 4
+
+  # ---------------------------------------------------------------------------
+  # optional() step
+  # ---------------------------------------------------------------------------
+
+  - name: optional_with_result
+    query: "g.V().has('Person', 'name', 'Alix').optional(out('KNOWS'))"
+    expect:
+      count: 1
+
+  - name: optional_without_result
+    query: "g.V().has('Person', 'name', 'Vincent').optional(out('KNOWS'))"
+    expect:
+      count: 1
+
+  # ---------------------------------------------------------------------------
+  # coalesce() step
+  # ---------------------------------------------------------------------------
+
+  - name: coalesce_first_match
+    query: "g.V().has('Person', 'name', 'Alix').coalesce(out('KNOWS'), out('WORKS_AT')).values('name')"
+    expect:
+      rows:
+        - [Gus]
+
+  - name: coalesce_fallback
+    query: "g.V().has('Person', 'name', 'Vincent').coalesce(out('KNOWS'), out('FOLLOWS'), values('name'))"
+    expect:
+      count: 1
+
+  # ---------------------------------------------------------------------------
+  # id() and label() steps
+  # ---------------------------------------------------------------------------
+
+  - name: id_step
+    query: "g.V().has('Person', 'name', 'Alix').id()"
+    expect:
+      count: 1
+
+  - name: label_step
+    query: "g.V().has('Person', 'name', 'Alix').label()"
+    expect:
+      rows:
+        - [Person]
+
+  # ---------------------------------------------------------------------------
+  # values() with multiple keys
+  # ---------------------------------------------------------------------------
+
+  - name: values_multiple_keys
+    query: "g.V().has('Person', 'name', 'Alix').values('name', 'age')"
+    expect:
+      count: 2
+
+  # ---------------------------------------------------------------------------
+  # Multi-hop with filters
+  # ---------------------------------------------------------------------------
+
+  - name: multi_hop_with_has
+    query: "g.V().has('Person', 'name', 'Alix').out('KNOWS').has('age', gt(20)).values('name')"
+    expect:
+      rows:
+        - [Gus]
+
+  - name: out_in_roundtrip
+    query: "g.V().has('Person', 'name', 'Alix').out('KNOWS').in('KNOWS').values('name')"
+    expect:
+      rows:
+        - [Alix]
+
+  # ---------------------------------------------------------------------------
+  # Edge properties via outE/inE
+  # ---------------------------------------------------------------------------
+
+  - name: edge_property_via_out_e
+    query: "g.V().has('Person', 'name', 'Alix').outE('KNOWS').values('since')"
+    expect:
+      rows:
+        - [2020]
+
+  - name: edge_filter_by_property
+    query: "g.V().has('Person', 'name', 'Alix').outE('WORKS_AT').has('role', 'Engineer').inV().values('name')"
+    expect:
+      rows:
+        - [Grafeo OSS]
+
+  # ---------------------------------------------------------------------------
+  # Combining filter steps
+  # ---------------------------------------------------------------------------
+
+  - name: and_with_multiple_conditions
+    query: "g.V().and(has('age', gte(25)), has('age', lte(30))).values('name')"
+    expect:
+      rows:
+        - [Alix]
+        - [Gus]
+
+  - name: or_with_multiple_conditions
+    query: "g.V().or(has('age', lt(26)), has('age', gt(34))).values('name')"
+    expect:
+      rows:
+        - [Gus]
+        - [Vincent]
+
+  - name: not_with_label
+    query: "g.V().not(hasLabel('Company')).count()"
+    expect:
+      rows:
+        - [3]
+
+  # ---------------------------------------------------------------------------
+  # skip() step
+  # ---------------------------------------------------------------------------
+
+  - name: skip_vertices
+    query: g.V().hasLabel('Person').skip(2)
+    expect:
+      count: 1
+
+  # ---------------------------------------------------------------------------
+  # constant() step
+  # ---------------------------------------------------------------------------
+
+  - name: constant_value
+    query: "g.V().has('Person', 'name', 'Alix').constant('found')"
+    expect:
+      rows:
+        - [found]
+
+  # ---------------------------------------------------------------------------
+  # union() step
+  # ---------------------------------------------------------------------------
+
+  - name: union_two_traversals
+    query: "g.V().has('Person', 'name', 'Alix').union(out('KNOWS'), out('WORKS_AT')).count()"
+    expect:
+      rows:
+        - [2]
+
+  # ---------------------------------------------------------------------------
+  # where() with predicates
+  # ---------------------------------------------------------------------------
+
+  - name: where_with_out_traversal
+    query: "g.V().hasLabel('Person').where(out('KNOWS')).count()"
+    expect:
+      rows:
+        - [2]
+
+  - name: where_with_not_out
+    query: "g.V().hasLabel('Person').where(out('WORKS_AT')).values('name')"
+    expect:
+      rows:
+        - [Alix]
+
+  # ---------------------------------------------------------------------------
+  # Chained aggregation
+  # ---------------------------------------------------------------------------
+
+  - name: sum_after_values
+    query: g.V().hasLabel('Person').values('age').sum()
+    expect:
+      rows:
+        - [90]
+
+  - name: mean_after_values
+    query: g.V().hasLabel('Person').values('age').mean()
+    expect:
+      rows:
+        - [30]
+
+  - name: min_after_filter
+    query: "g.V().has('age', gt(24)).values('age').min()"
+    expect:
+      rows:
+        - [25]
+
+  - name: max_after_filter
+    query: "g.V().has('age', lt(36)).values('age').max()"
+    expect:
+      rows:
+        - [35]

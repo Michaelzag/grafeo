@@ -1,0 +1,262 @@
+# GQL Label Expressions: ISO/IEC 39075:2024 sec 16.8
+#
+# Covers: IS label (basic), conjunction (&), disjunction (|), negation (!),
+# wildcard (%), parenthesized combinations, label expressions on edges.
+#
+# The spec defines label expressions as:
+#   label_expression ::= label_term | label_disjunction
+#   label_disjunction ::= label_expression '|' label_term
+#   label_conjunction ::= label_term '&' label_factor
+#   label_negation ::= '!' label_primary
+#   label_primary ::= label_name | '%' (wildcard) | '(' label_expression ')'
+
+meta:
+  language: gql
+  model: lpg
+  section: "16.8"
+  title: Label expressions
+  dataset: empty
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # Basic IS label (sec 16.8, label_primary = label_name)
+  # ---------------------------------------------------------------------------
+
+  # Sec 16.8: IS Label on node pattern (basic label match)
+  - name: iso_16_8_is_label_basic
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:City {name: 'Amsterdam'})"
+    query: MATCH (n IS Person) RETURN n.name
+    expect:
+      rows:
+        - [Alix]
+
+  # Sec 16.8: IS Label with no matching nodes yields empty
+  - name: iso_16_8_is_label_no_match
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+    query: MATCH (n IS Animal) RETURN n.name
+    expect:
+      empty: true
+
+  # ---------------------------------------------------------------------------
+  # Label conjunction: IS Label1 & Label2 (sec 16.8, label_conjunction)
+  # Matches nodes that have ALL specified labels.
+  # ---------------------------------------------------------------------------
+
+  # Sec 16.8: Conjunction requires both labels present
+  - name: iso_16_8_conjunction_both_present
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:Person:Developer {name: 'Django'})"
+      - "INSERT (:Developer {name: 'Shosanna'})"
+    query: MATCH (n IS Person & Developer) RETURN n.name
+    expect:
+      rows:
+        - [Django]
+
+  # Sec 16.8: Conjunction with no matching node (neither has both labels)
+  - name: iso_16_8_conjunction_no_match
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:Developer {name: 'Gus'})"
+    query: MATCH (n IS Person & Developer) RETURN n.name
+    expect:
+      empty: true
+
+  # Sec 16.8: Conjunction of three labels
+  - name: iso_16_8_conjunction_triple
+    setup:
+      - "INSERT (:Person:Developer:Senior {name: 'Beatrix'})"
+      - "INSERT (:Person:Developer {name: 'Django'})"
+    query: MATCH (n IS Person & Developer & Senior) RETURN n.name
+    expect:
+      rows:
+        - [Beatrix]
+
+  # ---------------------------------------------------------------------------
+  # Label disjunction: IS Label1 | Label2 (sec 16.8, label_disjunction)
+  # Matches nodes that have ANY of the specified labels.
+  # ---------------------------------------------------------------------------
+
+  # Sec 16.8: Disjunction matches either label
+  - name: iso_16_8_disjunction_either
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:City {name: 'Amsterdam'})"
+      - "INSERT (:Company {name: 'Grafeo'})"
+    query: MATCH (n IS Person | City) RETURN n.name
+    expect:
+      rows:
+        - [Alix]
+        - [Amsterdam]
+
+  # Sec 16.8: Disjunction with overlapping labels (node has both)
+  - name: iso_16_8_disjunction_overlap
+    setup:
+      - "INSERT (:Person:Developer {name: 'Django'})"
+    query: MATCH (n IS Person | Developer) RETURN n.name
+    expect:
+      rows:
+        - [Django]
+
+  # Sec 16.8: Disjunction of three labels
+  - name: iso_16_8_disjunction_triple
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:City {name: 'Amsterdam'})"
+      - "INSERT (:Company {name: 'Grafeo'})"
+      - "INSERT (:Animal {name: 'Fido'})"
+    query: MATCH (n IS Person | City | Company) RETURN n.name
+    expect:
+      rows:
+        - [Alix]
+        - [Amsterdam]
+        - [Grafeo]
+
+  # ---------------------------------------------------------------------------
+  # Label negation: IS !Label (sec 16.8, label_negation)
+  # Matches nodes that do NOT have the specified label.
+  # ---------------------------------------------------------------------------
+
+  # Sec 16.8: Negation excludes nodes with the label
+  - name: iso_16_8_negation_basic
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:City {name: 'Amsterdam'})"
+      - "INSERT (:Company {name: 'Grafeo'})"
+    query: MATCH (n IS !Person) RETURN n.name
+    expect:
+      rows:
+        - [Amsterdam]
+        - [Grafeo]
+
+  # Sec 16.8: Negation of label that no node has (matches all)
+  - name: iso_16_8_negation_nonexistent
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:City {name: 'Amsterdam'})"
+    query: MATCH (n IS !Animal) RETURN n.name
+    expect:
+      rows:
+        - [Alix]
+        - [Amsterdam]
+
+  # ---------------------------------------------------------------------------
+  # Wildcard label: IS % (sec 16.8, wildcard_label)
+  # Matches any node regardless of label.
+  # Feature G074: "Label expression: wildcard label"
+  # ---------------------------------------------------------------------------
+
+  # Sec 16.8: Wildcard matches all nodes
+  - name: iso_16_8_wildcard_matches_all
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:City {name: 'Amsterdam'})"
+    query: MATCH (n IS %) RETURN n.name
+    expect:
+      rows:
+        - [Alix]
+        - [Amsterdam]
+
+  # Sec 16.8: Wildcard count equals total node count
+  - name: iso_16_8_wildcard_count
+    setup:
+      - "INSERT (:A {v: 1})"
+      - "INSERT (:B {v: 2})"
+      - "INSERT (:C {v: 3})"
+    query: MATCH (n IS %) RETURN count(n) AS cnt
+    expect:
+      rows:
+        - [3]
+
+  # ---------------------------------------------------------------------------
+  # Parenthesized label expressions (sec 16.8, parenthesized_label_expression)
+  # IS (Label1 | Label2) & !Label3
+  # ---------------------------------------------------------------------------
+
+  # Sec 16.8: Parenthesized disjunction with conjunction
+  - name: iso_16_8_parenthesized_disjunction_and_negation
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:Person:Internal {name: 'Gus'})"
+      - "INSERT (:Developer {name: 'Django'})"
+      - "INSERT (:Developer:Internal {name: 'Shosanna'})"
+      - "INSERT (:City {name: 'Amsterdam'})"
+    query: MATCH (n IS (Person | Developer) & !Internal) RETURN n.name
+    expect:
+      rows:
+        - [Alix]
+        - [Django]
+
+  # Sec 16.8: Parenthesized conjunction in disjunction
+  - name: iso_16_8_parenthesized_conjunction_in_disjunction
+    setup:
+      - "INSERT (:Person:Developer {name: 'Django'})"
+      - "INSERT (:City {name: 'Amsterdam'})"
+      - "INSERT (:Person {name: 'Alix'})"
+    query: MATCH (n IS (Person & Developer) | City) RETURN n.name
+    expect:
+      rows:
+        - [Django]
+        - [Amsterdam]
+
+  # ---------------------------------------------------------------------------
+  # Label expressions on edges (sec 16.8 + sec 16.7)
+  # Edge patterns: -[e IS TYPE1 | TYPE2]->
+  # ---------------------------------------------------------------------------
+
+  # Sec 16.8: Edge label disjunction (match multiple edge types)
+  - name: iso_16_8_edge_label_disjunction
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:Person {name: 'Gus'})"
+      - "INSERT (:Company {name: 'Grafeo'})"
+      - "MATCH (a:Person {name: 'Alix'}), (g:Person {name: 'Gus'}) INSERT (a)-[:KNOWS]->(g)"
+      - "MATCH (a:Person {name: 'Alix'}), (c:Company {name: 'Grafeo'}) INSERT (a)-[:WORKS_AT]->(c)"
+    query: "MATCH (a:Person {name: 'Alix'})-[e IS KNOWS | WORKS_AT]->(b) RETURN b.name"
+    expect:
+      rows:
+        - [Gus]
+        - [Grafeo]
+
+  # Sec 16.8: Edge label with single IS
+  - name: iso_16_8_edge_label_single_is
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:Person {name: 'Gus'})"
+      - "MATCH (a:Person {name: 'Alix'}), (g:Person {name: 'Gus'}) INSERT (a)-[:KNOWS]->(g)"
+    query: "MATCH (a:Person {name: 'Alix'})-[e IS KNOWS]->(b) RETURN b.name"
+    expect:
+      rows:
+        - [Gus]
+
+  # Sec 16.8: Edge label negation (match edges that are NOT of a given type)
+  - name: iso_16_8_edge_label_negation
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:Person {name: 'Gus'})"
+      - "INSERT (:Company {name: 'Grafeo'})"
+      - "MATCH (a:Person {name: 'Alix'}), (g:Person {name: 'Gus'}) INSERT (a)-[:KNOWS]->(g)"
+      - "MATCH (a:Person {name: 'Alix'}), (c:Company {name: 'Grafeo'}) INSERT (a)-[:WORKS_AT]->(c)"
+    query: "MATCH (a:Person {name: 'Alix'})-[e IS !WORKS_AT]->(b) RETURN b.name"
+    expect:
+      rows:
+        - [Gus]
+
+  # ---------------------------------------------------------------------------
+  # Colon syntax as alias for IS (sec 16.7, is_or_colon)
+  # The spec allows both IS and : as the label introduction keyword.
+  # ---------------------------------------------------------------------------
+
+  # Sec 16.7: Colon syntax equivalent to IS for basic label
+  - name: iso_16_7_colon_vs_is_equivalent
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:City {name: 'Amsterdam'})"
+    query: MATCH (n:Person) RETURN n.name
+    expect:
+      rows:
+        - [Alix]

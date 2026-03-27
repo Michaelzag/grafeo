@@ -1,0 +1,87 @@
+# Cypher administrative commands: CREATE INDEX, DROP INDEX, SHOW INDEXES, EXPLAIN, PROFILE
+#
+# Based on the openCypher specification and Neo4j Cypher administrative commands.
+
+meta:
+  language: cypher
+  model: lpg
+  section: "7"
+  title: Administrative Commands
+  dataset: empty
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # CREATE INDEX
+  # ---------------------------------------------------------------------------
+
+  - name: create_index_on_label_property
+    statements:
+      - "CREATE INDEX idx_person_name FOR (n:Person) ON (n.name)"
+      - "CREATE (:Person {name: 'Alix'})"
+      - "MATCH (n:Person {name: 'Alix'}) RETURN n.name"
+    expect:
+      rows:
+        - [Alix]
+
+  - name: create_index_and_query
+    statements:
+      - "CREATE INDEX idx_city_pop FOR (c:City) ON (c.population)"
+      - "CREATE (:City {name: 'Amsterdam', population: 900000})"
+      - "CREATE (:City {name: 'Berlin', population: 3600000})"
+      - "MATCH (c:City) WHERE c.population > 1000000 RETURN c.name"
+    expect:
+      rows:
+        - [Berlin]
+
+  # ---------------------------------------------------------------------------
+  # DROP INDEX
+  # ---------------------------------------------------------------------------
+
+  - name: drop_index
+    statements:
+      - "CREATE INDEX idx_person_name FOR (n:Person) ON (n.name)"
+      - "DROP INDEX idx_person_name"
+      - "CREATE (:Person {name: 'Alix'})"
+      - "MATCH (n:Person {name: 'Alix'}) RETURN n.name"
+    expect:
+      rows:
+        - [Alix]
+
+  # ---------------------------------------------------------------------------
+  # SHOW INDEXES
+  # ---------------------------------------------------------------------------
+
+  - name: show_indexes_empty
+    query: SHOW INDEXES
+    expect:
+      empty: true
+
+  - name: show_indexes_after_create
+    statements:
+      - "CREATE INDEX idx_person_name FOR (n:Person) ON (n.name)"
+      - "SHOW INDEXES"
+    expect:
+      count: 1
+
+  # ---------------------------------------------------------------------------
+  # EXPLAIN
+  # ---------------------------------------------------------------------------
+
+  - name: explain_match
+    setup:
+      - "CREATE (:Person {name: 'Alix'})"
+    query: "EXPLAIN MATCH (n:Person) RETURN n.name"
+    expect:
+      count: 1
+
+  # ---------------------------------------------------------------------------
+  # PROFILE
+  # ---------------------------------------------------------------------------
+
+  - name: profile_match
+    setup:
+      - "CREATE (:Person {name: 'Alix'})"
+    query: "PROFILE MATCH (n:Person) RETURN n.name"
+    expect:
+      count: 1

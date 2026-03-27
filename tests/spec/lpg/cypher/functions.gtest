@@ -1,0 +1,498 @@
+# Cypher functions: scalar, list, string, numeric, type conversion, temporal, path
+#
+# Based on the openCypher specification and Neo4j Cypher function reference.
+# Tests function categories not covered by expressions.gtest or other test files.
+
+meta:
+  language: cypher
+  model: lpg
+  section: "6"
+  title: Functions
+  dataset: empty
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # Scalar Functions: id(), labels(), type(), keys(), properties(), exists()
+  # ---------------------------------------------------------------------------
+
+  - name: id_of_node
+    setup:
+      - "CREATE (:Person {name: 'Alix'})"
+    query: "MATCH (n:Person {name: 'Alix'}) RETURN id(n) IS NOT NULL AS has_id"
+    expect:
+      rows:
+        - [true]
+
+  - name: labels_single
+    setup:
+      - "CREATE (:Person {name: 'Alix'})"
+    query: "MATCH (n:Person {name: 'Alix'}) RETURN labels(n) AS lbls"
+    expect:
+      rows:
+        - ["[Person]"]
+
+  - name: labels_multiple
+    setup:
+      - "CREATE (:Person:Developer {name: 'Alix'})"
+    query: "MATCH (n {name: 'Alix'}) RETURN size(labels(n)) AS cnt"
+    expect:
+      rows:
+        - [2]
+
+  - name: type_of_relationship
+    setup:
+      - "CREATE (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})"
+    query: "MATCH (:Person)-[r]->(:Person) RETURN type(r) AS t"
+    expect:
+      rows:
+        - [KNOWS]
+
+  - name: keys_of_node
+    setup:
+      - "CREATE (:Person {name: 'Alix', age: 30})"
+    query: "MATCH (n:Person {name: 'Alix'}) RETURN size(keys(n)) AS key_count"
+    expect:
+      rows:
+        - [2]
+
+  - name: properties_of_node
+    setup:
+      - "CREATE (:Person {name: 'Alix', age: 30})"
+    query: "MATCH (n:Person {name: 'Alix'}) RETURN properties(n) IS NOT NULL AS has_props"
+    expect:
+      rows:
+        - [true]
+
+  - name: exists_property_true
+    setup:
+      - "CREATE (:Person {name: 'Alix', age: 30})"
+    query: "MATCH (n:Person {name: 'Alix'}) RETURN exists(n.age) AS has_age"
+    expect:
+      rows:
+        - [true]
+
+  - name: exists_property_false
+    setup:
+      - "CREATE (:Person {name: 'Alix'})"
+    query: "MATCH (n:Person {name: 'Alix'}) RETURN exists(n.age) AS has_age"
+    expect:
+      rows:
+        - [false]
+
+  # ---------------------------------------------------------------------------
+  # List Functions: head(), last(), tail(), range(), size()
+  # ---------------------------------------------------------------------------
+
+  - name: head_of_list
+    setup:
+      - "CREATE (:N {v: 1})"
+    query: "MATCH (n:N) RETURN head([10, 20, 30]) AS r"
+    expect:
+      rows:
+        - [10]
+
+  - name: last_of_list
+    setup:
+      - "CREATE (:N {v: 1})"
+    query: "MATCH (n:N) RETURN last([10, 20, 30]) AS r"
+    expect:
+      rows:
+        - [30]
+
+  - name: tail_of_list
+    setup:
+      - "CREATE (:N {v: 1})"
+    query: "MATCH (n:N) RETURN tail([10, 20, 30]) AS r"
+    expect:
+      rows:
+        - ["[20, 30]"]
+
+  - name: range_default_step
+    setup:
+      - "CREATE (:N {v: 1})"
+    query: "MATCH (n:N) RETURN range(0, 4) AS r"
+    expect:
+      rows:
+        - ["[0, 1, 2, 3, 4]"]
+
+  - name: range_with_step
+    setup:
+      - "CREATE (:N {v: 1})"
+    query: "MATCH (n:N) RETURN range(0, 10, 3) AS r"
+    expect:
+      rows:
+        - ["[0, 3, 6, 9]"]
+
+  - name: size_of_list
+    setup:
+      - "CREATE (:N {v: 1})"
+    query: "MATCH (n:N) RETURN size([1, 2, 3]) AS r"
+    expect:
+      rows:
+        - [3]
+
+  - name: size_of_string
+    setup:
+      - "CREATE (:N {v: 'Amsterdam'})"
+    query: MATCH (n:N) RETURN size(n.v) AS r
+    expect:
+      rows:
+        - [9]
+
+  # ---------------------------------------------------------------------------
+  # String Functions: toLower(), toUpper(), trim(), replace(), substring(),
+  #                   split(), left(), right(), reverse()
+  # ---------------------------------------------------------------------------
+
+  - name: to_lower
+    setup:
+      - "CREATE (:N {v: 'Amsterdam'})"
+    query: MATCH (n:N) RETURN toLower(n.v) AS r
+    expect:
+      rows:
+        - [amsterdam]
+
+  - name: to_upper
+    setup:
+      - "CREATE (:N {v: 'Amsterdam'})"
+    query: MATCH (n:N) RETURN toUpper(n.v) AS r
+    expect:
+      rows:
+        - [AMSTERDAM]
+
+  - name: trim_whitespace
+    setup:
+      - "CREATE (:N {v: '  hello  '})"
+    query: MATCH (n:N) RETURN trim(n.v) AS r
+    expect:
+      rows:
+        - [hello]
+
+  - name: replace_substring
+    setup:
+      - "CREATE (:N {v: 'Amsterdam'})"
+    query: "MATCH (n:N) RETURN replace(n.v, 'dam', 'DAM') AS r"
+    expect:
+      rows:
+        - [AmsterDAM]
+
+  - name: substring_from_start
+    setup:
+      - "CREATE (:N {v: 'Amsterdam'})"
+    query: MATCH (n:N) RETURN substring(n.v, 0, 3) AS r
+    expect:
+      rows:
+        - [Ams]
+
+  - name: substring_to_end
+    setup:
+      - "CREATE (:N {v: 'Amsterdam'})"
+    query: MATCH (n:N) RETURN substring(n.v, 6) AS r
+    expect:
+      rows:
+        - [dam]
+
+  - name: split_string
+    setup:
+      - "CREATE (:N {v: 'one,two,three'})"
+    query: "MATCH (n:N) RETURN split(n.v, ',') AS r"
+    expect:
+      rows:
+        - ["[one, two, three]"]
+
+  - name: left_string
+    setup:
+      - "CREATE (:N {v: 'Amsterdam'})"
+    query: MATCH (n:N) RETURN left(n.v, 3) AS r
+    expect:
+      rows:
+        - [Ams]
+
+  - name: right_string
+    setup:
+      - "CREATE (:N {v: 'Amsterdam'})"
+    query: MATCH (n:N) RETURN right(n.v, 3) AS r
+    expect:
+      rows:
+        - [dam]
+
+  - name: reverse_string
+    setup:
+      - "CREATE (:N {v: 'hello'})"
+    query: MATCH (n:N) RETURN reverse(n.v) AS r
+    expect:
+      rows:
+        - [olleh]
+
+  # ---------------------------------------------------------------------------
+  # Numeric Functions: abs(), ceil(), floor(), round(), sign(), sqrt(), toInteger(),
+  #                    toFloat(), toString(), toBoolean()
+  # ---------------------------------------------------------------------------
+
+  - name: abs_positive
+    setup:
+      - "CREATE (:N {v: -42})"
+    query: MATCH (n:N) RETURN abs(n.v) AS r
+    expect:
+      rows:
+        - [42]
+
+  - name: ceil_float
+    setup:
+      - "CREATE (:N {v: 1})"
+    query: "MATCH (n:N) RETURN ceil(2.3) AS r"
+    expect:
+      rows:
+        - [3]
+
+  - name: floor_float
+    setup:
+      - "CREATE (:N {v: 1})"
+    query: "MATCH (n:N) RETURN floor(2.9) AS r"
+    expect:
+      rows:
+        - [2]
+
+  - name: round_float
+    setup:
+      - "CREATE (:N {v: 1})"
+    query: "MATCH (n:N) RETURN round(2.5) AS r"
+    expect:
+      rows:
+        - [3]
+
+  - name: sign_positive
+    setup:
+      - "CREATE (:N {v: 42})"
+    query: MATCH (n:N) RETURN sign(n.v) AS r
+    expect:
+      rows:
+        - [1]
+
+  - name: sign_negative
+    setup:
+      - "CREATE (:N {v: -42})"
+    query: MATCH (n:N) RETURN sign(n.v) AS r
+    expect:
+      rows:
+        - [-1]
+
+  - name: sign_zero
+    setup:
+      - "CREATE (:N {v: 0})"
+    query: MATCH (n:N) RETURN sign(n.v) AS r
+    expect:
+      rows:
+        - [0]
+
+  - name: sqrt_perfect_square
+    setup:
+      - "CREATE (:N {v: 1})"
+    query: "MATCH (n:N) RETURN sqrt(16.0) AS r"
+    expect:
+      rows:
+        - [4]
+
+  - name: to_integer_from_string
+    setup:
+      - "CREATE (:N {v: '42'})"
+    query: MATCH (n:N) RETURN toInteger(n.v) AS r
+    expect:
+      rows:
+        - [42]
+
+  - name: to_integer_from_float
+    setup:
+      - "CREATE (:N {v: 1})"
+    query: "MATCH (n:N) RETURN toInteger(3.7) AS r"
+    expect:
+      rows:
+        - [3]
+
+  - name: to_float_from_string
+    setup:
+      - "CREATE (:N {v: '3.14'})"
+    query: MATCH (n:N) RETURN toFloat(n.v) AS r
+    expect:
+      rows:
+        - [3.14]
+
+  - name: to_float_from_integer
+    setup:
+      - "CREATE (:N {v: 42})"
+    query: MATCH (n:N) RETURN toFloat(n.v) AS r
+    expect:
+      rows:
+        - [42]
+
+  - name: to_string_from_integer
+    setup:
+      - "CREATE (:N {v: 42})"
+    query: MATCH (n:N) RETURN toString(n.v) AS r
+    expect:
+      rows:
+        - [42]
+
+  - name: to_boolean_from_string_true
+    setup:
+      - "CREATE (:N {v: 'true'})"
+    query: MATCH (n:N) RETURN toBoolean(n.v) AS r
+    expect:
+      rows:
+        - [true]
+
+  - name: to_boolean_from_string_false
+    setup:
+      - "CREATE (:N {v: 'false'})"
+    query: MATCH (n:N) RETURN toBoolean(n.v) AS r
+    expect:
+      rows:
+        - [false]
+
+  # ---------------------------------------------------------------------------
+  # Temporal Functions: date(), time(), datetime(), duration()
+  # ---------------------------------------------------------------------------
+
+  - name: date_from_string
+    setup:
+      - "CREATE (:N {v: 1})"
+    query: "MATCH (n:N) RETURN date('2024-06-15') AS r"
+    expect:
+      rows:
+        - [2024-06-15]
+
+  - name: date_from_map
+    setup:
+      - "CREATE (:N {v: 1})"
+    query: "MATCH (n:N) RETURN date({year: 2024, month: 6, day: 15}) AS r"
+    expect:
+      rows:
+        - [2024-06-15]
+
+  - name: datetime_from_string
+    setup:
+      - "CREATE (:N {v: 1})"
+    query: "MATCH (n:N) RETURN datetime('2024-06-15T10:30:00') AS r"
+    expect:
+      count: 1
+
+  - name: duration_from_string
+    setup:
+      - "CREATE (:N {v: 1})"
+    query: "MATCH (n:N) RETURN duration('P1Y2M3D') AS r"
+    expect:
+      count: 1
+
+  # ---------------------------------------------------------------------------
+  # Path Functions: length(), nodes(), relationships()
+  # ---------------------------------------------------------------------------
+
+  - name: path_length
+    setup:
+      - "CREATE (:N {v: 1})-[:R]->(:N {v: 2})-[:R]->(:N {v: 3})"
+    query: "MATCH p = (:N {v: 1})-[:R*]->(:N {v: 3}) RETURN length(p) AS len"
+    expect:
+      rows:
+        - [2]
+
+  - name: path_length_single_hop
+    setup:
+      - "CREATE (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})"
+    query: "MATCH p = (a:Person {name: 'Alix'})-[:KNOWS]->(b) RETURN length(p) AS len"
+    expect:
+      rows:
+        - [1]
+
+  # ---------------------------------------------------------------------------
+  # Aggregate Functions: collect(), count(), sum(), avg(), min(), max(),
+  #                      stDev(), percentileDisc(), percentileCont()
+  # ---------------------------------------------------------------------------
+
+  - name: collect_names
+    setup:
+      - "CREATE (:Person {name: 'Alix'})"
+      - "CREATE (:Person {name: 'Gus'})"
+    query: MATCH (n:Person) RETURN collect(n.name) AS names
+    expect:
+      count: 1
+
+  - name: collect_distinct
+    setup:
+      - "CREATE (:N {v: 'a'})"
+      - "CREATE (:N {v: 'a'})"
+      - "CREATE (:N {v: 'b'})"
+    query: MATCH (n:N) RETURN size(collect(DISTINCT n.v)) AS cnt
+    expect:
+      rows:
+        - [2]
+
+  - name: count_with_distinct
+    setup:
+      - "CREATE (:N {v: 'a'})"
+      - "CREATE (:N {v: 'a'})"
+      - "CREATE (:N {v: 'b'})"
+    query: MATCH (n:N) RETURN count(DISTINCT n.v) AS cnt
+    expect:
+      rows:
+        - [2]
+
+  - name: sum_values
+    setup:
+      - "CREATE (:N {v: 10})"
+      - "CREATE (:N {v: 20})"
+      - "CREATE (:N {v: 30})"
+    query: MATCH (n:N) RETURN sum(n.v) AS total
+    expect:
+      rows:
+        - [60]
+
+  - name: avg_values
+    setup:
+      - "CREATE (:N {v: 10})"
+      - "CREATE (:N {v: 20})"
+      - "CREATE (:N {v: 30})"
+    query: MATCH (n:N) RETURN avg(n.v) AS average
+    expect:
+      rows:
+        - [20]
+
+  - name: min_values
+    setup:
+      - "CREATE (:N {v: 10})"
+      - "CREATE (:N {v: 20})"
+      - "CREATE (:N {v: 5})"
+    query: MATCH (n:N) RETURN min(n.v) AS minimum
+    expect:
+      rows:
+        - [5]
+
+  - name: max_values
+    setup:
+      - "CREATE (:N {v: 10})"
+      - "CREATE (:N {v: 20})"
+      - "CREATE (:N {v: 5})"
+    query: MATCH (n:N) RETURN max(n.v) AS maximum
+    expect:
+      rows:
+        - [20]
+
+  # ---------------------------------------------------------------------------
+  # Chained Function Calls
+  # ---------------------------------------------------------------------------
+
+  - name: chained_string_functions
+    setup:
+      - "CREATE (:N {v: '  Hello World  '})"
+    query: MATCH (n:N) RETURN toLower(trim(n.v)) AS r
+    expect:
+      rows:
+        - [hello world]
+
+  - name: nested_list_functions
+    setup:
+      - "CREATE (:N {v: 1})"
+    query: "MATCH (n:N) RETURN head(tail([1, 2, 3])) AS r"
+    expect:
+      rows:
+        - [2]
