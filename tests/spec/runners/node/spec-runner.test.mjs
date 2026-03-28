@@ -101,6 +101,8 @@ function isLanguageAvailable(db, language) {
     case 'cypher': return typeof db.executeCypher === 'function'
     case 'gremlin': return typeof db.executeGremlin === 'function'
     case 'graphql': return typeof db.executeGraphql === 'function'
+    case 'sparql': return typeof db.executeSparql === 'function'
+    case 'rdf': return typeof db.executeSparql === 'function'
     case 'sql-pgq': case 'sql_pgq': return typeof db.executeSql === 'function'
     case 'sparql': return typeof db.executeSparql === 'function'
     default: return false
