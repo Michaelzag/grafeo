@@ -2,7 +2,7 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
-## [0.5.29] - Unreleased
+## [0.5.29] - 2026-03-28
 
 Query engine correctness improvements and unified declarative test suite.
 
@@ -10,7 +10,7 @@ Query engine correctness improvements and unified declarative test suite.
 
 - **Turtle parser and serializer**: zero-dependency W3C Turtle support (`load_turtle()`, `to_turtle()` on `RdfStore`), with prefix detection, subject grouping, numeric/boolean shorthands, `a` shorthand, and line/column error positions
 - **N-Quads serializer**: `to_nquads()` on `RdfStore` for exporting default and named graphs in a single stream
-- **Declarative `.gtest` spec test framework**: new `grafeo-spec-tests` crate with a YAML-based test format, build.rs code generator, and runtime comparison library. 2000+ tests across all 7 language/model combinations (GQL, Cypher, Gremlin, GraphQL (LPG+RDF), SQL/PGQ, SPARQL and Rosetta cross-language) from a single source of truth, with runners for binding-level verification
+- **Declarative `.gtest` spec test framework**: new `grafeo-spec-tests` crate with a YAML-based test format, build.rs code generator, and runtime comparison library. 2500+ tests across all 7 language/model combinations (GQL, Cypher, Gremlin, GraphQL (LPG+RDF), SQL/PGQ, SPARQL and Rosetta cross-language) from a single source of truth, with runners for binding-level verification
 - **EXISTS subquery in RETURN**: `RETURN EXISTS { MATCH (n)-[:R]->(:Label) } AS flag` now works for single-hop correlated patterns, including label-filtered endpoints
 - **Aggregate detection in GQL WITH**: `WITH count(n) AS cnt, max(n.val) AS mx` now correctly produces an aggregate operator instead of treating aggregates as scalar expressions
 
@@ -25,7 +25,11 @@ Query engine correctness improvements and unified declarative test suite.
 - **CASE WHEN with NULL aggregate**: `WITH count(c) AS cc RETURN CASE WHEN cc = 0 THEN 0 ELSE ... END` no longer returns NULL when the WHEN branch is true
 - **EXISTS with property filters**: `EXISTS { (n)-[:R]->(m) WHERE m.age > 30 }` silently dropped the WHERE, matching all connected nodes
 - **Keywords as property names**: `{order: 3}` and `n.order` rejected `order` and other keywords in property contexts
-- **Binding spec runners**: temporal type-tag unwrapping, missing SPARQL/hash assertions, error test logic, WASM feature gating
+- **Gremlin `hasLabel` on edges**: `g.E().hasLabel('KNOWS')` returned 0 rows because the translator used node labels instead of edge type
+- **Gremlin parser**: added `regex()` predicate, `$param` parameters, mid-traversal `V()` step
+- **JSON Infinity/NaN lost through C FFI**: `SUM()` overflow returned `null` in bindings because JSON cannot represent infinity; now encoded as string `"Infinity"`
+- **C#/Dart temporal values**: dates, times, and durations returned as locale-dependent native types instead of ISO strings
+- **Binding spec runners**: replaced YAML library parsers (Go yaml.v3, C# YamlDotNet, Dart package:yaml) with line-based parsers matching Rust/Node.js/Python; fixed SPARQL dispatch, hash assertions, error test logic, WASM feature gating
 
 ## [0.5.28] - 2026-03-27
 
