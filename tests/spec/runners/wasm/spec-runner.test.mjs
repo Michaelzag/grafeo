@@ -185,11 +185,11 @@ for (const filePath of gtestFiles) {
       // Handle rosetta variants
       if (tc.variants && Object.keys(tc.variants).length > 0) {
         for (const [lang, query] of Object.entries(tc.variants)) {
-          it(`${tc.name}_${lang}`, () => {
-            if (!WASM_AVAILABLE) return expect(true).toBe(true) // skip
+          it(`${tc.name}_${lang}`, (ctx) => {
+            if (!WASM_AVAILABLE) return ctx.skip()
             const db = new Database()
             try {
-              if (!isLanguageAvailable(db, lang)) return // skip
+              if (!isLanguageAvailable(db, lang)) return ctx.skip()
               if (meta.dataset && meta.dataset !== 'empty') {
                 loadDataset(db, meta.dataset)
               }
@@ -202,20 +202,20 @@ for (const filePath of gtestFiles) {
         continue
       }
 
-      it(tc.name, () => {
-        if (!WASM_AVAILABLE) return expect(true).toBe(true) // skip
+      it(tc.name, (ctx) => {
+        if (!WASM_AVAILABLE) return ctx.skip()
 
         // Skip by field
-        if (tc.skip) return
+        if (tc.skip) return ctx.skip()
 
         const db = new Database()
         try {
           // Check language availability
-          if (!isLanguageAvailable(db, meta.language)) return
+          if (!isLanguageAvailable(db, meta.language)) return ctx.skip()
 
           // Check requires: skip if binding does not expose the required method
           for (const req of meta.requires) {
-            if (!isLanguageAvailable(db, req)) return // skip
+            if (!isLanguageAvailable(db, req)) return ctx.skip()
           }
 
           // Load dataset
