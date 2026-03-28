@@ -178,7 +178,12 @@ dynamic _decodeMap(Map m) {
     return m[r'$time'] as String? ?? '';
   }
   if (m.containsKey(r'$duration')) {
-    return _parseIsoDuration(m[r'$duration'] as String? ?? 'PT0S');
+    // Return the ISO string directly. Dart's Duration type cannot represent
+    // calendar components (years, months, days), only time-based durations.
+    return m[r'$duration'] as String? ?? 'PT0S';
+  }
+  if (m.containsKey(r'$zoned_datetime')) {
+    return m[r'$zoned_datetime'] as String? ?? '';
   }
 
   // Regular map

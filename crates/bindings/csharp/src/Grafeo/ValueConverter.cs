@@ -199,15 +199,19 @@ internal static class ValueConverter
         }
         if (element.TryGetProperty("$date", out var dateElement))
         {
-            return DateOnly.Parse(dateElement.GetString()!);
+            return dateElement.GetString() ?? "";
         }
         if (element.TryGetProperty("$time", out var timeElement))
         {
-            return TimeOnly.Parse(timeElement.GetString()!);
+            return timeElement.GetString() ?? "";
         }
         if (element.TryGetProperty("$duration", out var durElement))
         {
-            return System.Xml.XmlConvert.ToTimeSpan(durElement.GetString()!);
+            return durElement.GetString() ?? "";
+        }
+        if (element.TryGetProperty("$zoned_datetime", out var zdtElement))
+        {
+            return zdtElement.GetString() ?? "";
         }
 
         // Regular object

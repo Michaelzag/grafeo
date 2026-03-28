@@ -193,15 +193,11 @@ for (const filePath of gtestFiles) {
           it(`${tc.name}_${lang}`, (ctx) => {
             if (!WASM_AVAILABLE) return ctx.skip()
             const db = new Database()
-            try {
-              if (!isLanguageAvailable(db, lang)) return ctx.skip()
-              if (meta.dataset && meta.dataset !== 'empty') {
-                loadDataset(db, meta.dataset)
-              }
-              runTestCase(db, { ...tc, query }, lang, meta.language || 'gql')
-            } finally {
-              db.free()
+            if (!isLanguageAvailable(db, lang)) return ctx.skip()
+            if (meta.dataset && meta.dataset !== 'empty') {
+              loadDataset(db, meta.dataset)
             }
+            runTestCase(db, { ...tc, query }, lang, meta.language || 'gql')
           })
         }
         continue
@@ -214,24 +210,21 @@ for (const filePath of gtestFiles) {
         if (tc.skip) return ctx.skip()
 
         const db = new Database()
-        try {
-          // Check language availability
-          if (!isLanguageAvailable(db, meta.language)) return ctx.skip()
 
-          // Check requires: skip if binding does not expose the required method
-          for (const req of meta.requires) {
-            if (!isLanguageAvailable(db, req)) return ctx.skip()
-          }
+        // Check language availability
+        if (!isLanguageAvailable(db, meta.language)) return ctx.skip()
 
-          // Load dataset
-          if (meta.dataset && meta.dataset !== 'empty') {
-            loadDataset(db, meta.dataset)
-          }
-
-          runTestCase(db, tc, meta.language, meta.language || 'gql')
-        } finally {
-          db.free()
+        // Check requires: skip if binding does not expose the required method
+        for (const req of meta.requires) {
+          if (!isLanguageAvailable(db, req)) return ctx.skip()
         }
+
+        // Load dataset
+        if (meta.dataset && meta.dataset !== 'empty') {
+          loadDataset(db, meta.dataset)
+        }
+
+        runTestCase(db, tc, meta.language, meta.language || 'gql')
       })
     }
   })
