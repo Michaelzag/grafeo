@@ -225,6 +225,16 @@ func scalarToCanonical(node *yaml.Node) string {
 		return strconv.FormatFloat(f, 'f', -1, 64)
 	}
 
+	// Bare Infinity/NaN strings (yaml.v3 may tag these as !!str)
+	switch node.Value {
+	case "Infinity", "inf", "+inf":
+		return "Infinity"
+	case "-Infinity", "-inf":
+		return "-Infinity"
+	case "NaN":
+		return "NaN"
+	}
+
 	// String (including quoted scalars)
 	return node.Value
 }
@@ -609,11 +619,39 @@ func findGtestFiles(dir string) ([]string, error) {
 // .gtest file parsing
 // ---------------------------------------------------------------------------
 
+// quoteInlineQueries preprocesses .gtest YAML content to quote inline query
+// values that contain {key: value} patterns which confuse yaml.v3's parser.
+// Block scalars (query: |) are not affected.
+func quoteInlineQueries(data []byte) []byte {
+	lines := strings.Split(string(data), "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Match "query: <something with braces>" but not "query: |" (block scalar)
+		for _, prefix := range []string{"query: ", "- "} {
+			if !strings.HasPrefix(trimmed, prefix) {
+				continue
+			}
+			val := trimmed[len(prefix):]
+			if val == "" || val == "|" || strings.HasPrefix(val, "\"") || strings.HasPrefix(val, "'") {
+				continue
+			}
+			// If the value contains unquoted {key: value}, quote the entire value
+			if strings.Contains(val, "{") && strings.Contains(val, ": ") {
+				indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+				lines[i] = indent + prefix + "\"" + strings.ReplaceAll(val, "\"", "\\\"") + "\""
+			}
+		}
+	}
+	return []byte(strings.Join(lines, "\n"))
+}
+
 func parseGtestFile(path string) (*GtestFile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
+	// Preprocess to handle inline queries with {key: value} patterns
+	data = quoteInlineQueries(data)
 	var gf GtestFile
 	if err := yaml.Unmarshal(data, &gf); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)

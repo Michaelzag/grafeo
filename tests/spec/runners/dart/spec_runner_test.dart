@@ -594,10 +594,12 @@ List<File> _findGtestFiles(Directory dir) {
 // =============================================================================
 
 /// Run a single test case against [db].
-void _runTestCase(GrafeoDB db, _TestCase tc, String language) {
-  // Run setup queries in the file's declared language
+void _runTestCase(GrafeoDB db, _TestCase tc, String language,
+    [String? setupLanguage]) {
+  // Run setup queries in the file's declared language (not the variant language)
+  final setupLang = setupLanguage ?? language;
   for (final setupQ in tc.setup) {
-    _executeQuery(db, language, setupQ);
+    _executeQuery(db, setupLang, setupQ);
   }
 
   final exp = tc.expect;
@@ -745,7 +747,7 @@ void main() {
                   expect: tc.expect,
                   tags: tc.tags,
                 );
-                _runTestCase(db, variantTc, lang);
+                _runTestCase(db, variantTc, lang, meta.language);
               } finally {
                 db.close();
               }

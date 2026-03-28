@@ -56,15 +56,20 @@ const DATASETS_DIR = join(SPEC_DIR, 'datasets')
  * by the comparator functions (which call resultToRows internally).
  */
 function wrapRawResult(rawResult) {
+  // Eagerly copy data so the rawResult (which may borrow the WASM Database)
+  // can be released before db.free() is called.
+  const columns = [...rawResult.columns]
+  const rows = rawResult.rows.map(row => [...row])
+
   return {
-    columns: rawResult.columns,
-    length: rawResult.rows.length,
+    columns,
+    length: rows.length,
     toArray() {
       const arr = []
-      for (const row of rawResult.rows) {
+      for (const row of rows) {
         const obj = {}
-        for (let i = 0; i < rawResult.columns.length; i++) {
-          obj[rawResult.columns[i]] = row[i]
+        for (let i = 0; i < columns.length; i++) {
+          obj[columns[i]] = row[i]
         }
         arr.push(obj)
       }
