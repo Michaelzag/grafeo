@@ -1,0 +1,26 @@
+[package]
+name = "grafeo-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+grafeo-adapters = { path = "../crates/grafeo-adapters", features = ["gql"] }
+
+# Prevent this crate from interfering with the workspace
+[workspace]
+
+[[bin]]
+name = "gql_parse_raw"
+path = "fuzz_targets/gql_parse_raw.rs"
+doc = false
+
+[[bin]]
+name = "gql_parse_structured"
+path = "fuzz_targets/gql_parse_structured.rs"
+doc = false
