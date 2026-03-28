@@ -9,6 +9,7 @@ meta:
   section: "25.1"
   title: Graph Algorithms (Extended)
   dataset: empty
+  requires: [algos]
 
 tests:
 

@@ -9,6 +9,7 @@ meta:
   section: "25.1"
   title: Procedures
   dataset: empty
+  requires: [algos]
 
 tests:
 
