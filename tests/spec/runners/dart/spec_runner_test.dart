@@ -1,8 +1,8 @@
 /// Dart spec runner for .gtest files.
 ///
-/// Discovers all .gtest files under tests/spec/, parses them with the `yaml`
-/// package, and creates `package:test` groups and tests that execute queries
-/// through the Dart GrafeoDB bindings.
+/// Discovers all .gtest files under tests/spec/, parses them with a line-based
+/// parser (no YAML dependency), and creates `package:test` groups and tests
+/// that execute queries through the Dart GrafeoDB bindings.
 ///
 /// Run with:
 ///   dart test spec_runner_test.dart
@@ -15,7 +15,6 @@ import 'dart:math' as math;
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:grafeo/grafeo.dart';
 import 'package:test/test.dart';
-import 'package:yaml/yaml.dart';
 
 // =============================================================================
 // Paths
@@ -341,7 +340,7 @@ class AccumulatorSink<T> implements Sink<T> {
 }
 
 // =============================================================================
-// .gtest YAML parsing
+// .gtest line-based parsing (no YAML dependency)
 // =============================================================================
 
 /// Parsed metadata from a .gtest file.
@@ -419,154 +418,429 @@ class _GtestFile {
   _GtestFile(this.meta, this.tests);
 }
 
-/// Parse a .gtest YAML file.
+/// Mutable parse context that tracks the current line position.
+class _ParseContext {
+  final List<String> lines;
+  int idx;
+
+  _ParseContext(this.lines, [this.idx = 0]);
+}
+
+// ---------------------------------------------------------------------------
+// Top-level parser
+// ---------------------------------------------------------------------------
+
+/// Parse a .gtest file using the line-based parser.
 _GtestFile _parseGtestFile(File file) {
   final content = file.readAsStringSync();
-  final doc = loadYaml(content);
-  if (doc is! YamlMap) {
-    throw FormatException('Expected YAML mapping at top level in ${file.path}');
-  }
-  final meta = _parseMeta(doc['meta']);
-  final rawTests = doc['tests'];
-  final tests = <_TestCase>[];
-  if (rawTests is YamlList) {
-    for (final raw in rawTests) {
-      tests.add(_parseTestCase(raw));
-    }
-  }
+  final lines = content.split(RegExp(r'\r?\n'));
+  final ctx = _ParseContext(lines);
+
+  _skipBlankAndComments(ctx);
+  final meta = _parseMeta(ctx);
+  _skipBlankAndComments(ctx);
+  final tests = _parseTests(ctx);
   return _GtestFile(meta, tests);
 }
 
-_Meta _parseMeta(dynamic d) {
-  if (d == null || d is! YamlMap) return _Meta();
-  return _Meta(
-    language: _asString(d['language'], 'gql'),
-    dataset: _asString(d['dataset'], 'empty'),
-    requires: _asStringList(d['requires']),
-    tags: _asStringList(d['tags']),
-  );
+// ---------------------------------------------------------------------------
+// Meta block
+// ---------------------------------------------------------------------------
+
+_Meta _parseMeta(_ParseContext ctx) {
+  final meta = _Meta();
+  _expectLine(ctx, 'meta:');
+  while (ctx.idx < ctx.lines.length) {
+    _skipBlankAndComments(ctx);
+    if (ctx.idx >= ctx.lines.length) break;
+    final line = ctx.lines[ctx.idx];
+    if (!line.startsWith(' ') && !line.startsWith('\t')) break;
+    final kv = _parseKV(line.trim());
+    if (kv == null) {
+      ctx.idx++;
+      continue;
+    }
+    final (key, value) = kv;
+    switch (key) {
+      case 'language':
+        meta.language = value;
+      case 'dataset':
+        meta.dataset = value;
+      case 'requires':
+        meta.requires = _parseYamlList(value);
+      case 'tags':
+        meta.tags = _parseYamlList(value);
+    }
+    ctx.idx++;
+  }
+  return meta;
 }
 
-_TestCase _parseTestCase(dynamic d) {
-  if (d is! YamlMap) return _TestCase();
-  final tc = _TestCase(
-    name: _asString(d['name'], ''),
-    skip: d['skip']?.toString(),
-    tags: _asStringList(d['tags']),
-  );
+// ---------------------------------------------------------------------------
+// Tests list
+// ---------------------------------------------------------------------------
 
-  // query
-  final q = d['query'];
-  if (q != null) tc.query = q.toString().trim();
-
-  // setup / statements
-  tc.setup = _asStringList(d['setup']);
-  tc.statements = _asStringList(d['statements']);
-
-  // variants
-  final rawVariants = d['variants'];
-  if (rawVariants is YamlMap) {
-    tc.variants = {
-      for (final entry in rawVariants.entries)
-        entry.key.toString(): entry.value.toString().trim(),
-    };
+List<_TestCase> _parseTests(_ParseContext ctx) {
+  _skipBlankAndComments(ctx);
+  _expectLine(ctx, 'tests:');
+  final tests = <_TestCase>[];
+  while (ctx.idx < ctx.lines.length) {
+    _skipBlankAndComments(ctx);
+    if (ctx.idx >= ctx.lines.length) break;
+    final trimmed = ctx.lines[ctx.idx].trim();
+    if (trimmed.startsWith('- name:')) {
+      tests.add(_parseSingleTest(ctx));
+    } else {
+      break;
+    }
   }
+  return tests;
+}
 
-  // expect
-  final rawExpect = d['expect'];
-  if (rawExpect is YamlMap) {
-    tc.expect = _parseExpect(rawExpect);
+_TestCase _parseSingleTest(_ParseContext ctx) {
+  final tc = _TestCase();
+
+  // First line: "- name: xxx"
+  final first = ctx.lines[ctx.idx].trim();
+  final kv = _parseKV(first.substring(2)); // strip "- "
+  if (kv != null) tc.name = _unquote(kv.$2);
+  ctx.idx++;
+
+  while (ctx.idx < ctx.lines.length) {
+    final line = ctx.lines[ctx.idx];
+    final trimmed = line.trim();
+    if (trimmed.startsWith('#')) {
+      ctx.idx++;
+      continue;
+    }
+    if (trimmed.startsWith('- name:')) break;
+    if (trimmed.isEmpty) {
+      ctx.idx++;
+      continue;
+    }
+
+    final kv2 = _parseKV(trimmed);
+    if (kv2 == null) {
+      ctx.idx++;
+      continue;
+    }
+    final (key, value) = kv2;
+    switch (key) {
+      case 'query':
+        if (value == '|') {
+          tc.query = _parseBlockScalar(ctx);
+        } else {
+          tc.query = _unquote(value);
+          ctx.idx++;
+        }
+      case 'skip':
+        tc.skip = _unquote(value);
+        ctx.idx++;
+      case 'setup':
+        ctx.idx++;
+        tc.setup = _parseStringList(ctx);
+      case 'statements':
+        ctx.idx++;
+        tc.statements = _parseStringList(ctx);
+      case 'tags':
+        tc.tags = _parseYamlList(value);
+        ctx.idx++;
+      case 'params':
+        ctx.idx++;
+        _parseMap(ctx, 6); // consume but discard (not used in Dart runner)
+      case 'expect':
+        ctx.idx++;
+        tc.expect = _parseExpectBlock(ctx);
+      case 'variants':
+        ctx.idx++;
+        tc.variants = _parseMap(ctx, 6);
+      default:
+        ctx.idx++;
+    }
   }
-
   return tc;
 }
 
-_Expect _parseExpect(YamlMap d) {
-  final e = _Expect(
-    ordered: d['ordered'] == true,
-    empty: d['empty'] == true,
-    columns: _asStringList(d['columns']),
-  );
+// ---------------------------------------------------------------------------
+// Expect block
+// ---------------------------------------------------------------------------
 
-  final count = d['count'];
-  if (count != null) e.count = count is int ? count : int.parse(count.toString());
+_Expect _parseExpectBlock(_ParseContext ctx) {
+  final e = _Expect();
+  while (ctx.idx < ctx.lines.length) {
+    final line = ctx.lines[ctx.idx];
+    final trimmed = line.trim();
+    if (trimmed.startsWith('#')) {
+      ctx.idx++;
+      continue;
+    }
+    if (trimmed.startsWith('- name:')) break;
+    if (!line.startsWith(' ') && !line.startsWith('\t') && trimmed.isNotEmpty) {
+      break;
+    }
+    if (trimmed.isEmpty) {
+      ctx.idx++;
+      continue;
+    }
 
-  final error = d['error'];
-  if (error != null) e.error = error.toString();
-
-  final hashVal = d['hash'];
-  if (hashVal != null) e.hash = hashVal.toString();
-
-  final precision = d['precision'];
-  if (precision != null) {
-    e.precision = precision is int ? precision : int.parse(precision.toString());
-  }
-
-  // rows: list of lists
-  final rawRows = d['rows'];
-  if (rawRows is YamlList) {
-    for (final rawRow in rawRows) {
-      if (rawRow is YamlList) {
-        e.rows.add([for (final v in rawRow) _yamlValueToString(v)]);
-      } else {
-        // Single-column shorthand
-        e.rows.add([_yamlValueToString(rawRow)]);
-      }
+    final kv = _parseKV(trimmed);
+    if (kv == null) break;
+    final (key, value) = kv;
+    switch (key) {
+      case 'ordered':
+        e.ordered = value == 'true';
+        ctx.idx++;
+      case 'count':
+        e.count = int.parse(value);
+        ctx.idx++;
+      case 'empty':
+        e.empty = value == 'true';
+        ctx.idx++;
+      case 'error':
+        e.error = _unquote(value);
+        ctx.idx++;
+      case 'hash':
+        e.hash = _unquote(value);
+        ctx.idx++;
+      case 'precision':
+        e.precision = int.parse(value);
+        ctx.idx++;
+      case 'columns':
+        e.columns = _parseYamlList(value);
+        ctx.idx++;
+      case 'rows':
+        ctx.idx++;
+        e.rows = _parseRows(ctx);
+      default:
+        ctx.idx++;
     }
   }
-
   return e;
 }
 
-/// Convert a YAML-parsed value to the canonical string representation.
-/// This handles the type coercions that YAML introduces (e.g. bool, int,
-/// float, null) so expected values match the Rust runner's output.
-String _yamlValueToString(dynamic val) {
-  if (val == null) return 'null';
-  if (val is bool) return val ? 'true' : 'false';
-  if (val is int) return val.toString();
-  if (val is double) {
-    if (val.isNaN) return 'NaN';
-    if (val.isInfinite) return val > 0 ? 'Infinity' : '-Infinity';
-    // Drop trailing .0 for whole numbers (matches Rust Display for f64).
-    if (val == val.truncateToDouble() && val.abs() < (1 << 53)) {
-      return val.toInt().toString();
+List<List<String>> _parseRows(_ParseContext ctx) {
+  final rows = <List<String>>[];
+  while (ctx.idx < ctx.lines.length) {
+    final trimmed = ctx.lines[ctx.idx].trim();
+    if (trimmed.startsWith('#')) {
+      ctx.idx++;
+      continue;
     }
-    return val.toString();
+    if (trimmed.isEmpty) {
+      ctx.idx++;
+      continue;
+    }
+    if (trimmed.startsWith('- [')) {
+      rows.add(_parseInlineList(trimmed.substring(2)));
+      ctx.idx++;
+    } else {
+      break;
+    }
   }
-  if (val is List) {
-    final inner = val.map(_yamlValueToString).join(', ');
-    return '[$inner]';
-  }
-  if (val is Map) {
-    final entries = val.entries
-        .map((e) => '${e.key}: ${_yamlValueToString(e.value)}')
-        .toList()
-      ..sort();
-    return '{${entries.join(', ')}}';
-  }
-  return val.toString();
+  return rows;
 }
 
-// =============================================================================
-// YAML utility helpers
-// =============================================================================
+// ---------------------------------------------------------------------------
+// Line-based primitives
+// ---------------------------------------------------------------------------
 
-String _asString(dynamic val, String defaultValue) {
-  if (val == null) return defaultValue;
-  return val.toString();
+/// Split a string on the first unquoted colon. Returns (key, value) or null.
+(String, String)? _parseKV(String s) {
+  var inSingle = false;
+  var inDouble = false;
+  for (var i = 0; i < s.length; i++) {
+    final c = s[i];
+    if (c == "'" && !inDouble) {
+      inSingle = !inSingle;
+    } else if (c == '"' && !inSingle) {
+      inDouble = !inDouble;
+    } else if (c == ':' && !inSingle && !inDouble) {
+      final key = s.substring(0, i).trim();
+      final value = s.substring(i + 1).trim();
+      if (key.isNotEmpty) return (key, value);
+    }
+  }
+  return null;
 }
 
-List<String> _asStringList(dynamic val) {
-  if (val == null) return [];
-  if (val is String) return [val];
-  if (val is YamlList) {
-    return [for (final v in val) v?.toString().trim() ?? ''];
+/// Strip surrounding quotes and process escape sequences.
+String _unquote(String s) {
+  s = s.trim();
+  if ((s.startsWith('"') && s.endsWith('"')) ||
+      (s.startsWith("'") && s.endsWith("'"))) {
+    return s
+        .substring(1, s.length - 1)
+        .replaceAll(r'\n', '\n')
+        .replaceAll(r'\t', '\t')
+        .replaceAll(r'\"', '"')
+        .replaceAll(r"\'", "'")
+        .replaceAll(r'\\', '\\');
   }
-  if (val is List) {
-    return [for (final v in val) v?.toString().trim() ?? ''];
+  return s;
+}
+
+/// Parse a YAML-style inline list like `[a, b, c]` into strings.
+List<String> _parseYamlList(String s) {
+  s = s.trim();
+  if (s == '[]' || s.isEmpty) return [];
+  if (s.startsWith('[') && s.endsWith(']')) {
+    return s
+        .substring(1, s.length - 1)
+        .split(',')
+        .map((v) => _unquote(v.trim()))
+        .where((v) => v.isNotEmpty)
+        .toList();
   }
-  return [val.toString()];
+  return [_unquote(s)];
+}
+
+/// Parse an inline list with nested bracket awareness, e.g. `[val1, [a, b]]`.
+List<String> _parseInlineList(String s) {
+  s = s.trim();
+  if (!s.startsWith('[') || !s.endsWith(']')) return [_unquote(s)];
+  final inner = s.substring(1, s.length - 1);
+  final items = <String>[];
+  var current = StringBuffer();
+  var depth = 0;
+  var inSingle = false;
+  var inDouble = false;
+  for (final c in inner.split('')) {
+    if (c == "'" && !inDouble && depth == 0) {
+      inSingle = !inSingle;
+      current.write(c);
+    } else if (c == '"' && !inSingle && depth == 0) {
+      inDouble = !inDouble;
+      current.write(c);
+    } else if ((c == '[' || c == '{') && !inSingle && !inDouble) {
+      depth++;
+      current.write(c);
+    } else if ((c == ']' || c == '}') && !inSingle && !inDouble) {
+      depth--;
+      current.write(c);
+    } else if (c == ',' && depth == 0 && !inSingle && !inDouble) {
+      items.add(_unquote(current.toString().trim()));
+      current = StringBuffer();
+    } else {
+      current.write(c);
+    }
+  }
+  final last = current.toString().trim();
+  if (last.isNotEmpty) items.add(_unquote(last));
+  return items;
+}
+
+/// Parse a YAML-style dash list (lines starting with `- `).
+List<String> _parseStringList(_ParseContext ctx) {
+  final items = <String>[];
+  while (ctx.idx < ctx.lines.length) {
+    final trimmed = ctx.lines[ctx.idx].trim();
+    if (trimmed.startsWith('#')) {
+      ctx.idx++;
+      continue;
+    }
+    if (trimmed.isEmpty) {
+      ctx.idx++;
+      continue;
+    }
+    if (trimmed.startsWith('- ')) {
+      final value = trimmed.substring(2);
+      if (value == '|') {
+        items.add(_parseBlockScalar(ctx));
+      } else {
+        items.add(_unquote(value));
+        ctx.idx++;
+      }
+    } else {
+      break;
+    }
+  }
+  return items;
+}
+
+/// Parse a key-value map at the given minimum indentation level.
+Map<String, String> _parseMap(_ParseContext ctx, int minIndent) {
+  final map = <String, String>{};
+  while (ctx.idx < ctx.lines.length) {
+    final line = ctx.lines[ctx.idx];
+    final trimmed = line.trim();
+    if (trimmed.startsWith('#') || trimmed.isEmpty) {
+      ctx.idx++;
+      continue;
+    }
+    if (trimmed.startsWith('- name:')) break;
+    final indent = line.length - line.trimLeft().length;
+    if (indent < minIndent) break;
+    final kv = _parseKV(trimmed);
+    if (kv != null) {
+      if (kv.$2 == '|') {
+        map[kv.$1] = _parseBlockScalar(ctx);
+      } else {
+        map[kv.$1] = _unquote(kv.$2);
+        ctx.idx++;
+      }
+    } else {
+      break;
+    }
+  }
+  return map;
+}
+
+/// Parse a YAML block scalar (lines after `|`).
+String _parseBlockScalar(_ParseContext ctx) {
+  ctx.idx++; // skip the "|" line
+  if (ctx.idx >= ctx.lines.length) return '';
+  final blockIndent =
+      ctx.lines[ctx.idx].length - ctx.lines[ctx.idx].trimLeft().length;
+  final parts = <String>[];
+  while (ctx.idx < ctx.lines.length) {
+    final line = ctx.lines[ctx.idx];
+    final trimmed = line.trim();
+    if (trimmed.isEmpty) {
+      parts.add('');
+      ctx.idx++;
+      continue;
+    }
+    final indent = line.length - line.trimLeft().length;
+    if (indent < blockIndent) break;
+    parts.add(line.substring(blockIndent));
+    ctx.idx++;
+  }
+  // Trim trailing empty lines, then join
+  while (parts.isNotEmpty && parts.last.isEmpty) {
+    parts.removeLast();
+  }
+  return parts.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Navigation helpers
+// ---------------------------------------------------------------------------
+
+/// Skip blank lines and comment lines (starting with #).
+void _skipBlankAndComments(_ParseContext ctx) {
+  while (ctx.idx < ctx.lines.length) {
+    final trimmed = ctx.lines[ctx.idx].trim();
+    if (trimmed.isEmpty || trimmed.startsWith('#')) {
+      ctx.idx++;
+    } else {
+      break;
+    }
+  }
+}
+
+/// Assert the current line matches [expected], then advance.
+void _expectLine(_ParseContext ctx, String expected) {
+  _skipBlankAndComments(ctx);
+  if (ctx.idx >= ctx.lines.length ||
+      ctx.lines[ctx.idx].trim() != expected) {
+    final got = ctx.idx < ctx.lines.length
+        ? ctx.lines[ctx.idx].trim()
+        : '<EOF>';
+    throw FormatException(
+      "Expected '$expected' at line ${ctx.idx + 1}, got '$got'",
+    );
+  }
+  ctx.idx++;
 }
 
 // =============================================================================

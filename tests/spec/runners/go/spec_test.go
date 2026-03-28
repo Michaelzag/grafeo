@@ -17,104 +17,52 @@ import (
 	"testing"
 
 	grafeo "github.com/GrafeoDB/grafeo/crates/bindings/go"
-	"gopkg.in/yaml.v3"
 )
 
 // ---------------------------------------------------------------------------
 // .gtest schema types
 // ---------------------------------------------------------------------------
 
-// GtestFile is the top-level structure of a .gtest YAML file.
+// GtestFile is the top-level structure of a .gtest file.
 type GtestFile struct {
-	Meta  Meta       `yaml:"meta"`
-	Tests []TestCase `yaml:"tests"`
+	Meta  Meta
+	Tests []TestCase
 }
 
 // Meta holds file-level metadata such as the query language and dataset.
 type Meta struct {
-	Language string   `yaml:"language"`
-	Model    string   `yaml:"model"`
-	Section  string   `yaml:"section"`
-	Title    string   `yaml:"title"`
-	Dataset  string   `yaml:"dataset"`
-	Requires []string `yaml:"requires"`
-	Tags     []string `yaml:"tags"`
+	Language string
+	Model    string
+	Section  string
+	Title    string
+	Dataset  string
+	Requires []string
+	Tags     []string
 }
 
 // TestCase represents a single test within a .gtest file.
 type TestCase struct {
-	Name       string            `yaml:"name"`
-	Query      string            `yaml:"query"`
-	Statements []string          `yaml:"statements"`
-	Setup      []string          `yaml:"setup"`
-	Params     map[string]string `yaml:"params"`
-	Tags       []string          `yaml:"tags"`
-	Skip       string            `yaml:"skip"`
-	Expect     Expect            `yaml:"expect"`
-	Variants   map[string]string `yaml:"variants"`
+	Name       string
+	Query      string
+	Statements []string
+	Setup      []string
+	Params     map[string]string
+	Tags       []string
+	Skip       string
+	Expect     Expect
+	Variants   map[string]string
 }
 
 // Expect holds the expected result assertions for a test case.
 type Expect struct {
-	Rows      [][]string `yaml:"-"` // Populated by custom UnmarshalYAML
-	Ordered   bool       `yaml:"ordered"`
-	Count     *int       `yaml:"count"`
-	Empty     bool       `yaml:"empty"`
-	Error     *string    `yaml:"error"`
-	Hash      *string    `yaml:"hash"`
-	Precision *int       `yaml:"precision"`
-	Columns   []string   `yaml:"columns"`
-}
-
-// UnmarshalYAML handles the Expect block, manually parsing `rows` to preserve
-// null values that Go's default YAML decoder would skip in slices.
-func (e *Expect) UnmarshalYAML(node *yaml.Node) error {
-	if node.Kind != yaml.MappingNode {
-		return nil
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := node.Content[i].Value
-		val := node.Content[i+1]
-		switch key {
-		case "rows":
-			if val.Kind == yaml.SequenceNode {
-				for _, rowNode := range val.Content {
-					if rowNode.Kind == yaml.SequenceNode {
-						cells := make([]string, len(rowNode.Content))
-						for j, cell := range rowNode.Content {
-							cells[j] = nodeToCanonical(cell)
-						}
-						e.Rows = append(e.Rows, cells)
-					}
-				}
-			}
-		case "ordered":
-			e.Ordered = val.Value == "true"
-		case "count":
-			if v, err := strconv.Atoi(val.Value); err == nil {
-				e.Count = &v
-			}
-		case "empty":
-			e.Empty = val.Value == "true"
-		case "error":
-			s := val.Value
-			e.Error = &s
-		case "hash":
-			s := val.Value
-			e.Hash = &s
-		case "precision":
-			if v, err := strconv.Atoi(val.Value); err == nil {
-				e.Precision = &v
-			}
-		case "columns":
-			if val.Kind == yaml.SequenceNode {
-				for _, c := range val.Content {
-					e.Columns = append(e.Columns, c.Value)
-				}
-			}
-		}
-	}
-	return nil
+	Rows      [][]string
+	Ordered   bool
+	Count     *int
+	Empty     bool
+	Error     *string
+	Hash      *string
+	Precision *int
+	Columns   []string
 }
 
 // ---------------------------------------------------------------------------
@@ -146,98 +94,6 @@ func executeQuery(db *grafeo.Database, language, query string) (*grafeo.QueryRes
 // ---------------------------------------------------------------------------
 // Canonical value serialization
 // ---------------------------------------------------------------------------
-
-// nodeToCanonical converts a yaml.Node to the canonical string representation
-// that matches the Rust spec-test runner's value_to_string.
-func nodeToCanonical(node *yaml.Node) string {
-	switch node.Kind {
-	case yaml.ScalarNode:
-		return scalarToCanonical(node)
-	case yaml.SequenceNode:
-		parts := make([]string, len(node.Content))
-		for i, child := range node.Content {
-			parts[i] = nodeToCanonical(child)
-		}
-		return "[" + strings.Join(parts, ", ") + "]"
-	case yaml.MappingNode:
-		entries := make([]string, 0, len(node.Content)/2)
-		for i := 0; i+1 < len(node.Content); i += 2 {
-			k := node.Content[i].Value
-			v := nodeToCanonical(node.Content[i+1])
-			entries = append(entries, k+": "+v)
-		}
-		sort.Strings(entries)
-		return "{" + strings.Join(entries, ", ") + "}"
-	case yaml.AliasNode:
-		return nodeToCanonical(node.Alias)
-	default:
-		return node.Value
-	}
-}
-
-// scalarToCanonical converts a YAML scalar node to its canonical string.
-func scalarToCanonical(node *yaml.Node) string {
-	// Null
-	if node.Tag == "!!null" || node.Value == "null" || node.Value == "~" || node.Value == "" {
-		if node.Tag == "!!null" || node.Value == "null" || node.Value == "~" {
-			return "null"
-		}
-		// Empty string with explicit tag
-		if node.Tag == "!!str" {
-			return ""
-		}
-		return "null"
-	}
-
-	// Boolean
-	if node.Tag == "!!bool" {
-		switch strings.ToLower(node.Value) {
-		case "true", "yes", "on":
-			return "true"
-		case "false", "no", "off":
-			return "false"
-		}
-	}
-
-	// Integer
-	if node.Tag == "!!int" {
-		return node.Value
-	}
-
-	// Float
-	if node.Tag == "!!float" {
-		switch node.Value {
-		case ".nan", ".NaN", ".NAN":
-			return "NaN"
-		case ".inf", ".Inf", ".INF":
-			return "Infinity"
-		case "-.inf", "-.Inf", "-.INF":
-			return "-Infinity"
-		}
-		f, err := strconv.ParseFloat(node.Value, 64)
-		if err != nil {
-			return node.Value
-		}
-		// Match Rust Display: whole numbers drop trailing .0
-		if f == math.Trunc(f) && !math.IsInf(f, 0) && !math.IsNaN(f) && math.Abs(f) < (1<<53) {
-			return strconv.FormatInt(int64(f), 10)
-		}
-		return strconv.FormatFloat(f, 'f', -1, 64)
-	}
-
-	// Bare Infinity/NaN strings (yaml.v3 may tag these as !!str)
-	switch node.Value {
-	case "Infinity", "inf", "+inf":
-		return "Infinity"
-	case "-Infinity", "-inf":
-		return "-Infinity"
-	case "NaN":
-		return "NaN"
-	}
-
-	// String (including quoted scalars)
-	return node.Value
-}
 
 // valueToString converts a Go interface{} value (as returned by grafeo Row)
 // to its canonical string representation for comparison.
@@ -616,55 +472,496 @@ func findGtestFiles(dir string) ([]string, error) {
 }
 
 // ---------------------------------------------------------------------------
-// .gtest file parsing
+// Line-based .gtest parser (ported from Node.js parser.mjs)
 // ---------------------------------------------------------------------------
 
-// quoteInlineQueries preprocesses .gtest YAML content to quote inline query
-// values that contain {key: value} patterns which confuse yaml.v3's parser.
-// Block scalars (query: |) are not affected.
-func quoteInlineQueries(data []byte) []byte {
-	lines := strings.Split(string(data), "\n")
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		// Match "query: <something with braces>" but not "query: |" (block scalar)
-		for _, prefix := range []string{"query: ", "- "} {
-			if !strings.HasPrefix(trimmed, prefix) {
-				continue
-			}
-			val := trimmed[len(prefix):]
-			if val == "" || val == "|" || strings.HasPrefix(val, "\"") || strings.HasPrefix(val, "'") {
-				continue
-			}
-			// If the value contains unquoted {key: value}, quote the entire value
-			if strings.Contains(val, "{") && strings.Contains(val, ": ") {
-				indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
-				lines[i] = indent + prefix + "\"" + strings.ReplaceAll(val, "\"", "\\\"") + "\""
-			}
-		}
-	}
-	return []byte(strings.Join(lines, "\n"))
+// parseContext holds the parser state: the lines of the file and the current
+// line index.
+type parseContext struct {
+	lines []string
+	idx   int
 }
 
+// parseGtestFile reads and parses a .gtest file using a line-based parser
+// (no YAML library). This mirrors the Node.js parser.mjs implementation.
 func parseGtestFile(path string) (*GtestFile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
-	// Preprocess to handle inline queries with {key: value} patterns
-	data = quoteInlineQueries(data)
-	var gf GtestFile
-	if err := yaml.Unmarshal(data, &gf); err != nil {
-		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	content := strings.ReplaceAll(string(data), "\r\n", "\n")
+	lines := strings.Split(content, "\n")
+	ctx := &parseContext{lines: lines, idx: 0}
+
+	skipBlankAndComments(ctx)
+	meta, err := parseMeta(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("parsing meta in %s: %w", path, err)
 	}
-	// Default language to gql
-	if gf.Meta.Language == "" {
-		gf.Meta.Language = "gql"
+	skipBlankAndComments(ctx)
+	tests, err := parseTests(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("parsing tests in %s: %w", path, err)
 	}
-	// Default dataset to empty
-	if gf.Meta.Dataset == "" {
-		gf.Meta.Dataset = "empty"
+	return &GtestFile{Meta: meta, Tests: tests}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Meta block
+// ---------------------------------------------------------------------------
+
+func parseMeta(ctx *parseContext) (Meta, error) {
+	meta := Meta{
+		Language: "gql",
+		Dataset:  "empty",
 	}
-	return &gf, nil
+	if err := expectLine(ctx, "meta:"); err != nil {
+		return meta, err
+	}
+	for ctx.idx < len(ctx.lines) {
+		skipBlankAndComments(ctx)
+		if ctx.idx >= len(ctx.lines) {
+			break
+		}
+		line := ctx.lines[ctx.idx]
+		if line == "" || (!strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t")) {
+			break
+		}
+		kv := parseKV(strings.TrimSpace(line))
+		if kv == nil {
+			ctx.idx++
+			continue
+		}
+		key, value := kv[0], kv[1]
+		switch key {
+		case "language":
+			meta.Language = value
+		case "model":
+			meta.Model = value
+		case "section":
+			meta.Section = unquote(value)
+		case "title":
+			meta.Title = value
+		case "dataset":
+			meta.Dataset = value
+		case "requires":
+			meta.Requires = parseYamlList(value)
+		case "tags":
+			meta.Tags = parseYamlList(value)
+		}
+		ctx.idx++
+	}
+	return meta, nil
+}
+
+// ---------------------------------------------------------------------------
+// Tests list
+// ---------------------------------------------------------------------------
+
+func parseTests(ctx *parseContext) ([]TestCase, error) {
+	skipBlankAndComments(ctx)
+	if err := expectLine(ctx, "tests:"); err != nil {
+		return nil, err
+	}
+	var tests []TestCase
+	for ctx.idx < len(ctx.lines) {
+		skipBlankAndComments(ctx)
+		if ctx.idx >= len(ctx.lines) {
+			break
+		}
+		trimmed := strings.TrimSpace(ctx.lines[ctx.idx])
+		if strings.HasPrefix(trimmed, "- name:") {
+			tc := parseSingleTest(ctx)
+			tests = append(tests, tc)
+		} else {
+			break
+		}
+	}
+	return tests, nil
+}
+
+func parseSingleTest(ctx *parseContext) TestCase {
+	tc := TestCase{
+		Params:   make(map[string]string),
+		Variants: make(map[string]string),
+	}
+
+	// First line: "- name: xxx"
+	first := strings.TrimSpace(ctx.lines[ctx.idx])
+	kv := parseKV(first[2:]) // strip "- "
+	if kv != nil {
+		tc.Name = unquote(kv[1])
+	}
+	ctx.idx++
+
+	for ctx.idx < len(ctx.lines) {
+		line := ctx.lines[ctx.idx]
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			ctx.idx++
+			continue
+		}
+		if strings.HasPrefix(trimmed, "- name:") {
+			break
+		}
+		if trimmed == "" {
+			ctx.idx++
+			continue
+		}
+
+		kv2 := parseKV(trimmed)
+		if kv2 == nil {
+			ctx.idx++
+			continue
+		}
+		key, value := kv2[0], kv2[1]
+		switch key {
+		case "query":
+			if value == "|" {
+				tc.Query = parseBlockScalar(ctx)
+			} else {
+				tc.Query = unquote(value)
+				ctx.idx++
+			}
+		case "skip":
+			tc.Skip = unquote(value)
+			ctx.idx++
+		case "setup":
+			ctx.idx++
+			tc.Setup = parseStringList(ctx)
+		case "statements":
+			ctx.idx++
+			tc.Statements = parseStringList(ctx)
+		case "tags":
+			tc.Tags = parseYamlList(value)
+			ctx.idx++
+		case "params":
+			ctx.idx++
+			tc.Params = parseMap(ctx, 6)
+		case "expect":
+			ctx.idx++
+			tc.Expect = parseExpectBlock(ctx)
+		case "variants":
+			ctx.idx++
+			tc.Variants = parseMap(ctx, 6)
+		default:
+			ctx.idx++
+		}
+	}
+	return tc
+}
+
+// ---------------------------------------------------------------------------
+// Expect block
+// ---------------------------------------------------------------------------
+
+func parseExpectBlock(ctx *parseContext) Expect {
+	exp := Expect{}
+	for ctx.idx < len(ctx.lines) {
+		line := ctx.lines[ctx.idx]
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			ctx.idx++
+			continue
+		}
+		if strings.HasPrefix(trimmed, "- name:") {
+			break
+		}
+		if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") && trimmed != "" {
+			break
+		}
+		if trimmed == "" {
+			ctx.idx++
+			continue
+		}
+
+		kv := parseKV(trimmed)
+		if kv == nil {
+			break
+		}
+		key, value := kv[0], kv[1]
+		switch key {
+		case "ordered":
+			exp.Ordered = value == "true"
+			ctx.idx++
+		case "count":
+			if v, err := strconv.Atoi(value); err == nil {
+				exp.Count = &v
+			}
+			ctx.idx++
+		case "empty":
+			exp.Empty = value == "true"
+			ctx.idx++
+		case "error":
+			s := unquote(value)
+			exp.Error = &s
+			ctx.idx++
+		case "hash":
+			s := unquote(value)
+			exp.Hash = &s
+			ctx.idx++
+		case "precision":
+			if v, err := strconv.Atoi(value); err == nil {
+				exp.Precision = &v
+			}
+			ctx.idx++
+		case "columns":
+			exp.Columns = parseYamlList(value)
+			ctx.idx++
+		case "rows":
+			ctx.idx++
+			exp.Rows = parseRows(ctx)
+		default:
+			ctx.idx++
+		}
+	}
+	return exp
+}
+
+func parseRows(ctx *parseContext) [][]string {
+	var rows [][]string
+	for ctx.idx < len(ctx.lines) {
+		trimmed := strings.TrimSpace(ctx.lines[ctx.idx])
+		if strings.HasPrefix(trimmed, "#") {
+			ctx.idx++
+			continue
+		}
+		if trimmed == "" {
+			ctx.idx++
+			continue
+		}
+		if strings.HasPrefix(trimmed, "- [") {
+			rows = append(rows, parseInlineList(trimmed[2:]))
+			ctx.idx++
+		} else {
+			break
+		}
+	}
+	return rows
+}
+
+// ---------------------------------------------------------------------------
+// Primitives (ported from Node.js parser.mjs)
+// ---------------------------------------------------------------------------
+
+// parseKV splits a string on the first unquoted colon. Returns [key, value] or
+// nil if no valid split is found. Respects single and double quotes so that
+// strings like "{name: 'Alix'}" inside a query value are not misinterpreted.
+func parseKV(s string) []string {
+	inSingle := false
+	inDouble := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '\'' && !inDouble {
+			inSingle = !inSingle
+		} else if c == '"' && !inSingle {
+			inDouble = !inDouble
+		} else if c == ':' && !inSingle && !inDouble {
+			key := strings.TrimSpace(s[:i])
+			value := strings.TrimSpace(s[i+1:])
+			if key != "" {
+				return []string{key, value}
+			}
+		}
+	}
+	return nil
+}
+
+// unquote strips surrounding single or double quotes and handles common escape
+// sequences (\n, \t, \", \', \\).
+func unquote(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 2 {
+		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
+			inner := s[1 : len(s)-1]
+			inner = strings.ReplaceAll(inner, `\n`, "\n")
+			inner = strings.ReplaceAll(inner, `\t`, "\t")
+			inner = strings.ReplaceAll(inner, `\"`, `"`)
+			inner = strings.ReplaceAll(inner, `\'`, `'`)
+			inner = strings.ReplaceAll(inner, `\\`, `\`)
+			return inner
+		}
+	}
+	return s
+}
+
+// parseYamlList parses an inline YAML list like "[a, b, c]" into a string slice.
+// Returns a single-element slice for bare values.
+func parseYamlList(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "[]" || s == "" {
+		return nil
+	}
+	if strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]") {
+		inner := s[1 : len(s)-1]
+		parts := strings.Split(inner, ",")
+		var result []string
+		for _, p := range parts {
+			v := unquote(strings.TrimSpace(p))
+			if v != "" {
+				result = append(result, v)
+			}
+		}
+		return result
+	}
+	return []string{unquote(s)}
+}
+
+// parseInlineList parses a row value like "[val1, val2, {key: val}]" with
+// support for nested brackets and braces.
+func parseInlineList(s string) []string {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "[") || !strings.HasSuffix(s, "]") {
+		return []string{unquote(s)}
+	}
+	inner := s[1 : len(s)-1]
+	var items []string
+	var current strings.Builder
+	depth := 0
+	inSingle := false
+	inDouble := false
+	for _, c := range inner {
+		switch {
+		case c == '\'' && !inDouble && depth == 0:
+			inSingle = !inSingle
+			current.WriteRune(c)
+		case c == '"' && !inSingle && depth == 0:
+			inDouble = !inDouble
+			current.WriteRune(c)
+		case (c == '[' || c == '{') && !inSingle && !inDouble:
+			depth++
+			current.WriteRune(c)
+		case (c == ']' || c == '}') && !inSingle && !inDouble:
+			depth--
+			current.WriteRune(c)
+		case c == ',' && depth == 0 && !inSingle && !inDouble:
+			items = append(items, unquote(strings.TrimSpace(current.String())))
+			current.Reset()
+		default:
+			current.WriteRune(c)
+		}
+	}
+	if strings.TrimSpace(current.String()) != "" {
+		items = append(items, unquote(strings.TrimSpace(current.String())))
+	}
+	return items
+}
+
+// parseStringList parses a YAML-style "- item" list. Items with "|" trigger
+// block scalar parsing.
+func parseStringList(ctx *parseContext) []string {
+	var items []string
+	for ctx.idx < len(ctx.lines) {
+		trimmed := strings.TrimSpace(ctx.lines[ctx.idx])
+		if strings.HasPrefix(trimmed, "#") {
+			ctx.idx++
+			continue
+		}
+		if trimmed == "" {
+			ctx.idx++
+			continue
+		}
+		if strings.HasPrefix(trimmed, "- ") {
+			value := trimmed[2:]
+			if value == "|" {
+				items = append(items, parseBlockScalar(ctx))
+			} else {
+				items = append(items, unquote(value))
+				ctx.idx++
+			}
+		} else {
+			break
+		}
+	}
+	return items
+}
+
+// parseMap parses indented key-value pairs into a map. Stops when indentation
+// drops below minIndent or a new test starts.
+func parseMap(ctx *parseContext, minIndent int) map[string]string {
+	m := make(map[string]string)
+	for ctx.idx < len(ctx.lines) {
+		line := ctx.lines[ctx.idx]
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") || trimmed == "" {
+			ctx.idx++
+			continue
+		}
+		if strings.HasPrefix(trimmed, "- name:") {
+			break
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		if indent < minIndent {
+			break
+		}
+		kv := parseKV(trimmed)
+		if kv != nil {
+			if kv[1] == "|" {
+				m[kv[0]] = parseBlockScalar(ctx)
+			} else {
+				m[kv[0]] = unquote(kv[1])
+				ctx.idx++
+			}
+		} else {
+			break
+		}
+	}
+	return m
+}
+
+// parseBlockScalar parses a YAML block scalar ("|") by collecting subsequent
+// indented lines. The result is trimmed of trailing whitespace.
+func parseBlockScalar(ctx *parseContext) string {
+	ctx.idx++ // skip the "|" line
+	if ctx.idx >= len(ctx.lines) {
+		return ""
+	}
+	blockIndent := len(ctx.lines[ctx.idx]) - len(strings.TrimLeft(ctx.lines[ctx.idx], " \t"))
+	var parts []string
+	for ctx.idx < len(ctx.lines) {
+		line := ctx.lines[ctx.idx]
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			parts = append(parts, "")
+			ctx.idx++
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		if indent < blockIndent {
+			break
+		}
+		parts = append(parts, line[blockIndent:])
+		ctx.idx++
+	}
+	return strings.TrimRight(strings.Join(parts, "\n"), " \t\n\r")
+}
+
+// skipBlankAndComments advances past empty lines and comment lines (starting
+// with #).
+func skipBlankAndComments(ctx *parseContext) {
+	for ctx.idx < len(ctx.lines) {
+		trimmed := strings.TrimSpace(ctx.lines[ctx.idx])
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			ctx.idx++
+		} else {
+			break
+		}
+	}
+}
+
+// expectLine asserts that the current line (after skipping blanks/comments)
+// matches the expected string, then advances.
+func expectLine(ctx *parseContext, expected string) error {
+	skipBlankAndComments(ctx)
+	if ctx.idx >= len(ctx.lines) {
+		return fmt.Errorf("expected %q at line %d, got <EOF>", expected, ctx.idx+1)
+	}
+	actual := strings.TrimSpace(ctx.lines[ctx.idx])
+	if actual != expected {
+		return fmt.Errorf("expected %q at line %d, got %q", expected, ctx.idx+1, actual)
+	}
+	ctx.idx++
+	return nil
 }
 
 // ---------------------------------------------------------------------------

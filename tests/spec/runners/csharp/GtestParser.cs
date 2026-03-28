@@ -1,17 +1,29 @@
-// YAML parser for .gtest spec files using YamlDotNet.
-// Mirrors the Rust build.rs parser in crates/grafeo-spec-tests/build.rs.
-
-using YamlDotNet.RepresentationModel;
+// Line-based parser for .gtest spec files (no YAML dependency).
+// Ported from the Node.js parser at tests/spec/runners/node/parser.mjs.
 
 namespace SpecRunner;
 
 /// <summary>
-/// Parses .gtest YAML files into <see cref="GtestFile"/> structures.
-/// Uses YamlDotNet's representation model for reliable handling of
-/// block scalars, inline lists, and quoted strings.
+/// Parses .gtest files into <see cref="GtestFile"/> structures using a
+/// line-based approach that mirrors the Node.js and Rust parsers.
 /// </summary>
 public static class GtestParser
 {
+    // Simple mutable context that tracks our position in the file.
+    private sealed class ParseContext
+    {
+        public readonly string[] Lines;
+        public int Idx;
+
+        public ParseContext(string[] lines)
+        {
+            Lines = lines;
+            Idx = 0;
+        }
+
+        public bool AtEnd => Idx >= Lines.Length;
+    }
+
     /// <summary>Parse a .gtest file at the given path.</summary>
     public static GtestFile ParseFile(string path)
     {
@@ -19,268 +31,475 @@ public static class GtestParser
         return Parse(content);
     }
 
-    /// <summary>Parse .gtest YAML content.</summary>
+    /// <summary>Parse .gtest content.</summary>
     public static GtestFile Parse(string content)
     {
-        var yaml = new YamlStream();
-        using var reader = new StringReader(content);
-        yaml.Load(reader);
+        var lines = content.Split(["\r\n", "\n"], StringSplitOptions.None);
+        var ctx = new ParseContext(lines);
 
-        if (yaml.Documents.Count == 0)
-            return new GtestFile();
+        SkipBlankAndComments(ctx);
+        var meta = ParseMeta(ctx);
+        SkipBlankAndComments(ctx);
+        var tests = ParseTests(ctx);
 
-        var root = (YamlMappingNode)yaml.Documents[0].RootNode;
-        var result = new GtestFile();
-
-        if (root.Children.TryGetValue(new YamlScalarNode("meta"), out var metaNode))
-            result.Meta = ParseMeta((YamlMappingNode)metaNode);
-
-        if (root.Children.TryGetValue(new YamlScalarNode("tests"), out var testsNode))
-            result.Tests = ParseTests((YamlSequenceNode)testsNode);
-
-        return result;
+        return new GtestFile { Meta = meta, Tests = tests };
     }
 
-    private static Meta ParseMeta(YamlMappingNode node)
+    // =========================================================================
+    // Meta block
+    // =========================================================================
+
+    private static Meta ParseMeta(ParseContext ctx)
     {
         var meta = new Meta();
+        ExpectLine(ctx, "meta:");
 
-        if (TryGetScalar(node, "language", out var language))
-            meta.Language = language;
-        if (TryGetScalar(node, "model", out var model))
-            meta.Model = model;
-        if (TryGetScalar(node, "section", out var section))
-            meta.Section = section;
-        if (TryGetScalar(node, "title", out var title))
-            meta.Title = title;
-        if (TryGetScalar(node, "dataset", out var dataset))
-            meta.Dataset = dataset;
-        if (TryGetStringList(node, "requires", out var requires))
-            meta.Requires = requires;
-        if (TryGetStringList(node, "tags", out var tags))
-            meta.Tags = tags;
+        while (!ctx.AtEnd)
+        {
+            SkipBlankAndComments(ctx);
+            if (ctx.AtEnd) break;
+
+            var line = ctx.Lines[ctx.Idx];
+            if (!line.StartsWith(' ') && !line.StartsWith('\t')) break;
+
+            var kv = ParseKV(line.Trim());
+            if (kv == null) { ctx.Idx++; continue; }
+
+            var (key, value) = kv.Value;
+            switch (key)
+            {
+                case "language": meta.Language = value; break;
+                case "model": meta.Model = value; break;
+                case "section": meta.Section = Unquote(value); break;
+                case "title": meta.Title = value; break;
+                case "dataset": meta.Dataset = value; break;
+                case "requires": meta.Requires = ParseYamlList(value); break;
+                case "tags": meta.Tags = ParseYamlList(value); break;
+            }
+            ctx.Idx++;
+        }
 
         return meta;
     }
 
-    private static List<TestCase> ParseTests(YamlSequenceNode node)
+    // =========================================================================
+    // Tests list
+    // =========================================================================
+
+    private static List<TestCase> ParseTests(ParseContext ctx)
     {
+        SkipBlankAndComments(ctx);
+        ExpectLine(ctx, "tests:");
+
         var tests = new List<TestCase>();
-        foreach (var child in node.Children)
+        while (!ctx.AtEnd)
         {
-            if (child is YamlMappingNode mapping)
-                tests.Add(ParseTestCase(mapping));
+            SkipBlankAndComments(ctx);
+            if (ctx.AtEnd) break;
+
+            var trimmed = ctx.Lines[ctx.Idx].Trim();
+            if (trimmed.StartsWith("- name:"))
+                tests.Add(ParseSingleTest(ctx));
+            else
+                break;
         }
         return tests;
     }
 
-    private static TestCase ParseTestCase(YamlMappingNode node)
+    private static TestCase ParseSingleTest(ParseContext ctx)
     {
         var tc = new TestCase();
 
-        if (TryGetScalar(node, "name", out var name))
-            tc.Name = name;
-        if (TryGetScalar(node, "query", out var query))
-            tc.Query = query.Trim();
-        if (TryGetScalar(node, "skip", out var skip))
-            tc.Skip = skip;
-        if (TryGetStringList(node, "setup", out var setup))
-            tc.Setup = setup;
-        if (TryGetStringList(node, "statements", out var statements))
-            tc.Statements = statements;
-        if (TryGetStringList(node, "tags", out var tags))
-            tc.Tags = tags;
+        // First line: "- name: xxx"
+        var first = ctx.Lines[ctx.Idx].Trim();
+        var kv = ParseKV(first[2..]); // strip "- "
+        if (kv != null) tc.Name = Unquote(kv.Value.Value);
+        ctx.Idx++;
 
-        if (TryGetMapping(node, "params", out var paramsNode))
+        while (!ctx.AtEnd)
         {
-            foreach (var kvp in paramsNode.Children)
+            var line = ctx.Lines[ctx.Idx];
+            var trimmed = line.Trim();
+
+            if (trimmed.StartsWith('#')) { ctx.Idx++; continue; }
+            if (trimmed.StartsWith("- name:")) break;
+            if (string.IsNullOrEmpty(trimmed)) { ctx.Idx++; continue; }
+
+            var kv2 = ParseKV(trimmed);
+            if (kv2 == null) { ctx.Idx++; continue; }
+
+            var (key, value) = kv2.Value;
+            switch (key)
             {
-                var key = ((YamlScalarNode)kvp.Key).Value ?? "";
-                var value = kvp.Value is YamlScalarNode scalar ? scalar.Value ?? "" : "";
-                tc.Params[key] = value;
+                case "query":
+                    if (value == "|")
+                    {
+                        tc.Query = ParseBlockScalar(ctx);
+                    }
+                    else
+                    {
+                        tc.Query = Unquote(value);
+                        ctx.Idx++;
+                    }
+                    break;
+                case "skip":
+                    tc.Skip = Unquote(value); ctx.Idx++; break;
+                case "setup":
+                    ctx.Idx++; tc.Setup = ParseStringList(ctx); break;
+                case "statements":
+                    ctx.Idx++; tc.Statements = ParseStringList(ctx); break;
+                case "tags":
+                    tc.Tags = ParseYamlList(value); ctx.Idx++; break;
+                case "params":
+                    ctx.Idx++; tc.Params = ParseMap(ctx, 6); break;
+                case "expect":
+                    ctx.Idx++; tc.Expect = ParseExpectBlock(ctx); break;
+                case "variants":
+                    ctx.Idx++; tc.Variants = ParseMap(ctx, 6); break;
+                default:
+                    ctx.Idx++; break;
             }
         }
-
-        if (TryGetMapping(node, "variants", out var variantsNode))
-        {
-            foreach (var kvp in variantsNode.Children)
-            {
-                var key = ((YamlScalarNode)kvp.Key).Value ?? "";
-                var value = kvp.Value is YamlScalarNode scalar ? (scalar.Value ?? "").Trim() : "";
-                tc.Variants[key] = value;
-            }
-        }
-
-        if (TryGetMapping(node, "expect", out var expectNode))
-            tc.Expect = ParseExpect(expectNode);
 
         return tc;
     }
 
-    private static Expect ParseExpect(YamlMappingNode node)
+    // =========================================================================
+    // Expect block
+    // =========================================================================
+
+    private static Expect ParseExpectBlock(ParseContext ctx)
     {
         var expect = new Expect();
 
-        if (TryGetScalar(node, "ordered", out var ordered))
-            expect.Ordered = ordered == "true" || ordered == "True";
-        if (TryGetScalar(node, "empty", out var empty))
-            expect.Empty = empty == "true" || empty == "True";
-        if (TryGetScalar(node, "count", out var count) && int.TryParse(count, out var countVal))
-            expect.Count = countVal;
-        if (TryGetScalar(node, "error", out var error))
-            expect.Error = error;
-        if (TryGetScalar(node, "hash", out var hash))
-            expect.Hash = hash;
-        if (TryGetScalar(node, "precision", out var precision) && int.TryParse(precision, out var precVal))
-            expect.Precision = precVal;
-        if (TryGetStringList(node, "columns", out var columns))
-            expect.Columns = columns;
-
-        if (node.Children.TryGetValue(new YamlScalarNode("rows"), out var rowsNode) &&
-            rowsNode is YamlSequenceNode rowsSeq)
+        while (!ctx.AtEnd)
         {
-            expect.Rows = ParseRows(rowsSeq);
+            var line = ctx.Lines[ctx.Idx];
+            var trimmed = line.Trim();
+
+            if (trimmed.StartsWith('#')) { ctx.Idx++; continue; }
+            if (trimmed.StartsWith("- name:")) break;
+            if (!line.StartsWith(' ') && !line.StartsWith('\t') && !string.IsNullOrEmpty(trimmed)) break;
+            if (string.IsNullOrEmpty(trimmed)) { ctx.Idx++; continue; }
+
+            var kv = ParseKV(trimmed);
+            if (kv == null) break;
+
+            var (key, value) = kv.Value;
+            switch (key)
+            {
+                case "ordered":
+                    expect.Ordered = value == "true"; ctx.Idx++; break;
+                case "count":
+                    if (int.TryParse(value, out var countVal)) expect.Count = countVal;
+                    ctx.Idx++; break;
+                case "empty":
+                    expect.Empty = value == "true"; ctx.Idx++; break;
+                case "error":
+                    expect.Error = Unquote(value); ctx.Idx++; break;
+                case "hash":
+                    expect.Hash = Unquote(value); ctx.Idx++; break;
+                case "precision":
+                    if (int.TryParse(value, out var precVal)) expect.Precision = precVal;
+                    ctx.Idx++; break;
+                case "columns":
+                    expect.Columns = ParseYamlList(value); ctx.Idx++; break;
+                case "rows":
+                    ctx.Idx++; expect.Rows = ParseRows(ctx); break;
+                default:
+                    ctx.Idx++; break;
+            }
         }
 
         return expect;
     }
 
-    private static List<List<string>> ParseRows(YamlSequenceNode node)
+    private static List<List<string>> ParseRows(ParseContext ctx)
     {
         var rows = new List<List<string>>();
-        foreach (var child in node.Children)
+        while (!ctx.AtEnd)
         {
-            if (child is YamlSequenceNode rowSeq)
+            var trimmed = ctx.Lines[ctx.Idx].Trim();
+            if (trimmed.StartsWith('#')) { ctx.Idx++; continue; }
+            if (string.IsNullOrEmpty(trimmed)) { ctx.Idx++; continue; }
+
+            if (trimmed.StartsWith("- ["))
             {
-                var row = new List<string>();
-                foreach (var cell in rowSeq.Children)
-                {
-                    row.Add(ValueToString(cell));
-                }
-                rows.Add(row);
+                rows.Add(ParseInlineList(trimmed[2..]));
+                ctx.Idx++;
             }
             else
             {
-                // Single-column shorthand
-                rows.Add([ValueToString(child)]);
+                break;
             }
         }
         return rows;
     }
 
+    // =========================================================================
+    // YAML primitives
+    // =========================================================================
+
     /// <summary>
-    /// Convert a YAML node to its canonical string representation.
-    /// Matches the Rust value_to_string in grafeo-spec-tests/src/lib.rs.
+    /// Split a string on the first unquoted colon. Returns null if no valid
+    /// key-value pair is found. Respects single and double quotes so that
+    /// colons inside quoted strings or query bodies are not treated as
+    /// separators.
     /// </summary>
-    internal static string ValueToString(YamlNode node)
+    internal static (string Key, string Value)? ParseKV(string s)
     {
-        if (node is YamlScalarNode scalar)
+        var inSingle = false;
+        var inDouble = false;
+
+        for (var i = 0; i < s.Length; i++)
         {
-            var value = scalar.Value;
-
-            // null
-            if (value is null || value == "null" || value == "~")
-                return "null";
-
-            // boolean
-            if (value == "true" || value == "True" || value == "TRUE")
-                return "true";
-            if (value == "false" || value == "False" || value == "FALSE")
-                return "false";
-
-            // Try integer first
-            if (long.TryParse(value, out _))
-                return value;
-
-            // Try float
-            if (double.TryParse(value, System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var d))
+            var c = s[i];
+            if (c == '\'' && !inDouble) inSingle = !inSingle;
+            else if (c == '"' && !inSingle) inDouble = !inDouble;
+            else if (c == ':' && !inSingle && !inDouble)
             {
-                if (double.IsNaN(d)) return "NaN";
-                if (double.IsPositiveInfinity(d)) return "Infinity";
-                if (double.IsNegativeInfinity(d)) return "-Infinity";
-                // Rust's Display for f64 drops ".0" for whole numbers
-                if (d == Math.Floor(d) && Math.Abs(d) < (1L << 53))
-                    return ((long)d).ToString();
-                return d.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                var key = s[..i].Trim();
+                var value = s[(i + 1)..].Trim();
+                if (!string.IsNullOrEmpty(key))
+                    return (key, value);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Strip surrounding quotes and unescape common sequences.
+    /// </summary>
+    internal static string Unquote(string s)
+    {
+        s = s.Trim();
+        if (s.Length >= 2 &&
+            ((s[0] == '"' && s[^1] == '"') || (s[0] == '\'' && s[^1] == '\'')))
+        {
+            return s[1..^1]
+                .Replace("\\n", "\n")
+                .Replace("\\t", "\t")
+                .Replace("\\\"", "\"")
+                .Replace("\\'", "'")
+                .Replace("\\\\", "\\");
+        }
+        return s;
+    }
+
+    /// <summary>
+    /// Parse a YAML-style inline list: <c>[val1, val2]</c>.
+    /// Handles nested brackets and braces for complex row values.
+    /// </summary>
+    internal static List<string> ParseInlineList(string s)
+    {
+        s = s.Trim();
+        if (!s.StartsWith('[') || !s.EndsWith(']'))
+            return [Unquote(s)];
+
+        var inner = s[1..^1];
+        var items = new List<string>();
+        var current = new System.Text.StringBuilder();
+        var depth = 0;
+        var inSingle = false;
+        var inDouble = false;
+
+        foreach (var c in inner)
+        {
+            if (c == '\'' && !inDouble && depth == 0)
+            {
+                inSingle = !inSingle;
+                current.Append(c);
+            }
+            else if (c == '"' && !inSingle && depth == 0)
+            {
+                inDouble = !inDouble;
+                current.Append(c);
+            }
+            else if ((c == '[' || c == '{') && !inSingle && !inDouble)
+            {
+                depth++;
+                current.Append(c);
+            }
+            else if ((c == ']' || c == '}') && !inSingle && !inDouble)
+            {
+                depth--;
+                current.Append(c);
+            }
+            else if (c == ',' && depth == 0 && !inSingle && !inDouble)
+            {
+                items.Add(Unquote(current.ToString().Trim()));
+                current.Clear();
+            }
+            else
+            {
+                current.Append(c);
+            }
+        }
+
+        var remainder = current.ToString().Trim();
+        if (!string.IsNullOrEmpty(remainder))
+            items.Add(Unquote(remainder));
+
+        return items;
+    }
+
+    /// <summary>
+    /// Parse a simple YAML inline list used for tags, requires, columns:
+    /// <c>[a, b, c]</c> or a bare scalar value.
+    /// </summary>
+    private static List<string> ParseYamlList(string s)
+    {
+        s = s.Trim();
+        if (s == "[]" || string.IsNullOrEmpty(s)) return [];
+
+        if (s.StartsWith('[') && s.EndsWith(']'))
+        {
+            return s[1..^1]
+                .Split(',')
+                .Select(v => Unquote(v.Trim()))
+                .Where(v => !string.IsNullOrEmpty(v))
+                .ToList();
+        }
+
+        return [Unquote(s)];
+    }
+
+    /// <summary>
+    /// Parse a YAML list of <c>- item</c> entries. Supports block scalar
+    /// values (<c>|</c>) for multi-line items.
+    /// </summary>
+    private static List<string> ParseStringList(ParseContext ctx)
+    {
+        var items = new List<string>();
+        while (!ctx.AtEnd)
+        {
+            var trimmed = ctx.Lines[ctx.Idx].Trim();
+            if (trimmed.StartsWith('#')) { ctx.Idx++; continue; }
+            if (string.IsNullOrEmpty(trimmed)) { ctx.Idx++; continue; }
+
+            if (trimmed.StartsWith("- "))
+            {
+                var value = trimmed[2..];
+                if (value == "|")
+                {
+                    items.Add(ParseBlockScalar(ctx));
+                }
+                else
+                {
+                    items.Add(Unquote(value));
+                    ctx.Idx++;
+                }
+            }
+            else
+            {
+                break;
+            }
+        }
+        return items;
+    }
+
+    /// <summary>
+    /// Parse a YAML-style key-value map at the given minimum indentation.
+    /// Supports block scalar values (<c>|</c>).
+    /// </summary>
+    private static Dictionary<string, string> ParseMap(ParseContext ctx, int minIndent)
+    {
+        var map = new Dictionary<string, string>();
+        while (!ctx.AtEnd)
+        {
+            var line = ctx.Lines[ctx.Idx];
+            var trimmed = line.Trim();
+
+            if (trimmed.StartsWith('#') || string.IsNullOrEmpty(trimmed))
+            { ctx.Idx++; continue; }
+
+            if (trimmed.StartsWith("- name:")) break;
+
+            var indent = line.Length - line.TrimStart().Length;
+            if (indent < minIndent) break;
+
+            var kv = ParseKV(trimmed);
+            if (kv != null)
+            {
+                if (kv.Value.Value == "|")
+                {
+                    map[kv.Value.Key] = ParseBlockScalar(ctx);
+                }
+                else
+                {
+                    map[kv.Value.Key] = Unquote(kv.Value.Value);
+                    ctx.Idx++;
+                }
+            }
+            else
+            {
+                break;
+            }
+        }
+        return map;
+    }
+
+    /// <summary>
+    /// Parse a YAML block scalar (indicated by <c>|</c>). Collects indented
+    /// continuation lines and joins them with newlines, trimming trailing
+    /// whitespace.
+    /// </summary>
+    private static string ParseBlockScalar(ParseContext ctx)
+    {
+        ctx.Idx++; // skip the "|" line
+        if (ctx.AtEnd) return "";
+
+        var blockIndent = ctx.Lines[ctx.Idx].Length - ctx.Lines[ctx.Idx].TrimStart().Length;
+        var parts = new List<string>();
+
+        while (!ctx.AtEnd)
+        {
+            var line = ctx.Lines[ctx.Idx];
+            var trimmed = line.Trim();
+
+            if (string.IsNullOrEmpty(trimmed))
+            {
+                parts.Add("");
+                ctx.Idx++;
+                continue;
             }
 
-            return value;
+            var indent = line.Length - line.TrimStart().Length;
+            if (indent < blockIndent) break;
+
+            parts.Add(line[blockIndent..]);
+            ctx.Idx++;
         }
 
-        if (node is YamlSequenceNode seq)
-        {
-            var inner = string.Join(", ", seq.Children.Select(ValueToString));
-            return $"[{inner}]";
-        }
-
-        if (node is YamlMappingNode map)
-        {
-            var entries = map.Children
-                .Select(kvp =>
-                {
-                    var key = ((YamlScalarNode)kvp.Key).Value ?? "";
-                    var val = ValueToString(kvp.Value);
-                    return $"{key}: {val}";
-                })
-                .OrderBy(e => e)
-                .ToList();
-            return "{" + string.Join(", ", entries) + "}";
-        }
-
-        return node.ToString() ?? "null";
+        return string.Join("\n", parts).TrimEnd();
     }
 
     // =========================================================================
     // Helpers
     // =========================================================================
 
-    private static bool TryGetScalar(YamlMappingNode node, string key, out string value)
+    private static void SkipBlankAndComments(ParseContext ctx)
     {
-        value = "";
-        if (!node.Children.TryGetValue(new YamlScalarNode(key), out var child))
-            return false;
-        if (child is YamlScalarNode scalar)
+        while (!ctx.AtEnd)
         {
-            value = scalar.Value ?? "";
-            return true;
+            var trimmed = ctx.Lines[ctx.Idx].Trim();
+            if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith('#'))
+                ctx.Idx++;
+            else
+                break;
         }
-        return false;
     }
 
-    private static bool TryGetMapping(YamlMappingNode node, string key, out YamlMappingNode mapping)
+    private static void ExpectLine(ParseContext ctx, string expected)
     {
-        mapping = null!;
-        if (!node.Children.TryGetValue(new YamlScalarNode(key), out var child))
-            return false;
-        if (child is YamlMappingNode map)
+        SkipBlankAndComments(ctx);
+        if (ctx.AtEnd || ctx.Lines[ctx.Idx].Trim() != expected)
         {
-            mapping = map;
-            return true;
+            var got = ctx.AtEnd ? "<EOF>" : ctx.Lines[ctx.Idx].Trim();
+            throw new InvalidOperationException(
+                $"Expected '{expected}' at line {ctx.Idx + 1}, got '{got}'");
         }
-        return false;
-    }
-
-    private static bool TryGetStringList(YamlMappingNode node, string key, out List<string> list)
-    {
-        list = [];
-        if (!node.Children.TryGetValue(new YamlScalarNode(key), out var child))
-            return false;
-
-        if (child is YamlSequenceNode seq)
-        {
-            list = seq.Children
-                .Select(c => c is YamlScalarNode s ? s.Value ?? "" : "")
-                .ToList();
-            return true;
-        }
-
-        if (child is YamlScalarNode scalar && scalar.Value is not null)
-        {
-            list = [scalar.Value];
-            return true;
-        }
-
-        return false;
+        ctx.Idx++;
     }
 }
