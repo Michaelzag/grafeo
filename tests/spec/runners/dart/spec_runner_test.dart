@@ -24,16 +24,16 @@ final _specDir = _resolveSpecDir();
 final _datasetsDir = Directory('${_specDir.path}/datasets');
 
 Directory _resolveSpecDir() {
-  // This file lives at tests/spec/runners/dart/spec_runner_test.dart.
-  // The spec root is tests/spec/ (two levels up).
-  var dir = File(Platform.script.toFilePath()).parent;
-  // Go up from dart/ -> runners/ -> spec/
-  dir = dir.parent.parent;
-  if (!dir.existsSync()) {
-    // Fallback: try resolving from the working directory
-    dir = Directory('${Directory.current.path}/tests/spec');
+  // Walk up from the working directory until we find Cargo.toml (repo root).
+  var dir = Directory.current;
+  while (dir.path != dir.parent.path) {
+    if (File('${dir.path}/Cargo.toml').existsSync()) {
+      return Directory('${dir.path}/tests/spec');
+    }
+    dir = dir.parent;
   }
-  return dir;
+  // Fallback: assume cwd is repo root
+  return Directory('${Directory.current.path}/tests/spec');
 }
 
 // =============================================================================
@@ -480,7 +480,7 @@ List<String> _asStringList(dynamic val) {
 List<File> _findGtestFiles(Directory dir) {
   final results = <File>[];
   if (!dir.existsSync()) return results;
-  for (final entity in dir.listSync(recursive: true)) {
+  for (final entity in dir.listSync(recursive: true, followLinks: false)) {
     if (entity is File && entity.path.endsWith('.gtest')) {
       // Skip anything inside the runners directory.
       final normalized = entity.path.replaceAll('\\', '/');
