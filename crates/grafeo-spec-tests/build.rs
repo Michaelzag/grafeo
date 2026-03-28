@@ -703,6 +703,7 @@ fn generate_tests(
     let mut count = 0;
 
     writeln!(output, "mod {module_name} {{").unwrap();
+    writeln!(output, "    #[allow(unused_imports)]").unwrap();
     writeln!(output, "    use super::*;").unwrap();
     writeln!(output).unwrap();
 

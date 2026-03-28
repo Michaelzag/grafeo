@@ -9,6 +9,8 @@
 
 #[cfg(feature = "gql")]
 mod tests {
+    use std::fmt::Write;
+
     use grafeo_adapters::query::gql::parse;
 
     /// Labels, properties, and variables used for generation.
@@ -37,7 +39,7 @@ mod tests {
         }
 
         fn coin(&mut self) -> bool {
-            self.next() % 2 == 0
+            self.next().is_multiple_of(2)
         }
 
         fn range(&mut self, max: u32) -> u32 {
@@ -72,7 +74,7 @@ mod tests {
             q.push_str(rng.pick(PROPS));
             q.push_str(": ");
             match rng.range(4) {
-                0 => q.push_str(&format!("{}", rng.next() as i32 % 100)),
+                0 => write!(q, "{}", rng.next() as i32 % 100).unwrap(),
                 1 => {
                     q.push('\'');
                     q.push_str(rng.pick(STRINGS));
@@ -124,7 +126,7 @@ mod tests {
                 _ => q.push_str(" IS NULL"),
             }
             if rng.range(6) < 5 {
-                q.push_str(&format!("{}", rng.next() as i32 % 100));
+                write!(q, "{}", rng.next() as i32 % 100).unwrap();
             }
         }
 
@@ -148,7 +150,7 @@ mod tests {
         // Modifiers
         if rng.coin() {
             q.push_str(" LIMIT ");
-            q.push_str(&format!("{}", rng.range(20) + 1));
+            write!(q, "{}", rng.range(20) + 1).unwrap();
         }
 
         q
