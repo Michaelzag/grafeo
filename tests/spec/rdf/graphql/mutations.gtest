@@ -1,0 +1,95 @@
+# GraphQL mutations on RDF-like data
+#
+# Covers: create, update, delete mutations on Resource/Person nodes.
+# Uses multi-statement tests: mutation first, then a verification query.
+
+meta:
+  language: graphql
+  model: rdf
+  section: mutations
+  title: GraphQL mutations on RDF data
+  dataset: rdf_social
+  requires: [graphql]
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # Create mutations
+  # ---------------------------------------------------------------------------
+
+  - name: create_person
+    statements:
+      - "mutation { createPerson(name: \"Django\", age: 27, city: \"Barcelona\") { name } }"
+      - "{ person { name } }"
+    expect:
+      count: 6
+
+  - name: create_organization
+    statements:
+      - "mutation { createOrganization(name: \"Acme Corp\", founded: 2020) { name } }"
+      - "{ organization { name } }"
+    expect:
+      count: 2
+
+  - name: create_and_verify_properties
+    statements:
+      - "mutation { createPerson(name: \"Butch\", age: 40, city: \"Prague\") { name } }"
+      - "{ person(name: \"Butch\") { name age city } }"
+    expect:
+      rows:
+        - [Butch, 40, Prague]
+
+  # ---------------------------------------------------------------------------
+  # Update mutations
+  # ---------------------------------------------------------------------------
+
+  - name: update_person_age
+    statements:
+      - "mutation { updatePerson(name: \"Alix\", age: 31) { name age } }"
+      - "{ person(name: \"Alix\") { name age } }"
+    expect:
+      rows:
+        - [Alix, 31]
+
+  - name: update_person_city
+    statements:
+      - "mutation { updatePerson(name: \"Gus\", city: \"Prague\") { name } }"
+      - "{ person(name: \"Gus\") { name city } }"
+    expect:
+      rows:
+        - [Gus, Prague]
+
+  - name: update_preserves_other_properties
+    statements:
+      - "mutation { updatePerson(name: \"Vincent\", age: 36) { name } }"
+      - "{ person(name: \"Vincent\") { name age city } }"
+    expect:
+      rows:
+        - [Vincent, 36, Paris]
+
+  # ---------------------------------------------------------------------------
+  # Delete mutations
+  # ---------------------------------------------------------------------------
+
+  - name: delete_person
+    statements:
+      - "mutation { deletePerson(name: \"Mia\") { success } }"
+      - "{ person { name } }"
+    expect:
+      count: 4
+
+  - name: delete_preserves_others
+    statements:
+      - "mutation { deletePerson(name: \"Jules\") { success } }"
+      - "{ person(name: \"Alix\") { name age } }"
+    expect:
+      rows:
+        - [Alix, 30]
+
+  - name: delete_with_relationships
+    # Deleting a node with edges should use detach delete
+    statements:
+      - "mutation { deletePerson(name: \"Alix\") { success } }"
+      - "{ person { name } }"
+    expect:
+      count: 4
