@@ -1,14 +1,15 @@
-# GraphQL on RDF model
+# GraphQL queries on RDF-like data
 #
-# Covers: type-based queries on RDF-like data (Resource/Person nodes with URIs),
-# field selection, filters by property and URI, nested relationship traversals.
+# Covers: type-based queries, field selection, shorthand syntax,
+# filters, pagination (first/skip), ordering (orderBy),
+# nested traversals, multi-label queries.
 
 meta:
   language: graphql
   model: rdf
   section: queries
   title: GraphQL queries on RDF data
-  dataset: rdf_people
+  dataset: rdf_social
   requires: [graphql]
 
 tests:
@@ -20,21 +21,63 @@ tests:
   - name: query_all_resources
     query: "query { resource { uri name } }"
     expect:
-      count: 2
+      count: 6
 
   - name: query_all_persons
     query: "query { person { name age } }"
     expect:
-      count: 2
+      count: 5
 
-  # ---------------------------------------------------------------------------
-  # Filters
-  # ---------------------------------------------------------------------------
-
-  - name: filter_person_by_age
-    query: "query { person(age: 30) { name } }"
+  - name: query_all_organizations
+    query: "query { organization { name founded } }"
     expect:
       count: 1
+
+  - name: query_single_field
+    query: "query { person { name } }"
+    expect:
+      count: 5
+
+  - name: query_multiple_fields
+    query: "query { person { name age city email } }"
+    expect:
+      count: 5
+
+  # ---------------------------------------------------------------------------
+  # Shorthand query syntax (no "query" keyword)
+  # ---------------------------------------------------------------------------
+
+  - name: shorthand_query
+    query: "{ person { name } }"
+    expect:
+      count: 5
+
+  - name: shorthand_with_filter
+    query: "{ person(name: \"Alix\") { name age } }"
+    expect:
+      rows:
+        - [Alix, 30]
+
+  # ---------------------------------------------------------------------------
+  # Equality filters
+  # ---------------------------------------------------------------------------
+
+  - name: filter_by_name
+    query: "{ person(name: \"Alix\") { name age } }"
+    expect:
+      rows:
+        - [Alix, 30]
+
+  - name: filter_by_age
+    query: "{ person(age: 25) { name } }"
+    expect:
+      rows:
+        - [Gus]
+
+  - name: filter_by_city
+    query: "{ person(city: \"Amsterdam\") { name } }"
+    expect:
+      count: 2
 
   - name: filter_resource_by_uri
     query: |
@@ -45,14 +88,130 @@ tests:
         }
       }
     expect:
-      count: 1
+      rows:
+        - [Alix, 30]
+
+  - name: filter_no_match
+    query: "{ person(name: \"Nobody\") { name } }"
+    expect:
+      empty: true
+
+  # ---------------------------------------------------------------------------
+  # Filter object syntax
+  # ---------------------------------------------------------------------------
+
+  - name: filter_object_by_age
+    query: "query { person(filter: { age: 30 }) { name } }"
+    expect:
+      rows:
+        - [Alix]
+
+  - name: filter_object_by_city
+    query: "query { person(filter: { city: \"Berlin\" }) { name } }"
+    expect:
+      rows:
+        - [Gus]
+
+  # ---------------------------------------------------------------------------
+  # Pagination
+  # ---------------------------------------------------------------------------
+
+  - name: first_limits_results
+    query: "{ person(first: 2) { name } }"
+    expect:
+      count: 2
+
+  - name: limit_alias
+    query: "{ person(limit: 3) { name } }"
+    expect:
+      count: 3
+
+  - name: skip_offsets_results
+    query: "{ person(first: 2, skip: 2) { name } }"
+    expect:
+      count: 2
+
+  - name: offset_alias
+    query: "{ person(limit: 2, offset: 1) { name } }"
+    expect:
+      count: 2
+
+  - name: first_exceeds_total
+    query: "{ person(first: 100) { name } }"
+    expect:
+      count: 5
+
+  # ---------------------------------------------------------------------------
+  # Ordering
+  # ---------------------------------------------------------------------------
+
+  - name: order_by_name_asc
+    query: |
+      query {
+        person(orderBy: { name: ASC }) {
+          name
+        }
+      }
+    expect:
+      ordered: true
+      rows:
+        - [Alix]
+        - [Gus]
+        - [Jules]
+        - [Mia]
+        - [Vincent]
+
+  - name: order_by_age_desc
+    query: |
+      query {
+        person(orderBy: { age: DESC }) {
+          name
+          age
+        }
+      }
+    expect:
+      ordered: true
+      rows:
+        - [Vincent, 35]
+        - [Mia, 32]
+        - [Alix, 30]
+        - [Jules, 28]
+        - [Gus, 25]
+
+  - name: order_by_with_first
+    query: |
+      query {
+        person(orderBy: { age: ASC }, first: 3) {
+          name
+          age
+        }
+      }
+    expect:
+      ordered: true
+      rows:
+        - [Gus, 25]
+        - [Jules, 28]
+        - [Alix, 30]
+
+  - name: order_by_with_skip_and_first
+    query: |
+      query {
+        person(orderBy: { age: ASC }, skip: 1, first: 2) {
+          name
+          age
+        }
+      }
+    expect:
+      ordered: true
+      rows:
+        - [Jules, 28]
+        - [Alix, 30]
 
   # ---------------------------------------------------------------------------
   # Nested traversals
   # ---------------------------------------------------------------------------
 
   - name: nested_knows_traversal
-    # Only Alix has a knows edge, so only 1 result with nested data
     query: |
       query {
         person {
@@ -63,4 +222,58 @@ tests:
         }
       }
     expect:
+      count: 5
+
+  - name: nested_knows_with_parent_filter
+    query: |
+      query {
+        person(name: "Alix") {
+          name
+          knows {
+            name
+          }
+        }
+      }
+    expect:
+      count: 2
+
+  - name: nested_works_at_traversal
+    query: |
+      query {
+        person(name: "Alix") {
+          name
+          works_at {
+            name
+          }
+        }
+      }
+    expect:
       count: 1
+
+  - name: nested_with_filter_on_target
+    query: |
+      query {
+        person(name: "Alix") {
+          name
+          knows(age: 25) {
+            name
+            age
+          }
+        }
+      }
+    expect:
+      count: 1
+
+  - name: nested_no_relationships
+    # Mia has no outgoing knows edges
+    query: |
+      query {
+        person(name: "Mia") {
+          name
+          knows {
+            name
+          }
+        }
+      }
+    expect:
+      empty: true

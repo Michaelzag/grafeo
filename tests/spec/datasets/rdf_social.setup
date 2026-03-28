@@ -1,0 +1,16 @@
+# RDF Social Network Dataset
+# 5 Resource/Person nodes, 1 Resource/Organization, 5 KNOWS edges, 1 WORKS_AT edge
+# Used by: rdf/graphql/*
+
+INSERT (:Resource:Person {uri: 'http://example.org/person/alix', name: 'Alix', age: 30, city: 'Amsterdam', email: 'alix@example.org'})
+INSERT (:Resource:Person {uri: 'http://example.org/person/gus', name: 'Gus', age: 25, city: 'Berlin', email: 'gus@example.org'})
+INSERT (:Resource:Person {uri: 'http://example.org/person/vincent', name: 'Vincent', age: 35, city: 'Paris', email: 'vincent@example.org'})
+INSERT (:Resource:Person {uri: 'http://example.org/person/jules', name: 'Jules', age: 28, city: 'Amsterdam', email: 'jules@example.org'})
+INSERT (:Resource:Person {uri: 'http://example.org/person/mia', name: 'Mia', age: 32, city: 'Prague', email: 'mia@example.org'})
+INSERT (:Resource:Organization {uri: 'http://example.org/org/grafeo', name: 'Grafeo OSS', founded: 2025, city: 'Amsterdam'})
+MATCH (a:Person {name: 'Alix'}), (g:Person {name: 'Gus'}) INSERT (a)-[:knows {since: 2020}]->(g)
+MATCH (a:Person {name: 'Alix'}), (v:Person {name: 'Vincent'}) INSERT (a)-[:knows {since: 2019}]->(v)
+MATCH (g:Person {name: 'Gus'}), (j:Person {name: 'Jules'}) INSERT (g)-[:knows {since: 2021}]->(j)
+MATCH (v:Person {name: 'Vincent'}), (m:Person {name: 'Mia'}) INSERT (v)-[:knows {since: 2022}]->(m)
+MATCH (j:Person {name: 'Jules'}), (a:Person {name: 'Alix'}) INSERT (j)-[:knows {since: 2023}]->(a)
+MATCH (a:Person {name: 'Alix'}), (o:Organization {name: 'Grafeo OSS'}) INSERT (a)-[:works_at {role: 'Engineer', since: 2019}]->(o)
