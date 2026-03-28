@@ -31,7 +31,7 @@ tests:
     query: "MATCH (n:N) RETURN TIME '14:30:00' AS t"
     expect:
       rows:
-        - [14:30:00]
+        - ["14:30:00"]
 
   - name: duration_literal_value
     setup:
@@ -301,7 +301,7 @@ tests:
     query: "MATCH (s:Schedule) RETURN s.time AS t"
     expect:
       rows:
-        - [09:00:00]
+        - ["09:00:00"]
 
   - name: duration_property_round_trip
     setup:

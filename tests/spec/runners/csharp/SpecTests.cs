@@ -376,6 +376,8 @@ public class SpecTests : IDisposable
         }
         if (value is Dictionary<string, object?> dict)
         {
+            if (IsDurationDict(dict))
+                return DurationToIso(dict);
             var entries = dict
                 .Select(kvp => $"{kvp.Key}: {ValueToCanonical(kvp.Value)}")
                 .OrderBy(e => e)
@@ -384,6 +386,8 @@ public class SpecTests : IDisposable
         }
         if (value is IReadOnlyDictionary<string, object?> roDict)
         {
+            if (roDict.Count == 3 && roDict.ContainsKey("months") && roDict.ContainsKey("days") && roDict.ContainsKey("nanos"))
+                return DurationToIso(roDict.ToDictionary(kvp => kvp.Key, kvp => kvp.Value));
             var entries = roDict
                 .Select(kvp => $"{kvp.Key}: {ValueToCanonical(kvp.Value)}")
                 .OrderBy(e => e)
@@ -394,6 +398,42 @@ public class SpecTests : IDisposable
             return $"bytes[{bytes.Length}]";
         // DateTime, DateOnly, TimeOnly, TimeSpan: use ToString for ISO format
         return value.ToString() ?? "null";
+    }
+
+    private static bool IsDurationDict(Dictionary<string, object?> dict)
+        => dict.Count == 3 && dict.ContainsKey("months") && dict.ContainsKey("days") && dict.ContainsKey("nanos");
+
+    private static string DurationToIso(Dictionary<string, object?> dict)
+    {
+        long totalMonths = Convert.ToInt64(dict["months"] ?? 0);
+        long days = Convert.ToInt64(dict["days"] ?? 0);
+        long nanos = Convert.ToInt64(dict["nanos"] ?? 0);
+        long years = totalMonths / 12;
+        long months = totalMonths % 12;
+        long hours = nanos / 3_600_000_000_000;
+        long rem = nanos % 3_600_000_000_000;
+        long minutes = rem / 60_000_000_000;
+        rem %= 60_000_000_000;
+        long seconds = rem / 1_000_000_000;
+        long subNanos = rem % 1_000_000_000;
+
+        var sb = new System.Text.StringBuilder("P");
+        if (years != 0) sb.Append($"{years}Y");
+        if (months != 0) sb.Append($"{months}M");
+        if (days != 0) sb.Append($"{days}D");
+        var tp = new System.Text.StringBuilder();
+        if (hours != 0) tp.Append($"{hours}H");
+        if (minutes != 0) tp.Append($"{minutes}M");
+        if (seconds != 0 || subNanos != 0)
+        {
+            if (subNanos != 0)
+                tp.Append($"{seconds}.{subNanos:D9}".TrimEnd('0') + "S");
+            else
+                tp.Append($"{seconds}S");
+        }
+        if (tp.Length > 0) { sb.Append('T'); sb.Append(tp); }
+        var result = sb.ToString();
+        return result == "P" ? "P0D" : result;
     }
 
     /// <summary>Handle JsonElement values that may appear in result rows.</summary>

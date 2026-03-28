@@ -122,6 +122,17 @@ String _valueToString(dynamic val) {
     return '[$inner]';
   }
   if (val is Map) {
+    // Duration: {months, days, nanos} -> ISO 8601
+    if (val.length == 3 &&
+        val.containsKey('months') &&
+        val.containsKey('days') &&
+        val.containsKey('nanos')) {
+      return _durationToIso(
+        (val['months'] as num).toInt(),
+        (val['days'] as num).toInt(),
+        (val['nanos'] as num).toInt(),
+      );
+    }
     final entries = val.entries
         .map((e) => '${e.key}: ${_valueToString(e.value)}')
         .toList()
@@ -141,6 +152,42 @@ String _valueToString(dynamic val) {
     return buf.toString();
   }
   return val.toString();
+}
+
+/// Convert {months, days, nanos} to ISO 8601 duration string.
+String _durationToIso(int totalMonths, int days, int nanos) {
+  final years = totalMonths ~/ 12;
+  final months = totalMonths % 12;
+  final hours = nanos ~/ 3600000000000;
+  var rem = nanos % 3600000000000;
+  final minutes = rem ~/ 60000000000;
+  rem = rem % 60000000000;
+  final seconds = rem ~/ 1000000000;
+  final subNanos = rem % 1000000000;
+
+  final buf = StringBuffer('P');
+  if (years != 0) buf.write('${years}Y');
+  if (months != 0) buf.write('${months}M');
+  if (days != 0) buf.write('${days}D');
+
+  final timeBuf = StringBuffer();
+  if (hours != 0) timeBuf.write('${hours}H');
+  if (minutes != 0) timeBuf.write('${minutes}M');
+  if (seconds != 0 || subNanos != 0) {
+    if (subNanos != 0) {
+      final frac = subNanos.toString().padLeft(9, '0').replaceAll(RegExp(r'0+$'), '');
+      timeBuf.write('$seconds.${frac}S');
+    } else {
+      timeBuf.write('${seconds}S');
+    }
+  }
+  if (timeBuf.isNotEmpty) {
+    buf.write('T');
+    buf.write(timeBuf);
+  }
+
+  final result = buf.toString();
+  return result == 'P' ? 'P0D' : result;
 }
 
 /// Convert a QueryResult to rows of canonical strings.

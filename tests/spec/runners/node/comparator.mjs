@@ -8,6 +8,41 @@
 import { createHash } from 'crypto'
 
 /**
+ * Convert a duration from {months, days, nanos} to ISO 8601 format.
+ * Matches Rust's Display impl for Duration.
+ */
+function durationToIso(totalMonths, days, nanos) {
+  const years = Math.floor(totalMonths / 12)
+  const months = totalMonths % 12
+  const hours = Math.floor(nanos / 3_600_000_000_000)
+  let rem = nanos % 3_600_000_000_000
+  const minutes = Math.floor(rem / 60_000_000_000)
+  rem = rem % 60_000_000_000
+  const seconds = Math.floor(rem / 1_000_000_000)
+  const subNanos = rem % 1_000_000_000
+
+  let result = 'P'
+  if (years) result += `${years}Y`
+  if (months) result += `${months}M`
+  if (days) result += `${days}D`
+
+  let timePart = ''
+  if (hours) timePart += `${hours}H`
+  if (minutes) timePart += `${minutes}M`
+  if (seconds || subNanos) {
+    if (subNanos) {
+      const frac = String(subNanos).padStart(9, '0').replace(/0+$/, '')
+      timePart += `${seconds}.${frac}S`
+    } else {
+      timePart += `${seconds}S`
+    }
+  }
+  if (timePart) result += 'T' + timePart
+
+  return result === 'P' ? 'P0D' : result
+}
+
+/**
  * Convert a JS value to its canonical string for comparison.
  * Must match Rust's value_to_string in lib.rs.
  */
@@ -29,6 +64,11 @@ export function valueToString(val) {
   if (typeof val === 'object' && val !== null) {
     // Date-like objects
     if (val instanceof Date) return val.toISOString()
+    // Duration: {months, days, nanos} -> ISO 8601
+    const keys = Object.keys(val)
+    if (keys.length === 3 && 'months' in val && 'days' in val && 'nanos' in val) {
+      return durationToIso(val.months, val.days, val.nanos)
+    }
     // Plain object (map)
     const entries = Object.entries(val)
       .map(([k, v]) => `${k}: ${valueToString(v)}`)

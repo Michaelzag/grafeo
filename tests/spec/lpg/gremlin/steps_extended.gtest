@@ -167,7 +167,7 @@ tests:
     query: "g.V().has('Person', 'name', 'Alix').constant('yes')"
     expect:
       rows:
-        - [yes]
+        - ["yes"]
 
   # ---------------------------------------------------------------------------
   # Numeric Predicates: inside(), outside()

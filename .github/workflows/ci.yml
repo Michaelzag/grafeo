@@ -132,7 +132,7 @@ jobs:
           uv pip install --system dist/*.whl
           uv pip install --system pytest pyyaml
       - name: Run spec tests
-        run: pytest tests/spec/ -v --timeout=60
+        run: pytest tests/spec/ -v
 
   node-spec:
     name: Node.js Spec Tests
@@ -258,7 +258,7 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: cargo-bins/cargo-binstall@main
-      - run: cargo binstall wasm-bindgen-cli --no-confirm
+      - run: cargo binstall wasm-bindgen-cli@0.2.114 --no-confirm
       - uses: actions/cache@v4
         with:
           path: |
@@ -690,7 +690,7 @@ jobs:
 
       - name: Install wasm-bindgen-cli
         uses: cargo-bins/cargo-binstall@main
-      - run: cargo binstall wasm-bindgen-cli --no-confirm
+      - run: cargo binstall wasm-bindgen-cli@0.2.114 --no-confirm
 
       - name: Cache cargo registry
         uses: actions/cache@v4

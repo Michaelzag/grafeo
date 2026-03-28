@@ -46,12 +46,55 @@ def value_to_string(val: Any) -> str:
         inner = ", ".join(value_to_string(v) for v in val)
         return f"[{inner}]"
     if isinstance(val, dict):
+        # Duration is returned as {months, days, nanos} from the C FFI.
+        # Convert to ISO 8601 duration format to match the Rust runner.
+        if set(val.keys()) == {"months", "days", "nanos"}:
+            return _duration_to_iso(val["months"], val["days"], val["nanos"])
         entries = sorted(f"{k}: {value_to_string(v)}" for k, v in val.items())
         return "{" + ", ".join(entries) + "}"
     if isinstance(val, bytes):
         return f"bytes[{len(val)}]"
     # datetime, date, time: use str() which gives ISO format
     return str(val)
+
+
+def _duration_to_iso(total_months: int, days: int, nanos: int) -> str:
+    """Convert a duration from {months, days, nanos} to ISO 8601 format.
+
+    Matches the Rust Display impl for Duration which produces P1Y2M3DT4H5M6S.
+    """
+    years, months = divmod(total_months, 12)
+    hours, rem = divmod(nanos, 3_600_000_000_000)
+    minutes, rem = divmod(rem, 60_000_000_000)
+    seconds, sub_nanos = divmod(rem, 1_000_000_000)
+
+    parts = ["P"]
+    if years:
+        parts.append(f"{years}Y")
+    if months:
+        parts.append(f"{months}M")
+    if days:
+        parts.append(f"{days}D")
+
+    time_parts = []
+    if hours:
+        time_parts.append(f"{hours}H")
+    if minutes:
+        time_parts.append(f"{minutes}M")
+    if seconds or sub_nanos:
+        if sub_nanos:
+            # Format as decimal seconds
+            frac = f"{sub_nanos:09d}".rstrip("0")
+            time_parts.append(f"{seconds}.{frac}S")
+        else:
+            time_parts.append(f"{seconds}S")
+
+    if time_parts:
+        parts.append("T")
+        parts.extend(time_parts)
+
+    result = "".join(parts)
+    return result if result != "P" else "P0D"
 
 
 # ---------------------------------------------------------------------------

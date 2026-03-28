@@ -277,7 +277,7 @@ tests:
       - "MATCH (n:Item) RETURN n.flag"
     expect:
       rows:
-        - [yes]
+        - ["yes"]
 
   - name: int_to_string
     statements:

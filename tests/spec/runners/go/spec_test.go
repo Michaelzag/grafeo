@@ -269,6 +269,16 @@ func valueToString(v interface{}) string {
 		}
 		return "[" + strings.Join(parts, ", ") + "]"
 	case map[string]interface{}:
+		// Duration: {months, days, nanos} -> ISO 8601
+		if len(val) == 3 {
+			if m, ok1 := val["months"]; ok1 {
+				if d, ok2 := val["days"]; ok2 {
+					if n, ok3 := val["nanos"]; ok3 {
+						return durationToISO(int64(toFloat(m)), int64(toFloat(d)), int64(toFloat(n)))
+					}
+				}
+			}
+		}
 		entries := make([]string, 0, len(val))
 		for k, item := range val {
 			entries = append(entries, k+": "+valueToString(item))
@@ -278,6 +288,70 @@ func valueToString(v interface{}) string {
 	default:
 		return fmt.Sprintf("%v", val)
 	}
+}
+
+// toFloat extracts a numeric value from an interface{}.
+func toFloat(v interface{}) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case int:
+		return float64(n)
+	case int64:
+		return float64(n)
+	default:
+		return 0
+	}
+}
+
+// durationToISO converts {months, days, nanos} to ISO 8601 duration format.
+func durationToISO(totalMonths, days, nanos int64) string {
+	years := totalMonths / 12
+	months := totalMonths % 12
+	hours := nanos / 3_600_000_000_000
+	rem := nanos % 3_600_000_000_000
+	minutes := rem / 60_000_000_000
+	rem = rem % 60_000_000_000
+	seconds := rem / 1_000_000_000
+	subNanos := rem % 1_000_000_000
+
+	var b strings.Builder
+	b.WriteString("P")
+	if years != 0 {
+		fmt.Fprintf(&b, "%dY", years)
+	}
+	if months != 0 {
+		fmt.Fprintf(&b, "%dM", months)
+	}
+	if days != 0 {
+		fmt.Fprintf(&b, "%dD", days)
+	}
+
+	var timePart strings.Builder
+	if hours != 0 {
+		fmt.Fprintf(&timePart, "%dH", hours)
+	}
+	if minutes != 0 {
+		fmt.Fprintf(&timePart, "%dM", minutes)
+	}
+	if seconds != 0 || subNanos != 0 {
+		if subNanos != 0 {
+			frac := strings.TrimRight(fmt.Sprintf("%09d", subNanos), "0")
+			fmt.Fprintf(&timePart, "%d.%sS", seconds, frac)
+		} else {
+			fmt.Fprintf(&timePart, "%dS", seconds)
+		}
+	}
+	if timePart.Len() > 0 {
+		b.WriteString("T")
+		b.WriteString(timePart.String())
+	}
+
+	result := b.String()
+	if result == "P" {
+		return "P0D"
+	}
+	return result
 }
 
 // ---------------------------------------------------------------------------
