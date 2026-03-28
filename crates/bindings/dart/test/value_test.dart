@@ -4,25 +4,27 @@ import 'package:test/test.dart';
 
 void main() {
   group('Duration decoding', () {
-    test('decodes PT1H30M10S to Duration', () {
+    // Durations are returned as ISO 8601 strings because Dart's Duration type
+    // cannot represent calendar components (years, months, days).
+    test('decodes PT1H30M10S to ISO string', () {
       final json = jsonEncode([
         {r'$duration': 'PT1H30M10S'}
       ]);
       final rows = parseRows(json);
       expect(rows, hasLength(1));
       final val = rows[0].values.first;
-      expect(val, isA<Duration>());
-      expect(val, equals(const Duration(hours: 1, minutes: 30, seconds: 10)));
+      expect(val, isA<String>());
+      expect(val, equals('PT1H30M10S'));
     });
 
-    test('decodes PT0S to Duration.zero', () {
+    test('decodes PT0S to string', () {
       final json = jsonEncode([
         {r'$duration': 'PT0S'}
       ]);
       final rows = parseRows(json);
       final val = rows[0].values.first;
-      expect(val, isA<Duration>());
-      expect(val, equals(Duration.zero));
+      expect(val, isA<String>());
+      expect(val, equals('PT0S'));
     });
 
     test('decodes hours-only duration PT2H', () {
@@ -31,18 +33,18 @@ void main() {
       ]);
       final rows = parseRows(json);
       final val = rows[0].values.first;
-      expect(val, isA<Duration>());
-      expect(val, equals(const Duration(hours: 2)));
+      expect(val, isA<String>());
+      expect(val, equals('PT2H'));
     });
 
-    test('decodes minutes-and-seconds PT5M30S', () {
+    test('decodes calendar duration P1Y2M3D', () {
       final json = jsonEncode([
-        {r'$duration': 'PT5M30S'}
+        {r'$duration': 'P1Y2M3D'}
       ]);
       final rows = parseRows(json);
       final val = rows[0].values.first;
-      expect(val, isA<Duration>());
-      expect(val, equals(const Duration(minutes: 5, seconds: 30)));
+      expect(val, isA<String>());
+      expect(val, equals('P1Y2M3D'));
     });
 
     test('decodes seconds-only PT45S', () {
@@ -51,8 +53,8 @@ void main() {
       ]);
       final rows = parseRows(json);
       final val = rows[0].values.first;
-      expect(val, isA<Duration>());
-      expect(val, equals(const Duration(seconds: 45)));
+      expect(val, isA<String>());
+      expect(val, equals('PT45S'));
     });
   });
 
