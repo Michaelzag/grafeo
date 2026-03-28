@@ -1,0 +1,151 @@
+{
+  "format": 1,
+  "restore": {
+    "H:\\GrafeoDB\\grafeo\\tests\\spec\\runners\\csharp\\SpecRunner.csproj": {}
+  },
+  "projects": {
+    "H:\\GrafeoDB\\grafeo\\crates\\bindings\\csharp\\src\\Grafeo\\Grafeo.csproj": {
+      "version": "0.5.29",
+      "restore": {
+        "projectUniqueName": "H:\\GrafeoDB\\grafeo\\crates\\bindings\\csharp\\src\\Grafeo\\Grafeo.csproj",
+        "projectName": "Grafeo",
+        "projectPath": "H:\\GrafeoDB\\grafeo\\crates\\bindings\\csharp\\src\\Grafeo\\Grafeo.csproj",
+        "packagesPath": "C:\\Users\\steve\\.nuget\\packages\\",
+        "outputPath": "H:\\GrafeoDB\\grafeo\\crates\\bindings\\csharp\\src\\Grafeo\\obj\\",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "C:\\Users\\steve\\AppData\\Roaming\\NuGet\\NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net8.0"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net8.0": {
+            "targetAlias": "net8.0",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "allWarningsAsErrors": true,
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        }
+      },
+      "frameworks": {
+        "net8.0": {
+          "targetAlias": "net8.0",
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.419/PortableRuntimeIdentifierGraph.json"
+        }
+      }
+    },
+    "H:\\GrafeoDB\\grafeo\\tests\\spec\\runners\\csharp\\SpecRunner.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "H:\\GrafeoDB\\grafeo\\tests\\spec\\runners\\csharp\\SpecRunner.csproj",
+        "projectName": "SpecRunner",
+        "projectPath": "H:\\GrafeoDB\\grafeo\\tests\\spec\\runners\\csharp\\SpecRunner.csproj",
+        "packagesPath": "C:\\Users\\steve\\.nuget\\packages\\",
+        "outputPath": "H:\\GrafeoDB\\grafeo\\tests\\spec\\runners\\csharp\\obj\\",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "C:\\Users\\steve\\AppData\\Roaming\\NuGet\\NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net8.0"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net8.0": {
+            "targetAlias": "net8.0",
+            "projectReferences": {
+              "H:\\GrafeoDB\\grafeo\\crates\\bindings\\csharp\\src\\Grafeo\\Grafeo.csproj": {
+                "projectPath": "H:\\GrafeoDB\\grafeo\\crates\\bindings\\csharp\\src\\Grafeo\\Grafeo.csproj"
+              }
+            }
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        }
+      },
+      "frameworks": {
+        "net8.0": {
+          "targetAlias": "net8.0",
+          "dependencies": {
+            "Microsoft.NET.Test.Sdk": {
+              "target": "Package",
+              "version": "[17.11.1, )"
+            },
+            "Xunit.SkippableFact": {
+              "target": "Package",
+              "version": "[1.4.13, )"
+            },
+            "YamlDotNet": {
+              "target": "Package",
+              "version": "[16.2.1, )"
+            },
+            "xunit": {
+              "target": "Package",
+              "version": "[2.9.2, )"
+            },
+            "xunit.runner.visualstudio": {
+              "target": "Package",
+              "version": "[2.8.2, )"
+            }
+          },
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.419/PortableRuntimeIdentifierGraph.json"
+        }
+      }
+    }
+  }
+}

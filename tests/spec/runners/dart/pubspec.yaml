@@ -1,0 +1,17 @@
+name: grafeo_spec_runner
+version: 0.0.1
+description: >-
+  Spec runner that discovers and executes .gtest files through
+  the Dart grafeo bindings.
+publish_to: none
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  grafeo:
+    path: ../../../../crates/bindings/dart
+  yaml: ^3.1.0
+
+dev_dependencies:
+  test: ^1.24.0

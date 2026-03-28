@@ -1,29 +1,43 @@
 /**
- * Vitest spec runner for .gtest files.
+ * Vitest spec runner for .gtest files (WASM bindings).
  *
  * Discovers all .gtest files under tests/spec/, parses them, and creates
- * vitest tests that execute queries through the Node.js GrafeoDB bindings.
+ * vitest tests that execute queries through the WASM GrafeoDB bindings.
+ *
+ * Reuses the parser and comparator from the Node.js runner.
  */
 
 import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync, statSync, existsSync } from 'fs'
 import { join, relative, resolve } from 'path'
-import { parseGtestFile } from './parser.mjs'
-import { assertRowsSorted, assertRowsOrdered, assertRowsWithPrecision, resultToRows } from './comparator.mjs'
+import { parseGtestFile } from '../node/parser.mjs'
+import { assertRowsSorted, assertRowsOrdered, assertRowsWithPrecision } from '../node/comparator.mjs'
 
 // ---------------------------------------------------------------------------
-// Import GrafeoDB (skip all tests gracefully if unavailable)
+// Import WASM bindings (skip all tests gracefully if unavailable)
 // ---------------------------------------------------------------------------
 
-let GrafeoDB
-let GRAFEO_AVAILABLE = false
+let Database
+let initSync
+let WASM_AVAILABLE = false
 
 try {
-  const mod = await import('../../../../crates/bindings/node/index.js')
-  GrafeoDB = mod.GrafeoDB
-  GRAFEO_AVAILABLE = true
+  const wasmPkgPath = resolve(import.meta.dirname, '..', '..', '..', '..', 'crates', 'bindings', 'wasm', 'pkg')
+  const wasmJsPath = join(wasmPkgPath, 'grafeo_wasm.js')
+  const wasmBinPath = join(wasmPkgPath, 'grafeo_wasm_bg.wasm')
+
+  if (existsSync(wasmJsPath) && existsSync(wasmBinPath)) {
+    const mod = await import('../../../../crates/bindings/wasm/pkg/grafeo_wasm.js')
+    Database = mod.Database
+    initSync = mod.initSync
+
+    // Initialize WASM synchronously from the .wasm file
+    const wasmBytes = readFileSync(wasmBinPath)
+    initSync({ module: wasmBytes })
+    WASM_AVAILABLE = true
+  }
 } catch {
-  // Bindings not built; all tests will be skipped
+  // WASM package not built or initialization failed; all tests will be skipped
 }
 
 // ---------------------------------------------------------------------------
@@ -32,6 +46,32 @@ try {
 
 const SPEC_DIR = resolve(import.meta.dirname, '..', '..')
 const DATASETS_DIR = join(SPEC_DIR, 'datasets')
+
+// ---------------------------------------------------------------------------
+// Result conversion
+// ---------------------------------------------------------------------------
+
+/**
+ * Wrap a WASM raw result so it looks like the Node.js QueryResult expected
+ * by the comparator functions (which call resultToRows internally).
+ */
+function wrapRawResult(rawResult) {
+  return {
+    columns: rawResult.columns,
+    length: rawResult.rows.length,
+    toArray() {
+      const arr = []
+      for (const row of rawResult.rows) {
+        const obj = {}
+        for (let i = 0; i < rawResult.columns.length; i++) {
+          obj[rawResult.columns[i]] = row[i]
+        }
+        arr.push(obj)
+      }
+      return arr
+    },
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -54,7 +94,7 @@ function findGtestFiles(dir) {
 }
 
 /** Load a .setup file and execute each line as GQL. */
-async function loadDataset(db, datasetName) {
+function loadDataset(db, datasetName) {
   const setupPath = join(DATASETS_DIR, `${datasetName}.setup`)
   if (!existsSync(setupPath)) {
     throw new Error(`Dataset file not found: ${setupPath}`)
@@ -63,42 +103,52 @@ async function loadDataset(db, datasetName) {
   for (const line of content.split(/\r?\n/)) {
     const trimmed = line.trim()
     if (!trimmed || trimmed.startsWith('#')) continue
-    await db.execute(trimmed)
+    db.execute(trimmed)
   }
 }
 
-/** Execute a query in the specified language. */
-async function executeQuery(db, language, query) {
+/**
+ * Map .gtest language keys to the WASM executeWithLanguage dispatch key.
+ * Returns null if the language is not recognized.
+ */
+function toDispatchKey(language) {
   switch (language) {
-    case 'gql':
-    case '':
-      return db.execute(query)
-    case 'cypher':
-      if (!db.executeCypher) throw new Error('Cypher not available')
-      return db.executeCypher(query)
-    case 'gremlin':
-      if (!db.executeGremlin) throw new Error('Gremlin not available')
-      return db.executeGremlin(query)
-    case 'graphql':
-      if (!db.executeGraphql) throw new Error('GraphQL not available')
-      return db.executeGraphql(query)
-    case 'sql-pgq':
-    case 'sql_pgq':
-      if (!db.executeSql) throw new Error('SQL/PGQ not available')
-      return db.executeSql(query)
-    default:
-      throw new Error(`Unsupported language: ${language}`)
+    case 'gql': case '': return 'gql'
+    case 'cypher': return 'cypher'
+    case 'gremlin': return 'gremlin'
+    case 'graphql': return 'graphql'
+    case 'graphql-rdf': return 'graphql-rdf'
+    case 'sparql': return 'sparql'
+    case 'sql-pgq': case 'sql_pgq': case 'sql': return 'sql'
+    default: return null
   }
 }
 
-/** Check if a language method is available on the GrafeoDB instance. */
+/** Execute a query in the specified language, returning a raw result. */
+function executeQueryRaw(db, language, query) {
+  const key = toDispatchKey(language)
+  if (key === null) throw new Error(`Unsupported language: ${language}`)
+  if (key === 'gql') return db.executeRaw(query)
+  return db.executeRawWithLanguage(query, key)
+}
+
+/** Execute a query in the specified language (for setup, returns array of objects). */
+function executeQuery(db, language, query) {
+  const key = toDispatchKey(language)
+  if (key === null) throw new Error(`Unsupported language: ${language}`)
+  if (key === 'gql') return db.execute(query)
+  return db.executeWithLanguage(query, key)
+}
+
+/** Check if a language method is available on the WASM Database instance. */
 function isLanguageAvailable(db, language) {
   switch (language) {
     case 'gql': case '': return true
     case 'cypher': return typeof db.executeCypher === 'function'
     case 'gremlin': return typeof db.executeGremlin === 'function'
     case 'graphql': return typeof db.executeGraphql === 'function'
-    case 'sql-pgq': case 'sql_pgq': return typeof db.executeSql === 'function'
+    case 'graphql-rdf': return typeof db.executeWithLanguage === 'function'
+    case 'sql-pgq': case 'sql_pgq': case 'sql': return typeof db.executeSql === 'function'
     case 'sparql': return typeof db.executeSparql === 'function'
     default: return false
   }
@@ -135,30 +185,30 @@ for (const filePath of gtestFiles) {
       // Handle rosetta variants
       if (tc.variants && Object.keys(tc.variants).length > 0) {
         for (const [lang, query] of Object.entries(tc.variants)) {
-          it(`${tc.name}_${lang}`, async () => {
-            if (!GRAFEO_AVAILABLE) return expect(true).toBe(true) // skip
-            const db = GrafeoDB.create()
+          it(`${tc.name}_${lang}`, () => {
+            if (!WASM_AVAILABLE) return expect(true).toBe(true) // skip
+            const db = new Database()
             try {
               if (!isLanguageAvailable(db, lang)) return // skip
               if (meta.dataset && meta.dataset !== 'empty') {
-                await loadDataset(db, meta.dataset)
+                loadDataset(db, meta.dataset)
               }
-              await runTestCase(db, { ...tc, query }, lang, meta.language || 'gql')
+              runTestCase(db, { ...tc, query }, lang)
             } finally {
-              db.close()
+              db.free()
             }
           })
         }
         continue
       }
 
-      it(tc.name, async () => {
-        if (!GRAFEO_AVAILABLE) return expect(true).toBe(true) // skip
+      it(tc.name, () => {
+        if (!WASM_AVAILABLE) return expect(true).toBe(true) // skip
 
         // Skip by field
         if (tc.skip) return
 
-        const db = GrafeoDB.create()
+        const db = new Database()
         try {
           // Check language availability
           if (!isLanguageAvailable(db, meta.language)) return
@@ -170,12 +220,12 @@ for (const filePath of gtestFiles) {
 
           // Load dataset
           if (meta.dataset && meta.dataset !== 'empty') {
-            await loadDataset(db, meta.dataset)
+            loadDataset(db, meta.dataset)
           }
 
-          await runTestCase(db, tc, meta.language, meta.language || 'gql')
+          runTestCase(db, tc, meta.language)
         } finally {
-          db.close()
+          db.free()
         }
       })
     }
@@ -183,10 +233,10 @@ for (const filePath of gtestFiles) {
 }
 
 /** Execute a single test case and assert the expected result. */
-async function runTestCase(db, tc, language, setupLanguage) {
-  // Run setup queries in the file's declared language (not the variant language)
+function runTestCase(db, tc, language) {
+  // Run setup queries in the file's declared language
   for (const setupQ of tc.setup) {
-    await executeQuery(db, setupLanguage || language, setupQ)
+    executeQuery(db, language, setupQ)
   }
 
   const exp = tc.expect
@@ -199,7 +249,7 @@ async function runTestCase(db, tc, language, setupLanguage) {
   if (exp.error) {
     try {
       for (const q of queries) {
-        await executeQuery(db, language, q)
+        executeQuery(db, language, q)
       }
       throw new Error(`Expected error containing '${exp.error}' but query succeeded`)
     } catch (err) {
@@ -209,15 +259,18 @@ async function runTestCase(db, tc, language, setupLanguage) {
     return
   }
 
-  // Execute all queries, capture last result
-  let result
+  // Execute all queries, capture last raw result for assertions
+  let rawResult
   for (let i = 0; i < queries.length; i++) {
-    result = await executeQuery(db, language, queries[i])
+    rawResult = executeQueryRaw(db, language, queries[i])
   }
+
+  // Wrap for the comparator functions
+  const result = wrapRawResult(rawResult)
 
   // Column assertion (checked before value assertions)
   if (exp.columns && exp.columns.length > 0) {
-    const actualCols = result.columns ? [...result.columns] : []
+    const actualCols = [...result.columns]
     expect(actualCols).toEqual(exp.columns)
   }
 
