@@ -22,7 +22,6 @@ tests:
   - name: insert_and_query_language_tagged_literal
     # Insert a French-tagged literal and retrieve it. Per the RDF 1.1 spec,
     # "bonjour"@fr has datatype rdf:langString and the tag must be preserved.
-    skip: "language tags lost during Value round-trip in translator"
     setup:
       - |
         INSERT DATA {
@@ -39,7 +38,6 @@ tests:
   - name: multiple_languages_same_predicate
     # Same subject and predicate with three distinct language tags should
     # produce three separate triples in the RDF graph.
-    skip: "language tags lost during Value round-trip in translator"
     setup:
       - |
         INSERT DATA {
@@ -57,7 +55,7 @@ tests:
   - name: language_tag_preserved_in_result
     # The language tag must survive the full round-trip: insert, store, query,
     # and projection. LANG() on the result should return the original tag.
-    skip: "language tags lost during Value round-trip in translator"
+    skip: "LANG() in projection not yet evaluated"
     setup:
       - |
         INSERT DATA {
@@ -202,7 +200,7 @@ tests:
     # Direct comparison of a variable bound to a language-tagged literal
     # against a language-tagged constant. Only an exact match on both
     # the lexical form and the tag should succeed.
-    skip: "language tags lost during Value round-trip in translator"
+    skip: "language-tagged literal comparison in FILTER not yet supported"
     setup:
       - |
         INSERT DATA {
@@ -225,7 +223,6 @@ tests:
   - name: optional_language_tagged_value
     # OPTIONAL clause with a language-tagged object. When the optional
     # pattern has no match, the variable should be unbound (null).
-    skip: "language tags lost during Value round-trip in translator"
     setup:
       - |
         INSERT DATA {
@@ -252,7 +249,6 @@ tests:
     # In RDF, "chat"@fr (French for "cat") and "chat"@en (English slang for
     # "conversation") are distinct terms despite identical lexical forms.
     # Both must be stored and returned.
-    skip: "language tags lost during Value round-trip in translator"
     setup:
       - |
         INSERT DATA {
@@ -270,7 +266,6 @@ tests:
     # A plain literal "hello" and a language-tagged "hello"@en are different
     # RDF terms. Inserting both on the same subject/predicate must produce
     # two triples.
-    skip: "language tags lost during Value round-trip in translator"
     setup:
       - |
         INSERT DATA {

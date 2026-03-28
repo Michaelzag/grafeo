@@ -69,7 +69,6 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: language_tagged_literal_insert_query
-    skip: "language tags lost during Value round-trip in translator"
     # Insert "chat"@fr and query it back. Per W3C, language-tagged literals
     # have datatype rdf:langString and the tag should be preserved.
     setup:
@@ -86,7 +85,6 @@ tests:
         - [chat]
 
   - name: multiple_language_tags
-    skip: "language tags lost during Value round-trip in translator"
     # Same predicate with different language tags should produce distinct triples.
     setup:
       - |
