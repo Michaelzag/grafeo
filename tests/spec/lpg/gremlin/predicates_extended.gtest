@@ -126,21 +126,18 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: regex_prefix
-    skip: "regex() not wired in parser (token exists but parse_predicate does not match it)"
     query: "g.V().hasLabel('Person').has('name', regex('A.*')).values('name')"
     expect:
       rows:
         - [Alix]
 
   - name: regex_suffix
-    skip: "regex() not wired in parser"
     query: "g.V().hasLabel('Person').has('city', regex('.*in$')).values('name')"
     expect:
       rows:
         - [Gus]
 
   - name: regex_substring
-    skip: "regex() not wired in parser"
     query: "g.V().hasLabel('Person').has('city', regex('.*er.*')).count()"
     expect:
       rows:

@@ -744,11 +744,15 @@ impl CardinalityEstimator {
 
         let subject_bound = matches!(
             scan.subject,
-            TripleComponent::Iri(_) | TripleComponent::Literal(_)
+            TripleComponent::Iri(_)
+                | TripleComponent::Literal(_)
+                | TripleComponent::LangLiteral { .. }
         );
         let object_bound = matches!(
             scan.object,
-            TripleComponent::Iri(_) | TripleComponent::Literal(_)
+            TripleComponent::Iri(_)
+                | TripleComponent::Literal(_)
+                | TripleComponent::LangLiteral { .. }
         );
         let predicate_iri = match &scan.predicate {
             TripleComponent::Iri(iri) => Some(iri.as_str()),

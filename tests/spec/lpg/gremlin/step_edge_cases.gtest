@@ -25,21 +25,18 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: other_v_from_out_edge
-    skip: "otherV() not implemented in translator"
     query: "g.V().has('Person', 'name', 'Alix').outE('KNOWS').otherV().values('name')"
     expect:
       rows:
         - [Gus]
 
   - name: other_v_from_in_edge
-    skip: "otherV() not implemented in translator"
     query: "g.V().has('Person', 'name', 'Gus').inE('KNOWS').otherV().values('name')"
     expect:
       rows:
         - [Alix]
 
   - name: other_v_count
-    skip: "otherV() not implemented in translator"
     query: "g.V().has('Person', 'name', 'Alix').outE().otherV().count()"
     expect:
       rows:
@@ -50,7 +47,6 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: label_on_out_edges
-    skip: "label() on edge variables returns null, Labels() not resolved for edges"
     query: "g.V().has('Person', 'name', 'Alix').outE().label()"
     expect:
       rows:
@@ -58,14 +54,12 @@ tests:
         - [WORKS_AT]
 
   - name: label_on_single_edge_type
-    skip: "label() on edge variables returns null"
     query: "g.V().has('Person', 'name', 'Alix').outE('KNOWS').label()"
     expect:
       rows:
         - [KNOWS]
 
   - name: label_on_in_edge
-    skip: "label() on edge variables returns null"
     query: "g.V().has('Person', 'name', 'Gus').inE('KNOWS').label()"
     expect:
       rows:

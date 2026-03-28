@@ -3408,12 +3408,46 @@ impl<'a> Parser<'a> {
             match self.current.kind {
                 TokenKind::LBracket => {
                     self.advance();
-                    let index = self.parse_expression()?;
-                    self.expect(TokenKind::RBracket)?;
-                    expr = Expression::IndexAccess {
-                        base: Box::new(expr),
-                        index: Box::new(index),
-                    };
+
+                    // Check for slice patterns: [..end], [start..], [start..end]
+                    if self.current.kind == TokenKind::DotDot {
+                        // [..end] pattern: no start
+                        self.advance(); // consume ..
+                        let end_expr = if self.current.kind == TokenKind::RBracket {
+                            None
+                        } else {
+                            Some(Box::new(self.parse_expression()?))
+                        };
+                        self.expect(TokenKind::RBracket)?;
+                        expr = Expression::SliceAccess {
+                            base: Box::new(expr),
+                            start: None,
+                            end: end_expr,
+                        };
+                    } else {
+                        let index = self.parse_expression()?;
+                        if self.current.kind == TokenKind::DotDot {
+                            // [start..] or [start..end] pattern
+                            self.advance(); // consume ..
+                            let end_expr = if self.current.kind == TokenKind::RBracket {
+                                None
+                            } else {
+                                Some(Box::new(self.parse_expression()?))
+                            };
+                            self.expect(TokenKind::RBracket)?;
+                            expr = Expression::SliceAccess {
+                                base: Box::new(expr),
+                                start: Some(Box::new(index)),
+                                end: end_expr,
+                            };
+                        } else {
+                            self.expect(TokenKind::RBracket)?;
+                            expr = Expression::IndexAccess {
+                                base: Box::new(expr),
+                                index: Box::new(index),
+                            };
+                        }
+                    }
                 }
                 // n:Label label-check syntax (compact form of IS LABELED).
                 // Multiple labels (n:Person:Actor) are ANDead together.

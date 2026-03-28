@@ -260,9 +260,9 @@ impl SparqlTranslator {
         // Build a sequence of InsertTriple operators
         let mut ops = Vec::new();
         for quad in data {
-            let subject = self.translate_triple_term(&quad.triple.subject)?;
+            let subject = self.translate_data_term(&quad.triple.subject)?;
             let predicate = self.translate_property_path(&quad.triple.predicate)?;
-            let object = self.translate_triple_term(&quad.triple.object)?;
+            let object = self.translate_data_term(&quad.triple.object)?;
             let graph = quad.graph.as_ref().map(|g| self.resolve_variable_or_iri(g));
 
             ops.push(LogicalOperator::InsertTriple(InsertTripleOp {
@@ -285,6 +285,29 @@ impl SparqlTranslator {
             Ok(LogicalPlan::new(LogicalOperator::Union(UnionOp {
                 inputs: ops,
             })))
+        }
+    }
+
+    /// Translates a triple term in a data context (INSERT DATA / DELETE DATA).
+    ///
+    /// Blank nodes become `TripleComponent::BlankNode` instead of variables,
+    /// because data operations have no WHERE clause to bind variables against.
+    fn translate_data_term(&mut self, term: &ast::TripleTerm) -> Result<TripleComponent> {
+        match term {
+            ast::TripleTerm::BlankNode(bnode) => {
+                let label = match bnode {
+                    ast::BlankNode::Labeled(label) => {
+                        format!("q{}_{label}", self.query_id)
+                    }
+                    ast::BlankNode::Anonymous(_) => {
+                        let anon = self.next_anon();
+                        format!("q{}_anon{anon}", self.query_id)
+                    }
+                };
+                Ok(TripleComponent::BlankNode(label))
+            }
+            // Non-blank-node terms use the standard translation
+            other => self.translate_triple_term(other),
         }
     }
 
@@ -897,8 +920,15 @@ impl SparqlTranslator {
             ast::TripleTerm::Variable(name) => Ok(TripleComponent::Variable(name.clone())),
             ast::TripleTerm::Iri(iri) => Ok(TripleComponent::Iri(self.resolve_iri(iri))),
             ast::TripleTerm::Literal(lit) => {
-                let value = self.literal_to_value(lit);
-                Ok(TripleComponent::Literal(value))
+                if let Some(lang) = &lit.language {
+                    Ok(TripleComponent::LangLiteral {
+                        value: lit.value.clone(),
+                        lang: lang.clone(),
+                    })
+                } else {
+                    let value = self.literal_to_value(lit);
+                    Ok(TripleComponent::Literal(value))
+                }
             }
             ast::TripleTerm::BlankNode(bnode) => {
                 // Treat blank nodes as variables, scoped by query_id
@@ -937,6 +967,16 @@ impl SparqlTranslator {
                 datatype: None,
                 language: None,
             }),
+            TripleComponent::LangLiteral { value, lang } => {
+                ast::TripleTerm::Literal(ast::Literal {
+                    value: value.clone(),
+                    datatype: None,
+                    language: Some(lang.clone()),
+                })
+            }
+            TripleComponent::BlankNode(label) => {
+                ast::TripleTerm::BlankNode(ast::BlankNode::Labeled(label.clone()))
+            }
         }
     }
 
@@ -1843,6 +1883,12 @@ impl SparqlTranslator {
                 LogicalExpression::Literal(Value::String(iri.clone().into()))
             }
             TripleComponent::Literal(val) => LogicalExpression::Literal(val.clone()),
+            TripleComponent::LangLiteral { value, .. } => {
+                LogicalExpression::Literal(Value::String(value.clone().into()))
+            }
+            TripleComponent::BlankNode(label) => {
+                LogicalExpression::Literal(Value::String(format!("_:{label}").into()))
+            }
         }
     }
 

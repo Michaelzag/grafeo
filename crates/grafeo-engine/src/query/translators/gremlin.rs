@@ -187,6 +187,21 @@ impl GremlinTranslator {
                     }
                     continue;
                 }
+                ast::Step::OtherV => {
+                    if let Some(ctx) = edge_ctx.take() {
+                        // otherV = the opposite endpoint from the traversal direction.
+                        // After outE(), the "other" vertex is the target (same as inV).
+                        // After inE(), the "other" vertex is the source (same as outV).
+                        // After bothE(), we cannot determine the "other" vertex
+                        // deterministically, so fall back to target.
+                        current_var = match ctx.direction {
+                            ExpandDirection::Outgoing => ctx.target_var,
+                            ExpandDirection::Incoming => ctx.source_var,
+                            ExpandDirection::Both => ctx.target_var,
+                        };
+                    }
+                    continue;
+                }
                 _ => {}
             }
 
@@ -826,14 +841,20 @@ impl GremlinTranslator {
                 Ok((plan, Some("id".to_string())))
             }
             ast::Step::Label => {
-                // Gremlin label() returns the first label as a scalar string,
-                // not a list. Use IndexAccess to extract element [0].
+                // For edges, use Type(var) which returns the edge type directly.
+                // For nodes, Labels(var) returns a list, so use IndexAccess to
+                // extract element [0] as a scalar string.
+                let label_expr = if is_edge {
+                    LogicalExpression::Type(current_var.to_string())
+                } else {
+                    LogicalExpression::IndexAccess {
+                        base: Box::new(LogicalExpression::Labels(current_var.to_string())),
+                        index: Box::new(LogicalExpression::Literal(Value::Int64(0))),
+                    }
+                };
                 let plan = LogicalOperator::Project(ProjectOp {
                     projections: vec![Projection {
-                        expression: LogicalExpression::IndexAccess {
-                            base: Box::new(LogicalExpression::Labels(current_var.to_string())),
-                            index: Box::new(LogicalExpression::Literal(Value::Int64(0))),
-                        },
+                        expression: label_expr,
                         alias: Some("label".to_string()),
                     }],
                     input: Box::new(input),

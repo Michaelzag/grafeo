@@ -294,7 +294,6 @@ tests:
         - [2]
 
   - name: drop_edge_via_global_e_has_label
-    skip: "g.E().hasLabel() does not resolve edge labels correctly"
     statements:
       - "g.E().hasLabel('WORKS_AT').drop()"
       - "g.E().count()"

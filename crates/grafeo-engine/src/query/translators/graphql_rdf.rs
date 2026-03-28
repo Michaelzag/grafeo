@@ -10,7 +10,7 @@
 //! - Nested selections → Predicate-object traversals
 //! - Scalar fields → Select variables from triple bindings
 
-use super::common::{VarGen, capitalize_first, wrap_filter};
+use super::common::{VarGen, capitalize_first, graphql_directives_allow, wrap_filter};
 use crate::query::plan::{
     BinaryOp, JoinOp, JoinType, LogicalExpression, LogicalOperator, LogicalPlan, ProjectOp,
     Projection, TripleComponent, TripleScanOp,
@@ -163,6 +163,11 @@ impl GraphQLRdfTranslator {
         for selection in &selection_set.selections {
             match selection {
                 ast::Selection::Field(field) => {
+                    // Evaluate @skip / @include directives
+                    if !graphql_directives_allow(&field.directives) {
+                        continue;
+                    }
+
                     if field.selection_set.is_some() {
                         // This is a nested object - requires another triple pattern
                         let (new_plan, nested_projections) =
@@ -183,6 +188,10 @@ impl GraphQLRdfTranslator {
                     }
                 }
                 ast::Selection::FragmentSpread(spread) => {
+                    // Evaluate @skip / @include directives on the spread
+                    if !graphql_directives_allow(&spread.directives) {
+                        continue;
+                    }
                     // Resolve fragment and include its fields
                     if let Some(frag) = self.fragments.get(&spread.name) {
                         let (new_plan, frag_projections) =
@@ -192,6 +201,10 @@ impl GraphQLRdfTranslator {
                     }
                 }
                 ast::Selection::InlineFragment(inline) => {
+                    // Evaluate @skip / @include directives on the inline fragment
+                    if !graphql_directives_allow(&inline.directives) {
+                        continue;
+                    }
                     // Inline fragment with type condition
                     if let Some(type_cond) = &inline.type_condition {
                         // Add type check as a triple pattern

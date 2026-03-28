@@ -239,6 +239,8 @@ pub enum TokenKind {
     Comma,
     /// . punctuation.
     Dot,
+    /// .. range operator (for list slicing).
+    DotDot,
     /// -> arrow.
     Arrow,
     /// <- arrow.
@@ -328,7 +330,12 @@ impl<'a> Lexer<'a> {
             }
             '.' => {
                 self.advance();
-                TokenKind::Dot
+                if self.peek() == '.' {
+                    self.advance();
+                    TokenKind::DotDot
+                } else {
+                    TokenKind::Dot
+                }
             }
             '+' => {
                 self.advance();

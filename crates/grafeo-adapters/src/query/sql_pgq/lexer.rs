@@ -112,6 +112,18 @@ pub enum TokenKind {
     /// HAVING
     Having,
 
+    // CASE expression keywords
+    /// CASE
+    Case,
+    /// WHEN
+    When,
+    /// THEN
+    Then,
+    /// ELSE
+    Else,
+    /// END
+    End,
+
     // Procedure keywords
     /// CALL
     Call,
@@ -525,6 +537,11 @@ impl<'a> Lexer<'a> {
             CommonKeyword::Yield => TokenKind::Yield,
             CommonKeyword::Optional => TokenKind::Optional,
             CommonKeyword::Having => TokenKind::Having,
+            CommonKeyword::Case => TokenKind::Case,
+            CommonKeyword::When => TokenKind::When,
+            CommonKeyword::Then => TokenKind::Then,
+            CommonKeyword::Else => TokenKind::Else,
+            CommonKeyword::End => TokenKind::End,
             // Keywords recognized by CommonKeyword but not used in SQL/PGQ
             // are mapped to Identifier (they can appear as table/column names)
             _ => TokenKind::Identifier,

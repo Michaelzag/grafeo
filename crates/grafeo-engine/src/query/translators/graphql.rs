@@ -11,7 +11,8 @@
 //! - Scalar fields → Return projections
 
 use super::common::{
-    VarGen, capitalize_first, wrap_filter, wrap_limit, wrap_return, wrap_skip, wrap_sort,
+    VarGen, capitalize_first, graphql_directives_allow, wrap_filter, wrap_limit, wrap_return,
+    wrap_skip, wrap_sort,
 };
 use crate::query::plan::{
     BinaryOp, CreateNodeOp, DeleteNodeOp, ExpandDirection, ExpandOp, LogicalExpression,
@@ -499,6 +500,11 @@ impl GraphQLTranslator {
         for selection in &selection_set.selections {
             match selection {
                 ast::Selection::Field(field) => {
+                    // Evaluate @skip / @include directives
+                    if !graphql_directives_allow(&field.directives) {
+                        continue;
+                    }
+
                     if field.selection_set.is_some() {
                         // This is a relationship traversal - collect nested items
                         let (new_plan, nested_items) =
@@ -530,6 +536,10 @@ impl GraphQLTranslator {
                     }
                 }
                 ast::Selection::FragmentSpread(spread) => {
+                    // Evaluate @skip / @include directives on the spread
+                    if !graphql_directives_allow(&spread.directives) {
+                        continue;
+                    }
                     // Resolve fragment and include its fields
                     if let Some(frag) = self.fragments.get(&spread.name) {
                         let (new_plan, items) = self.expand_fragment(frag, plan, current_var)?;
@@ -538,6 +548,10 @@ impl GraphQLTranslator {
                     }
                 }
                 ast::Selection::InlineFragment(inline) => {
+                    // Evaluate @skip / @include directives on the inline fragment
+                    if !graphql_directives_allow(&inline.directives) {
+                        continue;
+                    }
                     // Inline fragment with type condition
                     if let Some(type_cond) = &inline.type_condition {
                         // Add type check filter: type_cond IN labels(var)
@@ -726,6 +740,7 @@ impl GraphQLTranslator {
         for selection in &frag.selection_set.selections {
             if let ast::Selection::Field(field) = selection
                 && field.selection_set.is_none()
+                && graphql_directives_allow(&field.directives)
             {
                 // Scalar field
                 let alias = field.alias.clone().unwrap_or(field.name.clone());
@@ -753,6 +768,7 @@ impl GraphQLTranslator {
         for selection in &selection_set.selections {
             if let ast::Selection::Field(field) = selection
                 && field.selection_set.is_none()
+                && graphql_directives_allow(&field.directives)
             {
                 let alias = field.alias.clone().unwrap_or(field.name.clone());
                 return_items.push(ReturnItem {

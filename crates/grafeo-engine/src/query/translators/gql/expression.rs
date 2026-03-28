@@ -155,6 +155,24 @@ impl GqlTranslator {
                     index: Box::new(index_expr),
                 })
             }
+            ast::Expression::SliceAccess { base, start, end } => {
+                let base_expr = self.translate_expression(base)?;
+                let start_expr = start
+                    .as_ref()
+                    .map(|s| self.translate_expression(s))
+                    .transpose()?
+                    .map(Box::new);
+                let end_expr = end
+                    .as_ref()
+                    .map(|e| self.translate_expression(e))
+                    .transpose()?
+                    .map(Box::new);
+                Ok(LogicalExpression::SliceAccess {
+                    base: Box::new(base_expr),
+                    start: start_expr,
+                    end: end_expr,
+                })
+            }
             ast::Expression::ValueSubquery { query } => {
                 // VALUE { subquery } returns a scalar from the inner query.
                 // If the inner RETURN is a count() aggregate over an edge pattern,

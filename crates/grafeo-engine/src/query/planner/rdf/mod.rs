@@ -602,10 +602,16 @@ impl RdfPlanner {
                     output_columns.push(proj.alias.clone().unwrap_or_else(|| format!("{value}")));
                     output_types.push(LogicalType::Any);
                 }
-                _ => {
-                    // For non-variable expressions, we need to evaluate them
-                    // For now, skip complex expressions in projection
-                    continue;
+                expr => {
+                    // Convert complex expressions (function calls, arithmetic, etc.)
+                    // to physical filter expressions and evaluate them in the projection.
+                    let filter_expr = convert_filter_expression(expr)?;
+                    projections.push(ProjectExpr::Expression {
+                        expr: filter_expr,
+                        variable_columns: variable_columns.clone(),
+                    });
+                    output_columns.push(proj.alias.clone().unwrap_or_else(|| format!("{expr:?}")));
+                    output_types.push(LogicalType::Any);
                 }
             }
         }
@@ -615,7 +621,23 @@ impl RdfPlanner {
             return Ok((input_op, input_columns));
         }
 
-        let operator = Box::new(ProjectOperator::new(input_op, projections, output_types));
+        let has_expressions = projections
+            .iter()
+            .any(|p| matches!(p, ProjectExpr::Expression { .. }));
+
+        let operator: Box<dyn Operator> = if has_expressions {
+            // Expressions need a store reference for the ExpressionPredicate evaluator.
+            // RDF expressions only use variables (not node/edge properties), so a
+            // NullGraphStore is sufficient.
+            Box::new(ProjectOperator::with_store(
+                input_op,
+                projections,
+                output_types,
+                Arc::new(grafeo_core::graph::NullGraphStore) as Arc<dyn GraphStore>,
+            ))
+        } else {
+            Box::new(ProjectOperator::new(input_op, projections, output_types))
+        };
         Ok((operator, output_columns))
     }
 
@@ -958,7 +980,9 @@ impl RdfPlanner {
         &self,
         insert: &InsertTripleOp,
     ) -> Result<(Box<dyn Operator>, Vec<String>)> {
-        // Check if this is a pattern-based insert (has variables in the template)
+        // Check if this is a pattern-based insert (has variables in the template).
+        // Blank nodes are concrete values, not variables, so they don't trigger
+        // the pattern-based path.
         let has_variables = matches!(&insert.subject, TripleComponent::Variable(_))
             || matches!(&insert.predicate, TripleComponent::Variable(_))
             || matches!(&insert.object, TripleComponent::Variable(_));
@@ -1037,6 +1061,10 @@ impl RdfPlanner {
                 };
                 Ok(Term::Literal(lit))
             }
+            TripleComponent::LangLiteral { value, lang } => {
+                Ok(Term::lang_literal(value.clone(), lang.clone()))
+            }
+            TripleComponent::BlankNode(label) => Ok(Term::blank(label.clone())),
             TripleComponent::Variable(name) => {
                 // Variables in INSERT DATA should have been bound
                 Err(Error::Internal(format!(
@@ -1373,6 +1401,7 @@ impl RdfInsertPatternOperator {
     ) -> Option<Term> {
         match component {
             TripleComponent::Iri(iri) => Some(Term::Iri(iri.clone().into())),
+            TripleComponent::BlankNode(label) => Some(Term::blank(label.clone())),
             TripleComponent::Literal(value) => {
                 let lit = match value {
                     Value::String(s) => Literal::simple(s.to_string()),
@@ -1386,6 +1415,9 @@ impl RdfInsertPatternOperator {
                     _ => Literal::simple(format!("{:?}", value)),
                 };
                 Some(Term::Literal(lit))
+            }
+            TripleComponent::LangLiteral { value, lang } => {
+                Some(Term::lang_literal(value.clone(), lang.clone()))
             }
             TripleComponent::Variable(name) => {
                 // Remove the leading '?' if present
@@ -1655,6 +1687,7 @@ impl RdfDeletePatternOperator {
     ) -> Option<Term> {
         match component {
             TripleComponent::Iri(iri) => Some(Term::Iri(iri.clone().into())),
+            TripleComponent::BlankNode(label) => Some(Term::blank(label.clone())),
             TripleComponent::Literal(value) => {
                 let lit = match value {
                     Value::String(s) => Literal::simple(s.to_string()),
@@ -1668,6 +1701,9 @@ impl RdfDeletePatternOperator {
                     _ => Literal::simple(format!("{:?}", value)),
                 };
                 Some(Term::Literal(lit))
+            }
+            TripleComponent::LangLiteral { value, lang } => {
+                Some(Term::lang_literal(value.clone(), lang.clone()))
             }
             TripleComponent::Variable(name) => {
                 // Remove the leading '?' if present
@@ -2204,6 +2240,7 @@ impl RdfModifyOperator {
     ) -> Option<Term> {
         match component {
             TripleComponent::Iri(iri) => Some(Term::Iri(iri.clone().into())),
+            TripleComponent::BlankNode(label) => Some(Term::blank(label.clone())),
             TripleComponent::Literal(value) => {
                 let lit = match value {
                     Value::String(s) => Literal::simple(s.to_string()),
@@ -2217,6 +2254,9 @@ impl RdfModifyOperator {
                     _ => Literal::simple(format!("{:?}", value)),
                 };
                 Some(Term::Literal(lit))
+            }
+            TripleComponent::LangLiteral { value, lang } => {
+                Some(Term::lang_literal(value.clone(), lang.clone()))
             }
             TripleComponent::Variable(name) => {
                 let var_name = name.strip_prefix('?').unwrap_or(name);
@@ -3709,6 +3749,7 @@ fn push_term_value(col: &mut grafeo_core::execution::ValueVector, term: &Term) {
 fn component_to_term(component: &TripleComponent) -> Option<Term> {
     match component {
         TripleComponent::Variable(_) => None,
+        TripleComponent::BlankNode(label) => Some(Term::blank(label.clone())),
         TripleComponent::Iri(iri) => Some(Term::iri(iri.clone())),
         TripleComponent::Literal(value) => match value {
             Value::String(s) => Some(Term::literal(s.clone())),
@@ -3717,6 +3758,9 @@ fn component_to_term(component: &TripleComponent) -> Option<Term> {
             Value::Bool(b) => Some(Term::typed_literal(b.to_string(), Literal::XSD_BOOLEAN)),
             _ => Some(Term::literal(value.to_string())),
         },
+        TripleComponent::LangLiteral { value, lang } => {
+            Some(Term::lang_literal(value.clone(), lang.clone()))
+        }
     }
 }
 
@@ -3748,16 +3792,19 @@ fn estimate_operator_cardinality(
                 scan.subject,
                 crate::query::plan::TripleComponent::Iri(_)
                     | crate::query::plan::TripleComponent::Literal(_)
+                    | crate::query::plan::TripleComponent::LangLiteral { .. }
             );
             let p_bound = matches!(
                 scan.predicate,
                 crate::query::plan::TripleComponent::Iri(_)
                     | crate::query::plan::TripleComponent::Literal(_)
+                    | crate::query::plan::TripleComponent::LangLiteral { .. }
             );
             let o_bound = matches!(
                 scan.object,
                 crate::query::plan::TripleComponent::Iri(_)
                     | crate::query::plan::TripleComponent::Literal(_)
+                    | crate::query::plan::TripleComponent::LangLiteral { .. }
             );
 
             let estimate = match (s_bound, p_bound, o_bound) {

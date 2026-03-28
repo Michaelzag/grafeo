@@ -756,6 +756,24 @@ impl SqlPgqTranslator {
                     index: Box::new(index_expr),
                 })
             }
+            ast::Expression::SliceAccess { base, start, end } => {
+                let base_expr = self.translate_expression(base, table_alias)?;
+                let start_expr = start
+                    .as_ref()
+                    .map(|s| self.translate_expression(s, table_alias))
+                    .transpose()?
+                    .map(Box::new);
+                let end_expr = end
+                    .as_ref()
+                    .map(|e| self.translate_expression(e, table_alias))
+                    .transpose()?
+                    .map(Box::new);
+                Ok(LogicalExpression::SliceAccess {
+                    base: Box::new(base_expr),
+                    start: start_expr,
+                    end: end_expr,
+                })
+            }
             ast::Expression::LetIn { .. }
             | ast::Expression::ListComprehension { .. }
             | ast::Expression::ListPredicate { .. }

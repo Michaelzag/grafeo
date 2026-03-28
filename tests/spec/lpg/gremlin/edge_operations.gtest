@@ -23,21 +23,18 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: g_e_has_label_knows
-    skip: "g.E().hasLabel() does not resolve edge labels correctly"
     query: "g.E().hasLabel('KNOWS').count()"
     expect:
       rows:
         - [2]
 
   - name: g_e_has_label_works_at
-    skip: "g.E().hasLabel() does not resolve edge labels correctly"
     query: "g.E().hasLabel('WORKS_AT').count()"
     expect:
       rows:
         - [1]
 
   - name: g_e_has_label_no_match
-    skip: "g.E().hasLabel() does not resolve edge labels correctly"
     query: "g.E().hasLabel('FOLLOWS')"
     expect:
       empty: true
@@ -47,7 +44,6 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: drop_edge_by_label
-    skip: "depends on g.E().hasLabel() fix"
     statements:
       - "g.addV('X').property('name', 'src')"
       - "g.addV('X').property('name', 'dst')"

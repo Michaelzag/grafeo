@@ -107,6 +107,58 @@ pub(crate) fn is_binary_set_function(func: AggregateFunction) -> bool {
     )
 }
 
+/// Evaluates GraphQL `@skip` and `@include` directives to determine if a field
+/// should be included in the query result.
+///
+/// Per the GraphQL spec:
+/// - `@skip(if: true)` excludes the field
+/// - `@skip(if: false)` includes the field
+/// - `@include(if: false)` excludes the field
+/// - `@include(if: true)` includes the field
+///
+/// When both directives are present, the field is included only if it passes both
+/// checks (`@skip` must not exclude AND `@include` must include).
+///
+/// Returns `true` if the field should be included, `false` if it should be skipped.
+#[cfg(any(feature = "graphql", test))]
+pub(crate) fn graphql_directives_allow(
+    directives: &[grafeo_adapters::query::graphql::ast::Directive],
+) -> bool {
+    let mut include = true;
+
+    for directive in directives {
+        match directive.name.as_str() {
+            "skip" => {
+                // @skip(if: <bool>) - skip the field when the argument is true
+                if let Some(arg) = directive.arguments.iter().find(|a| a.name == "if") {
+                    if let grafeo_adapters::query::graphql::ast::InputValue::Boolean(val) =
+                        &arg.value
+                    {
+                        if *val {
+                            include = false;
+                        }
+                    }
+                }
+            }
+            "include" => {
+                // @include(if: <bool>) - include the field only when the argument is true
+                if let Some(arg) = directive.arguments.iter().find(|a| a.name == "if") {
+                    if let grafeo_adapters::query::graphql::ast::InputValue::Boolean(val) =
+                        &arg.value
+                    {
+                        if !val {
+                            include = false;
+                        }
+                    }
+                }
+            }
+            _ => {} // Unknown directives are ignored
+        }
+    }
+
+    include
+}
+
 /// Capitalizes the first character of a string.
 ///
 /// Used by GraphQL translators to convert field names to type names.

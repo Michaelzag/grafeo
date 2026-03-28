@@ -18,7 +18,6 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: case_searched_age_category
-    skip: "CASE expression not yet supported in SQL/PGQ parser"
     query: |
       SELECT * FROM GRAPH_TABLE (
         MATCH (n:Person)
@@ -31,7 +30,6 @@ tests:
         - [Vincent, 35]
 
   - name: case_searched_in_select
-    skip: "CASE expression not yet supported in SQL/PGQ parser"
     query: |
       SELECT name, CASE WHEN age >= 30 THEN 'senior' ELSE 'junior' END AS category
       FROM GRAPH_TABLE (
@@ -45,7 +43,6 @@ tests:
         - [Vincent, senior]
 
   - name: case_simple_city_to_country
-    skip: "CASE expression not yet supported in SQL/PGQ parser"
     query: |
       SELECT name, CASE city
         WHEN 'Amsterdam' THEN 'NL'
@@ -63,7 +60,6 @@ tests:
         - [Vincent, other]
 
   - name: case_without_else_returns_null
-    skip: "CASE expression not yet supported in SQL/PGQ parser"
     query: |
       SELECT name, CASE city
         WHEN 'Amsterdam' THEN 'NL'
@@ -80,7 +76,6 @@ tests:
         - [Vincent, null]
 
   - name: case_null_check
-    skip: "CASE expression not yet supported in SQL/PGQ parser"
     query: |
       SELECT person, CASE WHEN company IS NULL THEN 'unemployed' ELSE company END AS status
       FROM GRAPH_TABLE (

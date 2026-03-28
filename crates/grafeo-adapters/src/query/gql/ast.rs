@@ -1186,6 +1186,15 @@ pub enum Expression {
         /// The index expression.
         index: Box<Expression>,
     },
+    /// Slice access: `expr[start..end]`, `expr[..end]`, `expr[start..]`.
+    SliceAccess {
+        /// The base expression.
+        base: Box<Expression>,
+        /// Start index (None means from beginning).
+        start: Option<Box<Expression>>,
+        /// End index (None means to end).
+        end: Option<Box<Expression>>,
+    },
     /// LET ... IN ... END expression.
     LetIn {
         /// Variable bindings.

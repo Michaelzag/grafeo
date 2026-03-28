@@ -938,6 +938,8 @@ fn fmt_triple_component(comp: &TripleComponent) -> String {
         TripleComponent::Variable(name) => format!("?{name}"),
         TripleComponent::Iri(iri) => format!("<{iri}>"),
         TripleComponent::Literal(val) => format!("{val}"),
+        TripleComponent::LangLiteral { value, lang } => format!("\"{value}\"@{lang}"),
+        TripleComponent::BlankNode(label) => format!("_:{label}"),
     }
 }
 
@@ -1421,6 +1423,18 @@ pub enum TripleComponent {
     Iri(String),
     /// A constant literal value.
     Literal(Value),
+    /// A language-tagged string literal (RDF `rdf:langString`).
+    ///
+    /// Carries the lexical value and the BCP47 language tag separately so that
+    /// the tag survives the translator to planner to RDF store round-trip.
+    LangLiteral {
+        /// The lexical string value.
+        value: String,
+        /// BCP47 language tag, e.g. `"fr"`, `"en-GB"`.
+        lang: String,
+    },
+    /// A blank node with a scoped label (used in INSERT DATA).
+    BlankNode(String),
 }
 
 /// Union of multiple result sets.

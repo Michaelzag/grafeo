@@ -900,6 +900,7 @@ impl<'a> Parser<'a> {
 
     fn parse_primary_expression(&mut self) -> Result<Expression> {
         match self.current.kind {
+            TokenKind::Case => self.parse_case_expression(),
             TokenKind::Null => {
                 self.advance();
                 Ok(Expression::Literal(Literal::Null))
@@ -1012,6 +1013,54 @@ impl<'a> Parser<'a> {
         }
     }
 
+    // ==================== CASE Expression ====================
+
+    /// Parses a CASE expression (simple or searched).
+    ///
+    /// Simple:   `CASE expr WHEN val THEN result [ELSE default] END`
+    /// Searched: `CASE WHEN condition THEN result [ELSE default] END`
+    fn parse_case_expression(&mut self) -> Result<Expression> {
+        self.expect(TokenKind::Case)?;
+
+        // Determine simple vs searched CASE.
+        // If the next token is not WHEN, we have a simple CASE with an input expression.
+        let input = if self.current.kind != TokenKind::When {
+            Some(Box::new(self.parse_expression()?))
+        } else {
+            None
+        };
+
+        // Parse WHEN clauses
+        let mut whens = Vec::new();
+        while self.current.kind == TokenKind::When {
+            self.advance();
+            let condition = self.parse_expression()?;
+            self.expect(TokenKind::Then)?;
+            let result = self.parse_expression()?;
+            whens.push((condition, result));
+        }
+
+        if whens.is_empty() {
+            return Err(self.error("CASE requires at least one WHEN clause"));
+        }
+
+        // Parse optional ELSE
+        let else_clause = if self.current.kind == TokenKind::Else {
+            self.advance();
+            Some(Box::new(self.parse_expression()?))
+        } else {
+            None
+        };
+
+        self.expect(TokenKind::End)?;
+
+        Ok(Expression::Case {
+            input,
+            whens,
+            else_clause,
+        })
+    }
+
     // ==================== ORDER BY / LIMIT / OFFSET ====================
 
     fn parse_sort_items(&mut self) -> Result<Vec<SortItem>> {
@@ -1099,6 +1148,10 @@ impl<'a> Parser<'a> {
                 | TokenKind::References
                 | TokenKind::Call
                 | TokenKind::Yield
+                | TokenKind::When
+                | TokenKind::Then
+                | TokenKind::Else
+                | TokenKind::End
         )
     }
 
