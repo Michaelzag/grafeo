@@ -87,7 +87,6 @@ jobs:
 
   rust-spec:
     name: Rust Spec Tests
-    needs: [rust-check]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -281,7 +280,6 @@ jobs:
   # Rust tests
   rust-test:
     name: Rust Test (${{ matrix.os }})
-    needs: [rust-spec]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
