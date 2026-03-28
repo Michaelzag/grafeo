@@ -81,9 +81,207 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
+  # ── Spec test streams ──────────────────────────────────────────────
+  # Each binding runs its .gtest spec suite on a single runner (ubuntu)
+  # after rust-check passes. Fast feedback before the expensive matrix.
+
+  rust-spec:
+    name: Rust Spec Tests
+    needs: [rust-check]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-spec-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-spec-
+      - name: Run spec tests
+        run: cargo test -p grafeo-spec-tests --all-features
+
+  python-spec:
+    name: Python Spec Tests
+    needs: [rust-check]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - uses: astral-sh/setup-uv@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-pyspec-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-pyspec-
+      - name: Build and install
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --out dist -m crates/bindings/python/Cargo.toml
+          sccache: 'true'
+      - name: Install package
+        run: |
+          uv pip install --system dist/*.whl
+          uv pip install --system pytest pyyaml
+      - name: Run spec tests
+        run: pytest tests/spec/ -v --timeout=60
+
+  node-spec:
+    name: Node.js Spec Tests
+    needs: [rust-check]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-nodespec-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-nodespec-
+      - name: Build native module
+        working-directory: crates/bindings/node
+        run: |
+          npm install
+          npm run build
+      - name: Run spec tests
+        run: npx vitest run tests/spec/runners/node/spec-runner.test.mjs
+
+  go-spec:
+    name: Go Spec Tests
+    needs: [rust-check]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-gospec-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-gospec-
+      - name: Build shared library
+        run: cargo build --release -p grafeo-c --features full
+      - name: Run spec tests
+        working-directory: tests/spec/runners/go
+        run: |
+          cp ../../../../target/release/libgrafeo_c.so .
+          CGO_ENABLED=1 CGO_LDFLAGS="-L. -lgrafeo_c -lm -ldl -lpthread" LD_LIBRARY_PATH=. go test -count=1 -run TestSpec -timeout 120s -v
+
+  csharp-spec:
+    name: C# Spec Tests
+    needs: [rust-check]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-csspec-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-csspec-
+      - name: Build shared library
+        run: cargo build --release -p grafeo-c --features full
+      - name: Copy library
+        run: cp target/release/libgrafeo_c.so tests/spec/runners/csharp/
+      - name: Run spec tests
+        working-directory: tests/spec/runners/csharp
+        run: dotnet test --verbosity minimal
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/tests/spec/runners/csharp
+
+  dart-spec:
+    name: Dart Spec Tests
+    needs: [rust-check]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-dartspec-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-dartspec-
+      - name: Build shared library
+        run: cargo build --release -p grafeo-c --features full
+      - name: Copy library
+        run: cp target/release/libgrafeo_c.so crates/bindings/dart/
+      - name: Run spec tests
+        working-directory: tests/spec/runners/dart
+        run: |
+          dart pub get
+          dart test spec_runner_test.dart
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/crates/bindings/dart
+
+  wasm-spec:
+    name: WASM Spec Tests
+    needs: [rust-check]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: cargo-bins/cargo-binstall@main
+      - run: cargo binstall wasm-bindgen-cli --no-confirm
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-wasmspec-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-wasmspec-
+      - name: Build WASM
+        run: bash scripts/build-wasm.sh
+      - name: Run spec tests
+        working-directory: tests/spec/runners/wasm
+        run: |
+          npm install
+          npx vitest run
+
+  # ── Full test matrices (gated by spec tests) ────────────────────
+
   # Rust tests
   rust-test:
     name: Rust Test (${{ matrix.os }})
+    needs: [rust-spec]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -192,6 +390,7 @@ jobs:
   # features, which pull in "full" (all languages + AI) via grafeo-engine.
   python-test:
     name: Python Test (${{ matrix.os }}, Python ${{ matrix.python }})
+    needs: [python-spec]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -244,6 +443,7 @@ jobs:
   # features, which pull in "full" (all languages + AI) via grafeo-engine.
   node-test:
     name: Node.js Test (${{ matrix.os }}, Node ${{ matrix.node }})
+    needs: [node-spec]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -289,6 +489,7 @@ jobs:
   # the "Build shared library" step), so the Go FFI tests the full API surface.
   go-test:
     name: Go Test (${{ matrix.os }})
+    needs: [go-spec]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -348,6 +549,7 @@ jobs:
 
   csharp-test:
     name: C# Test (${{ matrix.os }})
+    needs: [csharp-spec]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -412,6 +614,7 @@ jobs:
   # so the Dart FFI tests exercise the complete C API surface.
   dart-test:
     name: Dart Test (${{ matrix.os }})
+    needs: [dart-spec]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -477,6 +680,7 @@ jobs:
   # (scripts/build-wasm.sh) handles the exact cargo flags.
   wasm-build:
     name: WASM Build
+    needs: [wasm-spec]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
