@@ -13,6 +13,8 @@ Async storage foundation and continued test coverage.
 - **`AsyncLpgWal`**: type alias for `AsyncTypedWal<WalRecord>`, the async equivalent of `LpgWal`
 - **`AsyncWalManager::write_frame`**: extracted low-level frame writer enabling generic `WalEntry` types in async context
 - **`AsyncWalGraphStore`**: async decorator that logs mutations to `AsyncLpgWal` before applying to `LpgStore`, with named graph context tracking via tokio mutex
+- **`GrafeoDB::async_wal_checkpoint()`**: async WAL checkpoint via `spawn_blocking`, avoids blocking the tokio runtime during fsync
+- **`GrafeoDB::async_write_snapshot()`**: async snapshot write via `spawn_blocking` for `.grafeo` single-file format
 
 ## [0.5.29] - 2026-03-29
 
