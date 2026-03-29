@@ -907,7 +907,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "UCASE projection expression not yet evaluated by RDF executor"]
     fn func_ucase() {
         let db = rdf_db();
         db.execute_sparql(r#"INSERT DATA { <http://ex.org/x> <http://ex.org/name> "Alix" }"#)
@@ -929,7 +928,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "LCASE projection expression not yet evaluated by RDF executor"]
     fn func_lcase() {
         let db = rdf_db();
         db.execute_sparql(r#"INSERT DATA { <http://ex.org/x> <http://ex.org/name> "Alix" }"#)
@@ -1163,7 +1161,6 @@ mod tests {
     // ====================================================================
 
     #[test]
-    #[ignore = "IN operator not yet evaluated at execution level"]
     fn filter_in_operator() {
         let db = rdf_db();
         insert_foaf_data(&db);
@@ -1181,7 +1178,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "NOT IN operator not yet evaluated at execution level"]
     fn filter_not_in_operator() {
         let db = rdf_db();
         insert_foaf_data(&db);
@@ -1203,7 +1199,6 @@ mod tests {
     // ====================================================================
 
     #[test]
-    #[ignore = "BOUND() evaluation does not yet distinguish NULL bindings from OPTIONAL"]
     fn filter_bound_function() {
         let db = rdf_db();
         insert_foaf_data(&db);
@@ -1222,7 +1217,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "BOUND() evaluation does not yet distinguish NULL bindings from OPTIONAL"]
     fn filter_not_bound_function() {
         let db = rdf_db();
         insert_foaf_data(&db);
