@@ -165,13 +165,17 @@ impl Binder {
                     if let Some(ref alias) = projection.alias {
                         // Determine the type from the expression
                         let data_type = self.infer_expression_type(&projection.expression);
+                        // Propagate node/edge status when projecting a variable
+                        // or a Case that selects between node variables (used
+                        // by optional() and union() translations).
+                        let (is_node, is_edge) = self.infer_entity_status(&projection.expression);
                         self.context.add_variable(
                             alias.clone(),
                             VariableInfo {
                                 name: alias.clone(),
                                 data_type,
-                                is_node: false,
-                                is_edge: false,
+                                is_node,
+                                is_edge,
                             },
                         );
                     }
@@ -1239,6 +1243,48 @@ impl Binder {
             LogicalExpression::List(_) => LogicalType::Any, // Complex type
             LogicalExpression::Map(_) => LogicalType::Any,  // Complex type
             _ => LogicalType::Any,
+        }
+    }
+
+    /// Infers whether an expression resolves to a node or edge entity.
+    ///
+    /// Returns `(is_node, is_edge)`. This propagates entity status through
+    /// simple Variable references and Case expressions whose branches all
+    /// agree on entity kind (used by optional() translation).
+    fn infer_entity_status(&self, expr: &LogicalExpression) -> (bool, bool) {
+        match expr {
+            LogicalExpression::Variable(src) => self
+                .context
+                .get(src)
+                .map_or((false, false), |info| (info.is_node, info.is_edge)),
+            LogicalExpression::Case {
+                when_clauses,
+                else_clause,
+                ..
+            } => {
+                // Collect entity status from all THEN and ELSE branches
+                let mut all_node = true;
+                let mut all_edge = true;
+                let mut any_branch = false;
+                for (_, then_expr) in when_clauses {
+                    let (n, e) = self.infer_entity_status(then_expr);
+                    all_node &= n;
+                    all_edge &= e;
+                    any_branch = true;
+                }
+                if let Some(else_expr) = else_clause {
+                    let (n, e) = self.infer_entity_status(else_expr);
+                    all_node &= n;
+                    all_edge &= e;
+                    any_branch = true;
+                }
+                if any_branch {
+                    (all_node, all_edge)
+                } else {
+                    (false, false)
+                }
+            }
+            _ => (false, false),
         }
     }
 

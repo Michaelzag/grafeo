@@ -836,14 +836,22 @@ impl GremlinTranslator {
 
             // Map steps
             ast::Step::Values(keys) => {
+                // Helper: IS NOT NULL filter expression for a variable
+                let not_null = |var: &str| LogicalExpression::Unary {
+                    op: UnaryOp::IsNotNull,
+                    operand: Box::new(LogicalExpression::Variable(var.to_string())),
+                };
+
                 if keys.len() > 1 {
                     // Gremlin values('a','b') emits one traverser per key.
-                    // Translate as Union of individual property projections.
+                    // Translate as Union of individual property projections,
+                    // each filtered to exclude nulls (non-existent
+                    // properties emit nothing in Gremlin).
                     let alias = self.var_gen.next();
                     let branches: Vec<LogicalOperator> = keys
                         .iter()
                         .map(|k| {
-                            LogicalOperator::Project(ProjectOp {
+                            let project = LogicalOperator::Project(ProjectOp {
                                 projections: vec![Projection {
                                     expression: LogicalExpression::Property {
                                         variable: current_var.to_string(),
@@ -853,30 +861,33 @@ impl GremlinTranslator {
                                 }],
                                 input: Box::new(input.clone()),
                                 pass_through_input: false,
-                            })
+                            });
+                            // Filter out nulls: non-existent properties
+                            // must not emit a traverser
+                            wrap_filter(project, not_null(&alias))
                         })
                         .collect();
                     let plan = LogicalOperator::Union(UnionOp { inputs: branches });
                     Ok((plan, Some(alias)))
                 } else {
-                    // Single key: simple Project
-                    let projections: Vec<Projection> = keys
-                        .iter()
-                        .map(|k| Projection {
+                    // Single key: Project then filter out nulls
+                    let key = &keys[0];
+                    let alias = key.clone();
+                    let plan = LogicalOperator::Project(ProjectOp {
+                        projections: vec![Projection {
                             expression: LogicalExpression::Property {
                                 variable: current_var.to_string(),
-                                property: k.clone(),
+                                property: key.clone(),
                             },
-                            alias: Some(k.clone()),
-                        })
-                        .collect();
-                    let plan = LogicalOperator::Project(ProjectOp {
-                        projections,
+                            alias: Some(alias.clone()),
+                        }],
                         input: Box::new(input),
                         pass_through_input: false,
                     });
-                    let new_var = keys.first().cloned();
-                    Ok((plan, new_var))
+                    // Filter out nulls: Gremlin values() skips entities
+                    // that lack the requested property
+                    let plan = wrap_filter(plan, not_null(&alias));
+                    Ok((plan, Some(alias)))
                 }
             }
             ast::Step::Id => {
@@ -1494,9 +1505,24 @@ impl GremlinTranslator {
                 }
             }
 
-            // optional(): keep current traverser if inner traversal is empty
+            // optional(): try inner traversal per traverser, fall back to
+            // identity when empty.
+            //
+            // In Gremlin, optional(T) evaluates T for each traverser.
+            // When T produces results, those replace the traverser. When
+            // T is empty for a given traverser, that traverser is kept
+            // unchanged. This requires per-row semantics, not batch-level.
+            //
+            // Translation:
+            //   LeftJoin(input, inner_traversal)
+            //     -> produces [current_var, ..., inner_var or NULL]
+            //   Project(CASE WHEN inner_var IS NOT NULL
+            //                THEN inner_var ELSE current_var END AS alias)
+            //     -> picks inner result when available, identity otherwise
             ast::Step::Optional(steps) => {
-                // Translate inner traversal
+                let alias = self.var_gen.next();
+
+                // Build the inner traversal starting from the same input
                 let mut inner_plan = input.clone();
                 let mut inner_var = current_var.to_string();
                 for step in steps {
@@ -1507,13 +1533,75 @@ impl GremlinTranslator {
                     }
                     inner_plan = new_plan;
                 }
-                // Use LeftJoin: keep left rows even when right produces nothing
-                let plan = LogicalOperator::LeftJoin(LeftJoinOp {
-                    left: Box::new(input),
-                    right: Box::new(inner_plan),
-                    condition: None,
-                });
-                Ok((plan, None))
+
+                // If the inner traversal produced a new variable (e.g.,
+                // out() creates a target node variable), use LeftJoin +
+                // CASE to select inner result or identity per row.
+                // If no new variable was introduced (inner_var ==
+                // current_var), the inner traversal is a filter, and we
+                // can use Otherwise with projected branches.
+                if inner_var == current_var {
+                    // Pure filter case: optional(has(...)) or similar.
+                    // Inner plan filters the same variable, so use
+                    // Otherwise: try filtered, fall back to unfiltered.
+                    let inner_projected = LogicalOperator::Project(ProjectOp {
+                        projections: vec![Projection {
+                            expression: LogicalExpression::Variable(current_var.to_string()),
+                            alias: Some(alias.clone()),
+                        }],
+                        input: Box::new(inner_plan),
+                        pass_through_input: false,
+                    });
+                    let identity_projected = LogicalOperator::Project(ProjectOp {
+                        projections: vec![Projection {
+                            expression: LogicalExpression::Variable(current_var.to_string()),
+                            alias: Some(alias.clone()),
+                        }],
+                        input: Box::new(input),
+                        pass_through_input: false,
+                    });
+                    let plan = LogicalOperator::Otherwise(OtherwiseOp {
+                        left: Box::new(inner_projected),
+                        right: Box::new(identity_projected),
+                    });
+                    Ok((plan, Some(alias)))
+                } else {
+                    // Navigation case: inner traversal introduces a new
+                    // variable (e.g., out() target). Use LeftJoin to
+                    // correlate per source row, then CASE to pick inner
+                    // result when present or identity when NULL.
+                    let left_join = LogicalOperator::LeftJoin(LeftJoinOp {
+                        left: Box::new(input),
+                        right: Box::new(inner_plan),
+                        condition: None,
+                    });
+
+                    // CASE WHEN inner_var IS NOT NULL
+                    //      THEN inner_var ELSE current_var END
+                    let case_expr = LogicalExpression::Case {
+                        operand: None,
+                        when_clauses: vec![(
+                            LogicalExpression::Unary {
+                                op: UnaryOp::IsNotNull,
+                                operand: Box::new(LogicalExpression::Variable(inner_var.clone())),
+                            },
+                            LogicalExpression::Variable(inner_var),
+                        )],
+                        else_clause: Some(Box::new(LogicalExpression::Variable(
+                            current_var.to_string(),
+                        ))),
+                    };
+
+                    let plan = LogicalOperator::Project(ProjectOp {
+                        projections: vec![Projection {
+                            expression: case_expr,
+                            alias: Some(alias.clone()),
+                        }],
+                        input: Box::new(left_join),
+                        pass_through_input: false,
+                    });
+                    Ok((plan, Some(alias)))
+                }
             }
 
             // union(): merge results from multiple sub-traversals
@@ -2860,6 +2948,7 @@ mod tests {
         match op {
             LogicalOperator::Project(p) => Some(p),
             LogicalOperator::Return(r) => find_project(&r.input),
+            LogicalOperator::Filter(f) => find_project(&f.input),
             _ => None,
         }
     }
@@ -2919,25 +3008,20 @@ mod tests {
             "Union should have 2 branches (one per key)"
         );
 
-        // Each branch should be a Project with a Property expression
+        // Each branch should be a Filter(IS NOT NULL) wrapping a Project
+        // with a Property expression (Gremlin values() filters out nulls).
         for (i, branch) in union.inputs.iter().enumerate() {
-            match branch {
-                LogicalOperator::Project(proj) => {
-                    assert_eq!(proj.projections.len(), 1);
-                    match &proj.projections[0].expression {
-                        LogicalExpression::Property { property, .. } => {
-                            let expected = if i == 0 { "name" } else { "age" };
-                            assert_eq!(
-                                property, expected,
-                                "Branch {i} should project '{expected}'"
-                            );
-                        }
-                        other => {
-                            panic!("Expected Property expression in branch {i}, got: {other:?}")
-                        }
-                    }
+            let proj = find_project(branch)
+                .unwrap_or_else(|| panic!("Expected Project inside branch {i}"));
+            assert_eq!(proj.projections.len(), 1);
+            match &proj.projections[0].expression {
+                LogicalExpression::Property { property, .. } => {
+                    let expected = if i == 0 { "name" } else { "age" };
+                    assert_eq!(property, expected, "Branch {i} should project '{expected}'");
                 }
-                other => panic!("Expected Project branch in Union, got: {other:?}"),
+                other => {
+                    panic!("Expected Property expression in branch {i}, got: {other:?}")
+                }
             }
         }
     }

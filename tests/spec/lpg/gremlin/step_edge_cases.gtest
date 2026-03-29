@@ -256,7 +256,6 @@ tests:
       empty: true
 
   - name: empty_values_on_missing_property
-    skip: "values('nonexistent') returns null row instead of filtering to empty"
     query: "g.V().has('Person', 'name', 'Alix').values('nonexistent')"
     expect:
       empty: true

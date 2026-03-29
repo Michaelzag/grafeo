@@ -80,7 +80,6 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: optional_inner_produces_value
-    skip: "optional() currently returns identity vertex instead of inner traversal result"
     # Alix has out('KNOWS') -> Gus. optional returns Gus (not Alix).
     query: "g.V().has('Person', 'name', 'Alix').optional(out('KNOWS')).values('name')"
     expect:
@@ -101,7 +100,6 @@ tests:
       count: 1
 
   - name: optional_with_filter_matching
-    skip: "optional() currently returns identity vertex instead of inner traversal result"
     # Alix out('KNOWS') = Gus (age 25). has('age', gt(20)) matches Gus. Returns Gus.
     query: "g.V().has('Person', 'name', 'Alix').optional(out('KNOWS').has('age', gt(20))).values('name')"
     expect:
@@ -116,7 +114,6 @@ tests:
         - [Alix]
 
   - name: optional_chained_both_match
-    skip: "optional() currently returns identity vertex instead of inner traversal result"
     # Alix: optional(out('KNOWS')) -> Gus. Then optional(out('KNOWS')) on Gus -> Vincent.
     query: "g.V().has('Person', 'name', 'Alix').optional(out('KNOWS')).optional(out('KNOWS')).values('name')"
     expect:
@@ -124,7 +121,6 @@ tests:
         - [Vincent]
 
   - name: optional_chained_second_empty
-    skip: "optional() currently returns identity vertex instead of inner traversal result"
     # Gus: optional(out('KNOWS')) -> Vincent. Then optional(out('WORKS_AT')) on Vincent -> no match, returns Vincent.
     query: "g.V().has('Person', 'name', 'Gus').optional(out('KNOWS')).optional(out('WORKS_AT')).values('name')"
     expect:
@@ -316,7 +312,6 @@ tests:
       count: 3
 
   - name: values_nonexistent_key
-    skip: "values() with nonexistent key returns a row with null instead of empty"
     query: "g.V().has('Person', 'name', 'Alix').values('nonexistent')"
     expect:
       empty: true
@@ -346,7 +341,6 @@ tests:
         - [2020]
 
   - name: values_mixed_property_existence
-    skip: "values() returns null for vertices missing the property instead of skipping them"
     # 'city' exists on 3 Persons but not on Company. Across all vertices: 3 results.
     query: "g.V().values('city').count()"
     expect:
@@ -365,7 +359,6 @@ tests:
         - [2]
 
   - name: optional_then_values_all_persons
-    skip: "optional() currently returns identity vertex instead of inner traversal result"
     # Alix: optional(out('KNOWS'))=Gus. Gus: optional(out('KNOWS'))=Vincent. Vincent: identity=Vincent.
     query: "g.V().hasLabel('Person').optional(out('KNOWS')).values('name')"
     expect:
