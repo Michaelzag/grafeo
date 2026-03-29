@@ -189,16 +189,11 @@ impl GremlinTranslator {
                 }
                 ast::Step::OtherV => {
                     if let Some(ctx) = edge_ctx.take() {
-                        // otherV = the opposite endpoint from the traversal direction.
-                        // After outE(), the "other" vertex is the target (same as inV).
-                        // After inE(), the "other" vertex is the source (same as outV).
-                        // After bothE(), we cannot determine the "other" vertex
-                        // deterministically, so fall back to target.
-                        current_var = match ctx.direction {
-                            ExpandDirection::Outgoing => ctx.target_var,
-                            ExpandDirection::Incoming => ctx.source_var,
-                            ExpandDirection::Both => ctx.target_var,
-                        };
+                        // otherV = the discovered endpoint (to_variable).
+                        // In the Expand operator, from_variable is always the
+                        // traverser's current node and to_variable is the node
+                        // reached by following the edge, regardless of direction.
+                        current_var = ctx.target_var;
                     }
                     continue;
                 }

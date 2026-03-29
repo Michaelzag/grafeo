@@ -129,27 +129,23 @@ pub(crate) fn graphql_directives_allow(
     for directive in directives {
         match directive.name.as_str() {
             "skip" => {
-                // @skip(if: <bool>) - skip the field when the argument is true
-                if let Some(arg) = directive.arguments.iter().find(|a| a.name == "if") {
-                    if let grafeo_adapters::query::graphql::ast::InputValue::Boolean(val) =
+                // @skip(if: true) excludes the field
+                if let Some(arg) = directive.arguments.iter().find(|a| a.name == "if")
+                    && let grafeo_adapters::query::graphql::ast::InputValue::Boolean(val) =
                         &arg.value
-                    {
-                        if *val {
-                            include = false;
-                        }
-                    }
+                    && *val
+                {
+                    include = false;
                 }
             }
             "include" => {
-                // @include(if: <bool>) - include the field only when the argument is true
-                if let Some(arg) = directive.arguments.iter().find(|a| a.name == "if") {
-                    if let grafeo_adapters::query::graphql::ast::InputValue::Boolean(val) =
+                // @include(if: false) excludes the field
+                if let Some(arg) = directive.arguments.iter().find(|a| a.name == "if")
+                    && let grafeo_adapters::query::graphql::ast::InputValue::Boolean(val) =
                         &arg.value
-                    {
-                        if !val {
-                            include = false;
-                        }
-                    }
+                    && !val
+                {
+                    include = false;
                 }
             }
             _ => {} // Unknown directives are ignored
