@@ -2,7 +2,7 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
-## [0.5.30] - Unreleased
+## [0.5.30] - 2029-03-29
 
 Async storage foundation and continued test coverage.
 
