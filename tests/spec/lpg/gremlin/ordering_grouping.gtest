@@ -109,13 +109,11 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: group_by_bare_label
-    skip: "bare 'label' keyword not recognized in by() modifier, use by(T.label)"
     query: "g.V().group().by(label)"
     expect:
       count: 1
 
   - name: group_by_t_label
-    skip: "group().by(T.label) does not produce grouped map output, passes through unchanged"
     query: "g.V().group().by(T.label)"
     expect:
       count: 1

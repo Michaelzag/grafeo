@@ -722,7 +722,6 @@ fn test_group_count() {
 }
 
 #[test]
-#[ignore = "group().by(label) produces wrong key structure in translator"]
 fn test_group_by_label() {
     let db = create_social_network();
     let result = db.execute_gremlin("g.V().group().by(label)").unwrap();

@@ -1178,6 +1178,33 @@ impl GremlinTranslator {
                         });
                         Ok((plan, Some(alias)))
                     }
+                    LogicalOperator::MapCollect(mut map_op) => {
+                        // Second .by() for group(): modify the Collect expression
+                        // inside the MapCollect's inner Aggregate.
+                        if let LogicalOperator::Aggregate(ref mut agg_op) = *map_op.input {
+                            if let Some(agg) = agg_op.aggregates.first() {
+                                if matches!(agg.function, AggregateFunction::Collect) {
+                                    let original_var = match &agg.expression {
+                                        Some(LogicalExpression::Variable(v)) => v.clone(),
+                                        _ => current_var.to_string(),
+                                    };
+                                    let by_expr =
+                                        self.translate_by_modifier(by_modifier, &original_var);
+                                    let new_value_var =
+                                        crate::query::planner::common::expression_to_string(
+                                            &by_expr,
+                                        );
+                                    agg_op.aggregates[0].expression = Some(by_expr);
+                                    agg_op.aggregates[0].alias = Some(new_value_var.clone());
+                                    map_op.value_var = new_value_var;
+                                    let alias = map_op.alias.clone();
+                                    return Ok((LogicalOperator::MapCollect(map_op), Some(alias)));
+                                }
+                            }
+                        }
+                        // Not a group second .by(), pass through
+                        Ok((LogicalOperator::MapCollect(map_op), None))
+                    }
                     LogicalOperator::Project(mut proj_op) => {
                         // project('n','a').by('name').by('age')
                         // Each successive .by() fills the next unfilled projection.
@@ -1240,9 +1267,26 @@ impl GremlinTranslator {
                 Ok((plan, Some(new_var)))
             }
 
-            // Group: not yet fully implemented (two-pass .by() key/value
-            // semantics and MapCollect interaction need rework).
-            ast::Step::Group(_modifiers) => Ok((input, None)),
+            // Group: group by a key and collect values into lists.
+            // First .by() sets the key, second .by() sets the value.
+            ast::Step::Group(_modifiers) => {
+                let alias = "collect".to_string();
+                let plan = LogicalOperator::Aggregate(AggregateOp {
+                    group_by: vec![LogicalExpression::Variable(current_var.to_string())],
+                    aggregates: vec![AggregateExpr {
+                        function: AggregateFunction::Collect,
+                        expression: Some(LogicalExpression::Variable(current_var.to_string())),
+                        expression2: None,
+                        distinct: false,
+                        alias: Some(alias.clone()),
+                        percentile: None,
+                        separator: None,
+                    }],
+                    input: Box::new(input),
+                    having: None,
+                });
+                Ok((plan, Some(alias)))
+            }
 
             // GroupCount: group by a key and count occurrences
             ast::Step::GroupCount(_label) => {

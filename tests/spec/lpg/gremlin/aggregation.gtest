@@ -106,7 +106,7 @@ tests:
   - name: group_by_city
     query: "g.V().hasLabel('Person').group().by('city').by('name')"
     expect:
-      count: 3
+      count: 1
 
   # ---------------------------------------------------------------------------
   # groupCount()
