@@ -1498,6 +1498,13 @@ impl SparqlTranslator {
                     }
                 }
                 "http://www.w3.org/2001/XMLSchema#dateTime" => {
+                    // Prefer ZonedDatetime when the value has an explicit offset,
+                    // so that local date/time and timezone are preserved for
+                    // YEAR/MONTH/DAY/HOURS/MINUTES/SECONDS/TIMEZONE/TZ functions.
+                    if let Some(zdt) = grafeo_common::types::ZonedDatetime::parse(&lit.value) {
+                        return Value::ZonedDatetime(zdt);
+                    }
+                    // Fall back to Timestamp for values without offset
                     if let Some(pos) = lit.value.find('T')
                         && let (Some(d), Some(t)) = (
                             grafeo_common::types::Date::parse(&lit.value[..pos]),

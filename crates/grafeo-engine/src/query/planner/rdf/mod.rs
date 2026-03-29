@@ -197,6 +197,10 @@ impl RdfPlanner {
     /// Returns an error if planning fails.
     pub fn plan(&self, logical_plan: &LogicalPlan) -> Result<PhysicalPlan> {
         let (operator, columns) = self.plan_operator(&logical_plan.root)?;
+        // Strip internal companion columns (__lang_<var>) from the output.
+        // They are used by LANG()/LANGMATCHES() during evaluation but should
+        // never appear in query results.
+        let (operator, columns) = strip_internal_columns(operator, columns);
         Ok(PhysicalPlan {
             operator,
             columns,
@@ -218,6 +222,7 @@ impl RdfPlanner {
 
         self.profiling.set(false);
         let (operator, columns) = result?;
+        let (operator, columns) = strip_internal_columns(operator, columns);
         let entries = self.profile_entries.borrow_mut().drain(..).collect();
 
         Ok((
@@ -308,10 +313,23 @@ impl RdfPlanner {
             columns.push(name.clone());
             output_mask[1] = true;
         }
+        // Track whether the object is a variable (for language-tag companion column)
+        let mut object_var_name: Option<String> = None;
         if let TripleComponent::Variable(name) = &scan.object {
             columns.push(name.clone());
             output_mask[2] = true;
+            object_var_name = Some(name.clone());
         }
+
+        // When the object is a variable, add a hidden companion column for
+        // language tags so that LANG() and LANGMATCHES() can access them.
+        // This must be added BEFORE the graph column to match the DataChunk
+        // layout (the lang column is emitted right after the object column).
+        let emit_lang_column = object_var_name.is_some();
+        if let Some(ref obj_name) = object_var_name {
+            columns.push(format!("__lang_{obj_name}"));
+        }
+
         if let Some(TripleComponent::Variable(name)) = &scan.graph {
             columns.push(name.clone());
             output_mask[3] = true;
@@ -333,6 +351,7 @@ impl RdfPlanner {
             self.chunk_size,
             graph_iri,
             scan_all_graphs,
+            emit_lang_column,
         ));
 
         Ok((operator, columns))
@@ -1042,6 +1061,21 @@ impl RdfPlanner {
                     }
                     Value::Bool(b) => {
                         Literal::typed(b.to_string(), "http://www.w3.org/2001/XMLSchema#boolean")
+                    }
+                    Value::Date(d) => {
+                        Literal::typed(d.to_string(), "http://www.w3.org/2001/XMLSchema#date")
+                    }
+                    Value::Time(t) => {
+                        Literal::typed(t.to_string(), "http://www.w3.org/2001/XMLSchema#time")
+                    }
+                    Value::Timestamp(ts) => {
+                        Literal::typed(ts.to_string(), "http://www.w3.org/2001/XMLSchema#dateTime")
+                    }
+                    Value::ZonedDatetime(zdt) => {
+                        Literal::typed(zdt.to_string(), "http://www.w3.org/2001/XMLSchema#dateTime")
+                    }
+                    Value::Duration(dur) => {
+                        Literal::typed(dur.to_string(), "http://www.w3.org/2001/XMLSchema#duration")
                     }
                     _ => Literal::simple(format!("{:?}", value)),
                 };
@@ -2624,6 +2658,8 @@ struct RdfTripleScanOperator {
     graph: Option<String>,
     /// Whether to scan ALL graphs (when GRAPH ?var is used).
     scan_all_graphs: bool,
+    /// Whether to emit a companion language-tag column after the object column.
+    emit_lang_column: bool,
     /// Chunk size for batching.
     chunk_size: usize,
     /// Cached matching triples with graph names (lazily populated).
@@ -2640,6 +2676,7 @@ impl RdfTripleScanOperator {
         chunk_size: usize,
         graph: Option<String>,
         scan_all_graphs: bool,
+        emit_lang_column: bool,
     ) -> Self {
         Self {
             store,
@@ -2647,6 +2684,7 @@ impl RdfTripleScanOperator {
             output_mask,
             graph,
             scan_all_graphs,
+            emit_lang_column,
             chunk_size,
             triples: None,
             position: 0,
@@ -2683,7 +2721,12 @@ impl RdfTripleScanOperator {
 
     /// Count how many output columns we have.
     fn output_column_count(&self) -> usize {
-        self.output_mask.iter().filter(|&&b| b).count()
+        let base = self.output_mask.iter().filter(|&&b| b).count();
+        if self.emit_lang_column {
+            base + 1
+        } else {
+            base
+        }
     }
 }
 
@@ -2733,6 +2776,18 @@ impl Operator for RdfTripleScanOperator {
                     push_term_value(col, triple.object());
                 }
                 col_idx += 1;
+
+                // Companion language-tag column
+                if self.emit_lang_column {
+                    if let Some(col) = chunk.column_mut(col_idx) {
+                        let lang_tag = match triple.object() {
+                            Term::Literal(lit) => lit.language().unwrap_or("").to_string(),
+                            _ => String::new(),
+                        };
+                        col.push_string(lang_tag);
+                    }
+                    col_idx += 1;
+                }
             }
             if self.output_mask[3] {
                 // Graph
@@ -3549,8 +3604,18 @@ impl RdfExpressionPredicate {
                 match val {
                     Value::Date(d) => Some(Value::Int64(i64::from(d.year()))),
                     Value::Timestamp(ts) => Some(Value::Int64(i64::from(ts.to_date().year()))),
-                    Value::String(s) => grafeo_common::types::Date::parse(&s)
-                        .map(|d| Value::Int64(i64::from(d.year()))),
+                    Value::ZonedDatetime(zdt) => {
+                        Some(Value::Int64(i64::from(zdt.to_local_date().year())))
+                    }
+                    Value::String(s) => {
+                        // Try full dateTime parse first (handles "2024-06-15T10:30:45+02:00"),
+                        // then fall back to date-only parse (handles "2024-06-15").
+                        if let Some(zdt) = grafeo_common::types::ZonedDatetime::parse(&s) {
+                            Some(Value::Int64(i64::from(zdt.to_local_date().year())))
+                        } else {
+                            parse_datetime_date(&s).map(|d| Value::Int64(i64::from(d.year())))
+                        }
+                    }
                     _ => None,
                 }
             }
@@ -3561,8 +3626,16 @@ impl RdfExpressionPredicate {
                 match val {
                     Value::Date(d) => Some(Value::Int64(i64::from(d.month()))),
                     Value::Timestamp(ts) => Some(Value::Int64(i64::from(ts.to_date().month()))),
-                    Value::String(s) => grafeo_common::types::Date::parse(&s)
-                        .map(|d| Value::Int64(i64::from(d.month()))),
+                    Value::ZonedDatetime(zdt) => {
+                        Some(Value::Int64(i64::from(zdt.to_local_date().month())))
+                    }
+                    Value::String(s) => {
+                        if let Some(zdt) = grafeo_common::types::ZonedDatetime::parse(&s) {
+                            Some(Value::Int64(i64::from(zdt.to_local_date().month())))
+                        } else {
+                            parse_datetime_date(&s).map(|d| Value::Int64(i64::from(d.month())))
+                        }
+                    }
                     _ => None,
                 }
             }
@@ -3573,8 +3646,16 @@ impl RdfExpressionPredicate {
                 match val {
                     Value::Date(d) => Some(Value::Int64(i64::from(d.day()))),
                     Value::Timestamp(ts) => Some(Value::Int64(i64::from(ts.to_date().day()))),
-                    Value::String(s) => grafeo_common::types::Date::parse(&s)
-                        .map(|d| Value::Int64(i64::from(d.day()))),
+                    Value::ZonedDatetime(zdt) => {
+                        Some(Value::Int64(i64::from(zdt.to_local_date().day())))
+                    }
+                    Value::String(s) => {
+                        if let Some(zdt) = grafeo_common::types::ZonedDatetime::parse(&s) {
+                            Some(Value::Int64(i64::from(zdt.to_local_date().day())))
+                        } else {
+                            parse_datetime_date(&s).map(|d| Value::Int64(i64::from(d.day())))
+                        }
+                    }
                     _ => None,
                 }
             }
@@ -3585,8 +3666,16 @@ impl RdfExpressionPredicate {
                 match val {
                     Value::Time(t) => Some(Value::Int64(i64::from(t.hour()))),
                     Value::Timestamp(ts) => Some(Value::Int64(i64::from(ts.to_time().hour()))),
-                    Value::String(s) => grafeo_common::types::Time::parse(&s)
-                        .map(|t| Value::Int64(i64::from(t.hour()))),
+                    Value::ZonedDatetime(zdt) => {
+                        Some(Value::Int64(i64::from(zdt.to_local_time().hour())))
+                    }
+                    Value::String(s) => {
+                        if let Some(zdt) = grafeo_common::types::ZonedDatetime::parse(&s) {
+                            Some(Value::Int64(i64::from(zdt.to_local_time().hour())))
+                        } else {
+                            parse_datetime_time(&s).map(|t| Value::Int64(i64::from(t.hour())))
+                        }
+                    }
                     _ => None,
                 }
             }
@@ -3597,8 +3686,16 @@ impl RdfExpressionPredicate {
                 match val {
                     Value::Time(t) => Some(Value::Int64(i64::from(t.minute()))),
                     Value::Timestamp(ts) => Some(Value::Int64(i64::from(ts.to_time().minute()))),
-                    Value::String(s) => grafeo_common::types::Time::parse(&s)
-                        .map(|t| Value::Int64(i64::from(t.minute()))),
+                    Value::ZonedDatetime(zdt) => {
+                        Some(Value::Int64(i64::from(zdt.to_local_time().minute())))
+                    }
+                    Value::String(s) => {
+                        if let Some(zdt) = grafeo_common::types::ZonedDatetime::parse(&s) {
+                            Some(Value::Int64(i64::from(zdt.to_local_time().minute())))
+                        } else {
+                            parse_datetime_time(&s).map(|t| Value::Int64(i64::from(t.minute())))
+                        }
+                    }
                     _ => None,
                 }
             }
@@ -3612,8 +3709,16 @@ impl RdfExpressionPredicate {
                 match val {
                     Value::Time(t) => Some(Value::Float64(to_secs(&t))),
                     Value::Timestamp(ts) => Some(Value::Float64(to_secs(&ts.to_time()))),
+                    Value::ZonedDatetime(zdt) => {
+                        Some(Value::Float64(to_secs(&zdt.to_local_time())))
+                    }
                     Value::String(s) => {
-                        grafeo_common::types::Time::parse(&s).map(|t| Value::Float64(to_secs(&t)))
+                        if let Some(zdt) = grafeo_common::types::ZonedDatetime::parse(&s) {
+                            Some(Value::Float64(to_secs(&zdt.to_local_time())))
+                        } else {
+                            grafeo_common::types::Time::parse(&s)
+                                .map(|t| Value::Float64(to_secs(&t)))
+                        }
                     }
                     _ => None,
                 }
@@ -3633,6 +3738,11 @@ impl RdfExpressionPredicate {
                             zdt.offset_seconds(),
                         )),
                     )),
+                    Value::String(s) => grafeo_common::types::ZonedDatetime::parse(&s).map(|zdt| {
+                        Value::Duration(grafeo_common::types::Duration::from_seconds(i64::from(
+                            zdt.offset_seconds(),
+                        )))
+                    }),
                     _ => None,
                 }
             }
@@ -3650,6 +3760,13 @@ impl RdfExpressionPredicate {
                     }
                     Value::ZonedDatetime(zdt) => {
                         Some(Value::String(format_tz_offset(zdt.offset_seconds()).into()))
+                    }
+                    Value::String(s) => {
+                        if let Some(zdt) = grafeo_common::types::ZonedDatetime::parse(&s) {
+                            Some(Value::String(format_tz_offset(zdt.offset_seconds()).into()))
+                        } else {
+                            Some(Value::String(String::new().into()))
+                        }
                     }
                     _ => Some(Value::String(String::new().into())),
                 }
@@ -3703,13 +3820,50 @@ impl RdfExpressionPredicate {
 
             // LANG - language tag of a literal
             "LANG" => {
-                let val = self.eval_expr(args.first()?, chunk, row)?;
-                // In RDF execution, language-tagged literals are stored as strings
-                // with the language tag in metadata. For now, return empty string.
-                match val {
-                    Value::String(_) => Some(Value::String(String::new().into())),
-                    _ => Some(Value::String(String::new().into())),
+                // Look up the companion language-tag column for the variable.
+                // The triple scan emits a hidden __lang_<var> column alongside
+                // each object variable.
+                if let Some(FilterExpression::Variable(var_name)) = args.first() {
+                    let lang_col_name = format!("__lang_{var_name}");
+                    if let Some(&col_idx) = self.variable_columns.get(&lang_col_name)
+                        && let Some(col) = chunk.column(col_idx)
+                        && let Some(Value::String(tag)) = col.get_value(row)
+                    {
+                        return Some(Value::String(tag));
+                    }
                 }
+                // No language tag found: return empty string per SPARQL spec
+                Some(Value::String(String::new().into()))
+            }
+
+            // LANGMATCHES - BCP47 language range matching (Section 17.4.2.9)
+            "LANGMATCHES" => {
+                if args.len() < 2 {
+                    return None;
+                }
+                let tag = match self.eval_expr(&args[0], chunk, row)? {
+                    Value::String(s) => s.to_string(),
+                    _ => return None,
+                };
+                let range = match self.eval_expr(&args[1], chunk, row)? {
+                    Value::String(s) => s.to_string(),
+                    _ => return None,
+                };
+
+                // SPARQL spec: LANGMATCHES(tag, "*") matches any non-empty tag
+                if range == "*" {
+                    return Some(Value::Bool(!tag.is_empty()));
+                }
+
+                // Case-insensitive prefix match per RFC 4647 basic filtering:
+                // tag "en-US" matches range "en" because "en" is a prefix and
+                // the next character in tag is '-'.
+                let tag_lower = tag.to_lowercase();
+                let range_lower = range.to_lowercase();
+                let matches = tag_lower == range_lower
+                    || (tag_lower.starts_with(&range_lower)
+                        && tag_lower.as_bytes().get(range_lower.len()) == Some(&b'-'));
+                Some(Value::Bool(matches))
             }
 
             // DATATYPE - datatype IRI of a literal
@@ -3831,6 +3985,32 @@ impl RdfExpressionPredicate {
     }
 }
 
+/// Parses the date component from a dateTime or date string.
+///
+/// Handles both "YYYY-MM-DD" and "YYYY-MM-DDTHH:MM:SS..." forms by splitting
+/// at 'T' and parsing only the date portion, then falling back to a plain date
+/// parse.
+fn parse_datetime_date(s: &str) -> Option<grafeo_common::types::Date> {
+    if let Some(pos) = s.find('T').or_else(|| s.find('t')) {
+        grafeo_common::types::Date::parse(&s[..pos])
+    } else {
+        grafeo_common::types::Date::parse(s)
+    }
+}
+
+/// Parses the time component from a dateTime or time string.
+///
+/// Handles both "HH:MM:SS..." and "YYYY-MM-DDTHH:MM:SS..." forms by splitting
+/// at 'T' and parsing only the time portion, then falling back to a plain time
+/// parse.
+fn parse_datetime_time(s: &str) -> Option<grafeo_common::types::Time> {
+    if let Some(pos) = s.find('T').or_else(|| s.find('t')) {
+        grafeo_common::types::Time::parse(&s[pos + 1..])
+    } else {
+        grafeo_common::types::Time::parse(s)
+    }
+}
+
 /// Formats a timezone offset in seconds as "+HH:MM" or "Z".
 fn format_tz_offset(offset_secs: i32) -> String {
     if offset_secs == 0 {
@@ -3852,6 +4032,38 @@ impl Predicate for RdfExpressionPredicate {
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+/// Strips internal `__lang_*` companion columns from the final output.
+///
+/// If no internal columns are present, the operator and columns pass through
+/// unchanged. Otherwise, a lightweight projection is inserted to remove them.
+fn strip_internal_columns(
+    operator: Box<dyn Operator>,
+    columns: Vec<String>,
+) -> (Box<dyn Operator>, Vec<String>) {
+    let keep_indices: Vec<usize> = columns
+        .iter()
+        .enumerate()
+        .filter(|(_, name)| !name.starts_with("__lang_"))
+        .map(|(i, _)| i)
+        .collect();
+
+    if keep_indices.len() == columns.len() {
+        // Nothing to strip
+        return (operator, columns);
+    }
+
+    let output_columns: Vec<String> = keep_indices.iter().map(|&i| columns[i].clone()).collect();
+    let output_types: Vec<LogicalType> = keep_indices.iter().map(|_| LogicalType::String).collect();
+
+    let projections = keep_indices
+        .into_iter()
+        .map(RdfProjectExpr::Column)
+        .collect();
+
+    let stripped = Box::new(RdfProjectOperator::new(operator, projections, output_types));
+    (stripped, output_columns)
+}
 
 /// Converts an RDF Term to a string for IRI/blank node representation.
 fn term_to_string(term: &Term) -> String {
@@ -4189,6 +4401,7 @@ mod tests {
             [true, true, true, false],
             30,
             None,
+            false,
             false,
         );
 
