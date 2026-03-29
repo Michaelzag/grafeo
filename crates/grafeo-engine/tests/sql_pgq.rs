@@ -903,3 +903,57 @@ fn test_group_by_with_non_aggregate_column() {
     assert!(gus_row.is_some(), "Gus should appear in results");
     assert_eq!(gus_row.unwrap()[1], Value::Int64(1));
 }
+
+// ============================================================================
+// HAVING inline aggregate coverage
+// ============================================================================
+
+/// HAVING COUNT(*) > N: inline aggregate in HAVING clause.
+#[test]
+fn having_count_star_filters_groups() {
+    let db = create_social_network();
+    let result = db
+        .execute_sql(
+            "SELECT name FROM GRAPH_TABLE (
+                MATCH (n:Person)-[:KNOWS]->(m:Person)
+                COLUMNS (n.name AS name)
+            ) GROUP BY name HAVING COUNT(*) > 1",
+        )
+        .unwrap();
+    // Alix knows 2 people, Gus knows 1 => only Alix passes HAVING COUNT(*) > 1
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0][0].as_str(), Some("Alix"));
+}
+
+/// HAVING with SUM aggregate.
+#[test]
+fn having_sum_filters_groups() {
+    let db = create_social_network();
+    let result = db
+        .execute_sql(
+            "SELECT name FROM GRAPH_TABLE (
+                MATCH (n:Person)-[:KNOWS]->(m:Person)
+                COLUMNS (n.name AS name, m.age AS friend_age)
+            ) GROUP BY name HAVING SUM(friend_age) > 50",
+        )
+        .unwrap();
+    // Alix's friends: Gus(25) + Harm(35) = 60 > 50
+    // Gus's friend: Harm(35) = 35 < 50
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0][0].as_str(), Some("Alix"));
+}
+
+/// HAVING COUNT(*) = 0 on empty groups: should return no rows.
+#[test]
+fn having_count_zero_returns_empty() {
+    let db = create_social_network();
+    let result = db
+        .execute_sql(
+            "SELECT name FROM GRAPH_TABLE (
+                MATCH (n:Person)-[:KNOWS]->(m:Person)
+                COLUMNS (n.name AS name)
+            ) GROUP BY name HAVING COUNT(*) > 10",
+        )
+        .unwrap();
+    assert_eq!(result.rows.len(), 0);
+}
