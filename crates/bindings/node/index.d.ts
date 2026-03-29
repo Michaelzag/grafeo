@@ -102,6 +102,20 @@ export declare class GrafeoDB {
    * Called automatically after DDL operations, but can be invoked manually.
    */
   clearPlanCache(): void
+  /**
+   * Forces a WAL checkpoint.
+   *
+   * Flushes all pending WAL records to the main storage.
+   */
+  walCheckpoint(): void
+  /**
+   * Saves the database to a file path.
+   *
+   * If in-memory, creates a new persistent database at the given path.
+   * If file-backed, creates a copy at the new path.
+   * The original database remains unchanged.
+   */
+  save(path: string): void
   /** Close the database. */
   close(): void
   /** Returns the full change history for a node. */

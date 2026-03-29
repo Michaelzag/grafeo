@@ -697,6 +697,102 @@ describe('transaction edge cases', () => {
   })
 })
 
+// ── Persistence and checkpoint ──────────────────────────────────────
+
+describe('persistence and checkpoint', () => {
+  it('should checkpoint and reopen with data intact', async () => {
+    const fs = await import('fs')
+    const os = await import('os')
+    const path = await import('path')
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grafeo-ckpt-'))
+    const dbPath = path.join(dir, 'ckpt.grafeo')
+
+    const db = GrafeoDB.create(dbPath)
+    db.createNode(['Person'], { name: 'Alix', age: 30 })
+    db.createNode(['Person'], { name: 'Gus', age: 25 })
+    db.walCheckpoint()
+    db.close()
+
+    const db2 = GrafeoDB.open(dbPath)
+    expect(db2.nodeCount()).toBe(2)
+
+    const result = await db2.execute('MATCH (p:Person) RETURN p.name')
+    const names = result.toArray().map((r) => r['p.name']).sort()
+    expect(names).toEqual(['Alix', 'Gus'])
+    db2.close()
+
+    try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* ignore */ }
+  })
+
+  it('should save in-memory database to file', async () => {
+    const fs = await import('fs')
+    const os = await import('os')
+    const path = await import('path')
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grafeo-save-'))
+    const dbPath = path.join(dir, 'saved.grafeo')
+
+    const db = GrafeoDB.create()
+    db.createNode(['Person'], { name: 'Alix', age: 30 })
+    db.createNode(['Person'], { name: 'Gus', age: 25 })
+    db.save(dbPath)
+
+    const db2 = GrafeoDB.open(dbPath)
+    expect(db2.nodeCount()).toBe(2)
+
+    const result = await db2.execute('MATCH (p:Person) RETURN p.name')
+    const names = result.toArray().map((r) => r['p.name']).sort()
+    expect(names).toEqual(['Alix', 'Gus'])
+    db2.close()
+
+    try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* ignore */ }
+  })
+
+  it('should handle multiple checkpoints', async () => {
+    const fs = await import('fs')
+    const os = await import('os')
+    const path = await import('path')
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grafeo-multi-'))
+    const dbPath = path.join(dir, 'multi.grafeo')
+
+    const db = GrafeoDB.create(dbPath)
+
+    // Phase 1
+    db.createNode(['Person'], { name: 'Alix' })
+    db.walCheckpoint()
+
+    // Phase 2
+    db.createNode(['Person'], { name: 'Gus' })
+    db.createNode(['Person'], { name: 'Vincent' })
+    db.walCheckpoint()
+
+    db.close()
+
+    const db2 = GrafeoDB.open(dbPath)
+    expect(db2.nodeCount()).toBe(3)
+
+    const result = await db2.execute('MATCH (p:Person) RETURN p.name')
+    const names = result.toArray().map((r) => r['p.name']).sort()
+    expect(names).toEqual(['Alix', 'Gus', 'Vincent'])
+    db2.close()
+
+    try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* ignore */ }
+  })
+
+  it('should checkpoint empty database without error', async () => {
+    const fs = await import('fs')
+    const os = await import('os')
+    const path = await import('path')
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grafeo-empty-'))
+    const dbPath = path.join(dir, 'empty.grafeo')
+
+    const db = GrafeoDB.create(dbPath)
+    expect(() => db.walCheckpoint()).not.toThrow()
+    db.close()
+
+    try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* ignore */ }
+  })
+})
+
 // ── Error handling ───────────────────────────────────────────────────
 
 describe('error handling', () => {

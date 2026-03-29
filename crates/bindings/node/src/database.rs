@@ -700,6 +700,30 @@ impl JsGrafeoDB {
         self.inner.read().clear_plan_cache();
     }
 
+    /// Forces a WAL checkpoint.
+    ///
+    /// Flushes all pending WAL records to the main storage.
+    #[napi(js_name = "walCheckpoint")]
+    pub fn wal_checkpoint(&self) -> Result<()> {
+        let db = self.inner.read();
+        db.wal_checkpoint()
+            .map_err(NodeGrafeoError::from)
+            .map_err(napi::Error::from)
+    }
+
+    /// Saves the database to a file path.
+    ///
+    /// If in-memory, creates a new persistent database at the given path.
+    /// If file-backed, creates a copy at the new path.
+    /// The original database remains unchanged.
+    #[napi]
+    pub fn save(&self, path: String) -> Result<()> {
+        let db = self.inner.read();
+        db.save(path)
+            .map_err(NodeGrafeoError::from)
+            .map_err(napi::Error::from)
+    }
+
     /// Close the database.
     #[napi]
     pub fn close(&self) -> Result<()> {
