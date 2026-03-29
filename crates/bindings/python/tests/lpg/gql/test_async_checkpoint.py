@@ -53,10 +53,7 @@ class TestAsyncCheckpoint:
             assert info["node_count"] == 3
             assert info["edge_count"] == 1
 
-            result = db2.execute(
-                "MATCH (p:Person)-[:WORKS_AT]->(c:Company) "
-                "RETURN p.name, c.name"
-            )
+            result = db2.execute("MATCH (p:Person)-[:WORKS_AT]->(c:Company) RETURN p.name, c.name")
             assert len(result) == 1
             row = result[0]
             assert row["p.name"] == "Alix"
@@ -85,8 +82,7 @@ class TestAsyncCheckpoint:
 
             db2 = GrafeoDB.open(db_path)
             result = db2.execute(
-                "MATCH (t:Thing) "
-                "RETURN t.str_val, t.int_val, t.float_val, t.bool_val, t.list_val"
+                "MATCH (t:Thing) RETURN t.str_val, t.int_val, t.float_val, t.bool_val, t.list_val"
             )
             assert len(result) == 1
             row = result[0]
@@ -190,9 +186,7 @@ class TestAsyncCheckpoint:
             names = sorted(row["p.name"] for row in result)
             assert names == ["Alix", "Gus"]
 
-            result_edge = db2.execute(
-                "MATCH ()-[e:KNOWS]->() RETURN e.since"
-            )
+            result_edge = db2.execute("MATCH ()-[e:KNOWS]->() RETURN e.since")
             assert len(result_edge) == 1
             assert result_edge[0]["e.since"] == 2020
 
