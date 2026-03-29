@@ -1115,4 +1115,88 @@ mod tests {
         collect_expression_variables(&expr, &mut vars);
         assert!(vars.is_empty());
     }
+
+    // --- graphql_directives_allow ---
+    //
+    // These tests require the `graphql` feature so that the
+    // `grafeo_adapters::query::graphql::ast` types are available.
+
+    #[cfg(feature = "graphql")]
+    mod graphql_directive_tests {
+        use super::super::graphql_directives_allow;
+        use grafeo_adapters::query::graphql::ast::{Argument, Directive, InputValue};
+
+        fn directive(name: &str, if_value: bool) -> Directive {
+            Directive {
+                name: name.to_string(),
+                arguments: vec![Argument {
+                    name: "if".to_string(),
+                    value: InputValue::Boolean(if_value),
+                }],
+            }
+        }
+
+        #[test]
+        fn test_skip_directive_true_excludes() {
+            // @skip(if: true) should exclude the field
+            let directives = vec![directive("skip", true)];
+            assert!(
+                !graphql_directives_allow(&directives),
+                "@skip(if: true) should return false (field excluded)"
+            );
+        }
+
+        #[test]
+        fn test_skip_directive_false_includes() {
+            // @skip(if: false) should include the field
+            let directives = vec![directive("skip", false)];
+            assert!(
+                graphql_directives_allow(&directives),
+                "@skip(if: false) should return true (field included)"
+            );
+        }
+
+        #[test]
+        fn test_include_directive_true_includes() {
+            // @include(if: true) should include the field
+            let directives = vec![directive("include", true)];
+            assert!(
+                graphql_directives_allow(&directives),
+                "@include(if: true) should return true"
+            );
+        }
+
+        #[test]
+        fn test_include_directive_false_excludes() {
+            // @include(if: false) should exclude the field
+            let directives = vec![directive("include", false)];
+            assert!(
+                !graphql_directives_allow(&directives),
+                "@include(if: false) should return false"
+            );
+        }
+
+        #[test]
+        fn test_no_directives_includes() {
+            // No directives at all should include the field
+            let directives: Vec<Directive> = vec![];
+            assert!(
+                graphql_directives_allow(&directives),
+                "empty directives should return true"
+            );
+        }
+
+        #[test]
+        fn test_unknown_directive_ignored() {
+            // Unknown directives should be ignored, field included
+            let directives = vec![Directive {
+                name: "deprecated".to_string(),
+                arguments: vec![],
+            }];
+            assert!(
+                graphql_directives_allow(&directives),
+                "unknown directive should be ignored, returning true"
+            );
+        }
+    }
 }

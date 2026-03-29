@@ -342,3 +342,216 @@ impl GqlTranslator {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn translator() -> GqlTranslator {
+        GqlTranslator::new()
+    }
+
+    // --- NULLIF desugaring ---
+
+    #[test]
+    fn test_nullif_desugars_to_case() {
+        // NULLIF(a, b) should produce:
+        //   CASE WHEN a = b THEN NULL ELSE a END
+        let t = translator();
+        let expr = ast::Expression::FunctionCall {
+            name: "NULLIF".to_string(),
+            args: vec![
+                ast::Expression::Variable("a".to_string()),
+                ast::Expression::Variable("b".to_string()),
+            ],
+            distinct: false,
+        };
+
+        let result = t.translate_expression(&expr).unwrap();
+
+        // Verify the Case structure
+        if let LogicalExpression::Case {
+            operand,
+            when_clauses,
+            else_clause,
+        } = &result
+        {
+            // No operand (searched CASE, not simple CASE)
+            assert!(
+                operand.is_none(),
+                "NULLIF should produce a searched CASE (no operand)"
+            );
+
+            // Exactly one WHEN clause
+            assert_eq!(
+                when_clauses.len(),
+                1,
+                "NULLIF should produce exactly one WHEN clause"
+            );
+
+            // WHEN condition: a = b
+            let (condition, then_expr) = &when_clauses[0];
+            if let LogicalExpression::Binary { left, op, right } = condition {
+                assert!(
+                    matches!(op, BinaryOp::Eq),
+                    "WHEN condition should use Eq operator"
+                );
+                assert!(
+                    matches!(left.as_ref(), LogicalExpression::Variable(v) if v == "a"),
+                    "left side of condition should be variable 'a'"
+                );
+                assert!(
+                    matches!(right.as_ref(), LogicalExpression::Variable(v) if v == "b"),
+                    "right side of condition should be variable 'b'"
+                );
+            } else {
+                panic!("WHEN condition should be a Binary expression, got: {condition:?}");
+            }
+
+            // THEN NULL
+            assert!(
+                matches!(then_expr, LogicalExpression::Literal(Value::Null)),
+                "THEN clause should be NULL"
+            );
+
+            // ELSE a
+            let else_expr = else_clause
+                .as_ref()
+                .expect("NULLIF should have an ELSE clause");
+            assert!(
+                matches!(else_expr.as_ref(), LogicalExpression::Variable(v) if v == "a"),
+                "ELSE clause should be variable 'a'"
+            );
+        } else {
+            panic!("NULLIF should translate to a Case expression, got: {result:?}");
+        }
+    }
+
+    #[test]
+    fn test_nullif_case_insensitive() {
+        // Verify that "nullif" (lowercase) also works
+        let t = translator();
+        let expr = ast::Expression::FunctionCall {
+            name: "nullif".to_string(),
+            args: vec![
+                ast::Expression::Literal(ast::Literal::Integer(1)),
+                ast::Expression::Literal(ast::Literal::Integer(2)),
+            ],
+            distinct: false,
+        };
+
+        let result = t.translate_expression(&expr).unwrap();
+        assert!(
+            matches!(result, LogicalExpression::Case { .. }),
+            "lowercase 'nullif' should also desugar to Case"
+        );
+    }
+
+    #[test]
+    fn test_nullif_wrong_arity_rejected() {
+        let t = translator();
+
+        // Too few arguments
+        let expr_one = ast::Expression::FunctionCall {
+            name: "NULLIF".to_string(),
+            args: vec![ast::Expression::Variable("a".to_string())],
+            distinct: false,
+        };
+        assert!(
+            t.translate_expression(&expr_one).is_err(),
+            "NULLIF with 1 argument should fail"
+        );
+
+        // Too many arguments
+        let expr_three = ast::Expression::FunctionCall {
+            name: "NULLIF".to_string(),
+            args: vec![
+                ast::Expression::Variable("a".to_string()),
+                ast::Expression::Variable("b".to_string()),
+                ast::Expression::Variable("c".to_string()),
+            ],
+            distinct: false,
+        };
+        assert!(
+            t.translate_expression(&expr_three).is_err(),
+            "NULLIF with 3 arguments should fail"
+        );
+    }
+
+    // --- length() on path variables ---
+
+    #[test]
+    fn test_length_of_path_variable() {
+        // length(p) where p is a path variable should translate to
+        // Variable("_path_length_p")
+        let t = translator();
+        let expr = ast::Expression::FunctionCall {
+            name: "length".to_string(),
+            args: vec![ast::Expression::Variable("p".to_string())],
+            distinct: false,
+        };
+
+        let result = t.translate_expression(&expr).unwrap();
+        assert!(
+            matches!(&result, LogicalExpression::Variable(v) if v == "_path_length_p"),
+            "length(p) should produce Variable(\"_path_length_p\"), got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_length_case_insensitive() {
+        // LENGTH(myPath) should also work (case-insensitive function name)
+        let t = translator();
+        let expr = ast::Expression::FunctionCall {
+            name: "LENGTH".to_string(),
+            args: vec![ast::Expression::Variable("myPath".to_string())],
+            distinct: false,
+        };
+
+        let result = t.translate_expression(&expr).unwrap();
+        assert!(
+            matches!(&result, LogicalExpression::Variable(v) if v == "_path_length_myPath"),
+            "LENGTH(myPath) should produce _path_length_myPath, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_length_with_non_variable_arg_is_regular_function() {
+        // length(expr) where expr is NOT a plain variable should remain a regular function call
+        let t = translator();
+        let expr = ast::Expression::FunctionCall {
+            name: "length".to_string(),
+            args: vec![ast::Expression::PropertyAccess {
+                variable: "n".to_string(),
+                property: "name".to_string(),
+            }],
+            distinct: false,
+        };
+
+        let result = t.translate_expression(&expr).unwrap();
+        assert!(
+            matches!(&result, LogicalExpression::FunctionCall { name, .. } if name == "length"),
+            "length(n.name) should stay as FunctionCall, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_length_with_multiple_args_is_regular_function() {
+        // length(a, b) should remain a regular function call (path optimization is single-arg only)
+        let t = translator();
+        let expr = ast::Expression::FunctionCall {
+            name: "length".to_string(),
+            args: vec![
+                ast::Expression::Variable("a".to_string()),
+                ast::Expression::Variable("b".to_string()),
+            ],
+            distinct: false,
+        };
+
+        let result = t.translate_expression(&expr).unwrap();
+        assert!(
+            matches!(&result, LogicalExpression::FunctionCall { name, .. } if name == "length"),
+            "length(a, b) should stay as FunctionCall, got: {result:?}"
+        );
+    }
+}
