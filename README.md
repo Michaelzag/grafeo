@@ -103,8 +103,8 @@ Full results: [embedded](https://github.com/GrafeoDB/graph-bench/blob/main/RESUL
 |----------------|-----|-----|
 | GQL | ✅ | - |
 | Cypher | ✅ | - |
+| GraphQL | ✅ | ✅ | 
 | Gremlin | ✅ | - |
-| GraphQL | ✅ | ✅ |
 | SPARQL | - | ✅ |
 | SQL/PGQ | ✅ | - |
 
