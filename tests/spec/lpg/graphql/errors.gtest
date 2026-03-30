@@ -31,6 +31,7 @@ tests:
       error: "No operation found"
 
   - name: empty_query_string
+    skip: "whitespace-only queries cannot be tested via binding spec runners (query stripped to empty)"
     query: "   "
     expect:
       error: "No operation found"
