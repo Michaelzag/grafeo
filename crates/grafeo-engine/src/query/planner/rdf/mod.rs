@@ -3787,7 +3787,12 @@ impl RdfExpressionPredicate {
                 let s = value_to_string(&val);
                 use sha1::Digest as _;
                 let hash = sha1::Sha1::digest(s.as_bytes());
-                Some(Value::String(format!("{hash:x}").into()))
+                let hex = hash.iter().fold(String::new(), |mut s, b| {
+                    use std::fmt::Write as _;
+                    let _ = write!(s, "{b:02x}");
+                    s
+                });
+                Some(Value::String(hex.into()))
             }
 
             "SHA256" => {
@@ -3795,7 +3800,12 @@ impl RdfExpressionPredicate {
                 let s = value_to_string(&val);
                 use sha2::Digest as _;
                 let hash = sha2::Sha256::digest(s.as_bytes());
-                Some(Value::String(format!("{hash:x}").into()))
+                let hex = hash.iter().fold(String::new(), |mut s, b| {
+                    use std::fmt::Write as _;
+                    let _ = write!(s, "{b:02x}");
+                    s
+                });
+                Some(Value::String(hex.into()))
             }
 
             "SHA384" => {
@@ -3803,7 +3813,12 @@ impl RdfExpressionPredicate {
                 let s = value_to_string(&val);
                 use sha2::Digest as _;
                 let hash = sha2::Sha384::digest(s.as_bytes());
-                Some(Value::String(format!("{hash:x}").into()))
+                let hex = hash.iter().fold(String::new(), |mut s, b| {
+                    use std::fmt::Write as _;
+                    let _ = write!(s, "{b:02x}");
+                    s
+                });
+                Some(Value::String(hex.into()))
             }
 
             "SHA512" => {
@@ -3811,7 +3826,12 @@ impl RdfExpressionPredicate {
                 let s = value_to_string(&val);
                 use sha2::Digest as _;
                 let hash = sha2::Sha512::digest(s.as_bytes());
-                Some(Value::String(format!("{hash:x}").into()))
+                let hex = hash.iter().fold(String::new(), |mut s, b| {
+                    use std::fmt::Write as _;
+                    let _ = write!(s, "{b:02x}");
+                    s
+                });
+                Some(Value::String(hex.into()))
             }
 
             // ================================================================
