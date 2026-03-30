@@ -2,9 +2,9 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
-## [0.5.30] - 2029-03-29
+## [0.5.30] - 2026-03-30
 
-Async storage foundation and continued test coverage.
+Async storage foundation and continued test coverage. Thanks to [@maxwellflitton](https://github.com/maxwellflitton) for the [async storage adapter discussion](https://github.com/orgs/GrafeoDB/discussions/190) that shaped this release.
 
 ### Added
 

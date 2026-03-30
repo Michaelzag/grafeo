@@ -17,6 +17,7 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: empty_query
+    skip: "whitespace-only queries cannot be tested via binding spec runners (query stripped to empty)"
     query: " "
     expect:
       error: "Expected"
