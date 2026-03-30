@@ -88,8 +88,3 @@ workspace = true
 [[bench]]
 name = "index_bench"
 harness = false
-
-[[bench]]
-name = "compact_vs_lpg"
-harness = false
-required-features = ["compact-store"]
