@@ -400,12 +400,16 @@ impl super::Planner {
                         Error::Internal(format!("Variable '{}' not found in input", name))
                     })?;
                     projections.push(ProjectExpr::Column(col_idx));
-                    output_types.push(LogicalType::Node);
-                    // Propagate scalar/edge status from input variable to output alias
+                    // Use Any for scalar variables so string/numeric values
+                    // are not coerced to NodeId by the typed vector push.
                     if self.scalar_columns.borrow().contains(name) {
+                        output_types.push(LogicalType::Any);
                         self.scalar_columns.borrow_mut().insert(col_name.clone());
                     } else if self.edge_columns.borrow().contains(name) {
+                        output_types.push(LogicalType::Edge);
                         self.edge_columns.borrow_mut().insert(col_name.clone());
+                    } else {
+                        output_types.push(LogicalType::Node);
                     }
                 }
                 LogicalExpression::Property { variable, property } => {

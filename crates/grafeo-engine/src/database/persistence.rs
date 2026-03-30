@@ -416,7 +416,7 @@ fn collect_schema(catalog: &std::sync::Arc<crate::catalog::Catalog>) -> Snapshot
 /// creation scans existing data.
 fn restore_indexes_from_snapshot(db: &super::GrafeoDB, indexes: &SnapshotIndexes) {
     for name in &indexes.property_indexes {
-        db.store.create_property_index(name);
+        db.lpg_store().create_property_index(name);
     }
 
     #[cfg(feature = "vector-index")]
@@ -529,9 +529,11 @@ impl super::GrafeoDB {
         let target = Self::with_config(target_config)?;
 
         // Copy all nodes using WAL-enabled methods
-        for node in self.store.all_nodes() {
+        for node in self.lpg_store().all_nodes() {
             let label_refs: Vec<&str> = node.labels.iter().map(|s| &**s).collect();
-            target.store.create_node_with_id(node.id, &label_refs)?;
+            target
+                .lpg_store()
+                .create_node_with_id(node.id, &label_refs)?;
 
             // Log to WAL
             target.log_wal(&WalRecord::CreateNode {
@@ -542,7 +544,7 @@ impl super::GrafeoDB {
             // Copy properties
             for (key, value) in node.properties {
                 target
-                    .store
+                    .lpg_store()
                     .set_node_property(node.id, key.as_str(), value.clone());
                 target.log_wal(&WalRecord::SetNodeProperty {
                     id: node.id,
@@ -553,9 +555,9 @@ impl super::GrafeoDB {
         }
 
         // Copy all edges using WAL-enabled methods
-        for edge in self.store.all_edges() {
+        for edge in self.lpg_store().all_edges() {
             target
-                .store
+                .lpg_store()
                 .create_edge_with_id(edge.id, edge.src, edge.dst, &edge.edge_type)?;
 
             // Log to WAL
@@ -569,7 +571,7 @@ impl super::GrafeoDB {
             // Copy properties
             for (key, value) in edge.properties {
                 target
-                    .store
+                    .lpg_store()
                     .set_edge_property(edge.id, key.as_str(), value.clone());
                 target.log_wal(&WalRecord::SetEdgeProperty {
                     id: edge.id,
@@ -580,17 +582,17 @@ impl super::GrafeoDB {
         }
 
         // Copy named graphs
-        for graph_name in self.store.graph_names() {
-            if let Some(src_graph) = self.store.graph(&graph_name) {
+        for graph_name in self.lpg_store().graph_names() {
+            if let Some(src_graph) = self.lpg_store().graph(&graph_name) {
                 target.log_wal(&WalRecord::CreateNamedGraph {
                     name: graph_name.clone(),
                 })?;
                 target
-                    .store
+                    .lpg_store()
                     .create_graph(&graph_name)
                     .map_err(|e| Error::Internal(e.to_string()))?;
 
-                if let Some(dst_graph) = target.store.graph(&graph_name) {
+                if let Some(dst_graph) = target.lpg_store().graph(&graph_name) {
                     // Switch WAL context to this named graph
                     target.log_wal(&WalRecord::SwitchGraph {
                         name: Some(graph_name.clone()),
@@ -639,7 +641,7 @@ impl super::GrafeoDB {
         }
 
         // Switch WAL context back to default graph
-        if !self.store.graph_names().is_empty() {
+        if !self.lpg_store().graph_names().is_empty() {
             target.log_wal(&WalRecord::SwitchGraph { name: None })?;
         }
 
@@ -691,13 +693,13 @@ impl super::GrafeoDB {
         use grafeo_adapters::storage::file::GrafeoFileManager;
 
         let snapshot_data = self.export_snapshot()?;
-        let epoch = self.store.current_epoch();
+        let epoch = self.lpg_store().current_epoch();
         let transaction_id = self
             .transaction_manager
             .last_assigned_transaction_id()
             .map_or(0, |t| t.0);
-        let node_count = self.store.node_count() as u64;
-        let edge_count = self.store.edge_count() as u64;
+        let node_count = self.lpg_store().node_count() as u64;
+        let edge_count = self.lpg_store().edge_count() as u64;
 
         let fm = GrafeoFileManager::create(path)?;
         fm.write_snapshot(
@@ -721,32 +723,38 @@ impl super::GrafeoDB {
         let target = Self::with_config(config)?;
 
         // Copy default graph nodes
-        for node in self.store.all_nodes() {
+        for node in self.lpg_store().all_nodes() {
             let label_refs: Vec<&str> = node.labels.iter().map(|s| &**s).collect();
-            target.store.create_node_with_id(node.id, &label_refs)?;
+            target
+                .lpg_store()
+                .create_node_with_id(node.id, &label_refs)?;
             for (key, value) in node.properties {
-                target.store.set_node_property(node.id, key.as_str(), value);
+                target
+                    .lpg_store()
+                    .set_node_property(node.id, key.as_str(), value);
             }
         }
 
         // Copy default graph edges
-        for edge in self.store.all_edges() {
+        for edge in self.lpg_store().all_edges() {
             target
-                .store
+                .lpg_store()
                 .create_edge_with_id(edge.id, edge.src, edge.dst, &edge.edge_type)?;
             for (key, value) in edge.properties {
-                target.store.set_edge_property(edge.id, key.as_str(), value);
+                target
+                    .lpg_store()
+                    .set_edge_property(edge.id, key.as_str(), value);
             }
         }
 
         // Copy named graphs
-        for graph_name in self.store.graph_names() {
-            if let Some(src_graph) = self.store.graph(&graph_name) {
+        for graph_name in self.lpg_store().graph_names() {
+            if let Some(src_graph) = self.lpg_store().graph(&graph_name) {
                 target
-                    .store
+                    .lpg_store()
                     .create_graph(&graph_name)
                     .map_err(|e| Error::Internal(e.to_string()))?;
-                if let Some(dst_graph) = target.store.graph(&graph_name) {
+                if let Some(dst_graph) = target.lpg_store().graph(&graph_name) {
                     for node in src_graph.all_nodes() {
                         let label_refs: Vec<&str> = node.labels.iter().map(|s| &**s).collect();
                         dst_graph.create_node_with_id(node.id, &label_refs)?;
@@ -828,16 +836,16 @@ impl super::GrafeoDB {
     ///
     /// Returns an error if serialization fails.
     pub fn export_snapshot(&self) -> Result<Vec<u8>> {
-        let nodes = collect_snapshot_nodes(&self.store);
-        let edges = collect_snapshot_edges(&self.store);
+        let nodes = collect_snapshot_nodes(self.lpg_store());
+        let edges = collect_snapshot_edges(self.lpg_store());
 
         // Collect named graphs
         let named_graphs: Vec<NamedGraphSnapshot> = self
-            .store
+            .lpg_store()
             .graph_names()
             .into_iter()
             .filter_map(|name| {
-                self.store
+                self.lpg_store()
                     .graph(&name)
                     .map(|graph_store| NamedGraphSnapshot {
                         name,
@@ -871,7 +879,7 @@ impl super::GrafeoDB {
         let rdf_named_graphs = Vec::new();
 
         let schema = collect_schema(&self.catalog);
-        let indexes = collect_index_metadata(&self.store);
+        let indexes = collect_index_metadata(self.lpg_store());
 
         let snapshot = Snapshot {
             version: SNAPSHOT_VERSION,
@@ -931,13 +939,13 @@ impl super::GrafeoDB {
         }
 
         let db = Self::new_in_memory();
-        populate_store_from_snapshot(&db.store, snapshot.nodes, snapshot.edges)?;
+        populate_store_from_snapshot(db.lpg_store(), snapshot.nodes, snapshot.edges)?;
 
         // Restore epoch from snapshot
         #[cfg(feature = "temporal")]
         {
             let epoch = EpochId::new(snapshot.epoch);
-            db.store.sync_epoch(epoch);
+            db.lpg_store().sync_epoch(epoch);
             db.transaction_manager.sync_epoch(epoch);
         }
 
@@ -947,10 +955,10 @@ impl super::GrafeoDB {
 
         // Restore named graphs
         for ng in snapshot.named_graphs {
-            db.store
+            db.lpg_store()
                 .create_graph(&ng.name)
                 .map_err(|e| Error::Internal(e.to_string()))?;
-            if let Some(graph_store) = db.store.graph(&ng.name) {
+            if let Some(graph_store) = db.lpg_store().graph(&ng.name) {
                 populate_store_from_snapshot(&graph_store, ng.nodes, ng.edges)?;
                 // Named graph stores need the same epoch so temporal property
                 // lookups via current_epoch() return the correct values.
@@ -1016,28 +1024,28 @@ impl super::GrafeoDB {
         }
 
         // Drop all existing named graphs, then clear default store
-        for name in self.store.graph_names() {
-            self.store.drop_graph(&name);
+        for name in self.lpg_store().graph_names() {
+            self.lpg_store().drop_graph(&name);
         }
-        self.store.clear();
+        self.lpg_store().clear();
 
-        populate_store_from_snapshot(&self.store, snapshot.nodes, snapshot.edges)?;
+        populate_store_from_snapshot(self.lpg_store(), snapshot.nodes, snapshot.edges)?;
 
         // Restore epoch from temporal snapshot
         #[cfg(feature = "temporal")]
         let snapshot_epoch = {
             let epoch = EpochId::new(snapshot.epoch);
-            self.store.sync_epoch(epoch);
+            self.lpg_store().sync_epoch(epoch);
             self.transaction_manager.sync_epoch(epoch);
             epoch
         };
 
         // Restore named graphs
         for ng in snapshot.named_graphs {
-            self.store
+            self.lpg_store()
                 .create_graph(&ng.name)
                 .map_err(|e| Error::Internal(e.to_string()))?;
-            if let Some(graph_store) = self.store.graph(&ng.name) {
+            if let Some(graph_store) = self.lpg_store().graph(&ng.name) {
                 populate_store_from_snapshot(&graph_store, ng.nodes, ng.edges)?;
                 #[cfg(feature = "temporal")]
                 graph_store.sync_epoch(snapshot_epoch);
@@ -1076,14 +1084,14 @@ impl super::GrafeoDB {
     ///
     /// Useful for dump/export operations.
     pub fn iter_nodes(&self) -> impl Iterator<Item = grafeo_core::graph::lpg::Node> + '_ {
-        self.store.all_nodes()
+        self.lpg_store().all_nodes()
     }
 
     /// Returns an iterator over all edges in the database.
     ///
     /// Useful for dump/export operations.
     pub fn iter_edges(&self) -> impl Iterator<Item = grafeo_core::graph::lpg::Edge> + '_ {
-        self.store.all_edges()
+        self.lpg_store().all_edges()
     }
 }
 
@@ -1111,12 +1119,12 @@ mod tests {
         session
             .execute("INSERT (:Person {name: 'Vincent'})")
             .unwrap();
-        assert_eq!(db.store.node_count(), 3);
+        assert_eq!(db.lpg_store().node_count(), 3);
 
         // Restore original
         db.restore_snapshot(&snapshot).unwrap();
 
-        assert_eq!(db.store.node_count(), 2);
+        assert_eq!(db.lpg_store().node_count(), 2);
         let result = session.execute("MATCH (n:Person) RETURN n.name").unwrap();
         assert_eq!(result.rows.len(), 2);
     }
@@ -1133,7 +1141,7 @@ mod tests {
         assert!(result.is_err());
 
         // DB should be unchanged
-        assert_eq!(db.store.node_count(), 1);
+        assert_eq!(db.lpg_store().node_count(), 1);
     }
 
     #[test]
@@ -1145,10 +1153,10 @@ mod tests {
 
         let session = db.session();
         session.execute("INSERT (:Person {name: 'Alix'})").unwrap();
-        assert_eq!(db.store.node_count(), 1);
+        assert_eq!(db.lpg_store().node_count(), 1);
 
         db.restore_snapshot(&empty_snapshot).unwrap();
-        assert_eq!(db.store.node_count(), 0);
+        assert_eq!(db.lpg_store().node_count(), 0);
     }
 
     #[test]
@@ -1165,7 +1173,7 @@ mod tests {
             .unwrap();
 
         let snapshot = db.export_snapshot().unwrap();
-        assert_eq!(db.store.edge_count(), 1);
+        assert_eq!(db.lpg_store().edge_count(), 1);
 
         // Modify: add more data
         session
@@ -1174,8 +1182,8 @@ mod tests {
 
         // Restore
         db.restore_snapshot(&snapshot).unwrap();
-        assert_eq!(db.store.node_count(), 2);
-        assert_eq!(db.store.edge_count(), 1);
+        assert_eq!(db.lpg_store().node_count(), 2);
+        assert_eq!(db.lpg_store().edge_count(), 1);
     }
 
     #[test]
@@ -1220,8 +1228,8 @@ mod tests {
     fn test_to_memory_empty() {
         let db = GrafeoDB::new_in_memory();
         let copy = db.to_memory().unwrap();
-        assert_eq!(copy.store.node_count(), 0);
-        assert_eq!(copy.store.edge_count(), 0);
+        assert_eq!(copy.lpg_store().node_count(), 0);
+        assert_eq!(copy.lpg_store().edge_count(), 0);
     }
 
     #[test]
@@ -1236,7 +1244,7 @@ mod tests {
             .unwrap();
 
         let copy = db.to_memory().unwrap();
-        assert_eq!(copy.store.node_count(), 2);
+        assert_eq!(copy.lpg_store().node_count(), 2);
 
         let s2 = copy.session();
         let result = s2
@@ -1258,8 +1266,8 @@ mod tests {
         db.set_edge_property(edge, "since", Value::Int64(2020));
 
         let copy = db.to_memory().unwrap();
-        assert_eq!(copy.store.node_count(), 2);
-        assert_eq!(copy.store.edge_count(), 1);
+        assert_eq!(copy.lpg_store().node_count(), 2);
+        assert_eq!(copy.lpg_store().edge_count(), 1);
 
         let s2 = copy.session();
         let result = s2.execute("MATCH ()-[e:KNOWS]->() RETURN e.since").unwrap();
@@ -1276,8 +1284,8 @@ mod tests {
 
         // Mutating original should not affect copy
         session.execute("INSERT (:Person {name: 'Gus'})").unwrap();
-        assert_eq!(db.store.node_count(), 2);
-        assert_eq!(copy.store.node_count(), 1);
+        assert_eq!(db.lpg_store().node_count(), 2);
+        assert_eq!(copy.lpg_store().node_count(), 1);
     }
 
     // --- iter_nodes() / iter_edges() ---
@@ -1362,7 +1370,7 @@ mod tests {
         assert!(err.contains("unsupported snapshot version"), "got: {err}");
 
         // DB unchanged
-        assert_eq!(db.store.node_count(), 1);
+        assert_eq!(db.lpg_store().node_count(), 1);
     }
 
     #[test]
@@ -1392,7 +1400,7 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("duplicate node ID"), "got: {err}");
-        assert_eq!(db.store.node_count(), 1);
+        assert_eq!(db.lpg_store().node_count(), 1);
     }
 
     #[test]

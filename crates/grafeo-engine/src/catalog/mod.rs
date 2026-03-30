@@ -1702,7 +1702,7 @@ pub struct CatalogConstraintValidator {
     /// Optional graph name for graph-type-bound validation.
     graph_name: Option<String>,
     /// Optional graph store for UNIQUE constraint enforcement via index lookup.
-    store: Option<Arc<dyn grafeo_core::graph::GraphStoreMut>>,
+    store: Option<Arc<dyn grafeo_core::graph::GraphStore>>,
 }
 
 impl CatalogConstraintValidator {
@@ -1722,7 +1722,7 @@ impl CatalogConstraintValidator {
     }
 
     /// Attaches a graph store for UNIQUE constraint enforcement.
-    pub fn with_store(mut self, store: Arc<dyn grafeo_core::graph::GraphStoreMut>) -> Self {
+    pub fn with_store(mut self, store: Arc<dyn grafeo_core::graph::GraphStore>) -> Self {
         self.store = Some(store);
         self
     }

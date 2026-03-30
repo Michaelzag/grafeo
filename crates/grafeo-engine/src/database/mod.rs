@@ -44,10 +44,10 @@ use grafeo_adapters::storage::wal::{
 };
 use grafeo_common::memory::buffer::{BufferManager, BufferManagerConfig};
 use grafeo_common::utils::error::Result;
-use grafeo_core::graph::GraphStoreMut;
 use grafeo_core::graph::lpg::LpgStore;
 #[cfg(feature = "rdf")]
 use grafeo_core::graph::rdf::RdfStore;
+use grafeo_core::graph::{GraphStore, GraphStoreMut};
 
 use crate::catalog::Catalog;
 use crate::config::Config;
@@ -80,8 +80,8 @@ use crate::transaction::TransactionManager;
 pub struct GrafeoDB {
     /// Database configuration.
     pub(super) config: Config,
-    /// The underlying graph store.
-    pub(super) store: Arc<LpgStore>,
+    /// The underlying graph store (None when using an external store).
+    pub(super) store: Option<Arc<LpgStore>>,
     /// Schema and metadata catalog shared across sessions.
     pub(super) catalog: Arc<Catalog>,
     /// RDF triple store (if RDF feature is enabled).
@@ -115,9 +115,12 @@ pub struct GrafeoDB {
     /// Single-file database manager (when using `.grafeo` format).
     #[cfg(feature = "grafeo-file")]
     pub(super) file_manager: Option<Arc<GrafeoFileManager>>,
-    /// External graph store (when using with_store()).
+    /// External read-only graph store (when using with_store() or with_read_store()).
     /// When set, sessions route queries through this store instead of the built-in LpgStore.
-    pub(super) external_store: Option<Arc<dyn GraphStoreMut>>,
+    pub(super) external_read_store: Option<Arc<dyn GraphStore>>,
+    /// External writable graph store (when using with_store()).
+    /// None for read-only databases created via with_read_store().
+    pub(super) external_write_store: Option<Arc<dyn GraphStoreMut>>,
     /// Metrics registry shared across all sessions.
     #[cfg(feature = "metrics")]
     pub(crate) metrics: Option<Arc<crate::metrics::MetricsRegistry>>,
@@ -135,6 +138,20 @@ pub struct GrafeoDB {
 }
 
 impl GrafeoDB {
+    /// Returns a reference to the built-in LPG store.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the database was created with [`with_store()`](Self::with_store) or
+    /// [`with_read_store()`](Self::with_read_store), which use an external store
+    /// instead of the built-in LPG store.
+    fn lpg_store(&self) -> &Arc<LpgStore> {
+        self.store.as_ref().expect(
+            "no built-in LpgStore: this GrafeoDB was created with an external store \
+             (with_store / with_read_store). Use session() or graph_store() instead.",
+        )
+    }
+
     /// Creates an in-memory database, fast to create, gone when dropped.
     ///
     /// Use this for tests, experiments, or when you don't need persistence.
@@ -426,7 +443,7 @@ impl GrafeoDB {
 
         Ok(Self {
             config,
-            store,
+            store: Some(store),
             catalog,
             #[cfg(feature = "rdf")]
             rdf_store,
@@ -445,7 +462,8 @@ impl GrafeoDB {
             embedding_models: RwLock::new(hashbrown::HashMap::new()),
             #[cfg(feature = "grafeo-file")]
             file_manager,
-            external_store: None,
+            external_read_store: None,
+            external_write_store: None,
             #[cfg(feature = "metrics")]
             metrics: Some(Arc::new(crate::metrics::MetricsRegistry::new())),
             current_graph: RwLock::new(None),
@@ -483,7 +501,6 @@ impl GrafeoDB {
             .validate()
             .map_err(|e| grafeo_common::utils::error::Error::Internal(e.to_string()))?;
 
-        let dummy_store = Arc::new(LpgStore::new()?);
         let transaction_manager = Arc::new(TransactionManager::new());
 
         let buffer_config = BufferManagerConfig {
@@ -499,7 +516,7 @@ impl GrafeoDB {
 
         Ok(Self {
             config,
-            store: dummy_store,
+            store: None,
             catalog: Arc::new(Catalog::new()),
             #[cfg(feature = "rdf")]
             rdf_store: Arc::new(RdfStore::new()),
@@ -518,12 +535,82 @@ impl GrafeoDB {
             embedding_models: RwLock::new(hashbrown::HashMap::new()),
             #[cfg(feature = "grafeo-file")]
             file_manager: None,
-            external_store: Some(store),
+            external_read_store: Some(Arc::clone(&store) as Arc<dyn GraphStore>),
+            external_write_store: Some(store),
             #[cfg(feature = "metrics")]
             metrics: Some(Arc::new(crate::metrics::MetricsRegistry::new())),
             current_graph: RwLock::new(None),
             current_schema: RwLock::new(None),
             read_only: false,
+        })
+    }
+
+    /// Creates a database backed by a read-only [`GraphStore`].
+    ///
+    /// The database is set to read-only mode. Write queries (CREATE, SET,
+    /// DELETE) will return `TransactionError::ReadOnly`.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::sync::Arc;
+    /// use grafeo_engine::{GrafeoDB, Config};
+    /// use grafeo_core::graph::GraphStore;
+    ///
+    /// fn example(store: Arc<dyn GraphStore>) -> grafeo_common::utils::error::Result<()> {
+    ///     let db = GrafeoDB::with_read_store(store, Config::in_memory())?;
+    ///     let result = db.execute("MATCH (n) RETURN count(n)")?;
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// [`GraphStore`]: grafeo_core::graph::GraphStore
+    pub fn with_read_store(store: Arc<dyn GraphStore>, config: Config) -> Result<Self> {
+        config
+            .validate()
+            .map_err(|e| grafeo_common::utils::error::Error::Internal(e.to_string()))?;
+
+        let transaction_manager = Arc::new(TransactionManager::new());
+
+        let buffer_config = BufferManagerConfig {
+            budget: config.memory_limit.unwrap_or_else(|| {
+                (BufferManagerConfig::detect_system_memory() as f64 * 0.75) as usize
+            }),
+            spill_path: None,
+            ..BufferManagerConfig::default()
+        };
+        let buffer_manager = BufferManager::new(buffer_config);
+
+        let query_cache = Arc::new(QueryCache::default());
+
+        Ok(Self {
+            config,
+            store: None,
+            catalog: Arc::new(Catalog::new()),
+            #[cfg(feature = "rdf")]
+            rdf_store: Arc::new(RdfStore::new()),
+            transaction_manager,
+            buffer_manager,
+            #[cfg(feature = "wal")]
+            wal: None,
+            #[cfg(feature = "wal")]
+            wal_graph_context: Arc::new(parking_lot::Mutex::new(None)),
+            query_cache,
+            commit_counter: Arc::new(AtomicUsize::new(0)),
+            is_open: RwLock::new(true),
+            #[cfg(feature = "cdc")]
+            cdc_log: Arc::new(crate::cdc::CdcLog::new()),
+            #[cfg(feature = "embed")]
+            embedding_models: RwLock::new(hashbrown::HashMap::new()),
+            #[cfg(feature = "grafeo-file")]
+            file_manager: None,
+            external_read_store: Some(store),
+            external_write_store: None,
+            #[cfg(feature = "metrics")]
+            metrics: Some(Arc::new(crate::metrics::MetricsRegistry::new())),
+            current_graph: RwLock::new(None),
+            current_schema: RwLock::new(None),
+            read_only: true,
         })
     }
 
@@ -924,19 +1011,23 @@ impl GrafeoDB {
             read_only: self.read_only,
         };
 
-        if let Some(ref ext_store) = self.external_store {
-            return Session::with_external_store(Arc::clone(ext_store), session_cfg())
-                .expect("arena allocation for external store session");
+        if let Some(ref ext_read) = self.external_read_store {
+            return Session::with_external_store(
+                Arc::clone(ext_read),
+                self.external_write_store.as_ref().map(Arc::clone),
+                session_cfg(),
+            )
+            .expect("arena allocation for external store session");
         }
 
         #[cfg(feature = "rdf")]
         let mut session = Session::with_rdf_store_and_adaptive(
-            Arc::clone(&self.store),
+            Arc::clone(self.lpg_store()),
             Arc::clone(&self.rdf_store),
             session_cfg(),
         );
         #[cfg(not(feature = "rdf"))]
-        let mut session = Session::with_adaptive(Arc::clone(&self.store), session_cfg());
+        let mut session = Session::with_adaptive(Arc::clone(self.lpg_store()), session_cfg());
 
         #[cfg(feature = "wal")]
         if let Some(ref wal) = self.wal {
@@ -1089,7 +1180,7 @@ impl GrafeoDB {
     /// [`graph_store()`](Self::graph_store) which returns the trait interface.
     #[must_use]
     pub fn store(&self) -> &Arc<LpgStore> {
-        &self.store
+        self.lpg_store()
     }
 
     /// Returns the LPG store for the currently active graph.
@@ -1099,14 +1190,12 @@ impl GrafeoDB {
     /// Falls back to the default store if the named graph does not exist.
     #[allow(dead_code)] // Reserved for future graph-aware CRUD methods
     fn active_store(&self) -> Arc<LpgStore> {
+        let store = self.lpg_store();
         let graph_name = self.current_graph.read().clone();
         match graph_name {
-            None => Arc::clone(&self.store),
-            Some(ref name) if name.eq_ignore_ascii_case("default") => Arc::clone(&self.store),
-            Some(ref name) => self
-                .store
-                .graph(name)
-                .unwrap_or_else(|| Arc::clone(&self.store)),
+            None => Arc::clone(store),
+            Some(ref name) if name.eq_ignore_ascii_case("default") => Arc::clone(store),
+            Some(ref name) => store.graph(name).unwrap_or_else(|| Arc::clone(store)),
         }
     }
 
@@ -1118,33 +1207,47 @@ impl GrafeoDB {
     ///
     /// Returns an error if arena allocation fails.
     pub fn create_graph(&self, name: &str) -> Result<bool> {
-        Ok(self.store.create_graph(name)?)
+        Ok(self.lpg_store().create_graph(name)?)
     }
 
     /// Drops a named graph. Returns `true` if dropped, `false` if it did not exist.
     pub fn drop_graph(&self, name: &str) -> bool {
-        self.store.drop_graph(name)
+        self.lpg_store().drop_graph(name)
     }
 
     /// Returns all named graph names.
     #[must_use]
     pub fn list_graphs(&self) -> Vec<String> {
-        self.store.graph_names()
+        self.lpg_store().graph_names()
     }
 
     /// Returns the graph store as a trait object.
     ///
-    /// This provides the [`GraphStoreMut`] interface for code that should work
-    /// with any storage backend. Use this when you only need graph read/write
-    /// operations and don't need admin methods like index management.
+    /// Returns a read-only trait object for the active graph store.
     ///
-    /// [`GraphStoreMut`]: grafeo_core::graph::GraphStoreMut
+    /// This provides the [`GraphStore`] interface for code that only needs
+    /// read operations. For write access, use [`graph_store_mut()`](Self::graph_store_mut).
+    ///
+    /// [`GraphStore`]: grafeo_core::graph::GraphStore
     #[must_use]
-    pub fn graph_store(&self) -> Arc<dyn GraphStoreMut> {
-        if let Some(ref ext_store) = self.external_store {
-            Arc::clone(ext_store)
+    pub fn graph_store(&self) -> Arc<dyn GraphStore> {
+        if let Some(ref ext_read) = self.external_read_store {
+            Arc::clone(ext_read)
         } else {
-            Arc::clone(&self.store) as Arc<dyn GraphStoreMut>
+            Arc::clone(self.lpg_store()) as Arc<dyn GraphStore>
+        }
+    }
+
+    /// Returns the writable graph store, if available.
+    ///
+    /// Returns `None` for read-only databases created via
+    /// [`with_read_store()`](Self::with_read_store).
+    #[must_use]
+    pub fn graph_store_mut(&self) -> Option<Arc<dyn GraphStoreMut>> {
+        if self.external_read_store.is_some() {
+            self.external_write_store.as_ref().map(Arc::clone)
+        } else {
+            Some(Arc::clone(self.lpg_store()) as Arc<dyn GraphStoreMut>)
         }
     }
 
@@ -1155,7 +1258,7 @@ impl GrafeoDB {
     /// transaction metadata in the transaction manager.
     pub fn gc(&self) {
         let min_epoch = self.transaction_manager.min_active_epoch();
-        self.store.gc_versions(min_epoch);
+        self.lpg_store().gc_versions(min_epoch);
         self.transaction_manager.gc();
     }
 
@@ -1295,13 +1398,13 @@ impl GrafeoDB {
         let snapshot_data = self.export_snapshot()?;
         maybe_crash("checkpoint_to_file:after_export");
 
-        let epoch = self.store.current_epoch();
+        let epoch = self.lpg_store().current_epoch();
         let transaction_id = self
             .transaction_manager
             .last_assigned_transaction_id()
             .map_or(0, |t| t.0);
-        let node_count = self.store.node_count() as u64;
-        let edge_count = self.store.edge_count() as u64;
+        let node_count = self.lpg_store().node_count() as u64;
+        let edge_count = self.lpg_store().edge_count() as u64;
 
         fm.write_snapshot(
             &snapshot_data,

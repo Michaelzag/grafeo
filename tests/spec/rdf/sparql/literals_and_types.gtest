@@ -100,7 +100,6 @@ tests:
       count: 2
 
   - name: filter_by_language_tag
-    skip: "LANG() function not yet evaluated by RDF executor"
     # Use LANG() to filter for a specific language tag.
     setup:
       - |

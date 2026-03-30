@@ -228,6 +228,11 @@ pub(crate) fn build_inner_join(
 ///
 /// Finds shared variables between left and right column lists for join keys,
 /// then creates a hash join with anti semantics (only left rows with no match).
+///
+/// Per the SPARQL 1.1 spec, MINUS with no shared variables between left and
+/// right is a no-op: two solutions are compatible only if they agree on all
+/// shared variables, so when there are none, no solutions are compatible and
+/// nothing is removed.
 pub(crate) fn build_anti_join(
     left: Box<dyn Operator>,
     right: Box<dyn Operator>,
@@ -236,6 +241,11 @@ pub(crate) fn build_anti_join(
     schema: Vec<LogicalType>,
 ) -> (Box<dyn Operator>, Vec<String>) {
     let (probe_keys, build_keys) = find_shared_join_keys(&left_columns, right_columns);
+
+    // No shared variables: MINUS is a no-op (keep all left rows).
+    if probe_keys.is_empty() {
+        return (left, left_columns);
+    }
 
     let operator: Box<dyn Operator> = Box::new(HashJoinOperator::new(
         left,

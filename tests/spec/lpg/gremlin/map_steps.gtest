@@ -54,7 +54,6 @@ tests:
         - [3]
 
   - name: union_with_values_on_each_branch
-    skip: "union branches containing .values() do not propagate property lookup correctly"
     # Alix: out(KNOWS).values('name')=Gus, out(WORKS_AT).values('name')=Grafeo OSS
     query: "g.V().has('Person', 'name', 'Alix').union(out('KNOWS').values('name'), out('WORKS_AT').values('name'))"
     expect:
@@ -175,7 +174,6 @@ tests:
       count: 2
 
   - name: path_empty_when_no_results
-    skip: "path() after empty traversal raises Column not found error"
     # Vincent has no outgoing KNOWS, so 2-hop from Vincent produces nothing
     query: "g.V().has('Person', 'name', 'Vincent').out('KNOWS').out('KNOWS').path()"
     expect:
@@ -305,7 +303,6 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: values_no_keys_returns_all_properties
-    skip: "values() with no keys raises Internal error: variable not found"
     # Alix has name, age, city: 3 property values
     query: "g.V().has('Person', 'name', 'Alix').values()"
     expect:
@@ -368,7 +365,6 @@ tests:
         - [Vincent]
 
   - name: constant_in_union_branch
-    skip: "union branches containing .values() do not propagate property lookup correctly"
     # Alix: union produces out('KNOWS')=Gus + constant('x')='x' = 2 items
     query: "g.V().has('Person', 'name', 'Alix').union(out('KNOWS').values('name'), constant('x'))"
     expect:

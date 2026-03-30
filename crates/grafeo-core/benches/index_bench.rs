@@ -263,6 +263,114 @@ fn bench_product_quantization(c: &mut Criterion) {
     group.finish();
 }
 
+// ---------------------------------------------------------------------------
+// CompactStore benchmarks (feature-gated)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "compact-store")]
+fn build_compact_store(
+    num_items: usize,
+    num_activities: usize,
+) -> grafeo_core::graph::compact::CompactStore {
+    use grafeo_core::graph::compact::CompactStoreBuilder;
+
+    let scores: Vec<u64> = (0..num_items).map(|i| (i % 10) as u64).collect();
+    let names: Vec<&str> = (0..num_items)
+        .map(|i| match i % 5 {
+            0 => "alpha",
+            1 => "beta",
+            2 => "gamma",
+            3 => "delta",
+            _ => "epsilon",
+        })
+        .collect();
+    let ratings: Vec<u64> = (0..num_activities).map(|i| (i % 5 + 1) as u64).collect();
+    let edges: Vec<(u32, u32)> = (0..num_activities)
+        .map(|i| (i as u32, (i % num_items) as u32))
+        .collect();
+
+    CompactStoreBuilder::new()
+        .node_table("Item", |t| {
+            t.column_bitpacked("score", &scores, 4)
+                .column_dict("name", &names)
+        })
+        .node_table("Activity", |t| t.column_bitpacked("rating", &ratings, 4))
+        .rel_table("ACTIVITY_ON", "Activity", "Item", |r| {
+            r.edges(edges).backward(true)
+        })
+        .build()
+        .expect("CompactStore build failed")
+}
+
+#[cfg(feature = "compact-store")]
+fn bench_compact_nodes_by_label(c: &mut Criterion) {
+    use grafeo_core::graph::traits::GraphStore;
+
+    let store = build_compact_store(10_000, 100_000);
+    c.bench_function("compact/nodes_by_label_100K", |b| {
+        b.iter(|| black_box(store.nodes_by_label("Activity").len()));
+    });
+}
+
+#[cfg(feature = "compact-store")]
+fn bench_compact_get_node_property(c: &mut Criterion) {
+    use grafeo_common::types::PropertyKey;
+    use grafeo_core::graph::traits::GraphStore;
+
+    let store = build_compact_store(10_000, 100_000);
+    let ids = store.nodes_by_label("Activity");
+    let key = PropertyKey::from("rating");
+
+    let mut state = 12345u64;
+    let lookups: Vec<usize> = (0..10_000)
+        .map(|_| {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (state as usize) % ids.len()
+        })
+        .collect();
+
+    c.bench_function("compact/get_node_property_10K", |b| {
+        b.iter(|| {
+            let mut sum = 0i64;
+            for &i in &lookups {
+                if let Some(grafeo_common::types::Value::Int64(v)) =
+                    store.get_node_property(ids[i], &key)
+                {
+                    sum += v;
+                }
+            }
+            black_box(sum)
+        });
+    });
+}
+
+#[cfg(feature = "compact-store")]
+fn bench_compact_edges_from(c: &mut Criterion) {
+    use grafeo_core::graph::Direction;
+    use grafeo_core::graph::traits::GraphStore;
+
+    let store = build_compact_store(10_000, 100_000);
+    let ids = store.nodes_by_label("Activity");
+
+    let mut state = 22222u64;
+    let lookups: Vec<usize> = (0..10_000)
+        .map(|_| {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (state as usize) % ids.len()
+        })
+        .collect();
+
+    c.bench_function("compact/edges_from_outgoing_10K", |b| {
+        b.iter(|| {
+            let mut total = 0usize;
+            for &i in &lookups {
+                total += store.edges_from(ids[i], Direction::Outgoing).len();
+            }
+            black_box(total)
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_adjacency_insert,
@@ -277,4 +385,16 @@ criterion_group!(
     bench_product_quantization,
 );
 
+#[cfg(feature = "compact-store")]
+criterion_group!(
+    compact_benches,
+    bench_compact_nodes_by_label,
+    bench_compact_get_node_property,
+    bench_compact_edges_from,
+);
+
+#[cfg(not(feature = "compact-store"))]
 criterion_main!(benches);
+
+#[cfg(feature = "compact-store")]
+criterion_main!(benches, compact_benches);

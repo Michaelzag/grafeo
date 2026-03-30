@@ -2183,6 +2183,29 @@ impl ExpressionPredicate {
                 }
                 None
             }
+            // property_values(n) returns all property values of a node or edge as a flat list.
+            // Used by Gremlin values() with no keys.
+            "property_values" => {
+                if args.len() != 1 {
+                    return None;
+                }
+                if let FilterExpression::Variable(var) = &args[0] {
+                    let col_idx = *self.variable_columns.get(var)?;
+                    let col = chunk.column(col_idx)?;
+                    if let Some(node_id) = col.get_node_id(row) {
+                        let node = self.resolve_node(node_id)?;
+                        let vals: Vec<Value> =
+                            node.properties.iter().map(|(_, v)| v.clone()).collect();
+                        return Some(Value::List(vals.into()));
+                    } else if let Some(edge_id) = col.get_edge_id(row) {
+                        let edge = self.resolve_edge(edge_id)?;
+                        let vals: Vec<Value> =
+                            edge.properties.iter().map(|(_, v)| v.clone()).collect();
+                        return Some(Value::List(vals.into()));
+                    }
+                }
+                None
+            }
             "trim" => {
                 if args.len() == 1 {
                     // Simple trim(string) - trim whitespace

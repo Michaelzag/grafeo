@@ -842,7 +842,33 @@ impl GremlinTranslator {
                     operand: Box::new(LogicalExpression::Variable(var.to_string())),
                 };
 
-                if keys.len() > 1 {
+                if keys.is_empty() {
+                    // values() with no keys: return all property values,
+                    // one row per value. Uses property_values(var) to get
+                    // all values as a list, then Unwind to emit individual rows.
+                    let list_alias = self.var_gen.next();
+                    let elem_alias = self.var_gen.next();
+                    let plan = LogicalOperator::Project(ProjectOp {
+                        projections: vec![Projection {
+                            expression: LogicalExpression::FunctionCall {
+                                name: "property_values".to_string(),
+                                args: vec![LogicalExpression::Variable(current_var.to_string())],
+                                distinct: false,
+                            },
+                            alias: Some(list_alias.clone()),
+                        }],
+                        input: Box::new(input),
+                        pass_through_input: false,
+                    });
+                    let plan = LogicalOperator::Unwind(UnwindOp {
+                        expression: LogicalExpression::Variable(list_alias),
+                        variable: elem_alias.clone(),
+                        ordinality_var: None,
+                        offset_var: None,
+                        input: Box::new(plan),
+                    });
+                    Ok((plan, Some(elem_alias)))
+                } else if keys.len() > 1 {
                     // Gremlin values('a','b') emits one traverser per key.
                     // Translate as Union of individual property projections,
                     // each filtered to exclude nulls (non-existent

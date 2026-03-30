@@ -129,7 +129,6 @@ tests:
         - [0]
 
   - name: three_hop_dead_end
-    skip: "3-hop traversal ending in empty causes Column not found error"
     # Alix -> Gus -> Vincent -> (nothing). 3-hop from Alix is empty.
     query: "g.V().has('Person', 'name', 'Alix').out('KNOWS').out('KNOWS').out('KNOWS')"
     expect:

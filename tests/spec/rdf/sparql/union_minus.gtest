@@ -114,7 +114,6 @@ tests:
         - [Gus]
 
   - name: minus_no_shared_variables_keeps_all
-    skip: "MINUS with no shared variables incorrectly removes all solutions"
     # MINUS with no overlapping variables has no effect per SPARQL spec
     setup:
       - |

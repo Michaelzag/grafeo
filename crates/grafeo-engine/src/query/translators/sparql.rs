@@ -1012,6 +1012,18 @@ impl SparqlTranslator {
                 operator,
                 right,
             } => {
+                // Detect language-tagged literal comparisons: ?var = "value"@lang
+                // or "value"@lang = ?var. Rewrite to check both lexical value and
+                // language tag so that "Barcelona"@es does not match "Barcelona"@ca.
+                if matches!(
+                    operator,
+                    ast::BinaryOperator::Equal | ast::BinaryOperator::NotEqual
+                ) && let Some(expanded) =
+                    self.try_expand_lang_comparison(left, *operator, right)?
+                {
+                    return Ok(expanded);
+                }
+
                 let left = self.translate_expression(left)?;
                 let right = self.translate_expression(right)?;
                 let op = self.translate_binary_op(*operator);
@@ -1456,6 +1468,62 @@ impl SparqlTranslator {
 
         // Return as-is if no prefix match or already a full IRI
         iri_str.to_string()
+    }
+
+    /// Rewrites `?var = "value"@lang` to `?var = "value" AND LANG(?var) = "lang"`,
+    /// and `?var != "value"@lang` to `?var != "value" OR LANG(?var) != "lang"`.
+    ///
+    /// Returns `None` when neither side is a language-tagged literal (the caller
+    /// falls through to the normal binary translation path).
+    fn try_expand_lang_comparison(
+        &mut self,
+        left: &ast::Expression,
+        operator: ast::BinaryOperator,
+        right: &ast::Expression,
+    ) -> Result<Option<LogicalExpression>> {
+        // Detect which side is the language-tagged literal and which is a variable.
+        let (var_expr, lang_lit) = match (left, right) {
+            (_, ast::Expression::Literal(lit)) if lit.language.is_some() => (left, lit),
+            (ast::Expression::Literal(lit), _) if lit.language.is_some() => (right, lit),
+            _ => return Ok(None),
+        };
+
+        let lang_tag = lang_lit.language.as_ref().expect("checked above");
+        let translated_var = self.translate_expression(var_expr)?;
+        let value_literal =
+            LogicalExpression::Literal(Value::String(lang_lit.value.clone().into()));
+        let lang_literal = LogicalExpression::Literal(Value::String(lang_tag.clone().into()));
+
+        // Build LANG(?var)
+        let lang_call = LogicalExpression::FunctionCall {
+            name: "LANG".to_string(),
+            args: vec![translated_var.clone()],
+            distinct: false,
+        };
+
+        let (value_op, lang_op, combine_op) = if operator == ast::BinaryOperator::Equal {
+            (BinaryOp::Eq, BinaryOp::Eq, BinaryOp::And)
+        } else {
+            // NotEqual: either value differs OR lang tag differs
+            (BinaryOp::Ne, BinaryOp::Ne, BinaryOp::Or)
+        };
+
+        let value_cmp = LogicalExpression::Binary {
+            left: Box::new(translated_var),
+            op: value_op,
+            right: Box::new(value_literal),
+        };
+        let lang_cmp = LogicalExpression::Binary {
+            left: Box::new(lang_call),
+            op: lang_op,
+            right: Box::new(lang_literal),
+        };
+
+        Ok(Some(LogicalExpression::Binary {
+            left: Box::new(value_cmp),
+            op: combine_op,
+            right: Box::new(lang_cmp),
+        }))
     }
 
     fn literal_to_value(&self, lit: &ast::Literal) -> Value {

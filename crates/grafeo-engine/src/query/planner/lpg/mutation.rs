@@ -3,15 +3,15 @@
 use super::{
     AddLabelOp, AddLabelOperator, AntiJoinOp, Arc, CreateEdgeOp, CreateEdgeOperator, CreateNodeOp,
     CreateNodeOperator, DeleteEdgeOp, DeleteEdgeOperator, DeleteNodeOp, DeleteNodeOperator,
-    Direction, Error, ExpandDirection, ExpressionPredicate, FilterOperator, GraphStore, HashMap,
-    LeftJoinOp, LogicalExpression, LogicalOperator, LogicalType, MergeConfig, MergeOp,
-    MergeOperator, MergeRelationshipConfig, MergeRelationshipOp, MergeRelationshipOperator,
-    Operator, ProjectExpr, ProjectOperator, PropertySource, RemoveLabelOp, RemoveLabelOperator,
-    Result, SetPropertyOp, SetPropertyOperator, ShortestPathOp, ShortestPathOperator, UnaryOp,
-    UnwindOp, UnwindOperator, Value,
+    Direction, Error, ExpandDirection, ExpressionPredicate, FilterOperator, HashMap, LeftJoinOp,
+    LogicalExpression, LogicalOperator, LogicalType, MergeConfig, MergeOp, MergeOperator,
+    MergeRelationshipConfig, MergeRelationshipOp, MergeRelationshipOperator, Operator, ProjectExpr,
+    ProjectOperator, PropertySource, RemoveLabelOp, RemoveLabelOperator, Result, SetPropertyOp,
+    SetPropertyOperator, ShortestPathOp, ShortestPathOperator, UnaryOp, UnwindOp, UnwindOperator,
+    Value,
 };
 #[cfg(feature = "algos")]
-use super::{CallProcedureOp, GraphStoreMut, StaticResultOperator};
+use super::{CallProcedureOp, StaticResultOperator};
 
 impl super::Planner {
     /// Plans a CREATE NODE operator.
@@ -58,7 +58,7 @@ impl super::Planner {
         output_schema.push(LogicalType::Node);
 
         let mut op = CreateNodeOperator::new(
-            Arc::clone(&self.store),
+            self.write_store()?,
             input_op,
             create.labels.clone(),
             properties,
@@ -127,7 +127,7 @@ impl super::Planner {
         let output_schema = self.derive_schema_from_columns(&columns);
 
         let mut operator = CreateEdgeOperator::new(
-            Arc::clone(&self.store),
+            self.write_store()?,
             input_op,
             from_column,
             to_column,
@@ -182,7 +182,7 @@ impl super::Planner {
 
         if is_edge {
             let mut op =
-                DeleteEdgeOperator::new(Arc::clone(&self.store), input_op, col_idx, output_schema)
+                DeleteEdgeOperator::new(self.write_store()?, input_op, col_idx, output_schema)
                     .with_transaction_context(self.viewing_epoch, self.transaction_id);
             if let Some(ref tracker) = self.write_tracker {
                 op = op.with_write_tracker(Arc::clone(tracker));
@@ -190,7 +190,7 @@ impl super::Planner {
             Ok((Box::new(op), output_columns))
         } else {
             let mut op = DeleteNodeOperator::new(
-                Arc::clone(&self.store),
+                self.write_store()?,
                 input_op,
                 col_idx,
                 output_schema,
@@ -226,13 +226,9 @@ impl super::Planner {
         let output_schema = self.derive_schema_from_columns(&columns);
         let output_columns = columns.clone();
 
-        let mut op = DeleteEdgeOperator::new(
-            Arc::clone(&self.store),
-            input_op,
-            edge_column,
-            output_schema,
-        )
-        .with_transaction_context(self.viewing_epoch, self.transaction_id);
+        let mut op =
+            DeleteEdgeOperator::new(self.write_store()?, input_op, edge_column, output_schema)
+                .with_transaction_context(self.viewing_epoch, self.transaction_id);
         if let Some(ref tracker) = self.write_tracker {
             op = op.with_write_tracker(Arc::clone(tracker));
         }
@@ -276,13 +272,10 @@ impl super::Planner {
                 .enumerate()
                 .map(|(i, name)| (name.clone(), i))
                 .collect();
-            let predicate = ExpressionPredicate::new(
-                filter_expr,
-                variable_columns,
-                Arc::clone(&self.store) as Arc<dyn GraphStore>,
-            )
-            .with_transaction_context(self.viewing_epoch, self.transaction_id)
-            .with_session_context(self.session_context.clone());
+            let predicate =
+                ExpressionPredicate::new(filter_expr, variable_columns, Arc::clone(&self.store))
+                    .with_transaction_context(self.viewing_epoch, self.transaction_id)
+                    .with_session_context(self.session_context.clone());
             let filter_op: Box<dyn Operator> =
                 Box::new(FilterOperator::new(join_op, Box::new(predicate)));
             return Ok((filter_op, join_columns));
@@ -335,7 +328,7 @@ impl super::Planner {
                             variable_columns: HashMap::new(),
                         }],
                         vec![LogicalType::Any],
-                        Arc::clone(&self.store) as Arc<dyn GraphStore>,
+                        Arc::clone(&self.store),
                     )
                     .with_transaction_context(self.viewing_epoch, self.transaction_id)
                     .with_session_context(self.session_context.clone()),
@@ -390,7 +383,7 @@ impl super::Planner {
                     input_op,
                     proj_exprs,
                     proj_schema,
-                    Arc::clone(&self.store) as Arc<dyn GraphStore>,
+                    Arc::clone(&self.store),
                 )
                 .with_transaction_context(self.viewing_epoch, self.transaction_id)
                 .with_session_context(self.session_context.clone()),
@@ -523,7 +516,7 @@ impl super::Planner {
         output_schema.push(LogicalType::Node);
 
         let mut merge_op = MergeOperator::new(
-            Arc::clone(&self.store),
+            self.write_store()?,
             input_op,
             MergeConfig {
                 variable: merge.variable.clone(),
@@ -651,7 +644,7 @@ impl super::Planner {
         };
 
         let mut merge_rel_op =
-            MergeRelationshipOperator::new(Arc::clone(&self.store), input_op, config)
+            MergeRelationshipOperator::new(self.write_store()?, input_op, config)
                 .with_transaction_context(self.viewing_epoch, self.transaction_id);
 
         if let Some(ref validator) = self.validator {
@@ -702,7 +695,7 @@ impl super::Planner {
         // Create the shortest path operator
         let operator: Box<dyn Operator> = Box::new(
             ShortestPathOperator::new(
-                Arc::clone(&self.store) as Arc<dyn GraphStore>,
+                Arc::clone(&self.store),
                 input_op,
                 source_column,
                 target_column,
@@ -792,7 +785,7 @@ impl super::Planner {
 
         let operator = Box::new(
             crate::query::executor::procedure_call::ProcedureCallOperator::new(
-                Arc::clone(&self.store) as Arc<dyn GraphStore>,
+                Arc::clone(&self.store),
                 algorithm,
                 params,
                 yield_columns,
@@ -919,7 +912,8 @@ impl super::Planner {
             return_columns,
             yield_columns,
             ProcedureContext {
-                store: Arc::clone(&self.store) as Arc<dyn GraphStoreMut>,
+                store: Arc::clone(&self.store),
+                store_mut: self.write_store.as_ref().map(Arc::clone),
                 transaction_manager: self.transaction_manager.clone(),
                 transaction_id: self.transaction_id,
                 viewing_epoch: self.viewing_epoch,
@@ -1001,7 +995,7 @@ impl super::Planner {
         output_columns.push("labels_added".to_string());
 
         let mut op = AddLabelOperator::new(
-            Arc::clone(&self.store),
+            self.write_store()?,
             input_op,
             node_column,
             add_label.labels.clone(),
@@ -1040,7 +1034,7 @@ impl super::Planner {
         output_columns.push("labels_removed".to_string());
 
         let mut op = RemoveLabelOperator::new(
-            Arc::clone(&self.store),
+            self.write_store()?,
             input_op,
             node_column,
             remove_label.labels.clone(),
@@ -1108,7 +1102,7 @@ impl super::Planner {
         let is_edge = set_prop.is_edge || self.edge_columns.borrow().contains(&set_prop.variable);
         let operator: Box<dyn Operator> = if is_edge {
             let mut op = SetPropertyOperator::new_for_edge(
-                Arc::clone(&self.store),
+                self.write_store()?,
                 input_op,
                 entity_column,
                 properties,
@@ -1125,7 +1119,7 @@ impl super::Planner {
             Box::new(op)
         } else {
             let mut op = SetPropertyOperator::new_for_node(
-                Arc::clone(&self.store),
+                self.write_store()?,
                 input_op,
                 entity_column,
                 properties,

@@ -10,9 +10,9 @@ use std::time::Instant;
 
 use grafeo_common::types::{TransactionId, Value};
 use grafeo_common::utils::error::Result;
-use grafeo_core::graph::GraphStoreMut;
 use grafeo_core::graph::lpg::LpgStore;
 use grafeo_core::graph::rdf::RdfStore;
+use grafeo_core::graph::{GraphStore, GraphStoreMut};
 
 use crate::database::QueryResult;
 
@@ -25,10 +25,12 @@ impl Session {
         rdf_store: Arc<RdfStore>,
         cfg: SessionConfig,
     ) -> Self {
-        let graph_store = Arc::clone(&store) as Arc<dyn GraphStoreMut>;
+        let graph_store = Arc::clone(&store) as Arc<dyn GraphStore>;
+        let graph_store_mut = Some(Arc::clone(&store) as Arc<dyn GraphStoreMut>);
         Self {
             store,
             graph_store,
+            graph_store_mut,
             catalog: cfg.catalog,
             rdf_store,
             transaction_manager: cfg.transaction_manager,
@@ -131,8 +133,9 @@ impl Session {
 
         let result = self.with_auto_commit(has_mutations, || {
             let (viewing_epoch, transaction_id) = self.get_transaction_context();
-            let processor = QueryProcessor::for_graph_store_with_transaction(
+            let processor = QueryProcessor::for_stores_with_transaction(
                 Arc::clone(&active),
+                self.active_write_store(),
                 Arc::clone(&self.transaction_manager),
             )?;
             let processor = if let Some(transaction_id) = transaction_id {

@@ -2,6 +2,18 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
+## [0.5.31] - Unreleased
+
+CompactStore: a read-optimized columnar graph store for memory-constrained environments. Thanks to [@temporaryfix](https://github.com/temporaryfix) for the design, prototype and implementation ([#199](https://github.com/GrafeoDB/grafeo/issues/199), [#204](https://github.com/GrafeoDB/grafeo/pull/204)).
+
+### Added
+
+- **`compact-store` feature flag**: opt-in columnar read-only store for WASM, edge workers and embedded devices
+- **`CompactStore`**: per-label `NodeTable`s with typed columns (`BitPackedInts`, `DictionaryEncoding`, `BitVector`, `Int8Vector`), double-indexed `CsrAdjacency` (forward + backward) for O(degree) edge traversal, and zone-map skip optimization for predicate pushdown
+- **`CompactStoreBuilder`**: fluent API for constructing stores from raw data with build-time validation (column lengths, value ranges, sort order, vector dimension alignment)
+- **`GrafeoDB::with_read_store()`**: integration point accepting `Arc<dyn GraphStore>` for read-only external stores, all query languages work through it
+- **Benchmark**: `compact_vs_lpg` criterion bench comparing both stores on identical data
+
 ## [0.5.30] - 2026-03-30
 
 Async storage foundation and continued test coverage. Thanks to [@maxwellflitton](https://github.com/maxwellflitton) for the [async storage adapter discussion](https://github.com/orgs/GrafeoDB/discussions/190) that shaped this release.

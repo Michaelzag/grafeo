@@ -15,10 +15,10 @@ use grafeo_common::types::{EdgeId, EpochId, NodeId, TransactionId, Value};
 use grafeo_common::utils::error::Result;
 use grafeo_common::{grafeo_debug_span, grafeo_info_span, grafeo_warn};
 use grafeo_core::graph::Direction;
-use grafeo_core::graph::GraphStoreMut;
 use grafeo_core::graph::lpg::{Edge, LpgStore, Node};
 #[cfg(feature = "rdf")]
 use grafeo_core::graph::rdf::RdfStore;
+use grafeo_core::graph::{GraphStore, GraphStoreMut};
 
 use crate::catalog::{Catalog, CatalogConstraintValidator};
 use crate::config::{AdaptiveConfig, GraphModel};
@@ -83,8 +83,10 @@ pub(crate) struct SessionConfig {
 pub struct Session {
     /// The underlying store.
     store: Arc<LpgStore>,
-    /// Graph store trait object for pluggable storage backends.
-    graph_store: Arc<dyn GraphStoreMut>,
+    /// Graph store trait object for pluggable storage backends (read path).
+    graph_store: Arc<dyn GraphStore>,
+    /// Writable graph store (None for read-only databases).
+    graph_store_mut: Option<Arc<dyn GraphStoreMut>>,
     /// Schema and metadata catalog shared across sessions.
     catalog: Arc<Catalog>,
     /// RDF triple store (if RDF feature is enabled).
@@ -185,10 +187,12 @@ impl Session {
     /// Creates a new session with adaptive execution configuration.
     #[allow(dead_code)]
     pub(crate) fn with_adaptive(store: Arc<LpgStore>, cfg: SessionConfig) -> Self {
-        let graph_store = Arc::clone(&store) as Arc<dyn GraphStoreMut>;
+        let graph_store = Arc::clone(&store) as Arc<dyn GraphStore>;
+        let graph_store_mut = Some(Arc::clone(&store) as Arc<dyn GraphStoreMut>);
         Self {
             store,
             graph_store,
+            graph_store_mut,
             catalog: cfg.catalog,
             #[cfg(feature = "rdf")]
             rdf_store: Arc::new(RdfStore::new()),
@@ -238,11 +242,13 @@ impl Session {
         wal_graph_context: Arc<parking_lot::Mutex<Option<String>>>,
     ) {
         // Wrap the graph store so query-engine mutations are WAL-logged
-        self.graph_store = Arc::new(crate::database::wal_store::WalGraphStore::new(
+        let wal_store = Arc::new(crate::database::wal_store::WalGraphStore::new(
             Arc::clone(&self.store),
             Arc::clone(&wal),
             Arc::clone(&wal_graph_context),
         ));
+        self.graph_store = Arc::clone(&wal_store) as Arc<dyn GraphStore>;
+        self.graph_store_mut = Some(wal_store as Arc<dyn GraphStoreMut>);
         self.wal = Some(wal);
         self.wal_graph_context = Some(wal_graph_context);
     }
@@ -268,12 +274,14 @@ impl Session {
     ///
     /// Returns an error if the internal arena allocation fails (out of memory).
     pub(crate) fn with_external_store(
-        store: Arc<dyn GraphStoreMut>,
+        read_store: Arc<dyn GraphStore>,
+        write_store: Option<Arc<dyn GraphStoreMut>>,
         cfg: SessionConfig,
     ) -> Result<Self> {
         Ok(Self {
             store: Arc::new(LpgStore::new()?),
-            graph_store: store,
+            graph_store: read_store,
+            graph_store_mut: write_store,
             catalog: cfg.catalog,
             #[cfg(feature = "rdf")]
             rdf_store: Arc::new(RdfStore::new()),
@@ -390,7 +398,7 @@ impl Session {
     /// Otherwise looks up the named graph in the root store and wraps it
     /// in a [`WalGraphStore`] so mutations are WAL-logged with the correct
     /// graph context.
-    fn active_store(&self) -> Arc<dyn GraphStoreMut> {
+    fn active_store(&self) -> Arc<dyn GraphStore> {
         let key = self.active_graph_storage_key();
         match key {
             None => Arc::clone(&self.graph_store),
@@ -403,11 +411,39 @@ impl Session {
                             Arc::clone(wal),
                             name.clone(),
                             Arc::clone(ctx),
-                        )) as Arc<dyn GraphStoreMut>;
+                        )) as Arc<dyn GraphStore>;
                     }
-                    named_store as Arc<dyn GraphStoreMut>
+                    named_store as Arc<dyn GraphStore>
                 }
                 None => Arc::clone(&self.graph_store),
+            },
+        }
+    }
+
+    /// Returns the writable store for the active graph, if available.
+    ///
+    /// Returns `None` for read-only databases. For named graphs, wraps
+    /// the store with WAL logging when durability is enabled.
+    fn active_write_store(&self) -> Option<Arc<dyn GraphStoreMut>> {
+        let key = self.active_graph_storage_key();
+        match key {
+            None => self.graph_store_mut.as_ref().map(Arc::clone),
+            Some(ref name) => match self.store.graph(name) {
+                Some(named_store) => {
+                    #[cfg(feature = "wal")]
+                    if let (Some(wal), Some(ctx)) = (&self.wal, &self.wal_graph_context) {
+                        return Some(Arc::new(
+                            crate::database::wal_store::WalGraphStore::new_for_graph(
+                                named_store,
+                                Arc::clone(wal),
+                                name.clone(),
+                                Arc::clone(ctx),
+                            ),
+                        ) as Arc<dyn GraphStoreMut>);
+                    }
+                    Some(named_store as Arc<dyn GraphStoreMut>)
+                }
+                None => self.graph_store_mut.as_ref().map(Arc::clone),
             },
         }
     }
@@ -2408,8 +2444,9 @@ impl Session {
             let (viewing_epoch, transaction_id) = self.get_transaction_context();
 
             // Create processor with transaction context
-            let processor = QueryProcessor::for_graph_store_with_transaction(
+            let processor = QueryProcessor::for_stores_with_transaction(
                 Arc::clone(&active),
+                self.active_write_store(),
                 Arc::clone(&self.transaction_manager),
             )?;
 
@@ -2688,8 +2725,9 @@ impl Session {
 
         let result = self.with_auto_commit(has_mutations, || {
             let (viewing_epoch, transaction_id) = self.get_transaction_context();
-            let processor = QueryProcessor::for_graph_store_with_transaction(
+            let processor = QueryProcessor::for_stores_with_transaction(
                 Arc::clone(&active),
+                self.active_write_store(),
                 Arc::clone(&self.transaction_manager),
             )?;
             let processor = if let Some(transaction_id) = transaction_id {
@@ -2794,8 +2832,9 @@ impl Session {
 
         let result = self.with_auto_commit(has_mutations, || {
             let (viewing_epoch, transaction_id) = self.get_transaction_context();
-            let processor = QueryProcessor::for_graph_store_with_transaction(
+            let processor = QueryProcessor::for_stores_with_transaction(
                 Arc::clone(&active),
+                self.active_write_store(),
                 Arc::clone(&self.transaction_manager),
             )?;
             let processor = if let Some(transaction_id) = transaction_id {
@@ -2933,8 +2972,9 @@ impl Session {
 
         let result = self.with_auto_commit(has_mutations, || {
             let (viewing_epoch, transaction_id) = self.get_transaction_context();
-            let processor = QueryProcessor::for_graph_store_with_transaction(
+            let processor = QueryProcessor::for_stores_with_transaction(
                 Arc::clone(&active),
+                self.active_write_store(),
                 Arc::clone(&self.transaction_manager),
             )?;
             let processor = if let Some(transaction_id) = transaction_id {
@@ -2995,8 +3035,9 @@ impl Session {
                     let has_mutations = Self::query_looks_like_mutation(query);
                     let active = self.active_store();
                     let result = self.with_auto_commit(has_mutations, || {
-                        let processor = QueryProcessor::for_graph_store_with_transaction(
+                        let processor = QueryProcessor::for_stores_with_transaction(
                             Arc::clone(&active),
+                            self.active_write_store(),
                             Arc::clone(&self.transaction_manager),
                         )?;
                         let (viewing_epoch, transaction_id) = self.get_transaction_context();
@@ -3767,7 +3808,7 @@ impl Session {
     /// `self.active_store()` for graph-aware execution).
     fn create_planner_for_store(
         &self,
-        store: Arc<dyn GraphStoreMut>,
+        store: Arc<dyn GraphStore>,
         viewing_epoch: EpochId,
         transaction_id: Option<TransactionId>,
     ) -> crate::query::Planner {
@@ -3776,7 +3817,7 @@ impl Session {
 
     fn create_planner_for_store_with_read_only(
         &self,
-        store: Arc<dyn GraphStoreMut>,
+        store: Arc<dyn GraphStore>,
         viewing_epoch: EpochId,
         transaction_id: Option<TransactionId>,
         read_only: bool,
@@ -3795,8 +3836,11 @@ impl Session {
             schema_info: LazyValue::new(move || Self::build_schema_value(&*schema_store)),
         };
 
+        let write_store = self.active_write_store();
+
         let mut planner = Planner::with_context(
             Arc::clone(&store),
+            write_store,
             Arc::clone(&self.transaction_manager),
             transaction_id,
             viewing_epoch,
@@ -3815,7 +3859,7 @@ impl Session {
     }
 
     /// Builds a `Value::Map` for the `info()` introspection function.
-    fn build_info_value(store: &dyn GraphStoreMut) -> Value {
+    fn build_info_value(store: &dyn GraphStore) -> Value {
         use grafeo_common::types::PropertyKey;
         use std::collections::BTreeMap;
 
@@ -3837,7 +3881,7 @@ impl Session {
     }
 
     /// Builds a `Value::Map` for the `schema()` introspection function.
-    fn build_schema_value(store: &dyn GraphStoreMut) -> Value {
+    fn build_schema_value(store: &dyn GraphStore) -> Value {
         use grafeo_common::types::PropertyKey;
         use std::collections::BTreeMap;
 

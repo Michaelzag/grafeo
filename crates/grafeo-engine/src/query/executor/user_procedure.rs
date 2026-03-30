@@ -9,7 +9,7 @@ use std::sync::Arc;
 use grafeo_common::types::{EpochId, TransactionId, Value};
 use grafeo_core::execution::DataChunk;
 use grafeo_core::execution::operators::{Operator, OperatorError, OperatorResult};
-use grafeo_core::graph::GraphStoreMut;
+use grafeo_core::graph::{GraphStore, GraphStoreMut};
 
 use crate::catalog::Catalog;
 use crate::database::QueryResult;
@@ -18,8 +18,10 @@ use crate::transaction::TransactionManager;
 
 /// Execution context shared across sub-query operators.
 pub struct ProcedureContext {
-    /// Store for sub-query execution.
-    pub store: Arc<dyn GraphStoreMut>,
+    /// Store for sub-query execution (read path).
+    pub store: Arc<dyn GraphStore>,
+    /// Writable store for sub-query mutations (None for read-only).
+    pub store_mut: Option<Arc<dyn GraphStoreMut>>,
     /// Transaction manager for sub-query coordination.
     pub transaction_manager: Option<Arc<TransactionManager>>,
     /// Current transaction ID.
@@ -47,8 +49,10 @@ pub struct UserProcedureOperator {
     return_columns: Vec<String>,
     /// YIELD column filter (if specified by caller).
     yield_columns: Option<Vec<String>>,
-    /// Store for sub-query execution.
-    store: Arc<dyn GraphStoreMut>,
+    /// Store for sub-query execution (read path).
+    store: Arc<dyn GraphStore>,
+    /// Writable store for sub-query mutations (None for read-only).
+    store_mut: Option<Arc<dyn GraphStoreMut>>,
     /// Transaction manager for sub-query.
     transaction_manager: Option<Arc<TransactionManager>>,
     /// Current transaction ID.
@@ -85,6 +89,7 @@ impl UserProcedureOperator {
             return_columns,
             yield_columns,
             store: ctx.store,
+            store_mut: ctx.store_mut,
             transaction_manager: ctx.transaction_manager,
             transaction_id: ctx.transaction_id,
             viewing_epoch: ctx.viewing_epoch,
@@ -114,6 +119,7 @@ impl UserProcedureOperator {
         let planner = if let Some(ref tx_mgr) = self.transaction_manager {
             let mut p = Planner::with_context(
                 Arc::clone(&self.store),
+                self.store_mut.as_ref().map(Arc::clone),
                 Arc::clone(tx_mgr),
                 self.transaction_id,
                 self.viewing_epoch,

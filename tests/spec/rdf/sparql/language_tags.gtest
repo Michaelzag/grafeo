@@ -53,7 +53,6 @@ tests:
       count: 3
 
   - name: language_tag_preserved_in_result
-    skip: "LANG() in SELECT projection returns null instead of the language tag"
     # The language tag must survive the full round-trip: insert, store, query,
     # and projection. LANG() on the result should return the original tag.
     setup:
@@ -74,7 +73,6 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: lang_returns_tag
-    skip: "LANG() comparison in FILTER returns 0 rows, tag not extracted for filtering"
     # LANG() extracts the language tag from a tagged literal. Using it in
     # FILTER to select only the French label from a multilingual set.
     setup:
@@ -93,7 +91,6 @@ tests:
       count: 1
 
   - name: lang_empty_for_plain_literal
-    skip: "LANG()='' filter does not exclude tagged literals, returns all rows"
     # LANG() on a plain (untagged) literal must return the empty string "".
     # This test verifies that untagged literals are correctly distinguished.
     setup:
@@ -112,7 +109,6 @@ tests:
         - [plain text]
 
   - name: lang_in_bind
-    skip: "LANG() in BIND returns empty string instead of the actual language tag"
     # LANG() can be used inside a BIND expression to project the tag as
     # a separate variable in the result set.
     setup:
@@ -129,8 +125,8 @@ tests:
     expect:
       ordered: true
       rows:
-        - [Prag, cs]
-        - [Prague, de]
+        - [Prague, cs]
+        - [Prag, de]
 
   # ---------------------------------------------------------------------------
   # LANGMATCHES() function (Section 17.4.2.9)
@@ -194,7 +190,6 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: filter_equality_with_language_tag
-    skip: "Language-tagged literal comparison in FILTER returns 0 rows"
     # Direct comparison of a variable bound to a language-tagged literal
     # against a language-tagged constant. Only an exact match on both
     # the lexical form and the tag should succeed.

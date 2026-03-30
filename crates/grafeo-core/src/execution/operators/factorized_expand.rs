@@ -349,8 +349,15 @@ impl FactorizedExpandChain {
             // Expand the deepest level of the factorized result
             // This adds a new level without flattening - the key to memory savings
             if let Some(mut factorized) = self.current_result.take() {
+                let level_count_before = factorized.level_count();
                 self.expand_deepest_level(&mut factorized, source_column, direction, edge_types)?;
-                self.current_result = Some(factorized);
+                if factorized.level_count() > level_count_before {
+                    // New level was added: keep result
+                    self.current_result = Some(factorized);
+                }
+                // Otherwise no edges were found at this level, so no valid
+                // paths exist through the chain. Leave current_result as None
+                // to signal an empty result set.
             }
         }
 

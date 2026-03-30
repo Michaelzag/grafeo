@@ -2424,9 +2424,8 @@ impl<'a> Parser<'a> {
                 .map_err(|_| self.error("Invalid path length"))?;
             self.advance();
 
-            if self.current.kind == TokenKind::Dot {
-                self.advance();
-                self.expect(TokenKind::Dot)?; // expect second dot for ..
+            if self.current.kind == TokenKind::DotDot {
+                self.advance(); // consume ..
 
                 if self.current.kind == TokenKind::Integer {
                     let max_text = self.current.text.clone();
@@ -2441,9 +2440,8 @@ impl<'a> Parser<'a> {
             } else {
                 Ok((Some(min), Some(min))) // *n means exactly n hops
             }
-        } else if self.current.kind == TokenKind::Dot {
-            self.advance();
-            self.expect(TokenKind::Dot)?; // expect second dot for ..
+        } else if self.current.kind == TokenKind::DotDot {
+            self.advance(); // consume ..
 
             if self.current.kind == TokenKind::Integer {
                 let max_text = self.current.text.clone();

@@ -330,7 +330,7 @@ impl<'a> Lexer<'a> {
             }
             '.' => {
                 self.advance();
-                if self.peek_char() == '.' {
+                if self.current_char() == '.' {
                     self.advance();
                     TokenKind::DotDot
                 } else {

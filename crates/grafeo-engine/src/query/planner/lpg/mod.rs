@@ -64,8 +64,10 @@ struct RangeBounds<'a> {
 
 /// Converts a logical plan to a physical operator tree for LPG stores.
 pub struct Planner {
-    /// The graph store (supports both read and write operations).
-    pub(super) store: Arc<dyn GraphStoreMut>,
+    /// The graph store (read-only operations).
+    pub(super) store: Arc<dyn GraphStore>,
+    /// Writable graph store (None for read-only databases).
+    pub(super) write_store: Option<Arc<dyn GraphStoreMut>>,
     /// Transaction manager for MVCC operations.
     pub(super) transaction_manager: Option<Arc<TransactionManager>>,
     /// Current transaction ID (if in a transaction).
@@ -114,10 +116,11 @@ impl Planner {
     /// This creates a planner without transaction context, using the current
     /// epoch from the store for visibility.
     #[must_use]
-    pub fn new(store: Arc<dyn GraphStoreMut>) -> Self {
+    pub fn new(store: Arc<dyn GraphStore>) -> Self {
         let epoch = store.current_epoch();
         Self {
             store,
+            write_store: None,
             transaction_manager: None,
             transaction_id: None,
             viewing_epoch: epoch,
@@ -140,7 +143,8 @@ impl Planner {
     /// Creates a new planner with transaction context for MVCC-aware planning.
     #[must_use]
     pub fn with_context(
-        store: Arc<dyn GraphStoreMut>,
+        store: Arc<dyn GraphStore>,
+        write_store: Option<Arc<dyn GraphStoreMut>>,
         transaction_manager: Arc<TransactionManager>,
         transaction_id: Option<TransactionId>,
         viewing_epoch: EpochId,
@@ -159,6 +163,7 @@ impl Planner {
 
         Self {
             store,
+            write_store,
             transaction_manager: Some(transaction_manager),
             transaction_id,
             viewing_epoch,
@@ -184,6 +189,16 @@ impl Planner {
     pub fn with_read_only(mut self, read_only: bool) -> Self {
         self.read_only = read_only;
         self
+    }
+
+    /// Returns the writable store, or `TransactionError::ReadOnly` if unavailable.
+    fn write_store(&self) -> Result<Arc<dyn GraphStoreMut>> {
+        self.write_store
+            .as_ref()
+            .map(Arc::clone)
+            .ok_or(Error::Transaction(
+                grafeo_common::utils::error::TransactionError::ReadOnly,
+            ))
     }
 
     /// Returns the viewing epoch for this planner.
@@ -757,7 +772,7 @@ mod tests {
     use grafeo_core::graph::GraphStoreMut;
     use grafeo_core::graph::lpg::LpgStore;
 
-    fn create_test_store() -> Arc<dyn GraphStoreMut> {
+    fn create_test_store() -> Arc<LpgStore> {
         let store = Arc::new(LpgStore::new().unwrap());
         store.create_node(&["Person"]);
         store.create_node(&["Person"]);
@@ -1629,10 +1644,16 @@ mod tests {
 
     // ==================== Mutation Tests ====================
 
+    fn create_writable_planner(store: &Arc<LpgStore>) -> Planner {
+        let mut p = Planner::new(Arc::clone(store) as Arc<dyn GraphStore>);
+        p.write_store = Some(Arc::clone(store) as Arc<dyn GraphStoreMut>);
+        p
+    }
+
     #[test]
     fn test_plan_create_node() {
         let store = create_test_store();
-        let planner = Planner::new(store);
+        let planner = create_writable_planner(&store);
 
         // CREATE (n:Person {name: 'Alix'})
         let logical = LogicalPlan::new(LogicalOperator::CreateNode(CreateNodeOp {
@@ -1652,7 +1673,7 @@ mod tests {
     #[test]
     fn test_plan_create_edge() {
         let store = create_test_store();
-        let planner = Planner::new(store);
+        let planner = create_writable_planner(&store);
 
         // MATCH (a), (b) CREATE (a)-[:KNOWS]->(b)
         let logical = LogicalPlan::new(LogicalOperator::CreateEdge(CreateEdgeOp {
@@ -1684,7 +1705,7 @@ mod tests {
     #[test]
     fn test_plan_delete_node() {
         let store = create_test_store();
-        let planner = Planner::new(store);
+        let planner = create_writable_planner(&store);
 
         // MATCH (n) DELETE n
         let logical = LogicalPlan::new(LogicalOperator::DeleteNode(DeleteNodeOp {
@@ -1789,7 +1810,7 @@ mod tests {
     #[test]
     fn test_planner_accessors() {
         let store = create_test_store();
-        let planner = Planner::new(Arc::clone(&store));
+        let planner = Planner::new(Arc::clone(&store) as Arc<dyn GraphStore>);
 
         assert!(planner.transaction_id().is_none());
         assert!(planner.transaction_manager().is_none());
@@ -1878,7 +1899,8 @@ mod tests {
     #[test]
     fn test_plan_adaptive_with_expand() {
         let store = create_test_store();
-        let planner = Planner::new(Arc::clone(&store)).with_factorized_execution(false);
+        let planner = Planner::new(Arc::clone(&store) as Arc<dyn GraphStore>)
+            .with_factorized_execution(false);
 
         // MATCH (a)-[:KNOWS]->(b) RETURN a, b
         let logical = LogicalPlan::new(LogicalOperator::Return(ReturnOp {
@@ -2203,7 +2225,8 @@ mod tests {
     #[test]
     fn test_plan_expand_incoming() {
         let store = create_test_store();
-        let planner = Planner::new(Arc::clone(&store)).with_factorized_execution(false);
+        let planner = Planner::new(Arc::clone(&store) as Arc<dyn GraphStore>)
+            .with_factorized_execution(false);
 
         // MATCH (a)<-[:KNOWS]-(b) RETURN a, b
         let logical = LogicalPlan::new(LogicalOperator::Return(ReturnOp {
@@ -2244,7 +2267,8 @@ mod tests {
     #[test]
     fn test_plan_expand_both_directions() {
         let store = create_test_store();
-        let planner = Planner::new(Arc::clone(&store)).with_factorized_execution(false);
+        let planner = Planner::new(Arc::clone(&store) as Arc<dyn GraphStore>)
+            .with_factorized_execution(false);
 
         // MATCH (a)-[:KNOWS]-(b) RETURN a, b
         let logical = LogicalPlan::new(LogicalOperator::Return(ReturnOp {
@@ -2294,7 +2318,8 @@ mod tests {
         let epoch = transaction_manager.current_epoch();
 
         let planner = Planner::with_context(
-            Arc::clone(&store),
+            Arc::clone(&store) as Arc<dyn GraphStore>,
+            Some(Arc::clone(&store) as Arc<dyn GraphStoreMut>),
             Arc::clone(&transaction_manager),
             Some(transaction_id),
             epoch,
@@ -2308,7 +2333,8 @@ mod tests {
     #[test]
     fn test_planner_with_factorized_execution_disabled() {
         let store = create_test_store();
-        let planner = Planner::new(Arc::clone(&store)).with_factorized_execution(false);
+        let planner = Planner::new(Arc::clone(&store) as Arc<dyn GraphStore>)
+            .with_factorized_execution(false);
 
         // Two consecutive expands - should NOT use factorized execution
         let logical = LogicalPlan::new(LogicalOperator::Return(ReturnOp {
