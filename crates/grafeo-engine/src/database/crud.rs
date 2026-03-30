@@ -22,7 +22,7 @@ impl super::GrafeoDB {
     /// let company = db.create_node(&["Company", "Startup"]);
     /// ```
     pub fn create_node(&self, labels: &[&str]) -> grafeo_common::types::NodeId {
-        let id = self.store.create_node(labels);
+        let id = self.lpg_store().create_node(labels);
 
         // Log to WAL if enabled
         #[cfg(feature = "wal")]
@@ -36,7 +36,7 @@ impl super::GrafeoDB {
         #[cfg(feature = "cdc")]
         self.cdc_log.record_create_node(
             id,
-            self.store.current_epoch(),
+            self.lpg_store().current_epoch(),
             None,
             Some(labels.iter().map(|s| (*s).to_string()).collect()),
         );
@@ -67,7 +67,7 @@ impl super::GrafeoDB {
             .collect();
 
         let id = self
-            .store
+            .lpg_store()
             .create_node_with_props(labels, props.iter().map(|(k, v)| (k.clone(), v.clone())));
 
         // Build CDC snapshot before WAL consumes props
@@ -102,7 +102,7 @@ impl super::GrafeoDB {
         #[cfg(feature = "cdc")]
         self.cdc_log.record_create_node(
             id,
-            self.store.current_epoch(),
+            self.lpg_store().current_epoch(),
             if cdc_props.is_empty() {
                 None
             } else {
@@ -113,12 +113,13 @@ impl super::GrafeoDB {
 
         // Auto-insert into matching text indexes for the new node
         #[cfg(feature = "text-index")]
-        if let Some(node) = self.store.get_node(id) {
+        if let Some(node) = self.lpg_store().get_node(id) {
             for label in &node.labels {
                 for (prop_key, prop_val) in &node.properties {
                     if let grafeo_common::types::Value::String(text) = prop_val
-                        && let Some(index) =
-                            self.store.get_text_index(label.as_str(), prop_key.as_ref())
+                        && let Some(index) = self
+                            .lpg_store()
+                            .get_text_index(label.as_str(), prop_key.as_ref())
                     {
                         index.write().insert(id, text);
                     }
@@ -135,7 +136,7 @@ impl super::GrafeoDB {
         &self,
         id: grafeo_common::types::NodeId,
     ) -> Option<grafeo_core::graph::lpg::Node> {
-        self.store.get_node(id)
+        self.lpg_store().get_node(id)
     }
 
     /// Gets a node as it existed at a specific epoch.
@@ -149,7 +150,7 @@ impl super::GrafeoDB {
         id: grafeo_common::types::NodeId,
         epoch: grafeo_common::types::EpochId,
     ) -> Option<grafeo_core::graph::lpg::Node> {
-        self.store.get_node_at_epoch(id, epoch)
+        self.lpg_store().get_node_at_epoch(id, epoch)
     }
 
     /// Gets an edge as it existed at a specific epoch.
@@ -161,7 +162,7 @@ impl super::GrafeoDB {
         id: grafeo_common::types::EdgeId,
         epoch: grafeo_common::types::EpochId,
     ) -> Option<grafeo_core::graph::lpg::Edge> {
-        self.store.get_edge_at_epoch(id, epoch)
+        self.lpg_store().get_edge_at_epoch(id, epoch)
     }
 
     /// Returns all versions of a node with their creation/deletion epochs.
@@ -176,7 +177,7 @@ impl super::GrafeoDB {
         Option<grafeo_common::types::EpochId>,
         grafeo_core::graph::lpg::Node,
     )> {
-        self.store.get_node_history(id)
+        self.lpg_store().get_node_history(id)
     }
 
     /// Returns all versions of an edge with their creation/deletion epochs.
@@ -191,7 +192,7 @@ impl super::GrafeoDB {
         Option<grafeo_common::types::EpochId>,
         grafeo_core::graph::lpg::Edge,
     )> {
-        self.store.get_edge_history(id)
+        self.lpg_store().get_edge_history(id)
     }
 
     /// Returns a property value as it existed at a specific epoch.
@@ -207,7 +208,8 @@ impl super::GrafeoDB {
         epoch: grafeo_common::types::EpochId,
     ) -> Option<grafeo_common::types::Value> {
         let prop_key = grafeo_common::types::PropertyKey::new(key);
-        self.store.get_node_property_at_epoch(id, &prop_key, epoch)
+        self.lpg_store()
+            .get_node_property_at_epoch(id, &prop_key, epoch)
     }
 
     /// Returns the full version timeline for a single property of a node.
@@ -221,7 +223,7 @@ impl super::GrafeoDB {
         id: grafeo_common::types::NodeId,
         key: &str,
     ) -> Vec<(grafeo_common::types::EpochId, grafeo_common::types::Value)> {
-        self.store.node_property_history_for_key(id, key)
+        self.lpg_store().node_property_history_for_key(id, key)
     }
 
     /// Returns the full version history for ALL properties of a node.
@@ -236,13 +238,13 @@ impl super::GrafeoDB {
         grafeo_common::types::PropertyKey,
         Vec<(grafeo_common::types::EpochId, grafeo_common::types::Value)>,
     )> {
-        self.store.node_property_history(id)
+        self.lpg_store().node_property_history(id)
     }
 
     /// Returns the current epoch of the database.
     #[must_use]
     pub fn current_epoch(&self) -> grafeo_common::types::EpochId {
-        self.store.current_epoch()
+        self.lpg_store().current_epoch()
     }
 
     /// Deletes a node and all its edges.
@@ -251,7 +253,7 @@ impl super::GrafeoDB {
     pub fn delete_node(&self, id: grafeo_common::types::NodeId) -> bool {
         // Capture properties for CDC before deletion
         #[cfg(feature = "cdc")]
-        let cdc_props = self.store.get_node(id).map(|node| {
+        let cdc_props = self.lpg_store().get_node(id).map(|node| {
             node.properties
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.clone()))
@@ -261,13 +263,13 @@ impl super::GrafeoDB {
         // Collect matching vector indexes BEFORE deletion removes labels
         #[cfg(feature = "vector-index")]
         let indexes_to_clean: Vec<std::sync::Arc<grafeo_core::index::vector::HnswIndex>> = self
-            .store
+            .lpg_store()
             .get_node(id)
             .map(|node| {
                 let mut indexes = Vec::new();
                 for label in &node.labels {
                     let prefix = format!("{}:", label.as_str());
-                    for (key, index) in self.store.vector_index_entries() {
+                    for (key, index) in self.lpg_store().vector_index_entries() {
                         if key.starts_with(&prefix) {
                             indexes.push(index);
                         }
@@ -282,13 +284,13 @@ impl super::GrafeoDB {
         let text_indexes_to_clean: Vec<
             std::sync::Arc<parking_lot::RwLock<grafeo_core::index::text::InvertedIndex>>,
         > = self
-            .store
+            .lpg_store()
             .get_node(id)
             .map(|node| {
                 let mut indexes = Vec::new();
                 for label in &node.labels {
                     let prefix = format!("{}:", label.as_str());
-                    for (key, index) in self.store.text_index_entries() {
+                    for (key, index) in self.lpg_store().text_index_entries() {
                         if key.starts_with(&prefix) {
                             indexes.push(index);
                         }
@@ -298,7 +300,7 @@ impl super::GrafeoDB {
             })
             .unwrap_or_default();
 
-        let result = self.store.delete_node(id);
+        let result = self.lpg_store().delete_node(id);
 
         // Remove from vector indexes after successful deletion
         #[cfg(feature = "vector-index")]
@@ -325,7 +327,7 @@ impl super::GrafeoDB {
         if result {
             self.cdc_log.record_delete(
                 crate::cdc::EntityId::Node(id),
-                self.store.current_epoch(),
+                self.lpg_store().current_epoch(),
                 cdc_props,
             );
         }
@@ -362,17 +364,17 @@ impl super::GrafeoDB {
         // Capture old value for CDC before the store write
         #[cfg(feature = "cdc")]
         let cdc_old_value = self
-            .store
+            .lpg_store()
             .get_node_property(id, &grafeo_common::types::PropertyKey::new(key));
         #[cfg(feature = "cdc")]
         let cdc_new_value = value.clone();
 
-        self.store.set_node_property(id, key, value);
+        self.lpg_store().set_node_property(id, key, value);
 
         #[cfg(feature = "cdc")]
         self.cdc_log.record_update(
             crate::cdc::EntityId::Node(id),
-            self.store.current_epoch(),
+            self.lpg_store().current_epoch(),
             key,
             cdc_old_value,
             cdc_new_value,
@@ -381,12 +383,14 @@ impl super::GrafeoDB {
         // Auto-insert into matching vector indexes
         #[cfg(feature = "vector-index")]
         if let Some(vec) = vector_data
-            && let Some(node) = self.store.get_node(id)
+            && let Some(node) = self.lpg_store().get_node(id)
         {
             for label in &node.labels {
-                if let Some(index) = self.store.get_vector_index(label.as_str(), key) {
-                    let accessor =
-                        grafeo_core::index::vector::PropertyVectorAccessor::new(&*self.store, key);
+                if let Some(index) = self.lpg_store().get_vector_index(label.as_str(), key) {
+                    let accessor = grafeo_core::index::vector::PropertyVectorAccessor::new(
+                        &**self.lpg_store(),
+                        key,
+                    );
                     index.insert(id, &vec, &accessor);
                 }
             }
@@ -394,7 +398,7 @@ impl super::GrafeoDB {
 
         // Auto-update matching text indexes
         #[cfg(feature = "text-index")]
-        if let Some(node) = self.store.get_node(id) {
+        if let Some(node) = self.lpg_store().get_node(id) {
             let text_val = node
                 .properties
                 .get(&grafeo_common::types::PropertyKey::new(key))
@@ -403,7 +407,7 @@ impl super::GrafeoDB {
                     _ => None,
                 });
             for label in &node.labels {
-                if let Some(index) = self.store.get_text_index(label.as_str(), key) {
+                if let Some(index) = self.lpg_store().get_text_index(label.as_str(), key) {
                     let mut idx = index.write();
                     if let Some(ref text) = text_val {
                         idx.insert(id, text);
@@ -433,7 +437,7 @@ impl super::GrafeoDB {
     /// assert!(added);
     /// ```
     pub fn add_node_label(&self, id: grafeo_common::types::NodeId, label: &str) -> bool {
-        let result = self.store.add_label(id, label);
+        let result = self.lpg_store().add_label(id, label);
 
         #[cfg(feature = "wal")]
         if result {
@@ -450,16 +454,16 @@ impl super::GrafeoDB {
         #[cfg(feature = "vector-index")]
         if result {
             let prefix = format!("{label}:");
-            for (key, index) in self.store.vector_index_entries() {
+            for (key, index) in self.lpg_store().vector_index_entries() {
                 if let Some(property) = key.strip_prefix(&prefix)
-                    && let Some(node) = self.store.get_node(id)
+                    && let Some(node) = self.lpg_store().get_node(id)
                 {
                     let prop_key = grafeo_common::types::PropertyKey::new(property);
                     if let Some(grafeo_common::types::Value::Vector(v)) =
                         node.properties.get(&prop_key)
                     {
                         let accessor = grafeo_core::index::vector::PropertyVectorAccessor::new(
-                            &*self.store,
+                            &**self.lpg_store(),
                             property,
                         );
                         index.insert(id, v, &accessor);
@@ -470,10 +474,10 @@ impl super::GrafeoDB {
 
         // Auto-insert into text indexes for the newly-added label
         #[cfg(feature = "text-index")]
-        if result && let Some(node) = self.store.get_node(id) {
+        if result && let Some(node) = self.lpg_store().get_node(id) {
             for (prop_key, prop_val) in &node.properties {
                 if let grafeo_common::types::Value::String(text) = prop_val
-                    && let Some(index) = self.store.get_text_index(label, prop_key.as_ref())
+                    && let Some(index) = self.lpg_store().get_text_index(label, prop_key.as_ref())
                 {
                     index.write().insert(id, text);
                 }
@@ -507,7 +511,7 @@ impl super::GrafeoDB {
             std::sync::Arc<parking_lot::RwLock<grafeo_core::index::text::InvertedIndex>>,
         > = {
             let prefix = format!("{label}:");
-            self.store
+            self.lpg_store()
                 .text_index_entries()
                 .into_iter()
                 .filter(|(key, _)| key.starts_with(&prefix))
@@ -515,7 +519,7 @@ impl super::GrafeoDB {
                 .collect()
         };
 
-        let result = self.store.remove_label(id, label);
+        let result = self.lpg_store().remove_label(id, label);
 
         #[cfg(feature = "wal")]
         if result {
@@ -557,7 +561,7 @@ impl super::GrafeoDB {
     /// ```
     #[must_use]
     pub fn get_node_labels(&self, id: grafeo_common::types::NodeId) -> Option<Vec<String>> {
-        self.store
+        self.lpg_store()
             .get_node(id)
             .map(|node| node.labels.iter().map(|s| s.to_string()).collect())
     }
@@ -587,7 +591,7 @@ impl super::GrafeoDB {
         dst: grafeo_common::types::NodeId,
         edge_type: &str,
     ) -> grafeo_common::types::EdgeId {
-        let id = self.store.create_edge(src, dst, edge_type);
+        let id = self.lpg_store().create_edge(src, dst, edge_type);
 
         // Log to WAL if enabled
         #[cfg(feature = "wal")]
@@ -603,7 +607,7 @@ impl super::GrafeoDB {
         #[cfg(feature = "cdc")]
         self.cdc_log.record_create_edge(
             id,
-            self.store.current_epoch(),
+            self.lpg_store().current_epoch(),
             None,
             src.as_u64(),
             dst.as_u64(),
@@ -637,7 +641,7 @@ impl super::GrafeoDB {
             .map(|(k, v)| (k.into(), v.into()))
             .collect();
 
-        let id = self.store.create_edge_with_props(
+        let id = self.lpg_store().create_edge_with_props(
             src,
             dst,
             edge_type,
@@ -678,7 +682,7 @@ impl super::GrafeoDB {
         #[cfg(feature = "cdc")]
         self.cdc_log.record_create_edge(
             id,
-            self.store.current_epoch(),
+            self.lpg_store().current_epoch(),
             if cdc_props.is_empty() {
                 None
             } else {
@@ -698,7 +702,7 @@ impl super::GrafeoDB {
         &self,
         id: grafeo_common::types::EdgeId,
     ) -> Option<grafeo_core::graph::lpg::Edge> {
-        self.store.get_edge(id)
+        self.lpg_store().get_edge(id)
     }
 
     /// Deletes an edge.
@@ -707,14 +711,14 @@ impl super::GrafeoDB {
     pub fn delete_edge(&self, id: grafeo_common::types::EdgeId) -> bool {
         // Capture properties for CDC before deletion
         #[cfg(feature = "cdc")]
-        let cdc_props = self.store.get_edge(id).map(|edge| {
+        let cdc_props = self.lpg_store().get_edge(id).map(|edge| {
             edge.properties
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.clone()))
                 .collect::<std::collections::HashMap<String, grafeo_common::types::Value>>()
         });
 
-        let result = self.store.delete_edge(id);
+        let result = self.lpg_store().delete_edge(id);
 
         #[cfg(feature = "wal")]
         if result && let Err(e) = self.log_wal(&WalRecord::DeleteEdge { id }) {
@@ -725,7 +729,7 @@ impl super::GrafeoDB {
         if result {
             self.cdc_log.record_delete(
                 crate::cdc::EntityId::Edge(id),
-                self.store.current_epoch(),
+                self.lpg_store().current_epoch(),
                 cdc_props,
             );
         }
@@ -755,17 +759,17 @@ impl super::GrafeoDB {
         // Capture old value for CDC before the store write
         #[cfg(feature = "cdc")]
         let cdc_old_value = self
-            .store
+            .lpg_store()
             .get_edge_property(id, &grafeo_common::types::PropertyKey::new(key));
         #[cfg(feature = "cdc")]
         let cdc_new_value = value.clone();
 
-        self.store.set_edge_property(id, key, value);
+        self.lpg_store().set_edge_property(id, key, value);
 
         #[cfg(feature = "cdc")]
         self.cdc_log.record_update(
             crate::cdc::EntityId::Edge(id),
-            self.store.current_epoch(),
+            self.lpg_store().current_epoch(),
             key,
             cdc_old_value,
             cdc_new_value,
@@ -776,7 +780,7 @@ impl super::GrafeoDB {
     ///
     /// Returns true if the property existed and was removed, false otherwise.
     pub fn remove_node_property(&self, id: grafeo_common::types::NodeId, key: &str) -> bool {
-        let removed = self.store.remove_node_property(id, key).is_some();
+        let removed = self.lpg_store().remove_node_property(id, key).is_some();
 
         #[cfg(feature = "wal")]
         if removed
@@ -790,9 +794,9 @@ impl super::GrafeoDB {
 
         // Remove from matching text indexes
         #[cfg(feature = "text-index")]
-        if removed && let Some(node) = self.store.get_node(id) {
+        if removed && let Some(node) = self.lpg_store().get_node(id) {
             for label in &node.labels {
-                if let Some(index) = self.store.get_text_index(label.as_str(), key) {
+                if let Some(index) = self.lpg_store().get_text_index(label.as_str(), key) {
                     index.write().remove(id);
                 }
             }
@@ -805,7 +809,7 @@ impl super::GrafeoDB {
     ///
     /// Returns true if the property existed and was removed, false otherwise.
     pub fn remove_edge_property(&self, id: grafeo_common::types::EdgeId, key: &str) -> bool {
-        let removed = self.store.remove_edge_property(id, key).is_some();
+        let removed = self.lpg_store().remove_edge_property(id, key).is_some();
 
         #[cfg(feature = "wal")]
         if removed
@@ -856,7 +860,7 @@ impl super::GrafeoDB {
             .into_iter()
             .map(|vec| {
                 let value = Value::Vector(vec.into());
-                let id = self.store.create_node_with_props(
+                let id = self.lpg_store().create_node_with_props(
                     labels,
                     std::iter::once((prop_key.clone(), value.clone())),
                 );
@@ -885,11 +889,13 @@ impl super::GrafeoDB {
 
         // Auto-insert into matching vector index if one exists
         #[cfg(feature = "vector-index")]
-        if let Some(index) = self.store.get_vector_index(label, property) {
-            let accessor =
-                grafeo_core::index::vector::PropertyVectorAccessor::new(&*self.store, property);
+        if let Some(index) = self.lpg_store().get_vector_index(label, property) {
+            let accessor = grafeo_core::index::vector::PropertyVectorAccessor::new(
+                &**self.lpg_store(),
+                property,
+            );
             for &id in &ids {
-                if let Some(node) = self.store.get_node(id) {
+                if let Some(node) = self.lpg_store().get_node(id) {
                     let pk = grafeo_common::types::PropertyKey::new(property);
                     if let Some(grafeo_common::types::Value::Vector(v)) = node.properties.get(&pk)
                         && std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -944,7 +950,7 @@ impl super::GrafeoDB {
         let ids: Vec<grafeo_common::types::NodeId> = properties_list
             .into_iter()
             .map(|props| {
-                let id = self.store.create_node_with_props(
+                let id = self.lpg_store().create_node_with_props(
                     labels,
                     props.iter().map(|(k, v)| (k.clone(), v.clone())),
                 );
@@ -982,7 +988,7 @@ impl super::GrafeoDB {
                 #[cfg(feature = "cdc")]
                 self.cdc_log.record_create_node(
                     id,
-                    self.store.current_epoch(),
+                    self.lpg_store().current_epoch(),
                     if cdc_props.is_empty() {
                         None
                     } else {
@@ -998,17 +1004,19 @@ impl super::GrafeoDB {
         // Auto-insert into matching vector indexes for any vector properties
         #[cfg(feature = "vector-index")]
         {
-            for (key, index) in self.store.vector_index_entries() {
+            for (key, index) in self.lpg_store().vector_index_entries() {
                 // key is "label:property"
                 if !key.starts_with(label) || !key[label.len()..].starts_with(':') {
                     continue;
                 }
                 let property = &key[label.len() + 1..];
-                let accessor =
-                    grafeo_core::index::vector::PropertyVectorAccessor::new(&*self.store, property);
+                let accessor = grafeo_core::index::vector::PropertyVectorAccessor::new(
+                    &**self.lpg_store(),
+                    property,
+                );
                 let pk = grafeo_common::types::PropertyKey::new(property);
                 for &id in &ids {
-                    if let Some(node) = self.store.get_node(id) {
+                    if let Some(node) = self.lpg_store().get_node(id) {
                         match node.properties.get(&pk) {
                             Some(Value::Vector(v)) => {
                                 if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1039,10 +1047,11 @@ impl super::GrafeoDB {
         // Auto-insert into matching text indexes for any string properties
         #[cfg(feature = "text-index")]
         for &id in &ids {
-            if let Some(node) = self.store.get_node(id) {
+            if let Some(node) = self.lpg_store().get_node(id) {
                 for (prop_key, prop_val) in &node.properties {
                     if let Value::String(text) = prop_val
-                        && let Some(index) = self.store.get_text_index(label, prop_key.as_ref())
+                        && let Some(index) =
+                            self.lpg_store().get_text_index(label, prop_key.as_ref())
                     {
                         index.write().insert(id, text);
                     }

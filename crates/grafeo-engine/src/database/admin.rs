@@ -12,31 +12,31 @@ impl super::GrafeoDB {
     /// Returns the number of nodes in the database.
     #[must_use]
     pub fn node_count(&self) -> usize {
-        self.store.node_count()
+        self.lpg_store().node_count()
     }
 
     /// Returns the number of edges in the database.
     #[must_use]
     pub fn edge_count(&self) -> usize {
-        self.store.edge_count()
+        self.lpg_store().edge_count()
     }
 
     /// Returns the number of distinct labels in the database.
     #[must_use]
     pub fn label_count(&self) -> usize {
-        self.store.label_count()
+        self.lpg_store().label_count()
     }
 
     /// Returns the number of distinct property keys in the database.
     #[must_use]
     pub fn property_key_count(&self) -> usize {
-        self.store.property_key_count()
+        self.lpg_store().property_key_count()
     }
 
     /// Returns the number of distinct edge types in the database.
     #[must_use]
     pub fn edge_type_count(&self) -> usize {
-        self.store.edge_type_count()
+        self.lpg_store().edge_type_count()
     }
 
     // =========================================================================
@@ -66,8 +66,8 @@ impl super::GrafeoDB {
     pub fn info(&self) -> crate::admin::DatabaseInfo {
         crate::admin::DatabaseInfo {
             mode: crate::admin::DatabaseMode::Lpg,
-            node_count: self.store.node_count(),
-            edge_count: self.store.edge_count(),
+            node_count: self.lpg_store().node_count(),
+            edge_count: self.lpg_store().edge_count(),
             is_persistent: self.is_persistent(),
             path: self.config.path.clone(),
             wal_enabled: self.config.wal_enabled,
@@ -85,7 +85,7 @@ impl super::GrafeoDB {
         use crate::memory_usage::{BufferManagerMemory, CacheMemory, MemoryUsage};
         use grafeo_common::memory::MemoryRegion;
 
-        let (store, indexes, mvcc, string_pool) = self.store.memory_breakdown();
+        let (store, indexes, mvcc, string_pool) = self.lpg_store().memory_breakdown();
 
         let (parsed_bytes, optimized_bytes, cached_plan_count) =
             self.query_cache.heap_memory_bytes();
@@ -137,11 +137,11 @@ impl super::GrafeoDB {
         let disk_bytes: Option<usize> = None;
 
         crate::admin::DatabaseStats {
-            node_count: self.store.node_count(),
-            edge_count: self.store.edge_count(),
-            label_count: self.store.label_count(),
-            edge_type_count: self.store.edge_type_count(),
-            property_key_count: self.store.property_key_count(),
+            node_count: self.lpg_store().node_count(),
+            edge_count: self.lpg_store().edge_count(),
+            label_count: self.lpg_store().label_count(),
+            edge_type_count: self.lpg_store().edge_type_count(),
+            property_key_count: self.lpg_store().property_key_count(),
             index_count: self.catalog.index_count(),
             memory_bytes: self.buffer_manager.allocated(),
             disk_bytes,
@@ -173,26 +173,26 @@ impl super::GrafeoDB {
     #[must_use]
     pub fn schema(&self) -> crate::admin::SchemaInfo {
         let labels = self
-            .store
+            .lpg_store()
             .all_labels()
             .into_iter()
             .map(|name| crate::admin::LabelInfo {
                 name: name.clone(),
-                count: self.store.nodes_with_label(&name).count(),
+                count: self.lpg_store().nodes_with_label(&name).count(),
             })
             .collect();
 
         let edge_types = self
-            .store
+            .lpg_store()
             .all_edge_types()
             .into_iter()
             .map(|name| crate::admin::EdgeTypeInfo {
                 name: name.clone(),
-                count: self.store.edges_with_type(&name).count(),
+                count: self.lpg_store().edges_with_type(&name).count(),
             })
             .collect();
 
-        let property_keys = self.store.all_property_keys();
+        let property_keys = self.lpg_store().all_property_keys();
 
         crate::admin::SchemaInfo::Lpg(crate::admin::LpgSchemaInfo {
             labels,
@@ -240,8 +240,8 @@ impl super::GrafeoDB {
         let mut result = crate::admin::ValidationResult::default();
 
         // Check for dangling edge references
-        for edge in self.store.all_edges() {
-            if self.store.get_node(edge.src).is_none() {
+        for edge in self.lpg_store().all_edges() {
+            if self.lpg_store().get_node(edge.src).is_none() {
                 result.errors.push(crate::admin::ValidationError {
                     code: "DANGLING_SRC".to_string(),
                     message: format!(
@@ -251,7 +251,7 @@ impl super::GrafeoDB {
                     context: Some(format!("edge:{}", edge.id.0)),
                 });
             }
-            if self.store.get_node(edge.dst).is_none() {
+            if self.lpg_store().get_node(edge.dst).is_none() {
                 result.errors.push(crate::admin::ValidationError {
                     code: "DANGLING_DST".to_string(),
                     message: format!(
@@ -264,7 +264,7 @@ impl super::GrafeoDB {
         }
 
         // Add warnings for potential issues
-        if self.store.node_count() > 0 && self.store.edge_count() == 0 {
+        if self.lpg_store().node_count() > 0 && self.lpg_store().edge_count() == 0 {
             result.warnings.push(crate::admin::ValidationWarning {
                 code: "NO_EDGES".to_string(),
                 message: "Database has nodes but no edges".to_string(),
@@ -288,7 +288,7 @@ impl super::GrafeoDB {
                 size_bytes: wal.size_bytes(),
                 record_count: wal.record_count() as usize,
                 last_checkpoint: wal.last_checkpoint_timestamp(),
-                current_epoch: self.store.current_epoch().as_u64(),
+                current_epoch: self.lpg_store().current_epoch().as_u64(),
             };
         }
 
@@ -298,7 +298,7 @@ impl super::GrafeoDB {
             size_bytes: 0,
             record_count: 0,
             last_checkpoint: None,
-            current_epoch: self.store.current_epoch().as_u64(),
+            current_epoch: self.lpg_store().current_epoch().as_u64(),
         }
     }
 
@@ -312,7 +312,7 @@ impl super::GrafeoDB {
     pub fn wal_checkpoint(&self) -> Result<()> {
         #[cfg(feature = "wal")]
         if let Some(ref wal) = self.wal {
-            let epoch = self.store.current_epoch();
+            let epoch = self.lpg_store().current_epoch();
             let transaction_id = self
                 .transaction_manager
                 .last_assigned_transaction_id()

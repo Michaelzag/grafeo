@@ -33,20 +33,20 @@ impl super::GrafeoDB {
     /// let nodes = db.find_nodes_by_property("email", &Value::from("alix@example.com"));
     /// ```
     pub fn create_property_index(&self, property: &str) {
-        self.store.create_property_index(property);
+        self.lpg_store().create_property_index(property);
     }
 
     /// Drops an index on a node property.
     ///
     /// Returns `true` if the index existed and was removed.
     pub fn drop_property_index(&self, property: &str) -> bool {
-        self.store.drop_property_index(property)
+        self.lpg_store().drop_property_index(property)
     }
 
     /// Returns `true` if the property has an index.
     #[must_use]
     pub fn has_property_index(&self, property: &str) -> bool {
-        self.store.has_property_index(property)
+        self.lpg_store().has_property_index(property)
     }
 
     /// Finds all nodes that have a specific property value.
@@ -72,7 +72,7 @@ impl super::GrafeoDB {
         property: &str,
         value: &grafeo_common::types::Value,
     ) -> Vec<grafeo_common::types::NodeId> {
-        self.store.find_nodes_by_property(property, value)
+        self.lpg_store().find_nodes_by_property(property, value)
     }
 
     // =========================================================================
@@ -128,7 +128,7 @@ impl super::GrafeoDB {
         #[cfg(feature = "vector-index")]
         let mut vectors: Vec<(grafeo_common::types::NodeId, Vec<f32>)> = Vec::new();
 
-        for node in self.store.nodes_with_label(label) {
+        for node in self.lpg_store().nodes_with_label(label) {
             if let Some(Value::Vector(v)) = node.properties.get(&prop_key) {
                 if let Some(expected) = found_dims {
                     if v.len() != expected {
@@ -165,7 +165,7 @@ impl super::GrafeoDB {
                     }
 
                     let index = HnswIndex::new(config);
-                    self.store
+                    self.lpg_store()
                         .add_vector_index(label, property, Arc::new(index));
                 }
 
@@ -196,13 +196,15 @@ impl super::GrafeoDB {
             }
 
             let index = HnswIndex::with_capacity(config, vectors.len());
-            let accessor =
-                grafeo_core::index::vector::PropertyVectorAccessor::new(&*self.store, property);
+            let accessor = grafeo_core::index::vector::PropertyVectorAccessor::new(
+                &**self.lpg_store(),
+                property,
+            );
             for (node_id, vec) in &vectors {
                 index.insert(*node_id, vec, &accessor);
             }
 
-            self.store
+            self.lpg_store()
                 .add_vector_index(label, property, Arc::new(index));
         }
 
@@ -226,7 +228,7 @@ impl super::GrafeoDB {
     /// label+property pair will return an error.
     #[cfg(feature = "vector-index")]
     pub fn drop_vector_index(&self, label: &str, property: &str) -> bool {
-        let removed = self.store.remove_vector_index(label, property);
+        let removed = self.lpg_store().remove_vector_index(label, property);
         if removed {
             grafeo_info!("Vector index dropped: :{label}({property})");
         }
@@ -249,11 +251,11 @@ impl super::GrafeoDB {
     pub fn rebuild_vector_index(&self, label: &str, property: &str) -> Result<()> {
         // Preserve config from existing index if available
         let config = self
-            .store
+            .lpg_store()
             .get_vector_index(label, property)
             .map(|idx| idx.config().clone());
 
-        self.store.remove_vector_index(label, property);
+        self.lpg_store().remove_vector_index(label, property);
 
         if let Some(config) = config {
             self.create_vector_index(
@@ -293,14 +295,16 @@ impl super::GrafeoDB {
         let prop_key = PropertyKey::new(property);
 
         // Index all existing nodes with this label + property
-        let nodes = self.store.nodes_by_label(label);
+        let nodes = self.lpg_store().nodes_by_label(label);
         for node_id in nodes {
-            if let Some(Value::String(text)) = self.store.get_node_property(node_id, &prop_key) {
+            if let Some(Value::String(text)) =
+                self.lpg_store().get_node_property(node_id, &prop_key)
+            {
                 index.insert(node_id, text.as_str());
             }
         }
 
-        self.store
+        self.lpg_store()
             .add_text_index(label, property, Arc::new(RwLock::new(index)));
         Ok(())
     }
@@ -310,7 +314,7 @@ impl super::GrafeoDB {
     /// Returns `true` if the index existed and was removed.
     #[cfg(feature = "text-index")]
     pub fn drop_text_index(&self, label: &str, property: &str) -> bool {
-        self.store.remove_text_index(label, property)
+        self.lpg_store().remove_text_index(label, property)
     }
 
     /// Rebuilds a text index by re-scanning all matching nodes.
@@ -322,7 +326,7 @@ impl super::GrafeoDB {
     /// Returns an error if no text index exists for this label+property.
     #[cfg(feature = "text-index")]
     pub fn rebuild_text_index(&self, label: &str, property: &str) -> Result<()> {
-        self.store.remove_text_index(label, property);
+        self.lpg_store().remove_text_index(label, property);
         self.create_text_index(label, property)
     }
 }

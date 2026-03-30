@@ -31,7 +31,7 @@ impl super::GrafeoDB {
 
         // Start with all nodes for this label
         let label_nodes: std::collections::HashSet<NodeId> =
-            self.store.nodes_by_label(label).into_iter().collect();
+            self.lpg_store().nodes_by_label(label).into_iter().collect();
 
         let mut allowlist = label_nodes;
 
@@ -44,14 +44,14 @@ impl super::GrafeoDB {
                 // This is much faster when a prior filter has already narrowed the set.
                 let prop_key = grafeo_common::types::PropertyKey::new(key);
                 allowlist.retain(|&node_id| {
-                    self.store
+                    self.lpg_store()
                         .get_node_property(node_id, &prop_key)
                         .is_some_and(|v| grafeo_core::LpgStore::matches_filter(&v, filter_value))
                 });
             } else {
                 // Equality filter: use indexed lookup when available
                 let matching: std::collections::HashSet<NodeId> = self
-                    .store
+                    .lpg_store()
                     .find_nodes_by_property(key, filter_value)
                     .into_iter()
                     .collect();
@@ -94,14 +94,14 @@ impl super::GrafeoDB {
         ef: Option<usize>,
         filters: Option<&std::collections::HashMap<String, Value>>,
     ) -> Result<Vec<(grafeo_common::types::NodeId, f32)>> {
-        let index = self.store.get_vector_index(label, property).ok_or_else(|| {
+        let index = self.lpg_store().get_vector_index(label, property).ok_or_else(|| {
             grafeo_common::utils::error::Error::Internal(format!(
                 "No vector index found for :{label}({property}). Call create_vector_index() first."
             ))
         })?;
 
         let accessor =
-            grafeo_core::index::vector::PropertyVectorAccessor::new(&*self.store, property);
+            grafeo_core::index::vector::PropertyVectorAccessor::new(&**self.lpg_store(), property);
 
         let results = match self.compute_filter_allowlist(label, filters) {
             Some(allowlist) => match ef {
@@ -141,14 +141,14 @@ impl super::GrafeoDB {
         ef: Option<usize>,
         filters: Option<&std::collections::HashMap<String, Value>>,
     ) -> Result<Vec<Vec<(grafeo_common::types::NodeId, f32)>>> {
-        let index = self.store.get_vector_index(label, property).ok_or_else(|| {
+        let index = self.lpg_store().get_vector_index(label, property).ok_or_else(|| {
             grafeo_common::utils::error::Error::Internal(format!(
                 "No vector index found for :{label}({property}). Call create_vector_index() first."
             ))
         })?;
 
         let accessor =
-            grafeo_core::index::vector::PropertyVectorAccessor::new(&*self.store, property);
+            grafeo_core::index::vector::PropertyVectorAccessor::new(&**self.lpg_store(), property);
 
         let results = match self.compute_filter_allowlist(label, filters) {
             Some(allowlist) => match ef {
@@ -203,14 +203,14 @@ impl super::GrafeoDB {
     ) -> Result<Vec<(grafeo_common::types::NodeId, f32)>> {
         use grafeo_core::index::vector::mmr_select;
 
-        let index = self.store.get_vector_index(label, property).ok_or_else(|| {
+        let index = self.lpg_store().get_vector_index(label, property).ok_or_else(|| {
             grafeo_common::utils::error::Error::Internal(format!(
                 "No vector index found for :{label}({property}). Call create_vector_index() first."
             ))
         })?;
 
         let accessor =
-            grafeo_core::index::vector::PropertyVectorAccessor::new(&*self.store, property);
+            grafeo_core::index::vector::PropertyVectorAccessor::new(&**self.lpg_store(), property);
 
         let fetch_k = fetch_k.unwrap_or(k.saturating_mul(4).max(k));
         let lambda = lambda.unwrap_or(0.5);
@@ -268,11 +268,14 @@ impl super::GrafeoDB {
         query: &str,
         k: usize,
     ) -> Result<Vec<(NodeId, f64)>> {
-        let index = self.store.get_text_index(label, property).ok_or_else(|| {
-            Error::Internal(format!(
-                "No text index found for :{label}({property}). Call create_text_index() first."
-            ))
-        })?;
+        let index = self
+            .lpg_store()
+            .get_text_index(label, property)
+            .ok_or_else(|| {
+                Error::Internal(format!(
+                    "No text index found for :{label}({property}). Call create_text_index() first."
+                ))
+            })?;
 
         Ok(index.read().search(query, k))
     }
@@ -313,7 +316,7 @@ impl super::GrafeoDB {
         let mut sources: Vec<Vec<(NodeId, f64)>> = Vec::new();
 
         // Text search
-        if let Some(text_index) = self.store.get_text_index(label, text_property) {
+        if let Some(text_index) = self.lpg_store().get_text_index(label, text_property) {
             let text_results = text_index.read().search(query_text, k * 2);
             if !text_results.is_empty() {
                 sources.push(text_results);
@@ -322,10 +325,10 @@ impl super::GrafeoDB {
 
         // Vector search (if query vector provided)
         if let Some(query_vec) = query_vector
-            && let Some(vector_index) = self.store.get_vector_index(label, vector_property)
+            && let Some(vector_index) = self.lpg_store().get_vector_index(label, vector_property)
         {
             let accessor = grafeo_core::index::vector::PropertyVectorAccessor::new(
-                &*self.store,
+                &**self.lpg_store(),
                 vector_property,
             );
             let vector_results = vector_index.search(query_vec, k * 2, &accessor);
