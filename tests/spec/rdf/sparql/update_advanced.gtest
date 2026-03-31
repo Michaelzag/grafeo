@@ -90,7 +90,6 @@ tests:
         - [Berlin]
 
   - name: modify_delete_only_with_where
-    skip: "DELETE-only MODIFY with FILTER not working as expected"
     # DELETE clause with WHERE but no INSERT: removes matching triples.
     setup:
       - |

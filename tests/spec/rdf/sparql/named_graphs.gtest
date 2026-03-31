@@ -290,7 +290,6 @@ tests:
       empty: true
 
   - name: same_triple_in_default_and_named_graph_isolation
-    skip: "GRAPH ?g also returns default graph triples"
     setup:
       - |
         INSERT DATA {

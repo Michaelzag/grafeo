@@ -78,21 +78,18 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: aggregation_count
-    skip: "Aggregation functions not supported in GraphQL translator"
     query: "{ personCount: person { _count } }"
     expect:
       rows:
         - [5]
 
   - name: aggregation_avg_age
-    skip: "Aggregation functions not supported in GraphQL translator"
     query: "{ person { _avg(field: age) } }"
     expect:
       rows:
         - [30]
 
   - name: aggregation_sum_age
-    skip: "Aggregation functions not supported in GraphQL translator"
     query: "{ person { _sum(field: age) } }"
     expect:
       rows:
@@ -103,7 +100,6 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: deeply_nested_four_levels
-    skip: "Deep nesting (4+ levels) fails with column resolution error"
     query: |
       query {
         person(name: "Alix") {
@@ -120,7 +116,7 @@ tests:
         }
       }
     expect:
-      empty: true
+      count: 1
 
   # ---------------------------------------------------------------------------
   # Variable with default value

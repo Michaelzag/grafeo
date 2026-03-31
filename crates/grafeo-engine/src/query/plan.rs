@@ -1407,6 +1407,21 @@ pub struct RemoveLabelOp {
 
 // ==================== RDF/SPARQL Operators ====================
 
+/// SPARQL dataset restriction from FROM / FROM NAMED clauses.
+///
+/// When present, restricts which graphs are visible to a triple scan:
+/// - `default_graphs`: IRIs whose union forms the default graph (basic patterns).
+/// - `named_graphs`: IRIs that enumerate the available named graphs (GRAPH patterns).
+#[derive(Debug, Clone, Default)]
+pub struct DatasetRestriction {
+    /// FROM IRIs: the default graph is the union of these named graphs.
+    /// Empty means no FROM clause was specified (unrestricted default graph).
+    pub default_graphs: Vec<String>,
+    /// FROM NAMED IRIs: only these named graphs are available to GRAPH patterns.
+    /// Empty means no FROM NAMED clause was specified (all named graphs visible).
+    pub named_graphs: Vec<String>,
+}
+
 /// Scan RDF triples matching a pattern.
 #[derive(Debug, Clone)]
 pub struct TripleScanOp {
@@ -1420,6 +1435,8 @@ pub struct TripleScanOp {
     pub graph: Option<TripleComponent>,
     /// Input operator (for chained patterns).
     pub input: Option<Box<LogicalOperator>>,
+    /// Dataset restriction from SPARQL FROM / FROM NAMED clauses.
+    pub dataset: Option<DatasetRestriction>,
 }
 
 /// A component of a triple pattern.

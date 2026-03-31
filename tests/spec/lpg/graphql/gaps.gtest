@@ -90,14 +90,12 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: count_aggregate_field
-    skip: "No aggregation mechanism exposed via GraphQL (count, sum, avg not mapped)"
     query: "{ personCount }"
     expect:
       rows:
         - [3]
 
   - name: sum_avg_on_numeric_fields
-    skip: "Numeric aggregation functions (sum, avg) have no GraphQL projection syntax"
     query: "{ personAggregate { sum_age avg_age } }"
     expect:
       rows:
@@ -108,7 +106,6 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: deeply_nested_four_levels
-    skip: "Deep nesting (4+ levels) fails with column resolution error"
     query: |
       query {
         person(name: "Alix") {

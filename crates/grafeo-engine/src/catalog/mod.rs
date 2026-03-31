@@ -158,16 +158,23 @@ impl Catalog {
     /// Creates a new index on a label and property key.
     pub fn create_index(
         &self,
+        name: &str,
         label: LabelId,
         property_key: PropertyKeyId,
         index_type: IndexType,
     ) -> IndexId {
-        self.indexes.create(label, property_key, index_type)
+        self.indexes.create(name, label, property_key, index_type)
     }
 
     /// Drops an index by ID.
     pub fn drop_index(&self, id: IndexId) -> bool {
         self.indexes.drop(id)
+    }
+
+    /// Finds an index by its user-defined name.
+    #[must_use]
+    pub fn find_index_by_name(&self, name: &str) -> Option<IndexId> {
+        self.indexes.find_by_name(name)
     }
 
     /// Gets the index definition for an index ID.
@@ -824,6 +831,8 @@ pub enum IndexType {
 pub struct IndexDefinition {
     /// The index ID.
     pub id: IndexId,
+    /// User-defined index name (e.g., `idx_person_name`).
+    pub name: String,
     /// The label this index applies to.
     pub label: LabelId,
     /// The property key being indexed.
@@ -837,6 +846,7 @@ struct IndexCatalog {
     indexes: RwLock<HashMap<IndexId, IndexDefinition>>,
     label_indexes: RwLock<HashMap<LabelId, Vec<IndexId>>>,
     label_property_indexes: RwLock<HashMap<(LabelId, PropertyKeyId), Vec<IndexId>>>,
+    name_index: RwLock<HashMap<String, IndexId>>,
     next_id: AtomicU32,
 }
 
@@ -846,12 +856,14 @@ impl IndexCatalog {
             indexes: RwLock::new(HashMap::new()),
             label_indexes: RwLock::new(HashMap::new()),
             label_property_indexes: RwLock::new(HashMap::new()),
+            name_index: RwLock::new(HashMap::new()),
             next_id: AtomicU32::new(0),
         }
     }
 
     fn create(
         &self,
+        name: &str,
         label: LabelId,
         property_key: PropertyKeyId,
         index_type: IndexType,
@@ -859,6 +871,7 @@ impl IndexCatalog {
         let id = IndexId::new(self.next_id.fetch_add(1, Ordering::Relaxed));
         let definition = IndexDefinition {
             id,
+            name: name.to_string(),
             label,
             property_key,
             index_type,
@@ -874,6 +887,7 @@ impl IndexCatalog {
             .entry((label, property_key))
             .or_default()
             .push(id);
+        self.name_index.write().insert(name.to_string(), id);
 
         id
     }
@@ -894,10 +908,16 @@ impl IndexCatalog {
             {
                 ids.retain(|&i| i != id);
             }
+            // Remove from name index
+            self.name_index.write().remove(&definition.name);
             true
         } else {
             false
         }
+    }
+
+    fn find_by_name(&self, name: &str) -> Option<IndexId> {
+        self.name_index.read().get(name).copied()
     }
 
     fn get(&self, id: IndexId) -> Option<IndexDefinition> {
@@ -2113,8 +2133,8 @@ mod tests {
         let age_id = catalog.get_or_create_property_key("age");
 
         // Create indexes
-        let idx1 = catalog.create_index(person_id, name_id, IndexType::Hash);
-        let idx2 = catalog.create_index(person_id, age_id, IndexType::BTree);
+        let idx1 = catalog.create_index("idx_person_name", person_id, name_id, IndexType::Hash);
+        let idx2 = catalog.create_index("idx_person_age", person_id, age_id, IndexType::BTree);
 
         assert_ne!(idx1, idx2);
         assert_eq!(catalog.index_count(), 2);
@@ -2286,9 +2306,10 @@ mod tests {
         let name_id = catalog.get_or_create_property_key("name");
 
         // Create multiple indexes on the same property with different types
-        let hash_idx = catalog.create_index(person_id, name_id, IndexType::Hash);
-        let btree_idx = catalog.create_index(person_id, name_id, IndexType::BTree);
-        let fulltext_idx = catalog.create_index(person_id, name_id, IndexType::FullText);
+        let hash_idx = catalog.create_index("idx_hash", person_id, name_id, IndexType::Hash);
+        let btree_idx = catalog.create_index("idx_btree", person_id, name_id, IndexType::BTree);
+        let fulltext_idx =
+            catalog.create_index("idx_fulltext", person_id, name_id, IndexType::FullText);
 
         assert_eq!(catalog.index_count(), 3);
 
@@ -2440,7 +2461,7 @@ mod tests {
             let catalog = Arc::clone(&catalog);
             handles.push(thread::spawn(move || {
                 let prop = PropertyKeyId::new(i);
-                catalog.create_index(label, prop, IndexType::Hash)
+                catalog.create_index(&format!("idx_{i}"), label, prop, IndexType::Hash)
             }));
         }
 
@@ -2517,6 +2538,7 @@ mod tests {
     fn test_index_definition_debug() {
         let def = IndexDefinition {
             id: IndexId::new(1),
+            name: "test_index".to_string(),
             label: LabelId::new(2),
             property_key: PropertyKeyId::new(3),
             index_type: IndexType::Hash,

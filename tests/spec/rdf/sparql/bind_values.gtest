@@ -219,7 +219,6 @@ tests:
         - [Vincent, Paris]
 
   - name: values_with_undef
-    skip: "VALUES with UNDEF not fully evaluated"
     setup:
       - |
         INSERT DATA {

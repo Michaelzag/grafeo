@@ -13,6 +13,31 @@ CompactStore: a read-optimized columnar graph store for memory-constrained envir
 - **`CompactStoreBuilder`**: fluent API for constructing stores from raw data with build-time validation (column lengths, value ranges, sort order, vector dimension alignment)
 - **`GrafeoDB::with_read_store()`**: integration point accepting `Arc<dyn GraphStore>` for read-only external stores, all query languages work through it
 - **Benchmark**: `compact_vs_lpg` criterion bench comparing both stores on identical data
+- **SQL/PGQ UNION, INTERSECT, EXCEPT**: full set operation support between GRAPH_TABLE queries, with optional ALL modifier
+- **GraphQL multiple root fields**: `{ person { name } company { name } }` now translates all root fields via Union instead of silently dropping all but the first
+- **GraphQL variable/parameter substitution**: `$variable` references in arguments now emit `LogicalExpression::Parameter` instead of `Null`, with default value propagation from `query($limit: Int = 2)` declarations
+- **Binding spec runner `params:` support**: Python, Node.js, Go, and C# test runners now pass gtest `params:` fields to parameterized execution methods
+
+### Fixed
+
+- **GQL list slice syntax**: `[1..3]`, `[..2]`, `[3..]` now work; one-char lexer bug (`peek_char` instead of `current_char`) prevented `..` token recognition
+- **SPARQL MINUS with disjoint variables**: no longer removes all solutions; returns left side unchanged when no variables are shared (per SPARQL 1.1 spec)
+- **SPARQL language-tagged literal comparison**: `FILTER(?x = "Barcelona"@es)` now checks both lexical value and language tag instead of ignoring the tag
+- **SPARQL function evaluation in SELECT/BIND**: STRLEN, CONCAT, IF, COALESCE, arithmetic now work in projection and BIND contexts (fixed BIND ordering, `LogicalType::Any` in RDF planner, projection-before-ORDER-BY)
+- **SPARQL property path reflexive case**: `<p>*` and `<p>?` now include the subject itself (zero-length match) even when no outgoing edges exist
+- **Gremlin 3-hop dead end**: multi-hop traversal ending in empty no longer causes "Column not found" error
+- **Gremlin `values()` with no keys**: `g.V().values()` returns all property values instead of panicking
+- **Gremlin union with `values()` branches**: scalar values in union branches no longer silently coerced to `NodeId(0)` (fixed `LogicalType::Any` for scalar projections)
+- **Gremlin `path()` on empty traversal**: returns empty result set instead of "Column not found" error
+- **Cypher `CREATE INDEX` / `DROP INDEX` / `SHOW INDEXES`**: indexes now registered in the catalog, so they persist across statements and are visible to `SHOW INDEXES` and droppable by name
+- **SPARQL `DATATYPE()` companion columns**: `__datatype_` columns now track original XSD datatypes through triple scans, fixing `DATATYPE()` which previously always returned `xsd:string`
+- **SPARQL `DESCRIBE` CBD expansion**: `DESCRIBE <IRI>` and `DESCRIBE ?var WHERE { ... }` now return all triples where the described resource is the subject (Concise Bounded Description)
+- **SPARQL DELETE-only MODIFY with FILTER**: `DELETE { ... } WHERE { ... FILTER(...) }` now correctly applies the FILTER (fixed type mismatch in `value_to_term`)
+- **SPARQL VALUES with UNDEF**: multi-variable VALUES blocks containing UNDEF now produce correct partial bindings via filter-based union branches
+- **SPARQL `GRAPH ?g` isolation**: `GRAPH ?g { ... }` now scans only named graphs, excluding the default graph per SPARQL 1.1 spec section 13.3
+- **SPARQL `STRDT()` type conversion**: `STRDT("88", xsd:integer)` now produces a typed `Int64` value so `DATATYPE()` returns the correct IRI
+- **SPARQL subquery aggregation propagation**: inner `SELECT (COUNT(...) AS ?c)` subquery results now correctly propagate to outer query
+- **GraphQL aggregation**: `{ personCount }`, `{ personAggregate { sum_age avg_age } }`, and `{ person { _count } }` field patterns now emit proper aggregate operators
 
 ## [0.5.30] - 2026-03-30
 

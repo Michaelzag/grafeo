@@ -201,7 +201,6 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: lang_returns_language_tag
-    skip: "LANG() comparison in FILTER returns 0 rows instead of 1"
     setup:
       - |
         INSERT DATA {
@@ -218,7 +217,6 @@ tests:
       count: 1
 
   - name: lang_empty_for_untagged_literal
-    skip: "LANG()='' filter returns 2 rows instead of 1 (language tags not distinguished)"
     setup:
       - |
         INSERT DATA {
@@ -238,7 +236,6 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: datatype_returns_type_iri
-    skip: "DATATYPE() comparison in FILTER returns 0 rows instead of 1"
     setup:
       - |
         INSERT DATA {
@@ -255,7 +252,6 @@ tests:
       count: 1
 
   - name: datatype_string_type
-    skip: "DATATYPE() comparison in FILTER returns 2 rows instead of 1"
     setup:
       - |
         INSERT DATA {

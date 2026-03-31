@@ -1064,6 +1064,7 @@ impl Session {
                 }
             }
             SchemaStatement::CreateIndex(stmt) => {
+                use crate::catalog::IndexType as CatalogIndexType;
                 use grafeo_adapters::query::gql::ast::IndexKind;
                 let active = self.active_lpg_store();
                 let index_type_str = match stmt.index_kind {
@@ -1095,6 +1096,20 @@ impl Session {
                         }
                     }
                 }
+                // Register each property index in the catalog for SHOW INDEXES
+                // and DROP INDEX name-based lookup.
+                let catalog_index_type = match stmt.index_kind {
+                    IndexKind::Property => CatalogIndexType::Hash,
+                    IndexKind::BTree => CatalogIndexType::BTree,
+                    IndexKind::Text => CatalogIndexType::FullText,
+                    IndexKind::Vector => CatalogIndexType::Hash,
+                };
+                let label_id = self.catalog.get_or_create_label(&stmt.label);
+                for prop in &stmt.properties {
+                    let prop_id = self.catalog.get_or_create_property_key(prop);
+                    self.catalog
+                        .create_index(&stmt.name, label_id, prop_id, catalog_index_type);
+                }
                 #[cfg(feature = "wal")]
                 for prop in &stmt.properties {
                     wal_log!(
@@ -1113,17 +1128,21 @@ impl Session {
                 )))
             }
             SchemaStatement::DropIndex { name, if_exists } => {
-                // Try to drop property index by name
-                let dropped = self.active_lpg_store().drop_property_index(&name);
-                if dropped || if_exists {
-                    if dropped {
-                        wal_log!(self, WalRecord::DropIndex { name: name.clone() });
+                // Look up the index by name in the catalog to find the
+                // underlying property, then drop from both catalog and store.
+                if let Some(index_id) = self.catalog.find_index_by_name(&name) {
+                    let def = self.catalog.get_index(index_id);
+                    self.catalog.drop_index(index_id);
+                    if let Some(def) = def
+                        && let Some(prop_name) =
+                            self.catalog.get_property_key_name(def.property_key)
+                    {
+                        self.active_lpg_store().drop_property_index(&prop_name);
                     }
-                    Ok(QueryResult::status(if dropped {
-                        format!("Dropped index '{name}'")
-                    } else {
-                        "No change".to_string()
-                    }))
+                    wal_log!(self, WalRecord::DropIndex { name: name.clone() });
+                    Ok(QueryResult::status(format!("Dropped index '{name}'")))
+                } else if if_exists {
+                    Ok(QueryResult::status("No change".to_string()))
                 } else {
                     Err(Error::Query(QueryError::new(
                         QueryErrorKind::Semantic,
@@ -1877,7 +1896,7 @@ impl Session {
                     .get_property_key_name(def.property_key)
                     .unwrap_or_else(|| "?".into());
                 vec![
-                    Value::from(format!("idx_{}_{}", label_name, prop_name)),
+                    Value::from(def.name),
                     Value::from(format!("{:?}", def.index_type)),
                     Value::from(&*label_name),
                     Value::from(&*prop_name),

@@ -15,9 +15,9 @@ use super::common::{
     wrap_skip, wrap_sort,
 };
 use crate::query::plan::{
-    BinaryOp, CountExpr, CreateNodeOp, DeleteNodeOp, ExpandDirection, ExpandOp, LogicalExpression,
-    LogicalOperator, LogicalPlan, NodeScanOp, PathMode, ReturnItem, SetPropertyOp, SortKey,
-    SortOrder, UnionOp,
+    AggregateExpr, AggregateFunction, AggregateOp, BinaryOp, CountExpr, CreateNodeOp,
+    DeleteNodeOp, ExpandDirection, ExpandOp, LogicalExpression, LogicalOperator, LogicalPlan,
+    NodeScanOp, PathMode, ReturnItem, SetPropertyOp, SortKey, SortOrder, UnionOp,
 };
 use grafeo_adapters::query::graphql::{self, ast};
 use grafeo_common::utils::error::{Error, QueryError, QueryErrorKind, Result};
@@ -398,6 +398,13 @@ impl GraphQLTranslator {
     }
 
     fn translate_root_field(&self, field: &ast::Field) -> Result<LogicalOperator> {
+        // Check for aggregate root field patterns:
+        //   { personCount }               -> COUNT(*) over Person
+        //   { personAggregate { sum_age } } -> SUM(age) over Person
+        if let Some(plan) = self.try_translate_aggregate_root(field)? {
+            return Ok(plan);
+        }
+
         // Root field name is the type/label to scan
         let var = self.var_gen.next();
 
@@ -451,6 +458,168 @@ impl GraphQLTranslator {
     }
 
     /// Extracts special arguments (first, skip, orderBy) from field arguments.
+    fn try_translate_aggregate_root(&self, field: &ast::Field) -> Result<Option<LogicalOperator>> {
+        let name = &field.name;
+
+        // Pattern 1: <Type>Count (no selection set) -> COUNT(*)
+        if let Some(type_name) = name.strip_suffix("Count")
+            && !type_name.is_empty()
+            && field.selection_set.is_none()
+        {
+            let var = self.var_gen.next();
+            let alias = field.alias.clone().unwrap_or_else(|| name.clone());
+            let scan = LogicalOperator::NodeScan(NodeScanOp {
+                variable: var,
+                label: Some(capitalize_first(type_name)),
+                input: None,
+            });
+            let agg = LogicalOperator::Aggregate(AggregateOp {
+                group_by: Vec::new(),
+                aggregates: vec![AggregateExpr {
+                    function: AggregateFunction::Count,
+                    expression: None,
+                    expression2: None,
+                    distinct: false,
+                    alias: Some(alias.clone()),
+                    percentile: None,
+                    separator: None,
+                }],
+                input: Box::new(scan),
+                having: None,
+            });
+            let plan = wrap_return(
+                agg,
+                vec![ReturnItem {
+                    expression: LogicalExpression::Variable(alias.clone()),
+                    alias: Some(alias),
+                }],
+                false,
+            );
+            return Ok(Some(plan));
+        }
+
+        // Pattern 2: <Type>Aggregate { sum_<prop>, avg_<prop>, ... }
+        if let Some(type_name) = name.strip_suffix("Aggregate")
+            && !type_name.is_empty()
+            && let Some(selection_set) = &field.selection_set
+        {
+            let var = self.var_gen.next();
+            let scan = LogicalOperator::NodeScan(NodeScanOp {
+                variable: var.clone(),
+                label: Some(capitalize_first(type_name)),
+                input: None,
+            });
+
+            let mut agg_exprs = Vec::new();
+            let mut return_items = Vec::new();
+
+            for selection in &selection_set.selections {
+                if let ast::Selection::Field(sub_field) = selection {
+                    if !graphql_directives_allow(&sub_field.directives) {
+                        continue;
+                    }
+                    let alias = sub_field
+                        .alias
+                        .clone()
+                        .unwrap_or_else(|| sub_field.name.clone());
+
+                    if let Some((func, prop)) =
+                        parse_aggregate_field(&sub_field.name, &sub_field.arguments)
+                    {
+                        let expression = prop.map(|p| LogicalExpression::Property {
+                            variable: var.clone(),
+                            property: p,
+                        });
+                        agg_exprs.push(AggregateExpr {
+                            function: func,
+                            expression,
+                            expression2: None,
+                            distinct: false,
+                            alias: Some(alias.clone()),
+                            percentile: None,
+                            separator: None,
+                        });
+                        return_items.push(ReturnItem {
+                            expression: LogicalExpression::Variable(alias.clone()),
+                            alias: Some(alias),
+                        });
+                    }
+                }
+            }
+
+            if agg_exprs.is_empty() {
+                return Ok(None);
+            }
+
+            let agg = LogicalOperator::Aggregate(AggregateOp {
+                group_by: Vec::new(),
+                aggregates: agg_exprs,
+                input: Box::new(scan),
+                having: None,
+            });
+            let plan = wrap_return(agg, return_items, false);
+            return Ok(Some(plan));
+        }
+
+        Ok(None)
+    }
+
+    fn try_translate_aggregate_selection_set(
+        &self,
+        selection_set: &ast::SelectionSet,
+        input: LogicalOperator,
+        current_var: &str,
+    ) -> Result<Option<LogicalOperator>> {
+        let mut agg_exprs: Vec<AggregateExpr> = Vec::new();
+        let mut return_items: Vec<ReturnItem> = Vec::new();
+
+        for selection in &selection_set.selections {
+            if let ast::Selection::Field(field) = selection {
+                if !graphql_directives_allow(&field.directives) {
+                    continue;
+                }
+                let Some((func, prop_name)) = parse_aggregate_field(&field.name, &field.arguments)
+                else {
+                    return Ok(None);
+                };
+
+                let alias = field.alias.clone().unwrap_or_else(|| field.name.clone());
+                let expression = prop_name.map(|p| LogicalExpression::Property {
+                    variable: current_var.to_string(),
+                    property: p,
+                });
+
+                agg_exprs.push(AggregateExpr {
+                    function: func,
+                    expression,
+                    expression2: None,
+                    distinct: false,
+                    alias: Some(alias.clone()),
+                    percentile: None,
+                    separator: None,
+                });
+                return_items.push(ReturnItem {
+                    expression: LogicalExpression::Variable(alias.clone()),
+                    alias: Some(alias),
+                });
+            } else {
+                return Ok(None);
+            }
+        }
+
+        if agg_exprs.is_empty() {
+            return Ok(None);
+        }
+
+        let agg = LogicalOperator::Aggregate(AggregateOp {
+            group_by: Vec::new(),
+            aggregates: agg_exprs,
+            input: Box::new(input),
+            having: None,
+        });
+        Ok(Some(wrap_return(agg, return_items, false)))
+    }
+
     fn extract_special_args<'a>(&self, args: &'a [ast::Argument], var: &str) -> ExtractedArgs<'a> {
         let mut first = None;
         let mut skip = None;
@@ -515,6 +684,13 @@ impl GraphQLTranslator {
         input: LogicalOperator,
         current_var: &str,
     ) -> Result<LogicalOperator> {
+        // Try aggregate selection set first (all fields are aggregate functions)
+        if let Some(plan) =
+            self.try_translate_aggregate_selection_set(selection_set, input.clone(), current_var)?
+        {
+            return Ok(plan);
+        }
+
         // Collect all return items and build the plan
         let (plan, return_items) =
             self.collect_selection_items(selection_set, input, current_var)?;
@@ -841,6 +1017,46 @@ impl GraphQLTranslator {
             QueryErrorKind::Syntax,
             "No field found in selection set",
         )))
+    }
+}
+
+fn parse_aggregate_field(
+    name: &str,
+    arguments: &[ast::Argument],
+) -> Option<(AggregateFunction, Option<String>)> {
+    // Underscore-prefixed style with argument: _sum(field: age)
+    let field_arg = arguments
+        .iter()
+        .find(|a| a.name == "field")
+        .and_then(|a| match &a.value {
+            ast::InputValue::Enum(s) | ast::InputValue::String(s) => Some(s.clone()),
+            _ => None,
+        });
+
+    match name {
+        "_count" | "count" => Some((AggregateFunction::Count, None)),
+        "_sum" => Some((AggregateFunction::Sum, field_arg)),
+        "_avg" => Some((AggregateFunction::Avg, field_arg)),
+        "_min" => Some((AggregateFunction::Min, field_arg)),
+        "_max" => Some((AggregateFunction::Max, field_arg)),
+        _ => {
+            // Prefix style: sum_<prop>, avg_<prop>, min_<prop>, max_<prop>
+            let prefixes: &[(&str, AggregateFunction)] = &[
+                ("sum_", AggregateFunction::Sum),
+                ("avg_", AggregateFunction::Avg),
+                ("min_", AggregateFunction::Min),
+                ("max_", AggregateFunction::Max),
+                ("count_", AggregateFunction::CountNonNull),
+            ];
+            for (prefix, func) in prefixes {
+                if let Some(prop) = name.strip_prefix(prefix)
+                    && !prop.is_empty()
+                {
+                    return Some((*func, Some(prop.to_string())));
+                }
+            }
+            None
+        }
     }
 }
 

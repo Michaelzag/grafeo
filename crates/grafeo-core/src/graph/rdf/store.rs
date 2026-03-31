@@ -901,7 +901,7 @@ impl RdfStore {
     /// Finds triples across specific graphs.
     ///
     /// - `graphs = None` searches the default graph only (backward compatible).
-    /// - `graphs = Some(&[])` searches ALL graphs (default + named).
+    /// - `graphs = Some(&[])` searches all named graphs (excluding the default graph).
     /// - `graphs = Some(&["g1", "g2"])` searches those named graphs only.
     pub fn find_in_graphs(
         &self,
@@ -914,9 +914,8 @@ impl RdfStore {
                 self.find(pattern).into_iter().map(|t| (None, t)).collect()
             }
             Some([]) => {
-                // ALL graphs
-                let mut results: Vec<(Option<String>, Arc<Triple>)> =
-                    self.find(pattern).into_iter().map(|t| (None, t)).collect();
+                // All named graphs (excludes default graph per SPARQL spec sec 13.3)
+                let mut results = Vec::new();
                 for (name, store) in self.named_graphs.read().iter() {
                     for t in store.find(pattern) {
                         results.push((Some(name.clone()), t));
@@ -1482,9 +1481,10 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert!(results[0].0.is_none());
 
-        // All graphs
+        // All named graphs (excludes default)
         let results = store.find_in_graphs(&pattern, Some(&[]));
-        assert_eq!(results.len(), 2);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0.as_deref(), Some("http://example.org/g1"));
 
         // Specific named graph
         let results = store.find_in_graphs(&pattern, Some(&["http://example.org/g1"]));

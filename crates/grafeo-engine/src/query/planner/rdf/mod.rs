@@ -197,9 +197,9 @@ impl RdfPlanner {
     /// Returns an error if planning fails.
     pub fn plan(&self, logical_plan: &LogicalPlan) -> Result<PhysicalPlan> {
         let (operator, columns) = self.plan_operator(&logical_plan.root)?;
-        // Strip internal companion columns (__lang_<var>) from the output.
-        // They are used by LANG()/LANGMATCHES() during evaluation but should
-        // never appear in query results.
+        // Strip internal companion columns (__lang_<var>, __datatype_<var>)
+        // from the output. They are used by LANG()/LANGMATCHES()/DATATYPE()
+        // during evaluation but should never appear in query results.
         let (operator, columns) = strip_internal_columns(operator, columns);
         Ok(PhysicalPlan {
             operator,
@@ -321,13 +321,15 @@ impl RdfPlanner {
             object_var_name = Some(name.clone());
         }
 
-        // When the object is a variable, add a hidden companion column for
-        // language tags so that LANG() and LANGMATCHES() can access them.
-        // This must be added BEFORE the graph column to match the DataChunk
-        // layout (the lang column is emitted right after the object column).
-        let emit_lang_column = object_var_name.is_some();
+        // When the object is a variable, add hidden companion columns for
+        // language tags and datatypes so that LANG(), LANGMATCHES(), and
+        // DATATYPE() can access them. These must be added BEFORE the graph
+        // column to match the DataChunk layout (emitted right after the
+        // object column).
+        let emit_companion_columns = object_var_name.is_some();
         if let Some(ref obj_name) = object_var_name {
             columns.push(format!("__lang_{obj_name}"));
+            columns.push(format!("__datatype_{obj_name}"));
         }
 
         if let Some(TripleComponent::Variable(name)) = &scan.graph {
@@ -351,7 +353,7 @@ impl RdfPlanner {
             self.chunk_size,
             graph_iri,
             scan_all_graphs,
-            emit_lang_column,
+            emit_companion_columns,
         ));
 
         Ok((operator, columns))
@@ -2296,14 +2298,9 @@ impl RdfModifyOperator {
             Value::String(s) => {
                 if s.starts_with("http://") || s.starts_with("https://") || s.starts_with("urn:") {
                     Some(Term::Iri(s.to_string().into()))
-                } else if let Ok(n) = s.parse::<i64>() {
-                    Some(Term::Literal(Literal::integer(n)))
-                } else if let Ok(f) = s.parse::<f64>() {
-                    Some(Term::Literal(Literal::typed(
-                        f.to_string(),
-                        "http://www.w3.org/2001/XMLSchema#double",
-                    )))
                 } else {
+                    // Preserve string values as simple literals without speculative
+                    // numeric parsing, so DELETE can match the original storage format.
                     Some(Term::Literal(Literal::simple(s.to_string())))
                 }
             }
@@ -2658,8 +2655,9 @@ struct RdfTripleScanOperator {
     graph: Option<String>,
     /// Whether to scan ALL graphs (when GRAPH ?var is used).
     scan_all_graphs: bool,
-    /// Whether to emit a companion language-tag column after the object column.
-    emit_lang_column: bool,
+    /// Whether to emit companion columns (language tag, datatype) after the
+    /// object column. Enabled when the object position is a variable.
+    emit_companion_columns: bool,
     /// Chunk size for batching.
     chunk_size: usize,
     /// Cached matching triples with graph names (lazily populated).
@@ -2676,7 +2674,7 @@ impl RdfTripleScanOperator {
         chunk_size: usize,
         graph: Option<String>,
         scan_all_graphs: bool,
-        emit_lang_column: bool,
+        emit_companion_columns: bool,
     ) -> Self {
         Self {
             store,
@@ -2684,7 +2682,7 @@ impl RdfTripleScanOperator {
             output_mask,
             graph,
             scan_all_graphs,
-            emit_lang_column,
+            emit_companion_columns,
             chunk_size,
             triples: None,
             position: 0,
@@ -2722,8 +2720,9 @@ impl RdfTripleScanOperator {
     /// Count how many output columns we have.
     fn output_column_count(&self) -> usize {
         let base = self.output_mask.iter().filter(|&&b| b).count();
-        if self.emit_lang_column {
-            base + 1
+        if self.emit_companion_columns {
+            // Two companion columns: __lang_ and __datatype_
+            base + 2
         } else {
             base
         }
@@ -2777,14 +2776,23 @@ impl Operator for RdfTripleScanOperator {
                 }
                 col_idx += 1;
 
-                // Companion language-tag column
-                if self.emit_lang_column {
+                // Companion language-tag and datatype columns
+                if self.emit_companion_columns {
                     if let Some(col) = chunk.column_mut(col_idx) {
                         let lang_tag = match triple.object() {
                             Term::Literal(lit) => lit.language().unwrap_or("").to_string(),
                             _ => String::new(),
                         };
                         col.push_string(lang_tag);
+                    }
+                    col_idx += 1;
+
+                    if let Some(col) = chunk.column_mut(col_idx) {
+                        let datatype = match triple.object() {
+                            Term::Literal(lit) => lit.datatype().to_string(),
+                            _ => String::new(),
+                        };
+                        col.push_string(datatype);
                     }
                     col_idx += 1;
                 }
@@ -3888,6 +3896,20 @@ impl RdfExpressionPredicate {
 
             // DATATYPE - datatype IRI of a literal
             "DATATYPE" => {
+                // Look up the companion datatype column for the variable.
+                // The triple scan emits a hidden __datatype_<var> column alongside
+                // each object variable.
+                if let Some(FilterExpression::Variable(var_name)) = args.first() {
+                    let dt_col_name = format!("__datatype_{var_name}");
+                    if let Some(&col_idx) = self.variable_columns.get(&dt_col_name)
+                        && let Some(col) = chunk.column(col_idx)
+                        && let Some(Value::String(dt)) = col.get_value(row)
+                        && !dt.is_empty()
+                    {
+                        return Some(Value::String(dt));
+                    }
+                }
+                // Fallback: infer datatype from the Value type
                 let val = self.eval_expr(args.first()?, chunk, row)?;
                 let dt = match &val {
                     Value::String(_) => "http://www.w3.org/2001/XMLSchema#string",
@@ -3928,12 +3950,35 @@ impl RdfExpressionPredicate {
             }
 
             // STRDT - construct a typed literal
+            // STRDT - construct a typed literal
             "STRDT" => {
                 if args.len() < 2 {
                     return None;
                 }
-                // Return the string value (type information is metadata)
-                self.eval_expr(&args[0], chunk, row)
+                let lexical = self.eval_expr(&args[0], chunk, row)?;
+                let datatype = self.eval_expr(&args[1], chunk, row)?;
+                let lex_str = value_to_string(&lexical);
+                let dt_str = value_to_string(&datatype);
+                // Convert the lexical form to the target XSD type so that
+                // DATATYPE() on the result returns the correct IRI.
+                match dt_str.as_str() {
+                    "http://www.w3.org/2001/XMLSchema#integer"
+                    | "http://www.w3.org/2001/XMLSchema#int"
+                    | "http://www.w3.org/2001/XMLSchema#long" => {
+                        lex_str.parse::<i64>().ok().map(Value::Int64)
+                    }
+                    "http://www.w3.org/2001/XMLSchema#double"
+                    | "http://www.w3.org/2001/XMLSchema#float"
+                    | "http://www.w3.org/2001/XMLSchema#decimal" => {
+                        lex_str.parse::<f64>().ok().map(Value::Float64)
+                    }
+                    "http://www.w3.org/2001/XMLSchema#boolean" => match lex_str.as_str() {
+                        "true" | "1" => Some(Value::Bool(true)),
+                        "false" | "0" => Some(Value::Bool(false)),
+                        _ => None,
+                    },
+                    _ => Some(Value::String(lex_str.into())),
+                }
             }
 
             // STRLANG - construct a language-tagged literal
@@ -4053,7 +4098,7 @@ impl Predicate for RdfExpressionPredicate {
 // Helper Functions
 // ============================================================================
 
-/// Strips internal `__lang_*` companion columns from the final output.
+/// Strips internal `__lang_*` and `__datatype_*` companion columns from the final output.
 ///
 /// If no internal columns are present, the operator and columns pass through
 /// unchanged. Otherwise, a lightweight projection is inserted to remove them.
@@ -4064,7 +4109,7 @@ fn strip_internal_columns(
     let keep_indices: Vec<usize> = columns
         .iter()
         .enumerate()
-        .filter(|(_, name)| !name.starts_with("__lang_"))
+        .filter(|(_, name)| !name.starts_with("__lang_") && !name.starts_with("__datatype_"))
         .map(|(i, _)| i)
         .collect();
 

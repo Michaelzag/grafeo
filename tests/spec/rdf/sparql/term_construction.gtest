@@ -188,7 +188,6 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: iri_used_in_triple_pattern
-    skip: "BIND(IRI(...)) value not used as subject in subsequent triple pattern, returns all rows"
     setup:
       - |
         INSERT DATA {
@@ -210,7 +209,6 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: strdt_with_filter
-    skip: "DATATYPE() on BIND-produced STRDT value returns 0 rows in FILTER comparison"
     setup:
       - |
         INSERT DATA {
