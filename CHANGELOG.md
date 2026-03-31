@@ -2,14 +2,14 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
-## [0.5.31] - 2026-03-32
+## [0.5.31] - 2026-04-01
 
 CompactStore: a read-optimized columnar graph store for memory-constrained environments. Thanks to [@temporaryfix](https://github.com/temporaryfix) for the design, prototype and implementation ([#199](https://github.com/GrafeoDB/grafeo/issues/199), [#204](https://github.com/GrafeoDB/grafeo/pull/204)). Also, all remaining syntax gaps covered by the gtest suite are now fully implemented!
 
 ### Added
 
 - **`compact-store` feature flag**: opt-in columnar read-only store for WASM, edge workers and embedded devices. Per-label `NodeTable`s with typed columns, double-indexed `CsrAdjacency` for O(degree) traversal, zone-map skip optimization, and a fluent `CompactStoreBuilder` API with build-time validation. Integrates via `GrafeoDB::with_read_store(Arc<dyn GraphStore>)`, all query languages work through it
-- **Benchmark**: `compact_vs_lpg` criterion bench comparing both stores on identical data
+- **Benchmark**: `compact_benches` criterion group with `nodes_by_label`, `get_node_property`, and `edges_from` benchmarks for CompactStore
 - **`execute_language(language, query, params)` in Python and Node.js bindings**: generic dispatch for non-standard language keys (e.g. `"graphql-rdf"`) without needing dedicated methods
 - **SQL/PGQ UNION, INTERSECT, EXCEPT**: full set operation support between GRAPH_TABLE queries, with optional ALL modifier
 - **GraphQL multiple root fields and variable substitution**: `{ person { name } company { name } }` now translates all root fields via Union instead of dropping all but the first; `$variable` references emit `LogicalExpression::Parameter` with default value propagation from query declarations
@@ -39,7 +39,7 @@ CompactStore: a read-optimized columnar graph store for memory-constrained envir
 - **`ValueVector` push safety net**: type-mismatched pushes now fall back to `VectorData::Generic` instead of silently dropping data
 - **`derive_rdf_schema` removed**: replaced by concrete type propagation through `plan_operator` return values
 - **`eval_function` split**: 1,687-line monolith refactored into a thin dispatcher and 9 focused category methods
-- **Dedup macros and utilities**: `impl_algorithm!` for `GraphAlgorithm` boilerplate (16 of 22 implementations), `map_common_keywords!` for shared lexer keyword mapping, `unescape_string` extracted to shared module, `extract_and_map` generic for binding entity extraction
+- **Dedup macros and utilities**: `impl_algorithm!` for `GraphAlgorithm` boilerplate (17 of 23 implementations), `map_common_keywords!` for shared lexer keyword mapping, `unescape_string` extracted to shared module, `extract_and_map` generic for binding entity extraction
 
 ## [0.5.30] - 2026-03-30
 

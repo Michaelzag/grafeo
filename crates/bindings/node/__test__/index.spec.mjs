@@ -791,6 +791,113 @@ describe('persistence and checkpoint', () => {
 
     try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* ignore */ }
   })
+
+  it('should create, close, and reopen with data intact', async () => {
+    const fs = await import('fs')
+    const os = await import('os')
+    const path = await import('path')
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grafeo-reopen-'))
+    const dbPath = path.join(dir, 'reopen.grafeo')
+
+    const db = GrafeoDB.create(dbPath)
+    await db.execute("INSERT (:Person {name: 'Alix', age: 30})")
+    await db.execute("INSERT (:Person {name: 'Gus', age: 25})")
+    await db.execute(
+      "MATCH (a:Person {name: 'Alix'}), (b:Person {name: 'Gus'}) INSERT (a)-[:KNOWS]->(b)"
+    )
+    expect(db.nodeCount()).toBe(2)
+    expect(db.edgeCount()).toBe(1)
+    db.close()
+
+    const db2 = GrafeoDB.open(dbPath)
+    expect(db2.nodeCount()).toBe(2)
+    expect(db2.edgeCount()).toBe(1)
+
+    const result = await db2.execute('MATCH (p:Person) RETURN p.name')
+    const names = result.toArray().map((r) => r['p.name']).sort()
+    expect(names).toEqual(['Alix', 'Gus'])
+    db2.close()
+
+    try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* ignore */ }
+  })
+
+  it('should accumulate data across multiple reopen cycles', async () => {
+    const fs = await import('fs')
+    const os = await import('os')
+    const path = await import('path')
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grafeo-cycles-'))
+    const dbPath = path.join(dir, 'cycles.grafeo')
+
+    // Cycle 1
+    let db = GrafeoDB.create(dbPath)
+    await db.execute("INSERT (:Person {name: 'Alix'})")
+    db.close()
+
+    // Cycle 2
+    db = GrafeoDB.open(dbPath)
+    expect(db.nodeCount()).toBe(1)
+    await db.execute("INSERT (:Person {name: 'Gus'})")
+    db.close()
+
+    // Cycle 3
+    db = GrafeoDB.open(dbPath)
+    expect(db.nodeCount()).toBe(2)
+    await db.execute("INSERT (:Person {name: 'Vincent'})")
+    db.close()
+
+    // Final check
+    db = GrafeoDB.open(dbPath)
+    expect(db.nodeCount()).toBe(3)
+    const result = await db.execute('MATCH (p:Person) RETURN p.name')
+    const names = result.toArray().map((r) => r['p.name']).sort()
+    expect(names).toEqual(['Alix', 'Gus', 'Vincent'])
+    db.close()
+
+    try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* ignore */ }
+  })
+
+  it('should persist edge properties across close/reopen', async () => {
+    const fs = await import('fs')
+    const os = await import('os')
+    const path = await import('path')
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grafeo-edgeprops-'))
+    const dbPath = path.join(dir, 'edgeprops.grafeo')
+
+    const db = GrafeoDB.create(dbPath)
+    await db.execute("INSERT (:Person {name: 'Alix'})")
+    await db.execute("INSERT (:Person {name: 'Gus'})")
+    await db.execute(
+      "MATCH (a:Person {name: 'Alix'}), (b:Person {name: 'Gus'}) " +
+      "INSERT (a)-[:KNOWS {since: 2020}]->(b)"
+    )
+    db.close()
+
+    const db2 = GrafeoDB.open(dbPath)
+    const result = await db2.execute('MATCH ()-[e:KNOWS]->() RETURN e.since')
+    const rows = result.toArray()
+    expect(rows).toHaveLength(1)
+    expect(rows[0]['e.since']).toBe(2020)
+    db2.close()
+
+    try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* ignore */ }
+  })
+
+  it('should produce a single .grafeo file, not a directory', async () => {
+    const fs = await import('fs')
+    const os = await import('os')
+    const path = await import('path')
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grafeo-single-'))
+    const dbPath = path.join(dir, 'single.grafeo')
+
+    const db = GrafeoDB.create(dbPath)
+    await db.execute("INSERT (:Node {x: 1})")
+    db.close()
+
+    const stat = fs.statSync(dbPath)
+    expect(stat.isFile()).toBe(true)
+
+    try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* ignore */ }
+  })
 })
 
 // ── Error handling ───────────────────────────────────────────────────
