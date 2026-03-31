@@ -13,12 +13,13 @@ import (
 
 // DatabaseInfo holds high-level database information.
 type DatabaseInfo struct {
-	NodeCount    int    `json:"node_count"`
-	EdgeCount    int    `json:"edge_count"`
-	IsPersistent bool   `json:"is_persistent"`
-	Path         string `json:"path"`
-	WalEnabled   bool   `json:"wal_enabled"`
-	Version      string `json:"version"`
+	NodeCount    int      `json:"node_count"`
+	EdgeCount    int      `json:"edge_count"`
+	IsPersistent bool     `json:"is_persistent"`
+	Path         string   `json:"path"`
+	WalEnabled   bool     `json:"wal_enabled"`
+	Version      string   `json:"version"`
+	Features     []string `json:"features"`
 }
 
 // Info returns high-level database information.

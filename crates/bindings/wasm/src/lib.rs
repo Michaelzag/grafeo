@@ -797,6 +797,12 @@ impl Database {
         serde_wasm_bindgen::to_value(&usage).map_err(|e| JsError::new(&e.to_string()))
     }
 
+    /// Returns high-level database information (counts, mode, features).
+    pub fn info(&self) -> Result<JsValue, JsError> {
+        let info = self.inner.info();
+        serde_wasm_bindgen::to_value(&info).map_err(|e| JsError::new(&e.to_string()))
+    }
+
     /// Bulk-imports rows (array of objects) as nodes or edges.
     ///
     /// This is the WASM equivalent of Python's `import_df()`: each object

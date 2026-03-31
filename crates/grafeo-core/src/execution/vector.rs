@@ -571,6 +571,76 @@ mod tests {
         assert_eq!(slice, &[1, 2, 3]);
     }
 
+    /// Typed push methods fall back to VectorData::Generic when the vector
+    /// was created with LogicalType::Any. This exercises the safety-net arms
+    /// added to prevent silent data loss on type mismatch.
+    #[test]
+    fn test_generic_fallback_push_int64() {
+        let mut vec = ValueVector::with_type(LogicalType::Any);
+        vec.push_int64(42);
+        vec.push_int64(-7);
+        assert_eq!(vec.len(), 2);
+        assert_eq!(vec.get_value(0), Some(Value::Int64(42)));
+        assert_eq!(vec.get_value(1), Some(Value::Int64(-7)));
+    }
+
+    #[test]
+    fn test_generic_fallback_push_bool() {
+        let mut vec = ValueVector::with_type(LogicalType::Any);
+        vec.push_bool(true);
+        vec.push_bool(false);
+        assert_eq!(vec.len(), 2);
+        assert_eq!(vec.get_value(0), Some(Value::Bool(true)));
+        assert_eq!(vec.get_value(1), Some(Value::Bool(false)));
+    }
+
+    #[test]
+    fn test_generic_fallback_push_float64() {
+        let mut vec = ValueVector::with_type(LogicalType::Any);
+        vec.push_float64(1.23);
+        vec.push_float64(-0.5);
+        assert_eq!(vec.len(), 2);
+        assert_eq!(vec.get_value(0), Some(Value::Float64(1.23)));
+        assert_eq!(vec.get_value(1), Some(Value::Float64(-0.5)));
+    }
+
+    #[test]
+    fn test_generic_fallback_push_string() {
+        let mut vec = ValueVector::with_type(LogicalType::Any);
+        vec.push_string("hello");
+        vec.push_string("world");
+        assert_eq!(vec.len(), 2);
+        assert_eq!(vec.get_value(0), Some(Value::String("hello".into())));
+        assert_eq!(vec.get_value(1), Some(Value::String("world".into())));
+    }
+
+    /// Mixed typed pushes into a Generic vector preserve each value's type.
+    #[test]
+    fn test_generic_fallback_mixed_types() {
+        let mut vec = ValueVector::with_type(LogicalType::Any);
+        vec.push_int64(1);
+        vec.push_string("two");
+        vec.push_bool(true);
+        vec.push_float64(99.5);
+        assert_eq!(vec.len(), 4);
+        assert_eq!(vec.get_value(0), Some(Value::Int64(1)));
+        assert_eq!(vec.get_value(1), Some(Value::String("two".into())));
+        assert_eq!(vec.get_value(2), Some(Value::Bool(true)));
+        assert_eq!(vec.get_value(3), Some(Value::Float64(99.5)));
+    }
+
+    /// Pushing a typed value into a mismatched non-Generic vector is a no-op.
+    #[test]
+    fn test_type_mismatch_noop() {
+        let mut vec = ValueVector::with_type(LogicalType::Int64);
+        vec.push_string("wrong type");
+        assert_eq!(vec.len(), 0);
+
+        let mut vec = ValueVector::with_type(LogicalType::String);
+        vec.push_int64(42);
+        assert_eq!(vec.len(), 0);
+    }
+
     #[test]
     fn test_clear() {
         let mut vec = ValueVector::with_type(LogicalType::Int64);

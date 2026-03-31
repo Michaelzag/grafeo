@@ -56,6 +56,21 @@ _LANGUAGE_METHODS: Dict[str, str] = {
     "sql_pgq": "execute_sql",
 }
 
+# Cached set of compiled feature flags from db.info()["features"]
+_compiled_features: Optional[set] = None
+
+
+def _get_compiled_features() -> set:
+    """Return the set of features compiled into the grafeo binary."""
+    global _compiled_features
+    if _compiled_features is None:
+        db = grafeo.GrafeoDB()
+        info = db.info()
+        _compiled_features = set(info.get("features", []))
+        db.close()
+    return _compiled_features
+
+
 # Repo root: tests/spec/runners/python/conftest.py -> five .parent calls
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 
@@ -148,17 +163,22 @@ class GtestItem(pytest.Item):
         # Determine language: per-test override > rosetta variant > file meta
         language = self.variant_lang or tc.language or meta.language or "gql"
 
-        # Check requires: skip if the binding does not expose the method
+        # Check requires: skip if the compiled build lacks the feature
         all_requires = list(meta.requires)
         if language not in ("gql", "") and language not in all_requires:
             all_requires.append(language)
 
+        features = _get_compiled_features()
         for req in all_requires:
-            method_name = _LANGUAGE_METHODS.get(req)
-            if method_name and not hasattr(grafeo.GrafeoDB, method_name):
-                pytest.skip(
-                    f"grafeo build does not support '{req}' (no {method_name} method)"
-                )
+            key = req.replace("_", "-")
+            if key == "gql":
+                continue
+            # Compound language keys: "graphql-rdf" requires both "graphql" and "rdf"
+            if key == "graphql-rdf":
+                if "graphql" not in features or "rdf" not in features:
+                    pytest.skip(f"grafeo build does not include '{key}' feature")
+            elif key not in features:
+                pytest.skip(f"grafeo build does not include '{key}' feature")
 
         # Fresh database per test
         db = grafeo.GrafeoDB()

@@ -4606,7 +4606,7 @@ fn rdf_values_equal(left: &Value, right: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::query::plan::LogicalPlan;
+    use crate::query::plan::{CountExpr, JoinType, LogicalPlan};
 
     #[test]
     fn test_rdf_planner_simple_scan() {
@@ -4851,5 +4851,231 @@ mod tests {
 
         // Should succeed silently
         assert!(op.next().is_ok());
+    }
+
+    /// Triple scan propagates LogicalType::String for every output column.
+    #[test]
+    fn test_type_propagation_triple_scan() {
+        let store = Arc::new(RdfStore::new());
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/name"),
+            Term::literal("Alix"),
+        ));
+
+        let planner = RdfPlanner::new(store);
+        let scan = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Variable("p".to_string()),
+            object: TripleComponent::Variable("o".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+
+        let (_op, columns, types) = planner.plan_operator(&scan).unwrap();
+        // All RDF columns are String: s, p, o, plus __lang_o companion
+        assert_eq!(columns.len(), types.len());
+        for (i, ty) in types.iter().enumerate() {
+            assert_eq!(
+                *ty,
+                LogicalType::String,
+                "column {i} ({}) should be String",
+                columns[i]
+            );
+        }
+    }
+
+    /// Join of two triple scans propagates String types through to output.
+    #[test]
+    fn test_type_propagation_join() {
+        use crate::query::plan::JoinOp;
+
+        let store = Arc::new(RdfStore::new());
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/name"),
+            Term::literal("Alix"),
+        ));
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/age"),
+            Term::typed_literal("30", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+
+        let planner = RdfPlanner::new(store);
+
+        let left = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/name".to_string()),
+            object: TripleComponent::Variable("name".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+        let right = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/age".to_string()),
+            object: TripleComponent::Variable("age".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+
+        let join = LogicalOperator::Join(JoinOp {
+            left: Box::new(left),
+            right: Box::new(right),
+            join_type: JoinType::Inner,
+            conditions: vec![],
+        });
+
+        let (_op, columns, types) = planner.plan_operator(&join).unwrap();
+        assert_eq!(columns.len(), types.len());
+        // All output columns should be String (join preserves types from both sides)
+        for (i, ty) in types.iter().enumerate() {
+            assert_eq!(
+                *ty,
+                LogicalType::String,
+                "join column {i} ({}) should be String",
+                columns[i]
+            );
+        }
+    }
+
+    /// BIND appends an Any-typed column for the computed expression.
+    #[test]
+    fn test_type_propagation_bind() {
+        let store = Arc::new(RdfStore::new());
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/name"),
+            Term::literal("Alix"),
+        ));
+
+        let planner = RdfPlanner::new(store);
+
+        let scan = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/name".to_string()),
+            object: TripleComponent::Variable("name".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+
+        let bind = LogicalOperator::Bind(BindOp {
+            input: Box::new(scan),
+            variable: "label".to_string(),
+            expression: crate::query::plan::LogicalExpression::Variable("name".to_string()),
+        });
+
+        let (_op, columns, types) = planner.plan_operator(&bind).unwrap();
+        assert_eq!(columns.last(), Some(&"label".to_string()));
+        // Input columns are String, BIND column is Any
+        let last_idx = types.len() - 1;
+        assert_eq!(
+            types[last_idx],
+            LogicalType::Any,
+            "BIND column should be Any"
+        );
+        for ty in &types[..last_idx] {
+            assert_eq!(*ty, LogicalType::String, "input columns should be String");
+        }
+    }
+
+    /// Aggregate output has concrete types: group-by columns are String,
+    /// COUNT is Int64, SUM/AVG are Float64.
+    #[test]
+    fn test_type_propagation_aggregate() {
+        use crate::query::plan::{AggregateExpr, AggregateFunction, AggregateOp};
+
+        let store = Arc::new(RdfStore::new());
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/name"),
+            Term::literal("Alix"),
+        ));
+
+        let planner = RdfPlanner::new(store);
+
+        let scan = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/name".to_string()),
+            object: TripleComponent::Variable("name".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+
+        let agg = LogicalOperator::Aggregate(AggregateOp {
+            input: Box::new(scan),
+            group_by: vec![crate::query::plan::LogicalExpression::Variable(
+                "name".to_string(),
+            )],
+            aggregates: vec![AggregateExpr {
+                function: AggregateFunction::Count,
+                expression: None,
+                expression2: None,
+                distinct: false,
+                alias: Some("cnt".to_string()),
+                percentile: None,
+                separator: None,
+            }],
+            having: None,
+        });
+
+        let (_op, columns, types) = planner.plan_operator(&agg).unwrap();
+        assert_eq!(columns, vec!["name", "cnt"]);
+        assert_eq!(types[0], LogicalType::String, "group-by column is String");
+        assert_eq!(types[1], LogicalType::Int64, "COUNT produces Int64");
+    }
+
+    /// Filter, Distinct, Limit, Skip all preserve input types.
+    #[test]
+    fn test_type_propagation_passthrough_operators() {
+        let store = Arc::new(RdfStore::new());
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/name"),
+            Term::literal("Alix"),
+        ));
+
+        let planner = RdfPlanner::new(store);
+
+        let scan = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/name".to_string()),
+            object: TripleComponent::Variable("name".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+
+        // Get baseline types from the scan
+        let (_op, _cols, scan_types) = planner.plan_operator(&scan).unwrap();
+
+        // Wrap in Limit
+        let limited = LogicalOperator::Limit(LimitOp {
+            input: Box::new(scan.clone()),
+            count: CountExpr::Literal(10),
+        });
+        let (_op, _cols, limit_types) = planner.plan_operator(&limited).unwrap();
+        assert_eq!(scan_types, limit_types, "Limit preserves types");
+
+        // Wrap in Distinct
+        let distinct = LogicalOperator::Distinct(DistinctOp {
+            input: Box::new(scan.clone()),
+            columns: None,
+        });
+        let (_op, _cols, distinct_types) = planner.plan_operator(&distinct).unwrap();
+        assert_eq!(scan_types, distinct_types, "Distinct preserves types");
+
+        // Wrap in Skip
+        let skipped = LogicalOperator::Skip(SkipOp {
+            input: Box::new(scan),
+            count: CountExpr::Literal(1),
+        });
+        let (_op, _cols, skip_types) = planner.plan_operator(&skipped).unwrap();
+        assert_eq!(scan_types, skip_types, "Skip preserves types");
     }
 }

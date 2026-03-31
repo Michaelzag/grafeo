@@ -145,18 +145,26 @@ function executeQuery(db, language, query) {
   return db.executeWithLanguage(query, key)
 }
 
-/** Check if a language method is available on the WASM Database instance. */
-function isLanguageAvailable(db, language) {
-  switch (language) {
-    case 'gql': case '': return true
-    case 'cypher': return typeof db.executeCypher === 'function'
-    case 'gremlin': return typeof db.executeGremlin === 'function'
-    case 'graphql': return typeof db.executeGraphql === 'function'
-    case 'graphql-rdf': return typeof db.executeWithLanguage === 'function'
-    case 'sql-pgq': case 'sql_pgq': case 'sql': return typeof db.executeSql === 'function'
-    case 'sparql': return typeof db.executeSparql === 'function'
-    default: return false
+/** Cached set of compiled feature flags, populated on first use. */
+let _features = null
+function getFeatures(db) {
+  if (!_features) {
+    const info = db.info()
+    _features = new Set(info.features || [])
   }
+  return _features
+}
+
+/** Check if a language or feature requirement is available. */
+function isAvailable(db, requirement) {
+  if (requirement === 'gql' || requirement === '') return true
+  const key = requirement.replace(/_/g, '-')
+  // Compound language keys: "graphql-rdf" requires both "graphql" and "rdf"
+  if (key === 'graphql-rdf') {
+    const f = getFeatures(db)
+    return f.has('graphql') && f.has('rdf')
+  }
+  return getFeatures(db).has(key)
 }
 
 // ---------------------------------------------------------------------------
@@ -193,7 +201,7 @@ for (const filePath of gtestFiles) {
           it(`${tc.name}_${lang}`, (ctx) => {
             if (!WASM_AVAILABLE) return ctx.skip()
             const db = new Database()
-            if (!isLanguageAvailable(db, lang)) return ctx.skip()
+            if (!isAvailable(db, lang)) return ctx.skip()
             if (meta.dataset && meta.dataset !== 'empty') {
               loadDataset(db, meta.dataset)
             }
@@ -217,11 +225,11 @@ for (const filePath of gtestFiles) {
         const db = new Database()
 
         // Check language availability
-        if (!isLanguageAvailable(db, meta.language)) return ctx.skip()
+        if (!isAvailable(db, meta.language)) return ctx.skip()
 
         // Check requires: skip if binding does not expose the required method
         for (const req of meta.requires) {
-          if (!isLanguageAvailable(db, req)) return ctx.skip()
+          if (!isAvailable(db, req)) return ctx.skip()
         }
 
         // Load dataset

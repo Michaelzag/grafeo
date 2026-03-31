@@ -1896,6 +1896,7 @@ pub extern "C" fn grafeo_info(db: *mut GrafeoDatabase) -> *mut c_char {
         "path": info.path.as_ref().map(|p| p.to_string_lossy().into_owned()),
         "wal_enabled": info.wal_enabled,
         "version": info.version,
+        "features": info.features,
     });
     let s = serde_json::to_string(&json).unwrap_or_default();
     CString::new(s).map_or(std::ptr::null_mut(), CString::into_raw)

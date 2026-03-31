@@ -21,6 +21,28 @@ import (
 )
 
 // ---------------------------------------------------------------------------
+// Compiled features (cached once per test run)
+// ---------------------------------------------------------------------------
+
+// compiledFeatures is populated in TestMain and holds the features compiled
+// into the grafeo-c library (e.g. "gql", "cypher", "algos").
+var compiledFeatures = map[string]bool{}
+
+func TestMain(m *testing.M) {
+	db, err := grafeo.OpenInMemory()
+	if err == nil {
+		info, err := db.Info()
+		if err == nil {
+			for _, f := range info.Features {
+				compiledFeatures[f] = true
+			}
+		}
+		db.Close()
+	}
+	os.Exit(m.Run())
+}
+
+// ---------------------------------------------------------------------------
 // .gtest schema types
 // ---------------------------------------------------------------------------
 
@@ -1074,14 +1096,19 @@ func runSingleTest(t *testing.T, gf *GtestFile, tc TestCase, variantLang, varian
 		language = gf.Meta.Language
 	}
 
-	// Check requires: skip if language is not supported
-	// (We cannot introspect available features at the Go level, so we try
-	// to execute and skip on specific errors. However, we do skip known
-	// unsupported dispatch keys proactively.)
+	// Check language availability
+	if language != "gql" && language != "" {
+		langKey := strings.ReplaceAll(language, "_", "-")
+		if !compiledFeatures[langKey] {
+			t.Skipf("language '%s' not available in this build", langKey)
+		}
+	}
+
+	// Check requires: skip if this build lacks the feature
 	for _, req := range gf.Meta.Requires {
-		if req == "rdf" && language != "sparql" {
-			// rdf requirement is only relevant for SPARQL tests
-			continue
+		key := strings.ReplaceAll(req, "_", "-")
+		if !compiledFeatures[key] {
+			t.Skipf("feature '%s' not available in this build", key)
 		}
 	}
 

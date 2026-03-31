@@ -38,17 +38,8 @@ public class SpecTests : IDisposable
     /// <summary>Path to the datasets directory.</summary>
     private static readonly string DatasetsDir = Path.Combine(SpecDir, "datasets");
 
-    /// <summary>Map of language names to GrafeoDB method names for availability checks.</summary>
-    private static readonly Dictionary<string, string> LanguageMethods = new()
-    {
-        ["gql"] = "Execute",
-        ["cypher"] = "ExecuteCypher",
-        ["gremlin"] = "ExecuteGremlin",
-        ["graphql"] = "ExecuteGraphql",
-        ["sparql"] = "ExecuteSparql",
-        ["sql-pgq"] = "ExecuteSql",
-        ["sql_pgq"] = "ExecuteSql",
-    };
+    /// <summary>Cached set of compiled feature flags from db.Info().</summary>
+    private static readonly HashSet<string> CompiledFeatures = LoadCompiledFeatures();
 
     private GrafeoDB? _db;
 
@@ -95,9 +86,9 @@ public class SpecTests : IDisposable
         // Check language availability
         if (language != "gql" && language != "")
         {
-            if (!HasLanguageMethod(language))
+            if (!HasFeature(language))
             {
-                Skip.If(true, $"Language '{language}' not available in this build");
+                Skip.If(true, $"Feature '{language}' not available in this build");
                 return;
             }
         }
@@ -105,9 +96,9 @@ public class SpecTests : IDisposable
         // Check requires
         foreach (var req in meta.Requires)
         {
-            if (!HasLanguageMethod(req))
+            if (!HasFeature(req))
             {
-                Skip.If(true, $"Required language '{req}' not available");
+                Skip.If(true, $"Required feature '{req}' not available");
                 return;
             }
         }
@@ -341,12 +332,12 @@ public class SpecTests : IDisposable
         return coerced;
     }
 
-    /// <summary>Check if a language method exists on GrafeoDB.</summary>
-    private static bool HasLanguageMethod(string language)
+    /// <summary>Check if a feature (language or capability) is available.</summary>
+    private static bool HasFeature(string requirement)
     {
-        if (!LanguageMethods.TryGetValue(language, out var methodName))
-            return false;
-        return typeof(GrafeoDB).GetMethod(methodName, [typeof(string)]) is not null;
+        if (requirement is "gql" or "") return true;
+        var key = requirement.Replace('_', '-');
+        return CompiledFeatures.Contains(key);
     }
 
     // =========================================================================
@@ -762,6 +753,27 @@ public class SpecTests : IDisposable
         {
             return false;
         }
+    }
+
+    private static HashSet<string> LoadCompiledFeatures()
+    {
+        try
+        {
+            using var db = GrafeoDB.Memory();
+            var json = db.Info();
+            var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("features", out var arr))
+            {
+                return arr.EnumerateArray()
+                    .Select(e => e.GetString()!)
+                    .ToHashSet();
+            }
+        }
+        catch
+        {
+            // Native library not available
+        }
+        return [];
     }
 
     private static string FindRepoRoot()

@@ -1670,6 +1670,7 @@ impl PyGrafeoDB {
         dict.set_item("path", info.path.map(|p| p.to_string_lossy().to_string()))?;
         dict.set_item("wal_enabled", info.wal_enabled)?;
         dict.set_item("version", info.version)?;
+        dict.set_item("features", pyo3::types::PyList::new(py, &info.features)?)?;
 
         Ok(dict.into())
     }

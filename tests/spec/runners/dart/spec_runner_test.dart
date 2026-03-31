@@ -49,25 +49,28 @@ String _normaliseLanguage(String lang) {
   };
 }
 
-/// Check whether a language is available by attempting a no-op query.
-/// Results are cached per language for the lifetime of the test run.
-final _languageAvailability = <String, bool>{};
+/// Cached set of compiled feature flags from db.info().
+Set<String>? _compiledFeatures;
 
-bool _isLanguageAvailable(String language) {
-  final key = _normaliseLanguage(language);
-  if (key == 'gql' || key.isEmpty) return true;
-  return _languageAvailability.putIfAbsent(key, () {
+Set<String> _getCompiledFeatures() {
+  if (_compiledFeatures == null) {
     final db = GrafeoDB.memory();
     try {
-      // Try a minimal query; if the language is not compiled in, this throws.
-      db.executeLanguage(key, 'MATCH (n) RETURN n LIMIT 0');
-      return true;
-    } on GrafeoException {
-      return false;
+      final info = jsonDecode(db.info()) as Map<String, dynamic>;
+      final features = info['features'] as List<dynamic>?;
+      _compiledFeatures = features?.map((e) => e.toString()).toSet() ?? {};
     } finally {
       db.close();
     }
-  });
+  }
+  return _compiledFeatures!;
+}
+
+/// Check whether a language or feature requirement is available.
+bool _isAvailable(String requirement) {
+  final key = _normaliseLanguage(requirement).replaceAll('_', '-');
+  if (key == 'gql' || key.isEmpty) return true;
+  return _getCompiledFeatures().contains(key);
 }
 
 // =============================================================================
@@ -1009,7 +1012,7 @@ void main() {
             final lang = entry.key;
             final variantQuery = entry.value;
             test('${tc.name}_$lang', () {
-              if (!_isLanguageAvailable(lang)) {
+              if (!_isAvailable(lang)) {
                 markTestSkipped('Language "$lang" not available');
                 return;
               }
@@ -1043,7 +1046,7 @@ void main() {
           }
 
           // Check language availability
-          if (!_isLanguageAvailable(meta.language)) {
+          if (!_isAvailable(meta.language)) {
             markTestSkipped(
               'Language "${meta.language}" not available',
             );
@@ -1052,7 +1055,7 @@ void main() {
 
           // Check requires
           for (final req in meta.requires) {
-            if (!_isLanguageAvailable(req)) {
+            if (!_isAvailable(req)) {
               markTestSkipped(
                 'Required language "$req" not available',
               );

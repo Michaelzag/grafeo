@@ -119,19 +119,26 @@ async function executeQuery(db, language, query, params) {
   }
 }
 
-/** Check if a language method is available on the GrafeoDB instance. */
-function isLanguageAvailable(db, language) {
-  switch (language) {
-    case 'gql': case '': return true
-    case 'cypher': return typeof db.executeCypher === 'function'
-    case 'gremlin': return typeof db.executeGremlin === 'function'
-    case 'graphql': return typeof db.executeGraphql === 'function'
-    case 'sparql': return typeof db.executeSparql === 'function'
-    case 'rdf': return typeof db.executeSparql === 'function'
-    case 'sql-pgq': case 'sql_pgq': return typeof db.executeSql === 'function'
-    case 'sparql': return typeof db.executeSparql === 'function'
-    default: return typeof db.executeLanguage === 'function'
+/** Cached set of compiled feature flags, populated on first use. */
+let _features = null
+function getFeatures(db) {
+  if (!_features) {
+    const info = db.info()
+    _features = new Set(info.features || [])
   }
+  return _features
+}
+
+/** Check if a language or feature requirement is available. */
+function isAvailable(db, requirement) {
+  if (requirement === 'gql' || requirement === '') return true
+  const key = requirement.replace(/_/g, '-')
+  // Compound language keys: "graphql-rdf" requires both "graphql" and "rdf"
+  if (key === 'graphql-rdf') {
+    const f = getFeatures(db)
+    return f.has('graphql') && f.has('rdf')
+  }
+  return getFeatures(db).has(key)
 }
 
 // ---------------------------------------------------------------------------
@@ -169,7 +176,7 @@ for (const filePath of gtestFiles) {
             if (!GRAFEO_AVAILABLE) return ctx.skip()
             const db = GrafeoDB.create()
             try {
-              if (!isLanguageAvailable(db, lang)) return ctx.skip()
+              if (!isAvailable(db, lang)) return ctx.skip()
               if (meta.dataset && meta.dataset !== 'empty') {
                 await loadDataset(db, meta.dataset)
               }
@@ -191,11 +198,11 @@ for (const filePath of gtestFiles) {
         const db = GrafeoDB.create()
         try {
           // Check language availability
-          if (!isLanguageAvailable(db, meta.language)) return ctx.skip()
+          if (!isAvailable(db, meta.language)) return ctx.skip()
 
-          // Check requires: skip if binding does not expose the required method
+          // Check requires: skip if the compiled build lacks the feature
           for (const req of meta.requires) {
-            if (!isLanguageAvailable(db, req)) return ctx.skip()
+            if (!isAvailable(db, req)) return ctx.skip()
           }
 
           // Load dataset
