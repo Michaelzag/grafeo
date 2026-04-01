@@ -148,8 +148,9 @@ if (Should-Run "dart") {
     if (Build-NativeLib) {
         $libSrc = Join-Path $root "target\release\$libName"
         $dartLib = Join-Path $root "crates\bindings\dart"
-        Copy-Item $libSrc $dartLib -Force
         $dartRunner = Join-Path $root "tests\spec\runners\dart"
+        Copy-Item $libSrc $dartLib -Force
+        Copy-Item $libSrc $dartRunner -Force
         Push-Location $dartRunner
         $env:LD_LIBRARY_PATH = $dartLib
         dart pub get 2>&1 | Out-Null

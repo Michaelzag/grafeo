@@ -297,11 +297,6 @@ impl super::Planner {
                 self.scalar_columns.borrow_mut().insert(col.clone());
             }
 
-            eprintln!(
-                "[plan_return_proj/complex] columns={columns:?} scalars={:?}",
-                self.scalar_columns.borrow()
-            );
-
             Ok((operator, columns))
         } else {
             // Simple case: all return items are bare variables
@@ -314,10 +309,6 @@ impl super::Planner {
                     let col_idx = *variable_columns.get(name).ok_or_else(|| {
                         Error::Internal(format!("Variable '{}' not found in input", name))
                     })?;
-                    eprintln!(
-                        "[plan_return_proj/simple] var={name} col_idx={col_idx} is_scalar={}",
-                        self.scalar_columns.borrow().contains(name)
-                    );
                     if self.scalar_columns.borrow().contains(name) {
                         projections.push(ProjectExpr::Column(col_idx));
                         output_types.push(LogicalType::Any);
