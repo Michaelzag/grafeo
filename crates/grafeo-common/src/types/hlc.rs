@@ -298,6 +298,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "requires wall clock (SystemTime::now) unavailable under Miri isolation"
+    )]
     fn sequential_now_strictly_increasing() {
         let clock = HlcClock::new();
         let mut prev = clock.now();
@@ -312,6 +316,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "requires wall clock (SystemTime::now) unavailable under Miri isolation"
+    )]
     fn concurrent_now_all_unique() {
         let clock = Arc::new(HlcClock::new());
         let num_threads = 8;
@@ -347,6 +355,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "requires wall clock (SystemTime::now) unavailable under Miri isolation"
+    )]
     fn update_advances_past_remote() {
         let clock = HlcClock::new();
 
