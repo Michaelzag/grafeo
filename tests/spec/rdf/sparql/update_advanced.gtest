@@ -89,6 +89,24 @@ tests:
       rows:
         - [Berlin]
 
+  - name: modify_update_numeric_value
+    # MODIFY with numeric literals: delete old integer, insert new integer.
+    # Regression test: RdfModifyOperator must parse string-typed bindings
+    # back to typed literals so the DELETE matches the stored triple.
+    setup:
+      - |
+        INSERT DATA {
+          <http://ex.org/item> <http://ex.org/version> 1 .
+        }
+      - |
+        DELETE { ?s <http://ex.org/version> ?old }
+        INSERT { ?s <http://ex.org/version> 2 }
+        WHERE  { ?s <http://ex.org/version> ?old }
+    query: "SELECT ?v WHERE { <http://ex.org/item> <http://ex.org/version> ?v }"
+    expect:
+      rows:
+        - [2]
+
   - name: modify_delete_only_with_where
     # DELETE clause with WHERE but no INSERT: removes matching triples.
     setup:

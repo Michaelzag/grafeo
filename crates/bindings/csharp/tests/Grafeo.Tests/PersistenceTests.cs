@@ -9,13 +9,15 @@ public sealed class PersistenceTests
     {
         var dir = Path.Combine(Path.GetTempPath(), $"grafeo-csharp-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
-        return Path.Combine(dir, name);
+        return Path.Combine(dir, Path.GetFileName(name));
     }
 
     private static void Cleanup(string dbPath)
     {
         var dir = Path.GetDirectoryName(dbPath)!;
-        try { Directory.Delete(dir, recursive: true); } catch { /* best-effort */ }
+        try { Directory.Delete(dir, recursive: true); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
     }
 
     [Fact]

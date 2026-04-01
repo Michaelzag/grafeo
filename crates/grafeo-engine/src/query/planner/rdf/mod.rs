@@ -1535,18 +1535,8 @@ impl RdfInsertPatternOperator {
     fn value_to_term(value: &Value) -> Option<Term> {
         match value {
             Value::String(s) => {
-                // Check if it looks like an IRI
                 if s.starts_with("http://") || s.starts_with("https://") || s.starts_with("urn:") {
                     Some(Term::Iri(s.to_string().into()))
-                } else if let Ok(n) = s.parse::<i64>() {
-                    // Try to parse as integer
-                    Some(Term::Literal(Literal::integer(n)))
-                } else if let Ok(f) = s.parse::<f64>() {
-                    // Try to parse as float
-                    Some(Term::Literal(Literal::typed(
-                        f.to_string(),
-                        "http://www.w3.org/2001/XMLSchema#double",
-                    )))
                 } else {
                     Some(Term::Literal(Literal::simple(s.to_string())))
                 }
@@ -1821,18 +1811,8 @@ impl RdfDeletePatternOperator {
     fn value_to_term(value: &Value) -> Option<Term> {
         match value {
             Value::String(s) => {
-                // Check if it looks like an IRI
                 if s.starts_with("http://") || s.starts_with("https://") || s.starts_with("urn:") {
                     Some(Term::Iri(s.to_string().into()))
-                } else if let Ok(n) = s.parse::<i64>() {
-                    // Try to parse as integer
-                    Some(Term::Literal(Literal::integer(n)))
-                } else if let Ok(f) = s.parse::<f64>() {
-                    // Try to parse as float
-                    Some(Term::Literal(Literal::typed(
-                        f.to_string(),
-                        "http://www.w3.org/2001/XMLSchema#double",
-                    )))
                 } else {
                     Some(Term::Literal(Literal::simple(s.to_string())))
                 }
@@ -2413,7 +2393,17 @@ impl Operator for RdfModifyOperator {
             }
         }
 
-        // Step 2: Apply DELETE templates using collected bindings
+        // Step 2: Apply DELETE templates using collected bindings.
+        //
+        // RDF typed literals (xsd:integer, xsd:boolean, ...) are stored with
+        // their datatype, but the WHERE clause returns them as plain strings
+        // (Value::String). Reconstructing the Term from the string loses the
+        // type, so a direct `store.remove(&triple)` would fail to match.
+        //
+        // Fix: when the exact triple isn't found, query the store with the
+        // subject+predicate pattern and remove any triple whose literal value
+        // matches the bound string. This handles the type mismatch without
+        // changing the column type system.
         for template in &self.delete_templates {
             for (chunk, row) in &bindings {
                 let subject = self.resolve_component(&template.subject, chunk, *row);
@@ -2421,7 +2411,45 @@ impl Operator for RdfModifyOperator {
                 let object = self.resolve_component(&template.object, chunk, *row);
 
                 if let (Some(s), Some(p), Some(o)) = (subject, predicate, object) {
-                    let triple = Triple::new(s, p, o);
+                    let triple = Triple::new(s.clone(), p.clone(), o.clone());
+                    if !self.store.remove(&triple) {
+                        // Exact match failed: the object may be a plain string
+                        // whose stored form is a typed literal (e.g. "1" vs
+                        // xsd:integer "1"). Query by subject+predicate and
+                        // match on the literal's lexical value.
+                        if let Term::Literal(target_lit) = &o {
+                            let pattern = TriplePattern {
+                                subject: Some(s.clone()),
+                                predicate: Some(p.clone()),
+                                object: None,
+                            };
+                            let matching: Vec<_> = self
+                                .store
+                                .find(&pattern)
+                                .into_iter()
+                                .filter(|t| {
+                                    if let Term::Literal(lit) = t.object() {
+                                        lit.value() == target_lit.value()
+                                    } else {
+                                        false
+                                    }
+                                })
+                                .collect();
+                            for matched in matching {
+                                #[cfg(feature = "cdc")]
+                                record_cdc_triple_delete(
+                                    &self.cdc_log,
+                                    matched.subject(),
+                                    matched.predicate(),
+                                    matched.object(),
+                                    None,
+                                    self.cdc_epoch,
+                                );
+                                self.store.remove(&matched);
+                            }
+                            continue;
+                        }
+                    }
                     #[cfg(feature = "cdc")]
                     record_cdc_triple_delete(
                         &self.cdc_log,
@@ -2431,7 +2459,6 @@ impl Operator for RdfModifyOperator {
                         None,
                         self.cdc_epoch,
                     );
-                    self.store.remove(&triple);
                 }
             }
         }
@@ -4288,7 +4315,6 @@ fn term_to_string(term: &Term) -> String {
     }
 }
 
-/// Pushes an RDF term value to a column, preserving type where possible.
 /// Pushes an RDF term value to a column.
 ///
 /// For RDF columns (which use String type), we always push as string to avoid
