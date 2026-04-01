@@ -16,8 +16,14 @@ public sealed class PersistenceTests
     {
         var dir = Path.GetDirectoryName(dbPath)!;
         try { Directory.Delete(dir, recursive: true); }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
+        catch (IOException)
+        {
+            // Best-effort cleanup in tests: ignore IO failures when deleting the temp directory.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Best-effort cleanup in tests: ignore permission issues when deleting the temp directory.
+        }
     }
 
     [Fact]
