@@ -4,13 +4,17 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 
 ## [0.5.32] - Unreleased
 
-Correctness hardening: aggregation fixes, Gremlin polish, crash recovery tests, and stress test expansion.
+Correctness hardening, Jepsen readiness, and Hybrid Logical Clock for causal consistency.
 
 ### Added
 
 - **Gremlin `valueMap()` and `elementMap()` with no arguments**: `g.V().valueMap()` returns all properties as a map; `g.V().elementMap()` returns id, label, and all properties as a map
 - **WAL-disabled crash injection tests**: crash recovery tests for single-file format with WAL disabled
 - **High-contention stress tests**: concurrent MERGE, mixed read/write, and concurrent schema mutation scenarios
+- **CDC for session mutations**: `CdcGraphStore` decorator intercepts all `GraphStoreMut` methods, buffers CDC events during transactions, and flushes on commit (discards on rollback). Session-driven mutations (`INSERT`, `SET`, `DELETE` via GQL/Cypher) now generate CDC events for replication
+- **Hybrid Logical Clock (HLC)**: `HlcTimestamp` type in grafeo-common packs physical ms (48-bit) + logical counter (16-bit) into a u64. `HlcClock` with lock-free CAS loop guarantees monotonic timestamps even under clock skew. Replaces wall-clock `SystemTime::now()` in CDC events
+- **Epoch monotonicity tests**: 5 concurrent stress tests proving `changes_between()` has no gaps, no duplicates, and strictly monotonic epoch ordering. Found and fixed CDC epoch assignment bug (events now always use `PENDING` epoch in buffer, assigned real commit epoch at flush time)
+- **Session CRUD methods**: `set_node_property()`, `set_edge_property()`, `delete_node()`, `delete_edge()`, `create_edge_with_props()` on Session for transaction-aware direct mutations
 - **gtest regression suite for 0.5.32**: GROUP BY on labels, GROUP BY on dates, ORDER BY column stripping, SPARQL ORDER BY STR(), Gremlin valueMap/elementMap
 - **4 real-world gtest datasets**: e-commerce (customers, orders, products, reviews), movie database (actors, directors, genres), IT infrastructure (services, servers, dependency chains), transportation network (cities, weighted routes, airports)
 - **GQL gap tests**: string predicates (CONTAINS, STARTS WITH, ENDS WITH), list functions (head, last, tail, range, slicing), CASE expressions (simple, searched, nested, in WHERE/ORDER BY), extended math (log, exp, power, trig, pi, e), advanced subqueries (EXISTS multi-hop, COUNT with filter, correlated), error scenarios (division by zero, NULL arithmetic, invalid CAST, overflow)

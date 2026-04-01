@@ -10,6 +10,7 @@
 
 mod date;
 mod duration;
+pub mod hlc;
 mod id;
 mod logical_type;
 mod property_map;
@@ -21,6 +22,7 @@ mod zoned_datetime;
 
 pub use date::Date;
 pub use duration::Duration;
+pub use hlc::{HlcClock, HlcTimestamp};
 pub use id::{EdgeId, EdgeTypeId, EpochId, IndexId, LabelId, NodeId, PropertyKeyId, TransactionId};
 pub use logical_type::LogicalType;
 pub use property_map::PropertyMap;

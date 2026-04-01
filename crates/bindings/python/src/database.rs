@@ -2907,6 +2907,7 @@ fn change_event_to_dict(
         "timestamp".to_string(),
         event
             .timestamp
+            .as_u64()
             .into_py_any(py)
             .expect("u64 to Python conversion"),
     );

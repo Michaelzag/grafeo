@@ -4066,6 +4066,68 @@ impl Session {
         )
     }
 
+    /// Creates an edge with properties within the active transaction context.
+    pub fn create_edge_with_props<'a>(
+        &self,
+        src: NodeId,
+        dst: NodeId,
+        edge_type: &str,
+        properties: impl IntoIterator<Item = (&'a str, Value)>,
+    ) -> grafeo_common::types::EdgeId {
+        let (epoch, transaction_id) = self.get_transaction_context();
+        let tid = transaction_id.unwrap_or(TransactionId::SYSTEM);
+        let store = self.active_lpg_store();
+        let eid = store.create_edge_versioned(src, dst, edge_type, epoch, tid);
+        for (key, value) in properties {
+            store.set_edge_property_versioned(eid, key, value, tid);
+        }
+        eid
+    }
+
+    /// Sets a node property within the active transaction context.
+    pub fn set_node_property(&self, id: NodeId, key: &str, value: Value) {
+        let (_, transaction_id) = self.get_transaction_context();
+        if let Some(tid) = transaction_id {
+            self.active_lpg_store()
+                .set_node_property_versioned(id, key, value, tid);
+        } else {
+            self.active_lpg_store().set_node_property(id, key, value);
+        }
+    }
+
+    /// Sets an edge property within the active transaction context.
+    pub fn set_edge_property(&self, id: grafeo_common::types::EdgeId, key: &str, value: Value) {
+        let (_, transaction_id) = self.get_transaction_context();
+        if let Some(tid) = transaction_id {
+            self.active_lpg_store()
+                .set_edge_property_versioned(id, key, value, tid);
+        } else {
+            self.active_lpg_store().set_edge_property(id, key, value);
+        }
+    }
+
+    /// Deletes a node within the active transaction context.
+    pub fn delete_node(&self, id: NodeId) -> bool {
+        let (epoch, transaction_id) = self.get_transaction_context();
+        if let Some(tid) = transaction_id {
+            self.active_lpg_store()
+                .delete_node_versioned(id, epoch, tid)
+        } else {
+            self.active_lpg_store().delete_node(id)
+        }
+    }
+
+    /// Deletes an edge within the active transaction context.
+    pub fn delete_edge(&self, id: grafeo_common::types::EdgeId) -> bool {
+        let (epoch, transaction_id) = self.get_transaction_context();
+        if let Some(tid) = transaction_id {
+            self.active_lpg_store()
+                .delete_edge_versioned(id, epoch, tid)
+        } else {
+            self.active_lpg_store().delete_edge(id)
+        }
+    }
+
     // =========================================================================
     // Direct Lookup APIs (bypass query planning for O(1) point reads)
     // =========================================================================

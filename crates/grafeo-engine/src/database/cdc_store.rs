@@ -10,10 +10,11 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use arcstr::ArcStr;
-use grafeo_common::types::{EdgeId, EpochId, NodeId, PropertyKey, TransactionId, Value};
+use grafeo_common::types::{
+    EdgeId, EpochId, HlcTimestamp, NodeId, PropertyKey, TransactionId, Value,
+};
 use grafeo_common::utils::hash::FxHashMap;
 use grafeo_core::graph::lpg::{CompareOp, Edge, Node};
 use grafeo_core::graph::{Direction, GraphStore, GraphStoreMut};
@@ -113,20 +114,24 @@ impl CdcGraphStore {
         let node = self.inner.get_node(id)?;
         Some(node.labels.iter().map(|l| l.to_string()).collect())
     }
+
+    /// Returns the next HLC timestamp from the CDC log's clock.
+    fn next_ts(&self) -> HlcTimestamp {
+        self.cdc_log.next_timestamp()
+    }
 }
 
-fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as u64)
-}
-
-fn make_event(entity_id: EntityId, kind: ChangeKind, epoch: EpochId) -> ChangeEvent {
+fn make_event(
+    entity_id: EntityId,
+    kind: ChangeKind,
+    epoch: EpochId,
+    timestamp: HlcTimestamp,
+) -> ChangeEvent {
     ChangeEvent {
         entity_id,
         kind,
         epoch,
-        timestamp: now_millis(),
+        timestamp,
         before: None,
         after: None,
         labels: None,
@@ -386,7 +391,12 @@ impl GraphStoreMut for CdcGraphStore {
     fn create_node(&self, labels: &[&str]) -> NodeId {
         let id = self.inner.create_node(labels);
         let epoch = self.inner.current_epoch();
-        let mut event = make_event(EntityId::Node(id), ChangeKind::Create, epoch);
+        let mut event = make_event(
+            EntityId::Node(id),
+            ChangeKind::Create,
+            epoch,
+            self.next_ts(),
+        );
         event.labels = Some(labels.iter().map(|s| (*s).to_string()).collect());
         self.record_directly(event);
         id
@@ -402,7 +412,12 @@ impl GraphStoreMut for CdcGraphStore {
             .inner
             .create_node_versioned(labels, epoch, transaction_id);
         // Use PENDING epoch: the real commit epoch is assigned during flush.
-        let mut event = make_event(EntityId::Node(id), ChangeKind::Create, EpochId::PENDING);
+        let mut event = make_event(
+            EntityId::Node(id),
+            ChangeKind::Create,
+            EpochId::PENDING,
+            self.next_ts(),
+        );
         event.labels = Some(labels.iter().map(|s| (*s).to_string()).collect());
         self.buffer_event(event);
         id
@@ -413,7 +428,12 @@ impl GraphStoreMut for CdcGraphStore {
     fn create_edge(&self, src: NodeId, dst: NodeId, edge_type: &str) -> EdgeId {
         let id = self.inner.create_edge(src, dst, edge_type);
         let epoch = self.inner.current_epoch();
-        let mut event = make_event(EntityId::Edge(id), ChangeKind::Create, epoch);
+        let mut event = make_event(
+            EntityId::Edge(id),
+            ChangeKind::Create,
+            epoch,
+            self.next_ts(),
+        );
         event.edge_type = Some(edge_type.to_string());
         event.src_id = Some(src.as_u64());
         event.dst_id = Some(dst.as_u64());
@@ -432,7 +452,12 @@ impl GraphStoreMut for CdcGraphStore {
         let id = self
             .inner
             .create_edge_versioned(src, dst, edge_type, epoch, transaction_id);
-        let mut event = make_event(EntityId::Edge(id), ChangeKind::Create, epoch);
+        let mut event = make_event(
+            EntityId::Edge(id),
+            ChangeKind::Create,
+            epoch,
+            self.next_ts(),
+        );
         event.edge_type = Some(edge_type.to_string());
         event.src_id = Some(src.as_u64());
         event.dst_id = Some(dst.as_u64());
@@ -444,7 +469,12 @@ impl GraphStoreMut for CdcGraphStore {
         let ids = self.inner.batch_create_edges(edges);
         let epoch = self.inner.current_epoch();
         for (id, (src, dst, edge_type)) in ids.iter().zip(edges) {
-            let mut event = make_event(EntityId::Edge(*id), ChangeKind::Create, epoch);
+            let mut event = make_event(
+                EntityId::Edge(*id),
+                ChangeKind::Create,
+                epoch,
+                self.next_ts(),
+            );
             event.edge_type = Some((*edge_type).to_string());
             event.src_id = Some(src.as_u64());
             event.dst_id = Some(dst.as_u64());
@@ -460,7 +490,12 @@ impl GraphStoreMut for CdcGraphStore {
         let deleted = self.inner.delete_node(id);
         if deleted {
             let epoch = self.inner.current_epoch();
-            let mut event = make_event(EntityId::Node(id), ChangeKind::Delete, epoch);
+            let mut event = make_event(
+                EntityId::Node(id),
+                ChangeKind::Delete,
+                epoch,
+                self.next_ts(),
+            );
             event.before = before_props;
             self.record_directly(event);
         }
@@ -477,7 +512,12 @@ impl GraphStoreMut for CdcGraphStore {
         let labels = self.collect_node_labels(id);
         let deleted = self.inner.delete_node_versioned(id, epoch, transaction_id);
         if deleted {
-            let mut event = make_event(EntityId::Node(id), ChangeKind::Delete, epoch);
+            let mut event = make_event(
+                EntityId::Node(id),
+                ChangeKind::Delete,
+                epoch,
+                self.next_ts(),
+            );
             event.before = before_props;
             event.labels = labels;
             self.buffer_event(event);
@@ -500,7 +540,12 @@ impl GraphStoreMut for CdcGraphStore {
 
         let epoch = self.inner.current_epoch();
         for (eid, props) in edge_infos {
-            let mut event = make_event(EntityId::Edge(eid), ChangeKind::Delete, epoch);
+            let mut event = make_event(
+                EntityId::Edge(eid),
+                ChangeKind::Delete,
+                epoch,
+                self.next_ts(),
+            );
             event.before = props;
             self.record_directly(event);
         }
@@ -511,7 +556,12 @@ impl GraphStoreMut for CdcGraphStore {
         let deleted = self.inner.delete_edge(id);
         if deleted {
             let epoch = self.inner.current_epoch();
-            let mut event = make_event(EntityId::Edge(id), ChangeKind::Delete, epoch);
+            let mut event = make_event(
+                EntityId::Edge(id),
+                ChangeKind::Delete,
+                epoch,
+                self.next_ts(),
+            );
             event.before = before_props;
             self.record_directly(event);
         }
@@ -527,7 +577,12 @@ impl GraphStoreMut for CdcGraphStore {
         let before_props = self.collect_edge_properties(id);
         let deleted = self.inner.delete_edge_versioned(id, epoch, transaction_id);
         if deleted {
-            let mut event = make_event(EntityId::Edge(id), ChangeKind::Delete, epoch);
+            let mut event = make_event(
+                EntityId::Edge(id),
+                ChangeKind::Delete,
+                epoch,
+                self.next_ts(),
+            );
             event.before = before_props;
             self.buffer_event(event);
         }
@@ -540,7 +595,12 @@ impl GraphStoreMut for CdcGraphStore {
         let old_value = self.inner.get_node_property(id, &PropertyKey::new(key));
         self.inner.set_node_property(id, key, value.clone());
         let epoch = self.inner.current_epoch();
-        let mut event = make_event(EntityId::Node(id), ChangeKind::Update, epoch);
+        let mut event = make_event(
+            EntityId::Node(id),
+            ChangeKind::Update,
+            epoch,
+            self.next_ts(),
+        );
         event.before = old_value.map(|v| {
             let mut m = HashMap::new();
             m.insert(key.to_string(), v);
@@ -556,7 +616,12 @@ impl GraphStoreMut for CdcGraphStore {
         let old_value = self.inner.get_edge_property(id, &PropertyKey::new(key));
         self.inner.set_edge_property(id, key, value.clone());
         let epoch = self.inner.current_epoch();
-        let mut event = make_event(EntityId::Edge(id), ChangeKind::Update, epoch);
+        let mut event = make_event(
+            EntityId::Edge(id),
+            ChangeKind::Update,
+            epoch,
+            self.next_ts(),
+        );
         event.before = old_value.map(|v| {
             let mut m = HashMap::new();
             m.insert(key.to_string(), v);
@@ -579,7 +644,12 @@ impl GraphStoreMut for CdcGraphStore {
         self.inner
             .set_node_property_versioned(id, key, value.clone(), transaction_id);
         let epoch = self.inner.current_epoch();
-        let mut event = make_event(EntityId::Node(id), ChangeKind::Update, epoch);
+        let mut event = make_event(
+            EntityId::Node(id),
+            ChangeKind::Update,
+            epoch,
+            self.next_ts(),
+        );
         event.before = old_value.map(|v| {
             let mut m = HashMap::new();
             m.insert(key.to_string(), v);
@@ -602,7 +672,12 @@ impl GraphStoreMut for CdcGraphStore {
         self.inner
             .set_edge_property_versioned(id, key, value.clone(), transaction_id);
         let epoch = self.inner.current_epoch();
-        let mut event = make_event(EntityId::Edge(id), ChangeKind::Update, epoch);
+        let mut event = make_event(
+            EntityId::Edge(id),
+            ChangeKind::Update,
+            epoch,
+            self.next_ts(),
+        );
         event.before = old_value.map(|v| {
             let mut m = HashMap::new();
             m.insert(key.to_string(), v);
@@ -618,7 +693,12 @@ impl GraphStoreMut for CdcGraphStore {
         let removed = self.inner.remove_node_property(id, key);
         if let Some(ref old_val) = removed {
             let epoch = self.inner.current_epoch();
-            let mut event = make_event(EntityId::Node(id), ChangeKind::Update, epoch);
+            let mut event = make_event(
+                EntityId::Node(id),
+                ChangeKind::Update,
+                epoch,
+                self.next_ts(),
+            );
             let mut before = HashMap::new();
             before.insert(key.to_string(), old_val.clone());
             event.before = Some(before);
@@ -631,7 +711,12 @@ impl GraphStoreMut for CdcGraphStore {
         let removed = self.inner.remove_edge_property(id, key);
         if let Some(ref old_val) = removed {
             let epoch = self.inner.current_epoch();
-            let mut event = make_event(EntityId::Edge(id), ChangeKind::Update, epoch);
+            let mut event = make_event(
+                EntityId::Edge(id),
+                ChangeKind::Update,
+                epoch,
+                self.next_ts(),
+            );
             let mut before = HashMap::new();
             before.insert(key.to_string(), old_val.clone());
             event.before = Some(before);
@@ -651,7 +736,12 @@ impl GraphStoreMut for CdcGraphStore {
             .remove_node_property_versioned(id, key, transaction_id);
         if let Some(ref old_val) = removed {
             let epoch = self.inner.current_epoch();
-            let mut event = make_event(EntityId::Node(id), ChangeKind::Update, epoch);
+            let mut event = make_event(
+                EntityId::Node(id),
+                ChangeKind::Update,
+                epoch,
+                self.next_ts(),
+            );
             let mut before = HashMap::new();
             before.insert(key.to_string(), old_val.clone());
             event.before = Some(before);
@@ -671,7 +761,12 @@ impl GraphStoreMut for CdcGraphStore {
             .remove_edge_property_versioned(id, key, transaction_id);
         if let Some(ref old_val) = removed {
             let epoch = self.inner.current_epoch();
-            let mut event = make_event(EntityId::Edge(id), ChangeKind::Update, epoch);
+            let mut event = make_event(
+                EntityId::Edge(id),
+                ChangeKind::Update,
+                epoch,
+                self.next_ts(),
+            );
             let mut before = HashMap::new();
             before.insert(key.to_string(), old_val.clone());
             event.before = Some(before);
@@ -686,7 +781,12 @@ impl GraphStoreMut for CdcGraphStore {
         let added = self.inner.add_label(node_id, label);
         if added {
             let epoch = self.inner.current_epoch();
-            let mut event = make_event(EntityId::Node(node_id), ChangeKind::Update, epoch);
+            let mut event = make_event(
+                EntityId::Node(node_id),
+                ChangeKind::Update,
+                epoch,
+                self.next_ts(),
+            );
             event.labels = self.collect_node_labels(node_id);
             self.record_directly(event);
         }
@@ -698,7 +798,12 @@ impl GraphStoreMut for CdcGraphStore {
         let removed = self.inner.remove_label(node_id, label);
         if removed {
             let epoch = self.inner.current_epoch();
-            let mut event = make_event(EntityId::Node(node_id), ChangeKind::Update, epoch);
+            let mut event = make_event(
+                EntityId::Node(node_id),
+                ChangeKind::Update,
+                epoch,
+                self.next_ts(),
+            );
             event.labels = old_labels;
             self.record_directly(event);
         }
@@ -716,7 +821,12 @@ impl GraphStoreMut for CdcGraphStore {
             .add_label_versioned(node_id, label, transaction_id);
         if added {
             let epoch = self.inner.current_epoch();
-            let mut event = make_event(EntityId::Node(node_id), ChangeKind::Update, epoch);
+            let mut event = make_event(
+                EntityId::Node(node_id),
+                ChangeKind::Update,
+                epoch,
+                self.next_ts(),
+            );
             event.labels = self.collect_node_labels(node_id);
             self.buffer_event(event);
         }
@@ -735,7 +845,12 @@ impl GraphStoreMut for CdcGraphStore {
             .remove_label_versioned(node_id, label, transaction_id);
         if removed {
             let epoch = self.inner.current_epoch();
-            let mut event = make_event(EntityId::Node(node_id), ChangeKind::Update, epoch);
+            let mut event = make_event(
+                EntityId::Node(node_id),
+                ChangeKind::Update,
+                epoch,
+                self.next_ts(),
+            );
             event.labels = old_labels;
             self.buffer_event(event);
         }
