@@ -592,7 +592,7 @@ enum InferredType {
     Dict,
 }
 
-/// Converts any [`GraphStore`] into a [`CompactStore`].
+/// Converts any [`GraphStore`](crate::graph::GraphStore) into a [`CompactStore`].
 ///
 /// Reads all nodes grouped by label, infers column types from property values,
 /// reads all edges grouped by type, and builds a `CompactStore` with backward
