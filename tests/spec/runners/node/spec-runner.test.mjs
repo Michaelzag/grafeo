@@ -198,8 +198,9 @@ for (const filePath of gtestFiles) {
 
         const db = GrafeoDB.create()
         try {
-          // Check language availability
+          // Check language availability (file-level and per-test)
           if (!isAvailable(db, meta.language)) return ctx.skip()
+          if (tc.language && !isAvailable(db, tc.language)) return ctx.skip()
 
           // Check requires: skip if the compiled build lacks the feature
           for (const req of meta.requires) {
@@ -237,7 +238,7 @@ async function runTestCase(db, tc, language, setupLanguage) {
   if (queries.length === 0) throw new Error(`No query or statements in test '${tc.name}'`)
 
   // Error case: execute all-but-last normally, only last should fail
-  if (exp.error) {
+  if (exp.error != null) {
     for (let i = 0; i < queries.length - 1; i++) {
       await executeQuery(db, language, queries[i])
     }

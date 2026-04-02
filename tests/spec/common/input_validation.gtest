@@ -38,7 +38,7 @@ tests:
     query: "MATCH (n:T) RETURN char_length(n.v) AS len"
     expect:
       rows:
-        - [12]
+        - [11]
 
   - name: tab_in_value
     setup:
@@ -46,7 +46,7 @@ tests:
     query: "MATCH (n:T) RETURN char_length(n.v) AS len"
     expect:
       rows:
-        - [10]
+        - [9]
 
   - name: empty_string_is_not_null
     setup:

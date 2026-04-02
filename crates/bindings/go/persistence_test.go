@@ -1,6 +1,7 @@
 package grafeo
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -211,9 +212,18 @@ func TestEdgePropertiesPersist(t *testing.T) {
 	if !ok {
 		t.Fatal("expected 'e.since' column")
 	}
-	// JSON numbers come back as float64.
-	if v, ok := since.(float64); !ok || v != 2020 {
-		t.Errorf("expected since=2020, got %v", since)
+	// JSON numbers come back as json.Number (due to UseNumber decoder).
+	switch v := since.(type) {
+	case json.Number:
+		if v.String() != "2020" {
+			t.Errorf("expected since=2020, got %v", v)
+		}
+	case float64:
+		if v != 2020 {
+			t.Errorf("expected since=2020, got %v", v)
+		}
+	default:
+		t.Errorf("expected numeric since, got %T: %v", since, since)
 	}
 }
 

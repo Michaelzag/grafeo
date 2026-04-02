@@ -1088,10 +1088,16 @@ void main() {
             return;
           }
 
-          // Check language availability
+          // Check language availability (file-level and per-test)
           if (!_isAvailable(meta.language)) {
             markTestSkipped(
               'Language "${meta.language}" not available',
+            );
+            return;
+          }
+          if (tc.language != null && !_isAvailable(tc.language!)) {
+            markTestSkipped(
+              'Language "${tc.language}" not available',
             );
             return;
           }

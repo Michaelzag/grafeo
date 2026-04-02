@@ -198,7 +198,7 @@ class GtestItem(pytest.Item):
 
         if statements:
             queries = list(statements)
-        elif query or tc.expect.get("error") is not None:
+        elif query or tc.expect.error is not None:
             queries = [query or ""]
         else:
             pytest.fail(f"No query or statements in test '{tc.name}' in {self.path}")
@@ -303,7 +303,15 @@ def _coerce_params(raw_params: Dict[str, str]) -> Optional[Dict[str, object]]:
         return None
     coerced: Dict[str, object] = {}
     for key, value in raw_params.items():
-        # int first
+        # Already typed (YAML parser returns bool/int/float directly)
+        # Check bool first because bool is a subclass of int in Python
+        if isinstance(value, bool):
+            coerced[key] = value
+            continue
+        if isinstance(value, (int, float)):
+            coerced[key] = value
+            continue
+        # String coercion: int first
         try:
             coerced[key] = int(value)
             continue

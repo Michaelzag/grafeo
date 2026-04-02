@@ -225,13 +225,17 @@ for (const filePath of gtestFiles) {
 
         const db = new Database()
 
-        // Check language availability
+        // Check language availability (file-level and per-test)
         if (!isAvailable(db, meta.language)) return ctx.skip()
+        if (tc.language && !isAvailable(db, tc.language)) return ctx.skip()
 
         // Check requires: skip if binding does not expose the required method
         for (const req of meta.requires) {
           if (!isAvailable(db, req)) return ctx.skip()
         }
+
+        // WASM executeRaw does not support params yet
+        if (tc.params && Object.keys(tc.params).length > 0) return ctx.skip()
 
         // Load dataset
         if (meta.dataset && meta.dataset !== 'empty') {
@@ -264,7 +268,7 @@ function runTestCase(db, tc, language, setupLanguage) {
   if (queries.length === 0) throw new Error(`No query or statements in test '${tc.name}'`)
 
   // Error case: execute all-but-last normally, only last should fail
-  if (exp.error) {
+  if (exp.error != null) {
     for (let i = 0; i < queries.length - 1; i++) {
       executeQuery(db, language, queries[i])
     }

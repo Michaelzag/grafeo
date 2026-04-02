@@ -9,6 +9,7 @@ meta:
   section: catalog
   title: Catalog and diagnostics
   dataset: social_network
+  requires: [algos]
 
 tests:
 
