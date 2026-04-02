@@ -865,18 +865,18 @@ func parseKV(s string) []string {
 	return nil
 }
 
-// unquote strips surrounding single or double quotes and handles common escape
-// sequences (\n, \t, \", \', \\).
+// unquote strips surrounding single or double quotes and handles YAML-level
+// escapes (quotes and backslashes). Does NOT process \n or \t: those are GQL
+// string escapes handled by the engine's parser.
 func unquote(s string) string {
 	s = strings.TrimSpace(s)
 	if len(s) >= 2 {
 		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
 			inner := s[1 : len(s)-1]
-			inner = strings.ReplaceAll(inner, `\n`, "\n")
-			inner = strings.ReplaceAll(inner, `\t`, "\t")
+			inner = strings.ReplaceAll(inner, `\\`, "\x00")
 			inner = strings.ReplaceAll(inner, `\"`, `"`)
 			inner = strings.ReplaceAll(inner, `\'`, `'`)
-			inner = strings.ReplaceAll(inner, `\\`, `\`)
+			inner = strings.ReplaceAll(inner, "\x00", `\`)
 			return inner
 		}
 	}

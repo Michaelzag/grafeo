@@ -710,17 +710,19 @@ List<List<String>> _parseRows(_ParseContext ctx) {
 }
 
 /// Strip surrounding quotes and process escape sequences.
+/// Strip surrounding quotes and unescape YAML-level escapes only.
+/// Do NOT process `\n` or `\t`: those are GQL string escapes handled
+/// by the engine's parser.
 String _unquote(String s) {
   s = s.trim();
   if ((s.startsWith('"') && s.endsWith('"')) ||
       (s.startsWith("'") && s.endsWith("'"))) {
     return s
         .substring(1, s.length - 1)
-        .replaceAll(r'\n', '\n')
-        .replaceAll(r'\t', '\t')
+        .replaceAll(r'\\', '\x00')
         .replaceAll(r'\"', '"')
         .replaceAll(r"\'", "'")
-        .replaceAll(r'\\', '\\');
+        .replaceAll('\x00', r'\');
   }
   return s;
 }
