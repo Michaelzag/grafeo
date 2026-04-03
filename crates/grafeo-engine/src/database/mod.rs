@@ -1086,12 +1086,33 @@ impl GrafeoDB {
         self.create_session_inner(Some(cdc_enabled))
     }
 
+    /// Creates a read-only session regardless of the database's access mode.
+    ///
+    /// Mutations executed through this session will fail with
+    /// `TransactionError::ReadOnly`. Useful for replication replicas where
+    /// the database itself must remain writable (for applying CDC changes)
+    /// but client-facing queries must be read-only.
+    #[must_use]
+    pub fn session_read_only(&self) -> Session {
+        self.create_session_inner_opts(None, true)
+    }
+
     /// Shared session creation logic.
     ///
     /// `cdc_override` overrides the database-wide `cdc_enabled` default when
     /// `Some`. `None` falls back to the database default.
     #[allow(unused_variables)] // cdc_override unused when cdc feature is off
     fn create_session_inner(&self, cdc_override: Option<bool>) -> Session {
+        self.create_session_inner_opts(cdc_override, false)
+    }
+
+    /// Shared session creation with all overrides.
+    #[allow(unused_variables)]
+    fn create_session_inner_opts(
+        &self,
+        cdc_override: Option<bool>,
+        force_read_only: bool,
+    ) -> Session {
         let session_cfg = || crate::session::SessionConfig {
             transaction_manager: Arc::clone(&self.transaction_manager),
             query_cache: Arc::clone(&self.query_cache),
@@ -1102,7 +1123,7 @@ impl GrafeoDB {
             query_timeout: self.config.query_timeout,
             commit_counter: Arc::clone(&self.commit_counter),
             gc_interval: self.config.gc_interval,
-            read_only: self.read_only,
+            read_only: self.read_only || force_read_only,
         };
 
         if let Some(ref ext_read) = self.external_read_store {
