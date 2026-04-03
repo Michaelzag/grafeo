@@ -1215,6 +1215,7 @@ describe('hybrid search', () => {
 describe('CDC operations', () => {
   it('should track node creation history', async () => {
     const db = GrafeoDB.create()
+    db.enableCdc()
     const node = db.createNode(['Person'], { name: 'Alix' })
 
     const history = await db.nodeHistory(node.id)
@@ -1224,6 +1225,7 @@ describe('CDC operations', () => {
 
   it('should track node update history', async () => {
     const db = GrafeoDB.create()
+    db.enableCdc()
     const node = db.createNode(['Person'], { name: 'Alix' })
     db.setNodeProperty(node.id, 'age', 30)
 
@@ -1234,6 +1236,7 @@ describe('CDC operations', () => {
 
   it('should track edge creation history', async () => {
     const db = GrafeoDB.create()
+    db.enableCdc()
     const a = db.createNode(['N'])
     const b = db.createNode(['N'])
     const edge = db.createEdge(a.id, b.id, 'R')
@@ -1245,6 +1248,7 @@ describe('CDC operations', () => {
 
   it('should return changes between epochs', async () => {
     const db = GrafeoDB.create()
+    db.enableCdc()
     db.createNode(['Person'], { name: 'Alix' })
     db.createNode(['Person'], { name: 'Gus' })
 

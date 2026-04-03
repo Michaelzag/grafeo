@@ -340,6 +340,7 @@ class TestCDCNodeHistory:
     def test_node_history_after_create(self, db):
         if not hasattr(db, "node_history"):
             pytest.skip("CDC not available")
+        db.enable_cdc()
         node = db.create_node(["Memory"], {"text": "hello"})
         node_id = node.id if hasattr(node, "id") else node
         events = db.node_history(node_id)
@@ -348,6 +349,7 @@ class TestCDCNodeHistory:
     def test_node_history_after_property_change(self, db):
         if not hasattr(db, "node_history"):
             pytest.skip("CDC not available")
+        db.enable_cdc()
         node = db.create_node(["Memory"], {"text": "v1"})
         node_id = node.id if hasattr(node, "id") else node
         db.set_node_property(node_id, "text", "v2")
