@@ -235,13 +235,16 @@ impl PyGrafeoDB {
     ///     db = GrafeoDB()           # In-memory (fast, temporary)
     ///     db = GrafeoDB("./mydb")   # Persistent (survives restarts)
     #[new]
-    #[pyo3(signature = (path=None))]
-    fn new(path: Option<String>) -> PyResult<Self> {
-        let config = if let Some(p) = path {
+    #[pyo3(signature = (path=None, *, cdc=false))]
+    fn new(path: Option<String>, cdc: bool) -> PyResult<Self> {
+        let mut config = if let Some(p) = path {
             Config::persistent(p)
         } else {
             Config::in_memory()
         };
+        if cdc {
+            config = config.with_cdc();
+        }
 
         let db = GrafeoDB::with_config(config).map_err(PyGrafeoError::from)?;
 
@@ -2421,6 +2424,29 @@ impl PyGrafeoDB {
     }
 
     // ── Change Data Capture ─────────────────────────────────────────────
+
+    /// Enable CDC for all future sessions.
+    ///
+    /// Existing sessions are not affected.
+    #[cfg(feature = "cdc")]
+    fn enable_cdc(&self) {
+        self.inner.read().set_cdc_enabled(true);
+    }
+
+    /// Disable CDC for all future sessions.
+    ///
+    /// Existing sessions are not affected.
+    #[cfg(feature = "cdc")]
+    fn disable_cdc(&self) {
+        self.inner.read().set_cdc_enabled(false);
+    }
+
+    /// Returns whether CDC is currently enabled for new sessions.
+    #[cfg(feature = "cdc")]
+    #[getter]
+    fn cdc_enabled(&self) -> bool {
+        self.inner.read().is_cdc_enabled()
+    }
 
     /// Returns the full change history for a node.
     ///

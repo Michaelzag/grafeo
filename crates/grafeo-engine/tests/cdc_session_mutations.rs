@@ -13,11 +13,11 @@
 
 #![cfg(all(feature = "cdc", feature = "gql"))]
 
-use grafeo_engine::GrafeoDB;
 use grafeo_engine::cdc::{ChangeKind, EntityId};
+use grafeo_engine::{Config, GrafeoDB};
 
 fn db() -> GrafeoDB {
-    GrafeoDB::new_in_memory()
+    GrafeoDB::with_config(Config::in_memory().with_cdc()).unwrap()
 }
 
 // ============================================================================

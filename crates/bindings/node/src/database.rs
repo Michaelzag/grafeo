@@ -750,6 +750,27 @@ impl JsGrafeoDB {
 
     // ── Change Data Capture ─────────────────────────────────────────────
 
+    /// Enable CDC for all future sessions.
+    #[cfg(feature = "cdc")]
+    #[napi(js_name = "enableCdc")]
+    pub fn enable_cdc(&self) {
+        self.inner.read().set_cdc_enabled(true);
+    }
+
+    /// Disable CDC for all future sessions.
+    #[cfg(feature = "cdc")]
+    #[napi(js_name = "disableCdc")]
+    pub fn disable_cdc(&self) {
+        self.inner.read().set_cdc_enabled(false);
+    }
+
+    /// Returns whether CDC is currently enabled for new sessions.
+    #[cfg(feature = "cdc")]
+    #[napi(js_name = "isCdcEnabled", getter)]
+    pub fn is_cdc_enabled(&self) -> bool {
+        self.inner.read().is_cdc_enabled()
+    }
+
     /// Returns the full change history for a node.
     #[cfg(feature = "cdc")]
     #[napi(js_name = "nodeHistory")]

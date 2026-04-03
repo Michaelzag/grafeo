@@ -19,8 +19,8 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 
 use grafeo_common::types::EpochId;
-use grafeo_engine::GrafeoDB;
 use grafeo_engine::cdc::{ChangeKind, EntityId};
+use grafeo_engine::{Config, GrafeoDB};
 
 // ============================================================================
 // Test 1: Concurrent commits produce strictly increasing epochs
@@ -29,7 +29,7 @@ use grafeo_engine::cdc::{ChangeKind, EntityId};
 #[test]
 #[ignore = "deadlock under concurrent session commits with CDC logging"]
 fn concurrent_commits_produce_strictly_increasing_epochs() {
-    let db = Arc::new(GrafeoDB::new_in_memory());
+    let db = Arc::new(GrafeoDB::with_config(Config::in_memory().with_cdc()).unwrap());
     let num_threads = 8;
     let ops_per_thread = 20;
     let barrier = Arc::new(Barrier::new(num_threads));
@@ -117,7 +117,7 @@ fn concurrent_commits_produce_strictly_increasing_epochs() {
 
 #[test]
 fn changes_between_no_gaps() {
-    let db = GrafeoDB::new_in_memory();
+    let db = GrafeoDB::with_config(Config::in_memory().with_cdc()).unwrap();
     let session = db.session();
 
     // Insert 10 nodes, each in its own auto-commit statement
@@ -162,7 +162,7 @@ fn changes_between_no_gaps() {
 
 #[test]
 fn changes_between_range_bounds_strict() {
-    let db = GrafeoDB::new_in_memory();
+    let db = GrafeoDB::with_config(Config::in_memory().with_cdc()).unwrap();
     let session = db.session();
 
     // Insert 5 nodes, capture commit epoch of each
@@ -210,7 +210,7 @@ fn changes_between_range_bounds_strict() {
 
 #[test]
 fn concurrent_sessions_cdc_event_count_matches() {
-    let db = Arc::new(GrafeoDB::new_in_memory());
+    let db = Arc::new(GrafeoDB::with_config(Config::in_memory().with_cdc()).unwrap());
     let num_threads = 4;
     let nodes_per_thread = 10;
     let barrier = Arc::new(Barrier::new(num_threads));
@@ -269,7 +269,7 @@ fn concurrent_sessions_cdc_event_count_matches() {
 
 #[test]
 fn transaction_rollback_leaves_no_epoch_holes() {
-    let db = GrafeoDB::new_in_memory();
+    let db = GrafeoDB::with_config(Config::in_memory().with_cdc()).unwrap();
 
     // Commit 3
     for i in 0..3 {

@@ -227,6 +227,18 @@ pub struct Config {
     /// read the same database concurrently. Mutations are rejected at the
     /// session level.
     pub access_mode: AccessMode,
+
+    /// Whether CDC (Change Data Capture) is enabled for new sessions by default.
+    ///
+    /// When `true`, sessions created via [`GrafeoDB::session()`] automatically
+    /// track all mutations. Individual sessions can override this via
+    /// [`GrafeoDB::session_with_cdc()`]. The `cdc` feature flag must be
+    /// compiled in for CDC to function; this field only controls runtime
+    /// activation.
+    ///
+    /// Default: `false` (CDC is opt-in to avoid overhead on the mutation
+    /// hot path).
+    pub cdc_enabled: bool,
 }
 
 /// Configuration for adaptive query execution.
@@ -316,6 +328,7 @@ impl Default for Config {
             query_timeout: None,
             gc_interval: 100,
             access_mode: AccessMode::default(),
+            cdc_enabled: false,
         }
     }
 }
@@ -473,6 +486,19 @@ impl Config {
             access_mode: AccessMode::ReadOnly,
             ..Default::default()
         }
+    }
+
+    /// Enables CDC (Change Data Capture) for all new sessions by default.
+    ///
+    /// Sessions created via [`GrafeoDB::session()`] will automatically track
+    /// mutations. Individual sessions can still opt out via
+    /// [`GrafeoDB::session_with_cdc(false)`].
+    ///
+    /// Requires the `cdc` feature flag to be compiled in.
+    #[must_use]
+    pub fn with_cdc(mut self) -> Self {
+        self.cdc_enabled = true;
+        self
     }
 
     /// Validates the configuration, returning an error for invalid combinations.

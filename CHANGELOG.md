@@ -43,6 +43,7 @@ Correctness hardening, Jepsen readiness, and Hybrid Logical Clock for causal con
 
 ### Changed
 
+- **CDC is now opt-in per session**: CDC is no longer unconditionally active when the `cdc` feature flag is compiled in. A new `Config::with_cdc()` builder method and `GrafeoDB::set_cdc_enabled()` runtime toggle control the database-wide default (off by default). `GrafeoDB::session_with_cdc(bool)` overrides the default for individual sessions. This eliminates the HLC syscall and event-buffering overhead from the mutation hot path when CDC is not needed, fixing a +251% regression on single-node inserts under `--all-features` benchmarks. Python: `GrafeoDB(cdc=True)`, `db.enable_cdc()`, `db.disable_cdc()`. Node.js: `db.enableCdc()`, `db.disableCdc()`. C: `grafeo_set_cdc_enabled(db, true)`
 - **CompactStore property scans use native codec operations**: `ColumnCodec::find_eq()` and `find_in_range()` push equality and range checks into the codec's native domain (dictionary code comparison, raw u64 comparison) instead of decoding to `Value` per row. Thanks to [@temporaryfix](https://github.com/temporaryfix) for the pr/implementation ([#216](https://github.com/GrafeoDB/grafeo/pull/216))
 
 ### Internal

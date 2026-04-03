@@ -16,6 +16,7 @@
 #ifndef GRAFEO_H
 #define GRAFEO_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -68,6 +69,11 @@ GrafeoDatabase* grafeo_open_single_file(const char* path);
 GrafeoStatus    grafeo_close(GrafeoDatabase* db);
 void            grafeo_free_database(GrafeoDatabase* db);
 const char*     grafeo_version(void);
+
+/* ---- Change Data Capture ------------------------------------------------- */
+
+void grafeo_set_cdc_enabled(GrafeoDatabase* db, bool enabled);
+bool grafeo_is_cdc_enabled(GrafeoDatabase* db);
 
 /* ---- Query execution ----------------------------------------------------- */
 

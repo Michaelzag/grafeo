@@ -258,6 +258,28 @@ pub extern "C" fn grafeo_version() -> *const c_char {
 }
 
 // =========================================================================
+// Change Data Capture
+// =========================================================================
+
+/// Enable or disable CDC for all future sessions.
+///
+/// Does not affect sessions that were already created.
+#[cfg(feature = "cdc")]
+#[unsafe(no_mangle)]
+pub extern "C" fn grafeo_set_cdc_enabled(db: *mut GrafeoDatabase, enabled: bool) {
+    if let Some(db) = unsafe { db.as_ref() } {
+        db.inner.read().set_cdc_enabled(enabled);
+    }
+}
+
+/// Returns whether CDC is currently enabled for new sessions.
+#[cfg(feature = "cdc")]
+#[unsafe(no_mangle)]
+pub extern "C" fn grafeo_is_cdc_enabled(db: *mut GrafeoDatabase) -> bool {
+    unsafe { db.as_ref() }.map_or(false, |db| db.inner.read().is_cdc_enabled())
+}
+
+// =========================================================================
 // Query Execution
 // =========================================================================
 
