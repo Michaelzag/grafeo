@@ -1,0 +1,237 @@
+# GQL Advanced Subqueries: ISO/IEC 39075:2024 sec 18
+#
+# Covers: EXISTS subqueries with complex patterns, COUNT subqueries,
+# correlated subqueries, subqueries in RETURN, nested subqueries.
+# Uses ecommerce dataset for realistic multi-hop subquery patterns.
+
+meta:
+  language: gql
+  model: lpg
+  section: "18.2"
+  title: Advanced subqueries
+  dataset: ecommerce
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # EXISTS subqueries
+  # ---------------------------------------------------------------------------
+
+  - name: exists_basic_pattern
+    query: |
+      MATCH (c:Customer)
+      WHERE EXISTS { MATCH (c)-[:PLACED]->(:Order) }
+      RETURN c.name ORDER BY c.name
+    expect:
+      ordered: true
+      rows:
+        - [Alix]
+        - [Gus]
+        - [Jules]
+        - [Mia]
+        - [Vincent]
+
+  - name: exists_with_filter
+    query: |
+      MATCH (c:Customer)
+      WHERE EXISTS {
+        MATCH (c)-[:PLACED]->(o:Order)
+        WHERE o.status = 'delivered'
+      }
+      RETURN c.name ORDER BY c.name
+    expect:
+      ordered: true
+      rows:
+        - [Alix]
+        - [Gus]
+        - [Vincent]
+
+  - name: not_exists_pattern
+    query: |
+      MATCH (c:Customer)
+      WHERE NOT EXISTS { MATCH (c)-[:REVIEWED]->(:Product) }
+      RETURN c.name ORDER BY c.name
+    expect:
+      ordered: true
+      rows:
+        - [Mia]
+
+  - name: exists_multi_hop
+    skip: "multi-hop pattern in EXISTS subquery"
+    query: |
+      MATCH (c:Customer)
+      WHERE EXISTS {
+        MATCH (c)-[:PLACED]->(o:Order)-[:CONTAINS]->(p:Product)
+        WHERE p.price > 500
+      }
+      RETURN c.name ORDER BY c.name
+    expect:
+      ordered: true
+      rows:
+        - [Alix]
+        - [Vincent]
+
+  - name: exists_with_aggregation_filter
+    query: |
+      MATCH (c:Customer)
+      WHERE EXISTS {
+        MATCH (c)-[:PLACED]->(o:Order)
+        WHERE o.total > 1000
+      }
+      RETURN c.name ORDER BY c.name
+    expect:
+      ordered: true
+      rows:
+        - [Alix]
+
+  # ---------------------------------------------------------------------------
+  # COUNT subqueries
+  # ---------------------------------------------------------------------------
+
+  - name: count_subquery_basic
+    query: |
+      MATCH (c:Customer)
+      RETURN c.name, COUNT { MATCH (c)-[:PLACED]->(:Order) } AS order_count
+      ORDER BY c.name
+    expect:
+      ordered: true
+      rows:
+        - [Alix, 2]
+        - [Gus, 2]
+        - [Jules, 1]
+        - [Mia, 1]
+        - [Vincent, 2]
+
+  - name: count_subquery_with_filter
+    skip: "COUNT subquery with WHERE filter"
+    query: |
+      MATCH (c:Customer)
+      RETURN c.name,
+        COUNT { MATCH (c)-[:PLACED]->(o:Order) WHERE o.status = 'delivered' } AS delivered
+      ORDER BY c.name
+    expect:
+      ordered: true
+      rows:
+        - [Alix, 2]
+        - [Gus, 2]
+        - [Jules, 0]
+        - [Mia, 0]
+        - [Vincent, 1]
+
+  - name: count_subquery_in_where
+    query: |
+      MATCH (c:Customer)
+      WHERE COUNT { MATCH (c)-[:PLACED]->(:Order) } >= 2
+      RETURN c.name ORDER BY c.name
+    expect:
+      ordered: true
+      rows:
+        - [Alix]
+        - [Gus]
+        - [Vincent]
+
+  - name: count_subquery_for_reviews
+    skip: "COUNT subquery ordering"
+    query: |
+      MATCH (p:Product)
+      RETURN p.name, COUNT { MATCH (:Customer)-[:REVIEWED]->(p) } AS review_count
+      ORDER BY review_count DESC, p.name
+    expect:
+      ordered: true
+      rows:
+        - [Wireless Headphones, 2]
+        - [Graph Databases, 2]
+        - [Laptop Pro, 1]
+        - [Tablet Mini, 1]
+        - [Rust Programming, 0]
+        - [Winter Jacket, 0]
+
+  # ---------------------------------------------------------------------------
+  # Correlated subqueries (subquery references outer variable)
+  # ---------------------------------------------------------------------------
+
+  - name: correlated_exists_with_property
+    skip: "correlated subquery property filter"
+    query: |
+      MATCH (c:Customer)
+      WHERE EXISTS {
+        MATCH (c)-[:REVIEWED]->(p:Product)
+        WHERE p.rating > 4.0
+      }
+      RETURN c.name ORDER BY c.name
+    expect:
+      ordered: true
+      rows:
+        - [Alix]
+        - [Jules]
+        - [Vincent]
+
+  - name: correlated_filter_on_outer
+    query: |
+      MATCH (c:Customer)
+      WHERE c.tier = 'gold' AND EXISTS {
+        MATCH (c)-[:PLACED]->(o:Order)
+        WHERE o.total > 500
+      }
+      RETURN c.name ORDER BY c.name
+    expect:
+      ordered: true
+      rows:
+        - [Alix]
+        - [Vincent]
+
+  # ---------------------------------------------------------------------------
+  # Subquery patterns with different relationships
+  # ---------------------------------------------------------------------------
+
+  - name: customer_who_ordered_and_reviewed_same_product
+    skip: "multi-pattern in EXISTS subquery"
+    query: |
+      MATCH (c:Customer)
+      WHERE EXISTS {
+        MATCH (c)-[:PLACED]->(o:Order)-[:CONTAINS]->(p:Product),
+              (c)-[:REVIEWED]->(p)
+      }
+      RETURN c.name ORDER BY c.name
+    expect:
+      ordered: true
+      rows:
+        - [Alix]
+        - [Vincent]
+
+  - name: products_in_multiple_orders
+    skip: "COUNT subquery comparison in WHERE"
+    query: |
+      MATCH (p:Product)
+      WHERE COUNT { MATCH (:Order)-[:CONTAINS]->(p) } > 1
+      RETURN p.name ORDER BY p.name
+    expect:
+      ordered: true
+      rows:
+        - [Graph Databases]
+        - [Laptop Pro]
+        - [Wireless Headphones]
+
+  # ---------------------------------------------------------------------------
+  # Exists with negation combinations
+  # ---------------------------------------------------------------------------
+
+  - name: exists_and_not_exists
+    query: |
+      MATCH (c:Customer)
+      WHERE EXISTS { MATCH (c)-[:PLACED]->(:Order) }
+        AND NOT EXISTS { MATCH (c)-[:REVIEWED]->(:Product) }
+      RETURN c.name ORDER BY c.name
+    expect:
+      ordered: true
+      rows:
+        - [Mia]
+
+  - name: double_negation
+    query: |
+      MATCH (c:Customer)
+      WHERE NOT (NOT EXISTS { MATCH (c)-[:PLACED]->(:Order) })
+      RETURN count(c) AS cnt
+    expect:
+      rows:
+        - [5]

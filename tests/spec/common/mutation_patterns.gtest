@@ -1,0 +1,176 @@
+# Mutation Patterns
+#
+# Statement-level persistence and mutation patterns beyond 24.1_transactions.
+# Covers: counter increments, cascading deletes, type changes, edge mutations,
+# label manipulation, schema+data, batch inserts.
+# All tests use statements: for multi-step mutation-then-verify.
+
+meta:
+  language: gql
+  model: lpg
+  section: mutations
+  title: Mutation patterns
+  dataset: empty
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # Counter / accumulator patterns
+  # ---------------------------------------------------------------------------
+
+  - name: counter_increment_three_times
+    skip: "SET self-reference (c.value = c.value + 1) not supported"
+    statements:
+      - "INSERT (:Counter {name: 'hits', value: 0})"
+      - "MATCH (c:Counter {name: 'hits'}) SET c.value = c.value + 1"
+      - "MATCH (c:Counter {name: 'hits'}) SET c.value = c.value + 1"
+      - "MATCH (c:Counter {name: 'hits'}) SET c.value = c.value + 1"
+      - "MATCH (c:Counter {name: 'hits'}) RETURN c.value"
+    expect:
+      rows:
+        - [3]
+
+  - name: property_overwrite_last_wins
+    statements:
+      - "INSERT (:T {v: 1})"
+      - "MATCH (n:T) SET n.v = 2"
+      - "MATCH (n:T) SET n.v = 3"
+      - "MATCH (n:T) RETURN n.v"
+    expect:
+      rows:
+        - [3]
+
+  # ---------------------------------------------------------------------------
+  # Cascading deletes
+  # ---------------------------------------------------------------------------
+
+  - name: detach_delete_removes_all_edges
+    statements:
+      - "INSERT (:N {name: 'a'})-[:R]->(:N {name: 'b'})-[:R]->(:N {name: 'c'})"
+      - "MATCH (n:N {name: 'b'}) DETACH DELETE n"
+      - "MATCH ()-[r]->() RETURN count(r) AS cnt"
+    expect:
+      rows:
+        - [0]
+
+  - name: detach_delete_preserves_unconnected
+    statements:
+      - "INSERT (:A {name: 'a'})-[:R]->(:B {name: 'b'})"
+      - "INSERT (:C {name: 'safe'})"
+      - "MATCH (n:A) DETACH DELETE n"
+      - "MATCH (n) RETURN count(n) AS cnt"
+    expect:
+      rows:
+        - [2]
+
+  - name: delete_node_with_multiple_edge_types
+    statements:
+      - "INSERT (:Src {name: 'src'})"
+      - "INSERT (:Dst {name: 'dst'})"
+      - "MATCH (a:Src), (b:Dst) INSERT (a)-[:KNOWS]->(b)"
+      - "MATCH (a:Src), (b:Dst) INSERT (a)-[:WORKS_WITH]->(b)"
+      - "MATCH (n:Src) DETACH DELETE n"
+      - "MATCH ()-[r]->() RETURN count(r) AS cnt"
+    expect:
+      rows:
+        - [0]
+
+  # ---------------------------------------------------------------------------
+  # Reinsert and type change
+  # ---------------------------------------------------------------------------
+
+  - name: reinsert_after_delete
+    statements:
+      - "INSERT (:T {key: 'alpha', val: 1})"
+      - "MATCH (n:T {key: 'alpha'}) DELETE n"
+      - "INSERT (:T {key: 'alpha', val: 2})"
+      - "MATCH (n:T {key: 'alpha'}) RETURN n.val"
+    expect:
+      rows:
+        - [2]
+
+  - name: property_type_change_int_to_string
+    statements:
+      - "INSERT (:T {v: 42})"
+      - "MATCH (n:T) SET n.v = 'forty-two'"
+      - "MATCH (n:T) RETURN n.v"
+    expect:
+      rows:
+        - [forty-two]
+
+  - name: property_type_change_string_to_bool
+    statements:
+      - "INSERT (:T {v: 'yes'})"
+      - "MATCH (n:T) SET n.v = true"
+      - "MATCH (n:T) RETURN n.v"
+    expect:
+      rows:
+        - [true]
+
+  - name: set_property_to_null
+    statements:
+      - "INSERT (:T {name: 'Alix', tag: 'temp'})"
+      - "MATCH (n:T) SET n.tag = null"
+      - "MATCH (n:T) RETURN n.tag"
+    expect:
+      rows:
+        - [null]
+
+  # ---------------------------------------------------------------------------
+  # Edge and label mutations
+  # ---------------------------------------------------------------------------
+
+  - name: edge_property_update
+    statements:
+      - "INSERT (:A {name: 'a'})-[:R {weight: 1}]->(:B {name: 'b'})"
+      - "MATCH (:A)-[r:R]->(:B) SET r.weight = 99"
+      - "MATCH (:A)-[r:R]->(:B) RETURN r.weight"
+    expect:
+      rows:
+        - [99]
+
+  - name: add_label_remove_different_label
+    statements:
+      - "INSERT (:A:B {name: 'Alix'})"
+      - "MATCH (n:A:B) SET n:C"
+      - "MATCH (n:A) REMOVE n:A"
+      - "MATCH (n:B:C) RETURN n.name"
+    expect:
+      rows:
+        - [Alix]
+
+  - name: multiple_edge_types_same_pair
+    statements:
+      - "INSERT (:X {name: 'x'})"
+      - "INSERT (:Y {name: 'y'})"
+      - "MATCH (a:X), (b:Y) INSERT (a)-[:KNOWS]->(b)"
+      - "MATCH (a:X), (b:Y) INSERT (a)-[:LIKES]->(b)"
+      - "MATCH (:X)-[r]->(:Y) RETURN count(r) AS cnt"
+    expect:
+      rows:
+        - [2]
+
+  # ---------------------------------------------------------------------------
+  # Schema + data
+  # ---------------------------------------------------------------------------
+
+  - name: node_type_then_insert
+    statements:
+      - "CREATE NODE TYPE Vehicle (make STRING NOT NULL, year INTEGER)"
+      - "INSERT (:Vehicle {make: 'Volvo', year: 2024})"
+      - "MATCH (v:Vehicle) RETURN v.make, v.year"
+    expect:
+      rows:
+        - [Volvo, 2024]
+
+  # ---------------------------------------------------------------------------
+  # Batch insert
+  # ---------------------------------------------------------------------------
+
+  - name: batch_insert_via_unwind
+    statements:
+      - "UNWIND range(1, 50) AS i INSERT (:Batch {v: i})"
+      - "MATCH (n:Batch) RETURN count(n) AS cnt"
+    expect:
+      rows:
+        - [50]

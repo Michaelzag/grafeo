@@ -88,6 +88,7 @@ struct TestCase {
     setup: Vec<String>,
     params: HashMap<String, String>,
     tags: Vec<String>,
+    requires: Vec<String>,
     language: Option<String>,
     skip: Option<String>,
     expect: Expect,
@@ -227,6 +228,7 @@ fn parse_single_test(lines: &[&str], idx: &mut usize) -> Result<TestCase, String
         setup: Vec::new(),
         params: HashMap::new(),
         tags: Vec::new(),
+        requires: Vec::new(),
         language: None,
         skip: None,
         expect: Expect::default(),
@@ -287,6 +289,10 @@ fn parse_single_test(lines: &[&str], idx: &mut usize) -> Result<TestCase, String
                 }
                 "tags" => {
                     tc.tags = parse_yaml_list(value);
+                    *idx += 1;
+                }
+                "requires" => {
+                    tc.requires = parse_yaml_list(value);
                     *idx += 1;
                 }
                 "language" => {
@@ -523,13 +529,14 @@ fn unquote(s: &str) -> String {
     let s = s.trim();
     if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
         let inner = &s[1..s.len() - 1];
-        // Handle basic escape sequences
+        // Only unescape YAML-level escapes (quotes and backslashes).
+        // Do NOT process \n or \t here: those are GQL string escapes
+        // that the GQL parser handles via unescape_string().
         inner
-            .replace("\\n", "\n")
-            .replace("\\t", "\t")
+            .replace("\\\\", "\x00")
             .replace("\\\"", "\"")
             .replace("\\'", "'")
-            .replace("\\\\", "\\")
+            .replace('\x00', "\\")
     } else {
         s.to_string()
     }
@@ -791,16 +798,51 @@ fn generate_single_test(
         _ => vec![],
     };
 
-    // Requires from file meta
+    // Requires from file meta + per-test requires
     let mut all_requires: Vec<&str> = file.meta.requires.iter().map(String::as_str).collect();
+    for req in &tc.requires {
+        if !all_requires.contains(&req.as_str()) {
+            all_requires.push(req);
+        }
+    }
     for fg in feature_gates {
         if !all_requires.contains(&fg) {
             all_requires.push(fg);
         }
     }
 
-    if !all_requires.is_empty() {
-        let cfg_parts: Vec<String> = all_requires
+    // Only emit #[cfg] for known Cargo features. Binding capabilities
+    // (e.g. "int64-safe") are not Cargo features and the Rust runner
+    // always has full fidelity, so they pass through without gating.
+    const CARGO_FEATURES: &[&str] = &[
+        "gql",
+        "cypher",
+        "sparql",
+        "gremlin",
+        "graphql",
+        "sql-pgq",
+        "rdf",
+        "algos",
+        "vector-index",
+        "text-index",
+        "hybrid-search",
+        "cdc",
+        "tiered-storage",
+        "succinct-indexes",
+        "ring-index",
+        "block-stm",
+        "wal",
+        "spill",
+        "mmap",
+    ];
+    let cargo_requires: Vec<&str> = all_requires
+        .iter()
+        .filter(|r| CARGO_FEATURES.contains(r))
+        .copied()
+        .collect();
+
+    if !cargo_requires.is_empty() {
+        let cfg_parts: Vec<String> = cargo_requires
             .iter()
             .map(|r| format!("feature = \"{r}\""))
             .collect();

@@ -738,6 +738,219 @@ fn test_stress_concurrent_epoch_pressure() {
 }
 
 #[test]
+#[ignore = "stress test"]
+fn concurrent_merge_same_node() {
+    // 8 threads each run 10 rounds of MERGE with their own key.
+    // The contention comes from all threads issuing MERGE on the same
+    // label, forcing concurrent read-then-write cycles on the index.
+    // Each thread's MERGE should be idempotent: no matter how many
+    // rounds, it should produce exactly one node per key.
+    let db = Arc::new(GrafeoDB::new_in_memory());
+
+    let num_threads = 8;
+    let rounds = 10;
+    let barrier = Arc::new(Barrier::new(num_threads));
+
+    let handles: Vec<_> = (0..num_threads)
+        .map(|tid| {
+            let db = Arc::clone(&db);
+            let barrier = Arc::clone(&barrier);
+
+            thread::spawn(move || {
+                barrier.wait();
+
+                for round in 0..rounds {
+                    let session = db.session();
+                    let query = format!(
+                        "MERGE (n:Shared {{key: 'thread_{tid}'}}) \
+                         ON CREATE SET n.thread_id = {tid} \
+                         ON MATCH SET n.round = {round}"
+                    );
+                    session.execute(&query).unwrap();
+                }
+            })
+        })
+        .collect();
+
+    for handle in handles {
+        handle.join().expect("Thread panicked");
+    }
+
+    // Each thread should have exactly one node (MERGE is idempotent per key)
+    let session = db.session();
+    let result = session.execute("MATCH (n:Shared) RETURN n").unwrap();
+    assert_eq!(
+        result.row_count(),
+        num_threads,
+        "Each thread should produce exactly 1 node via MERGE"
+    );
+
+    // Verify each thread's node exists
+    for tid in 0..num_threads {
+        let query = format!("MATCH (n:Shared {{key: 'thread_{tid}'}}) RETURN n");
+        let result = session.execute(&query).unwrap();
+        assert_eq!(
+            result.row_count(),
+            1,
+            "Thread {tid} should have exactly 1 node"
+        );
+    }
+}
+
+#[test]
+#[ignore = "stress test"]
+fn concurrent_mixed_read_write_high_contention() {
+    // 12 threads: 6 writers inserting unique nodes, 6 readers counting
+    let db = Arc::new(GrafeoDB::new_in_memory());
+
+    let num_writers = 6;
+    let num_readers = 6;
+    let total_threads = num_writers + num_readers;
+    let barrier = Arc::new(Barrier::new(total_threads));
+    let write_success = Arc::new(AtomicUsize::new(0));
+    let read_errors = Arc::new(AtomicUsize::new(0));
+
+    let mut handles = Vec::new();
+
+    // Writer threads: each inserts a uniquely-labeled node
+    static NAMES: [&str; 6] = ["Alix", "Gus", "Vincent", "Jules", "Mia", "Butch"];
+    for wid in 0..num_writers {
+        let db = Arc::clone(&db);
+        let barrier = Arc::clone(&barrier);
+        let write_success = Arc::clone(&write_success);
+        let name = NAMES[wid];
+
+        handles.push(thread::spawn(move || {
+            barrier.wait();
+
+            let session = db.session();
+            let query = format!("INSERT (:Contention {{name: '{name}', writer: {wid}}})");
+            if session.execute(&query).is_ok() {
+                write_success.fetch_add(1, Ordering::Relaxed);
+            }
+        }));
+    }
+
+    // Reader threads: each runs a MATCH + count query multiple times
+    for _ in 0..num_readers {
+        let db = Arc::clone(&db);
+        let barrier = Arc::clone(&barrier);
+        let read_errors = Arc::clone(&read_errors);
+
+        handles.push(thread::spawn(move || {
+            barrier.wait();
+
+            for _ in 0..10 {
+                let session = db.session();
+                if session
+                    .execute("MATCH (n:Contention) RETURN count(n)")
+                    .is_err()
+                {
+                    read_errors.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        }));
+    }
+
+    for handle in handles {
+        handle.join().expect("Thread panicked");
+    }
+
+    assert_eq!(
+        read_errors.load(Ordering::Relaxed),
+        0,
+        "No read errors expected during high contention"
+    );
+
+    let writes = write_success.load(Ordering::Relaxed);
+    assert_eq!(writes, num_writers, "All writers should succeed");
+
+    // Verify total node count matches the number of successful writes
+    let session = db.session();
+    let result = session.execute("MATCH (n:Contention) RETURN n").unwrap();
+    assert_eq!(
+        result.row_count(),
+        writes,
+        "Total nodes should equal number of successful writes"
+    );
+}
+
+#[test]
+#[ignore = "stress test"]
+fn concurrent_schema_mutation_with_queries() {
+    // 4 threads running queries while 2 threads create/drop node types.
+    // Verifies no panics or crashes under concurrent schema changes.
+    let db = Arc::new(GrafeoDB::new_in_memory());
+
+    let num_query_threads = 4;
+    let num_schema_threads = 2;
+    let total_threads = num_query_threads + num_schema_threads;
+    let barrier = Arc::new(Barrier::new(total_threads));
+    let completed = Arc::new(AtomicUsize::new(0));
+
+    let mut handles = Vec::new();
+
+    // Schema mutation threads: create and drop node types in a loop
+    for sid in 0..num_schema_threads {
+        let db = Arc::clone(&db);
+        let barrier = Arc::clone(&barrier);
+        let completed = Arc::clone(&completed);
+
+        handles.push(thread::spawn(move || {
+            barrier.wait();
+
+            for i in 0..5 {
+                let session = db.session();
+                let type_name = format!("Temp{sid}_{i}");
+                // Create a node type
+                let _ = session.execute(&format!("CREATE NODE TYPE {type_name} (val INTEGER)"));
+                // Insert a node of that type
+                let _ = session.execute(&format!("INSERT (:{type_name} {{val: {i}}})"));
+                // Drop the node type
+                let _ = session.execute(&format!("DROP NODE TYPE {type_name}"));
+            }
+            completed.fetch_add(1, Ordering::Relaxed);
+        }));
+    }
+
+    // Query threads: run read queries concurrently with schema changes
+    static QUERY_NAMES: [&str; 4] = ["Django", "Shosanna", "Hans", "Beatrix"];
+    for qid in 0..num_query_threads {
+        let db = Arc::clone(&db);
+        let barrier = Arc::clone(&barrier);
+        let completed = Arc::clone(&completed);
+        let name = QUERY_NAMES[qid];
+
+        handles.push(thread::spawn(move || {
+            barrier.wait();
+
+            let session = db.session();
+            // Insert a node unrelated to the schema mutations
+            let _ = session.execute(&format!(
+                "INSERT (:QueryNode {{name: '{name}', qid: {qid}}})"
+            ));
+            // Run several read queries
+            for _ in 0..10 {
+                let _ = session.execute("MATCH (n:QueryNode) RETURN n.name");
+            }
+            completed.fetch_add(1, Ordering::Relaxed);
+        }));
+    }
+
+    for handle in handles {
+        handle
+            .join()
+            .expect("Thread panicked during concurrent schema mutation");
+    }
+
+    assert_eq!(
+        completed.load(Ordering::Relaxed),
+        total_threads,
+        "All threads should complete without panic"
+    );
+}
+
+#[test]
 #[ignore = "stress test: slow in CI, run locally with --ignored"]
 fn test_stress_rapid_session_lifecycle() {
     // 16 threads rapidly creating, using, and dropping sessions

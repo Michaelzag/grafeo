@@ -371,6 +371,64 @@ fn bench_compact_edges_from(c: &mut Criterion) {
     });
 }
 
+#[cfg(feature = "compact-store")]
+fn bench_compact_find_nodes_by_property(c: &mut Criterion) {
+    use grafeo_common::types::Value;
+    use grafeo_core::graph::traits::GraphStore;
+
+    let mut group = c.benchmark_group("compact/find_nodes_by_property");
+
+    for &n in &[1_000usize, 10_000, 100_000] {
+        let store = build_compact_store(n, n * 5);
+
+        group.bench_function(format!("dict_eq/{n}"), |b| {
+            b.iter(|| {
+                black_box(
+                    store
+                        .find_nodes_by_property("name", &Value::String("gamma".into()))
+                        .len(),
+                )
+            });
+        });
+
+        group.bench_function(format!("int_eq/{n}"), |b| {
+            b.iter(|| {
+                black_box(
+                    store
+                        .find_nodes_by_property("score", &Value::Int64(5))
+                        .len(),
+                )
+            });
+        });
+    }
+
+    group.finish();
+}
+
+#[cfg(feature = "compact-store")]
+fn bench_compact_find_nodes_in_range(c: &mut Criterion) {
+    use grafeo_common::types::Value;
+    use grafeo_core::graph::traits::GraphStore;
+
+    let mut group = c.benchmark_group("compact/find_nodes_in_range");
+
+    for &n in &[1_000usize, 10_000, 100_000] {
+        let store = build_compact_store(n, n * 5);
+
+        group.bench_function(format!("score_gt_7/{n}"), |b| {
+            b.iter(|| {
+                black_box(
+                    store
+                        .find_nodes_in_range("score", Some(&Value::Int64(7)), None, false, false)
+                        .len(),
+                )
+            });
+        });
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_adjacency_insert,
@@ -391,6 +449,8 @@ criterion_group!(
     bench_compact_nodes_by_label,
     bench_compact_get_node_property,
     bench_compact_edges_from,
+    bench_compact_find_nodes_by_property,
+    bench_compact_find_nodes_in_range,
 );
 
 #[cfg(not(feature = "compact-store"))]

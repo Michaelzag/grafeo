@@ -108,7 +108,9 @@ func parseResult(r *C.GrafeoResult) (*QueryResult, error) {
 	jsonStr := C.GoString(jsonPtr)
 
 	var rawRows []map[string]any
-	if err := json.Unmarshal([]byte(jsonStr), &rawRows); err != nil {
+	dec := json.NewDecoder(strings.NewReader(jsonStr))
+	dec.UseNumber()
+	if err := dec.Decode(&rawRows); err != nil {
 		return nil, err
 	}
 

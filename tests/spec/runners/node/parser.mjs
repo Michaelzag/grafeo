@@ -119,7 +119,7 @@ function parseSingleTest(ctx) {
   const tc = {
     name: '', query: null, statements: [], setup: [],
     params: {}, tags: [], skip: null, language: null,
-    expect: makeExpect(), variants: {},
+    expect: makeExpect(), variants: {}, requires: [],
   }
 
   // First line: "- name: xxx"
@@ -153,6 +153,8 @@ function parseSingleTest(ctx) {
         tc.language = unquote(value); ctx.idx++; break
       case 'tags':
         tc.tags = parseYamlList(value); ctx.idx++; break
+      case 'requires':
+        tc.requires = parseYamlList(value); ctx.idx++; break
       case 'params':
         ctx.idx++; tc.params = parseMap(ctx, 6); break
       case 'expect':
@@ -240,9 +242,10 @@ function parseKV(s) {
 function unquote(s) {
   s = s.trim()
   if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+    // Only unescape YAML-level escapes (quotes and backslashes).
+    // Do NOT process \n or \t: those are GQL string escapes handled by the engine.
     return s.slice(1, -1)
-      .replace(/\\n/g, '\n').replace(/\\t/g, '\t')
-      .replace(/\\"/g, '"').replace(/\\'/g, "'").replace(/\\\\/g, '\\')
+      .replace(/\\\\/g, '\x00').replace(/\\"/g, '"').replace(/\\'/g, "'").replace(/\x00/g, '\\')
   }
   return s
 }

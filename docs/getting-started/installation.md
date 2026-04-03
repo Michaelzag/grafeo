@@ -122,7 +122,7 @@ Add to `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  grafeo: ^0.5.21
+  grafeo: ^0.5.32
 ```
 
 ### Verify Installation
@@ -183,8 +183,8 @@ grafeo = { version = "0.5", features = ["embed"] }
 
 | Profile / Group | Contents | Description |
 |-----------------|----------|-------------|
-| `embedded` | gql, ai, algos, parallel, regex | Default for libraries and bindings |
-| `browser` | gql, regex-lite | Default for WASM |
+| `embedded` | gql, ai, algos, compact-store, parallel, regex | Default for libraries and bindings |
+| `browser` | gql, compact-store, regex-lite | Default for WASM |
 | `server` / `full` | embedded + languages + storage + rdf + cdc | Everything except embed |
 | `languages` | gql, cypher, sparql, gremlin, graphql, sql-pgq | All query language parsers |
 | `ai` | vector-index, text-index, hybrid-search, cdc | AI/RAG search + change tracking |

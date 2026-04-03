@@ -13,6 +13,7 @@ Grafeo supports multiple storage modes for different use cases.
 |------|------------|-------------|----------|
 | In-Memory | None | Fastest | Testing, temporary data |
 | Persistent | Full | Fast | Production workloads |
+| [Compact](../compact-store.md) | None (in-memory) | Fastest reads | Read-only analytics, WASM |
 
 ## Sections
 

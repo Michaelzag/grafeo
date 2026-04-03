@@ -55,8 +55,9 @@ class TestCase:
     query: Optional[str] = None
     statements: List[str] = field(default_factory=list)
     setup: List[str] = field(default_factory=list)
-    params: Dict[str, str] = field(default_factory=dict)
+    params: Dict[str, object] = field(default_factory=dict)
     tags: List[str] = field(default_factory=list)
+    requires: List[str] = field(default_factory=list)
     skip: Optional[str] = None
     expect: Expect = field(default_factory=Expect)
     variants: Dict[str, str] = field(default_factory=dict)
@@ -131,6 +132,7 @@ def _parse_test_dict(d: dict) -> TestCase:
     if tc.skip is not None:
         tc.skip = str(tc.skip)
     tc.tags = _as_string_list(d.get("tags", []))
+    tc.requires = _as_string_list(d.get("requires", []))
 
     # query: may be a string or a multi-line block
     q = d.get("query")
@@ -141,10 +143,11 @@ def _parse_test_dict(d: dict) -> TestCase:
     tc.setup = _as_string_list(d.get("setup", []))
     tc.statements = _as_string_list(d.get("statements", []))
 
-    # params
+    # params: keep original types from YAML (bool, int, float) so
+    # _coerce_params can pass them through without lossy str() conversion
     raw_params = d.get("params", {})
     if isinstance(raw_params, dict):
-        tc.params = {str(k): str(v) for k, v in raw_params.items()}
+        tc.params = {str(k): v for k, v in raw_params.items()}
 
     # per-test language override (e.g. "graphql-rdf")
     lang = d.get("language")
@@ -310,6 +313,9 @@ def _lb_parse_single_test(lines: List[str], idx: int) -> tuple:
             tc.statements, idx = _lb_parse_string_list(lines, idx)
         elif key == "tags":
             tc.tags = _lb_parse_yaml_list(value)
+            idx += 1
+        elif key == "requires":
+            tc.requires = _lb_parse_yaml_list(value)
             idx += 1
         elif key == "params":
             idx += 1
@@ -499,17 +505,22 @@ def _lb_parse_kv(s: str) -> tuple:
 
 
 def _unquote(s: str) -> str:
+    """Strip surrounding quotes and unescape YAML-level escapes only.
+
+    Do NOT process ``\\n`` or ``\\t`` here: those are GQL string escapes
+    that the engine's parser handles via ``unescape_string()``.
+    """
     s = s.strip()
     if len(s) >= 2 and (
         (s[0] == '"' and s[-1] == '"') or (s[0] == "'" and s[-1] == "'")
     ):
         inner = s[1:-1]
+        # Use a sentinel to avoid order-dependent replacement issues
         return (
-            inner.replace("\\n", "\n")
-            .replace("\\t", "\t")
+            inner.replace("\\\\", "\x00")
             .replace('\\"', '"')
             .replace("\\'", "'")
-            .replace("\\\\", "\\")
+            .replace("\x00", "\\")
         )
     return s
 

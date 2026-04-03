@@ -61,3 +61,54 @@ tests:
     expect:
       rows:
         - [3]
+
+  - name: sibling_call_same_variable_name
+    skip: "sibling CALL blocks lose first block output in some bindings"
+    description: >
+      Same-named variables in sibling CALL blocks must not collide.
+      Each block's internal 'n' is independent; only the aliased outputs
+      should be visible to the outer RETURN.
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:Company {name: 'TechCorp'})"
+    query: |
+      CALL { MATCH (n:Person) RETURN n.name AS person_name }
+      CALL { MATCH (n:Company) RETURN n.name AS company_name }
+      RETURN person_name, company_name
+    expect:
+      rows:
+        - [Alix, TechCorp]
+
+  - name: sibling_call_outputs_both_visible
+    skip: "sibling CALL blocks lose first block output in some bindings"
+    description: >
+      Two sibling CALL blocks with different variables should both produce
+      their aliased outputs in the outer RETURN.
+    setup:
+      - "INSERT (:Person {name: 'Alix', age: 30})"
+      - "INSERT (:Person {name: 'Gus', age: 25})"
+    query: |
+      CALL { MATCH (a:Person {name: 'Alix'}) RETURN a.age AS age_a }
+      CALL { MATCH (b:Person {name: 'Gus'}) RETURN b.age AS age_b }
+      RETURN age_a, age_b
+    expect:
+      rows:
+        - [30, 25]
+
+  - name: three_sibling_calls_same_variable
+    skip: "sibling CALL blocks lose first block output in some bindings"
+    description: >
+      Three sibling CALL blocks all using 'n' internally should each
+      resolve independently.
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:Company {name: 'TechCorp'})"
+      - "INSERT (:City {name: 'Amsterdam'})"
+    query: |
+      CALL { MATCH (n:Person) RETURN n.name AS pname }
+      CALL { MATCH (n:Company) RETURN n.name AS cname }
+      CALL { MATCH (n:City) RETURN n.name AS city }
+      RETURN pname, cname, city
+    expect:
+      rows:
+        - [Alix, TechCorp, Amsterdam]

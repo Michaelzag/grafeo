@@ -1,0 +1,285 @@
+# Common Numeric Edge Cases
+#
+# Covers: integer overflow, float precision, NaN handling,
+# Infinity arithmetic, very large/small numbers, rounding behavior.
+
+meta:
+  language: gql
+  model: lpg
+  section: numeric
+  title: Numeric edge cases
+  dataset: empty
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # Integer boundaries
+  # ---------------------------------------------------------------------------
+
+  - name: max_int64
+    requires: [int64-safe]
+    setup:
+      - "INSERT (:N {v: 9223372036854775807})"
+    query: "MATCH (n:N) RETURN n.v AS val"
+    expect:
+      rows:
+        - [9223372036854775807]
+
+  - name: min_int64
+    skip: "min int64 storage"
+    setup:
+      - "INSERT (:N {v: -9223372036854775808})"
+    query: "MATCH (n:N) RETURN n.v AS val"
+    expect:
+      rows:
+        - [-9223372036854775808]
+
+  - name: int64_overflow_addition
+    skip: "overflow wraps instead of error"
+    setup:
+      - "INSERT (:N {v: 9223372036854775807})"
+    query: "MATCH (n:N) RETURN n.v + 1 AS val"
+    expect:
+      error: "overflow"
+
+  - name: int64_underflow_subtraction
+    skip: "underflow wraps instead of error"
+    setup:
+      - "INSERT (:N {v: -9223372036854775808})"
+    query: "MATCH (n:N) RETURN n.v - 1 AS val"
+    expect:
+      error: "overflow"
+
+  # ---------------------------------------------------------------------------
+  # Float precision
+  # ---------------------------------------------------------------------------
+
+  - name: float_equality_exact
+    setup:
+      - "INSERT (:N {v: 0.1})"
+    query: "MATCH (n:N) RETURN n.v + 0.2 AS sum"
+    expect:
+      precision: 10
+      rows:
+        - [0.3]
+
+  - name: float_very_small
+    setup:
+      - "INSERT (:N {v: 0.000000001})"
+    query: "MATCH (n:N) RETURN n.v * 1000000000 AS val"
+    expect:
+      precision: 6
+      rows:
+        - [1.0]
+
+  - name: float_very_large
+    setup:
+      - "INSERT (:N {v: 1.0e308})"
+    query: "MATCH (n:N) RETURN n.v AS val"
+    expect:
+      count: 1
+
+  # ---------------------------------------------------------------------------
+  # Infinity
+  # ---------------------------------------------------------------------------
+
+  - name: positive_infinity
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN 1.0 / 0.0 AS val"
+    expect:
+      rows:
+        - [Infinity]
+
+  - name: negative_infinity
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN -1.0 / 0.0 AS val"
+    expect:
+      rows:
+        - [-Infinity]
+
+  - name: infinity_plus_number
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN (1.0 / 0.0) + 42 AS val"
+    expect:
+      rows:
+        - [Infinity]
+
+  - name: infinity_minus_infinity
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN (1.0 / 0.0) - (1.0 / 0.0) AS val"
+    expect:
+      rows:
+        - [NaN]
+
+  - name: infinity_times_zero
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN (1.0 / 0.0) * 0 AS val"
+    expect:
+      rows:
+        - [NaN]
+
+  - name: infinity_comparison
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) WHERE (1.0 / 0.0) > 999999999 RETURN true AS result"
+    expect:
+      rows:
+        - [true]
+
+  # ---------------------------------------------------------------------------
+  # NaN
+  # ---------------------------------------------------------------------------
+
+  - name: nan_from_zero_div_zero
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN 0.0 / 0.0 AS val"
+    expect:
+      rows:
+        - [NaN]
+
+  - name: nan_not_equal_to_itself
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) WHERE (0.0 / 0.0) = (0.0 / 0.0) RETURN true AS result"
+    expect:
+      empty: true
+
+  - name: nan_arithmetic
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN (0.0 / 0.0) + 1 AS val"
+    expect:
+      rows:
+        - [NaN]
+
+  # ---------------------------------------------------------------------------
+  # Rounding
+  # ---------------------------------------------------------------------------
+
+  - name: round_half_up
+    skip: "round returns integer not float"
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN round(2.5) AS val"
+    expect:
+      rows:
+        - [3.0]
+
+  - name: round_negative
+    skip: "round returns integer not float"
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN round(-2.5) AS val"
+    expect:
+      rows:
+        - [-3.0]
+
+  - name: ceil_positive
+    skip: "ceil returns integer not float"
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN ceil(2.1) AS val"
+    expect:
+      rows:
+        - [3.0]
+
+  - name: ceil_negative
+    skip: "ceil returns integer not float"
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN ceil(-2.9) AS val"
+    expect:
+      rows:
+        - [-2.0]
+
+  - name: floor_positive
+    skip: "floor returns integer not float"
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN floor(2.9) AS val"
+    expect:
+      rows:
+        - [2.0]
+
+  - name: floor_negative
+    skip: "floor returns integer not float"
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN floor(-2.1) AS val"
+    expect:
+      rows:
+        - [-3.0]
+
+  # ---------------------------------------------------------------------------
+  # Mixed integer/float arithmetic
+  # ---------------------------------------------------------------------------
+
+  - name: int_plus_float
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN 5 + 2.5 AS val"
+    expect:
+      rows:
+        - [7.5]
+
+  - name: int_division_truncation
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN 7 / 2 AS val"
+    expect:
+      rows:
+        - [3]
+
+  - name: negative_modulo
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN -7 % 3 AS val"
+    expect:
+      rows:
+        - [-1]
+
+  - name: zero_modulo
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN 0 % 5 AS val"
+    expect:
+      rows:
+        - [0]
+
+  # ---------------------------------------------------------------------------
+  # Aggregation with edge cases
+  # ---------------------------------------------------------------------------
+
+  - name: sum_with_mixed_null
+    setup:
+      - "INSERT (:Item {price: 10})"
+      - "INSERT (:Item {price: 20})"
+      - "INSERT (:Item {})"
+    query: "MATCH (i:Item) RETURN sum(i.price) AS total"
+    expect:
+      rows:
+        - [30]
+
+  - name: avg_with_all_null
+    setup:
+      - "INSERT (:Item {})"
+      - "INSERT (:Item {})"
+    query: "MATCH (i:Item) RETURN avg(i.price) AS average"
+    expect:
+      rows:
+        - [null]
+
+  - name: count_star_vs_count_property
+    setup:
+      - "INSERT (:Item {price: 10})"
+      - "INSERT (:Item {})"
+    query: "MATCH (i:Item) RETURN count(*) AS all_rows, count(i.price) AS with_price"
+    expect:
+      rows:
+        - [2, 1]

@@ -53,31 +53,20 @@ mod sparql_aggregate_expression_tests {
         );
     }
 
-    /// ORDER BY ASC(STR(?s)): expression-based sorting should not panic.
+    /// ORDER BY ASC(STR(?s)): expression-based sorting should work.
     #[test]
     fn sparql_order_by_str() {
         let db = rdf_db();
         insert_sample_triples(&db);
 
-        let result = db
-            .execute_sparql("SELECT ?s WHERE { ?s <http://ex.org/name> ?o } ORDER BY ASC(STR(?s))");
-
-        match result {
-            Err(ref err) => {
-                let msg = format!("{err}");
-                assert!(
-                    msg.contains("Store required for expression evaluation"),
-                    "Expected 'Store required for expression evaluation', got: {msg}"
-                );
-            }
-            Ok(ref qr) => {
-                assert_eq!(
-                    qr.row_count(),
-                    2,
-                    "ORDER BY ASC(STR(?s)) should return 2 rows"
-                );
-            }
-        }
+        let qr = db
+            .execute_sparql("SELECT ?s WHERE { ?s <http://ex.org/name> ?o } ORDER BY ASC(STR(?s))")
+            .unwrap();
+        assert_eq!(
+            qr.row_count(),
+            2,
+            "ORDER BY ASC(STR(?s)) should return 2 rows"
+        );
     }
 
     /// Both GROUP BY and ORDER BY with STR(): combined complex expressions.
@@ -105,26 +94,14 @@ mod sparql_aggregate_expression_tests {
         let db = rdf_db();
         insert_sample_triples(&db);
 
-        let result = db.execute_sparql(
-            "SELECT ?s WHERE { ?s <http://ex.org/name> ?o } ORDER BY DESC(STR(?s))",
+        let qr = db
+            .execute_sparql("SELECT ?s WHERE { ?s <http://ex.org/name> ?o } ORDER BY DESC(STR(?s))")
+            .unwrap();
+        assert_eq!(
+            qr.row_count(),
+            2,
+            "ORDER BY DESC(STR(?s)) should return 2 rows"
         );
-
-        match result {
-            Err(ref err) => {
-                let msg = format!("{err}");
-                assert!(
-                    msg.contains("Store required for expression evaluation"),
-                    "Expected 'Store required for expression evaluation', got: {msg}"
-                );
-            }
-            Ok(ref qr) => {
-                assert_eq!(
-                    qr.row_count(),
-                    2,
-                    "ORDER BY DESC(STR(?s)) should return 2 rows"
-                );
-            }
-        }
     }
 
     // ---------------------------------------------------------------

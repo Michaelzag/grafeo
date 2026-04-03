@@ -1,0 +1,50 @@
+# IT Infrastructure Dataset
+# 4 Servers, 5 Services, 3 Networks, 2 Incidents
+# Topology: Service -[DEPENDS_ON {latency_ms}]-> Service
+#           Service -[RUNS_ON]-> Server
+#           Server -[IN_NETWORK]-> Network
+#           Incident -[AFFECTS]-> Service
+#
+# Use case: dependency chains, cycle detection, weighted paths,
+#           impact analysis, infrastructure topology queries
+
+INSERT (:Server {name: 'srv-web-1', cpu_cores: 8, memory_gb: 32, region: 'eu-west', status: 'healthy'})
+INSERT (:Server {name: 'srv-web-2', cpu_cores: 8, memory_gb: 32, region: 'eu-west', status: 'healthy'})
+INSERT (:Server {name: 'srv-db-1', cpu_cores: 16, memory_gb: 128, region: 'eu-west', status: 'healthy'})
+INSERT (:Server {name: 'srv-cache-1', cpu_cores: 4, memory_gb: 64, region: 'eu-west', status: 'degraded'})
+
+INSERT (:Service {name: 'api-gateway', version: '2.1.0', port: 8080, status: 'running', priority: 1})
+INSERT (:Service {name: 'auth-service', version: '1.5.3', port: 8081, status: 'running', priority: 1})
+INSERT (:Service {name: 'user-service', version: '3.0.1', port: 8082, status: 'running', priority: 2})
+INSERT (:Service {name: 'order-service', version: '2.0.0', port: 8083, status: 'running', priority: 2})
+INSERT (:Service {name: 'cache-layer', version: '1.2.0', port: 6379, status: 'degraded', priority: 3})
+
+INSERT (:Network {name: 'frontend-net', cidr: '10.0.1.0/24', vlan: 100})
+INSERT (:Network {name: 'backend-net', cidr: '10.0.2.0/24', vlan: 200})
+INSERT (:Network {name: 'data-net', cidr: '10.0.3.0/24', vlan: 300})
+
+INSERT (:Incident {id: 'INC-001', severity: 'high', title: 'Cache timeout errors', started: DATE '2024-03-15', resolved: false})
+INSERT (:Incident {id: 'INC-002', severity: 'low', title: 'Slow auth responses', started: DATE '2024-03-10', resolved: true})
+
+MATCH (s:Service {name: 'api-gateway'}), (t:Service {name: 'auth-service'}) INSERT (s)-[:DEPENDS_ON {latency_ms: 5, critical: true}]->(t)
+MATCH (s:Service {name: 'api-gateway'}), (t:Service {name: 'user-service'}) INSERT (s)-[:DEPENDS_ON {latency_ms: 8, critical: true}]->(t)
+MATCH (s:Service {name: 'api-gateway'}), (t:Service {name: 'order-service'}) INSERT (s)-[:DEPENDS_ON {latency_ms: 10, critical: false}]->(t)
+MATCH (s:Service {name: 'auth-service'}), (t:Service {name: 'cache-layer'}) INSERT (s)-[:DEPENDS_ON {latency_ms: 2, critical: true}]->(t)
+MATCH (s:Service {name: 'user-service'}), (t:Service {name: 'cache-layer'}) INSERT (s)-[:DEPENDS_ON {latency_ms: 2, critical: false}]->(t)
+MATCH (s:Service {name: 'order-service'}), (t:Service {name: 'user-service'}) INSERT (s)-[:DEPENDS_ON {latency_ms: 12, critical: true}]->(t)
+
+MATCH (s:Service {name: 'api-gateway'}), (sv:Server {name: 'srv-web-1'}) INSERT (s)-[:RUNS_ON]->(sv)
+MATCH (s:Service {name: 'auth-service'}), (sv:Server {name: 'srv-web-1'}) INSERT (s)-[:RUNS_ON]->(sv)
+MATCH (s:Service {name: 'user-service'}), (sv:Server {name: 'srv-web-2'}) INSERT (s)-[:RUNS_ON]->(sv)
+MATCH (s:Service {name: 'order-service'}), (sv:Server {name: 'srv-web-2'}) INSERT (s)-[:RUNS_ON]->(sv)
+MATCH (s:Service {name: 'cache-layer'}), (sv:Server {name: 'srv-cache-1'}) INSERT (s)-[:RUNS_ON]->(sv)
+
+MATCH (sv:Server {name: 'srv-web-1'}), (n:Network {name: 'frontend-net'}) INSERT (sv)-[:IN_NETWORK]->(n)
+MATCH (sv:Server {name: 'srv-web-1'}), (n:Network {name: 'backend-net'}) INSERT (sv)-[:IN_NETWORK]->(n)
+MATCH (sv:Server {name: 'srv-web-2'}), (n:Network {name: 'backend-net'}) INSERT (sv)-[:IN_NETWORK]->(n)
+MATCH (sv:Server {name: 'srv-db-1'}), (n:Network {name: 'data-net'}) INSERT (sv)-[:IN_NETWORK]->(n)
+MATCH (sv:Server {name: 'srv-cache-1'}), (n:Network {name: 'data-net'}) INSERT (sv)-[:IN_NETWORK]->(n)
+MATCH (sv:Server {name: 'srv-cache-1'}), (n:Network {name: 'backend-net'}) INSERT (sv)-[:IN_NETWORK]->(n)
+
+MATCH (i:Incident {id: 'INC-001'}), (s:Service {name: 'cache-layer'}) INSERT (i)-[:AFFECTS]->(s)
+MATCH (i:Incident {id: 'INC-002'}), (s:Service {name: 'auth-service'}) INSERT (i)-[:AFFECTS]->(s)

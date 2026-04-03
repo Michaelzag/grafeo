@@ -803,6 +803,19 @@ impl Database {
         serde_wasm_bindgen::to_value(&info).map_err(|e| JsError::new(&e.to_string()))
     }
 
+    /// Converts the database to a read-only CompactStore for faster queries.
+    ///
+    /// Takes a snapshot of all nodes and edges, builds a columnar store with
+    /// CSR adjacency, and switches to read-only mode. After this call, write
+    /// operations will fail. Gives ~60x memory reduction and 100x+ traversal
+    /// speedup for read-only workloads.
+    #[cfg(feature = "compact-store")]
+    pub fn compact(&mut self) -> Result<(), JsError> {
+        self.inner
+            .compact()
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
     /// Bulk-imports rows (array of objects) as nodes or edges.
     ///
     /// This is the WASM equivalent of Python's `import_df()`: each object

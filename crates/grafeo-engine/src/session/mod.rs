@@ -133,6 +133,10 @@ pub struct Session {
     /// CDC log for change tracking.
     #[cfg(feature = "cdc")]
     cdc_log: Arc<crate::cdc::CdcLog>,
+    /// Buffered CDC events for the current transaction.
+    /// Flushed to `cdc_log` on commit, discarded on rollback.
+    #[cfg(feature = "cdc")]
+    cdc_pending_events: Option<Arc<parking_lot::Mutex<Vec<crate::cdc::ChangeEvent>>>>,
     /// Current graph name (for multi-graph USE GRAPH support). None = default graph.
     current_graph: parking_lot::Mutex<Option<String>>,
     /// Current schema name (ISO/IEC 39075 Section 4.7.3: independent from session graph).
@@ -181,6 +185,10 @@ struct SavepointState {
     /// Reserved for future use (e.g., restoring graph context on rollback).
     #[allow(dead_code)]
     active_graph: Option<String>,
+    /// CDC event buffer position at savepoint creation.
+    /// On rollback-to-savepoint, the buffer is truncated to this position.
+    #[cfg(feature = "cdc")]
+    cdc_event_position: usize,
 }
 
 impl Session {
@@ -216,6 +224,8 @@ impl Session {
             wal_graph_context: None,
             #[cfg(feature = "cdc")]
             cdc_log: Arc::new(crate::cdc::CdcLog::new()),
+            #[cfg(feature = "cdc")]
+            cdc_pending_events: None,
             current_graph: parking_lot::Mutex::new(None),
             current_schema: parking_lot::Mutex::new(None),
             time_zone: parking_lot::Mutex::new(None),
@@ -254,8 +264,23 @@ impl Session {
     }
 
     /// Sets the CDC log for this session (shared with the database).
+    ///
+    /// Wraps the current write store with a `CdcGraphStore` decorator so
+    /// that all session mutations (INSERT, SET, DELETE via query execution)
+    /// buffer CDC events. The buffer is flushed to the `CdcLog` on commit
+    /// and discarded on rollback.
     #[cfg(feature = "cdc")]
     pub(crate) fn set_cdc_log(&mut self, cdc_log: Arc<crate::cdc::CdcLog>) {
+        // Wrap the WRITE store only with CdcGraphStore to intercept mutations.
+        // The read store (self.graph_store) is left unchanged for zero read overhead.
+        if let Some(ref write_store) = self.graph_store_mut {
+            let cdc_store = Arc::new(crate::database::cdc_store::CdcGraphStore::new(
+                Arc::clone(write_store),
+                Arc::clone(&cdc_log),
+            ));
+            self.cdc_pending_events = Some(cdc_store.pending_events());
+            self.graph_store_mut = Some(cdc_store as Arc<dyn grafeo_core::graph::GraphStoreMut>);
+        }
         self.cdc_log = cdc_log;
     }
 
@@ -305,6 +330,8 @@ impl Session {
             wal_graph_context: None,
             #[cfg(feature = "cdc")]
             cdc_log: Arc::new(crate::cdc::CdcLog::new()),
+            #[cfg(feature = "cdc")]
+            cdc_pending_events: None,
             current_graph: parking_lot::Mutex::new(None),
             current_schema: parking_lot::Mutex::new(None),
             time_zone: parking_lot::Mutex::new(None),
@@ -430,18 +457,31 @@ impl Session {
             None => self.graph_store_mut.as_ref().map(Arc::clone),
             Some(ref name) => match self.store.graph(name) {
                 Some(named_store) => {
+                    let mut store: Arc<dyn GraphStoreMut> = named_store;
+
                     #[cfg(feature = "wal")]
                     if let (Some(wal), Some(ctx)) = (&self.wal, &self.wal_graph_context) {
-                        return Some(Arc::new(
-                            crate::database::wal_store::WalGraphStore::new_for_graph(
-                                named_store,
-                                Arc::clone(wal),
-                                name.clone(),
-                                Arc::clone(ctx),
-                            ),
-                        ) as Arc<dyn GraphStoreMut>);
+                        store = Arc::new(crate::database::wal_store::WalGraphStore::new_for_graph(
+                            // WAL needs Arc<LpgStore>, get it fresh
+                            self.store
+                                .graph(name)
+                                .unwrap_or_else(|| Arc::clone(&self.store)),
+                            Arc::clone(wal),
+                            name.clone(),
+                            Arc::clone(ctx),
+                        ));
                     }
-                    Some(named_store as Arc<dyn GraphStoreMut>)
+
+                    #[cfg(feature = "cdc")]
+                    if let Some(ref pending) = self.cdc_pending_events {
+                        store = Arc::new(crate::database::cdc_store::CdcGraphStore::wrap(
+                            store,
+                            Arc::clone(&self.cdc_log),
+                            Arc::clone(pending),
+                        ));
+                    }
+
+                    Some(store)
                 }
                 None => self.graph_store_mut.as_ref().map(Arc::clone),
             },
@@ -3292,6 +3332,11 @@ impl Session {
                 }
                 #[cfg(feature = "rdf")]
                 self.rollback_rdf_transaction(transaction_id);
+                // Discard buffered CDC events on conflict rollback
+                #[cfg(feature = "cdc")]
+                if let Some(ref pending) = self.cdc_pending_events {
+                    pending.lock().clear();
+                }
                 *self.read_only_tx.lock() = self.db_read_only;
                 self.savepoints.lock().clear();
                 self.touched_graphs.lock().clear();
@@ -3326,6 +3371,18 @@ impl Session {
         for graph_name in &touched {
             let store = self.resolve_store(graph_name);
             store.commit_transaction_properties(transaction_id);
+        }
+
+        // Flush buffered CDC events now that the transaction is committed.
+        // All buffered events have PENDING epoch; assign the real commit_epoch.
+        // Uses record_batch to acquire the write lock once per commit.
+        #[cfg(feature = "cdc")]
+        if let Some(ref pending) = self.cdc_pending_events {
+            let events: Vec<crate::cdc::ChangeEvent> = pending.lock().drain(..).collect();
+            self.cdc_log.record_batch(events.into_iter().map(|mut e| {
+                e.epoch = commit_epoch;
+                e
+            }));
         }
 
         // Sync epoch for all touched graphs so that convenience lookups
@@ -3433,6 +3490,12 @@ impl Session {
         #[cfg(feature = "rdf")]
         self.rollback_rdf_transaction(transaction_id);
 
+        // Discard buffered CDC events on rollback
+        #[cfg(feature = "cdc")]
+        if let Some(ref pending) = self.cdc_pending_events {
+            pending.lock().clear();
+        }
+
         // Clear savepoints and touched graphs
         self.savepoints.lock().clear();
         self.touched_graphs.lock().clear();
@@ -3491,6 +3554,11 @@ impl Session {
             name: name.to_string(),
             graph_snapshots,
             active_graph: self.current_graph.lock().clone(),
+            #[cfg(feature = "cdc")]
+            cdc_event_position: self
+                .cdc_pending_events
+                .as_ref()
+                .map_or(0, |p| p.lock().len()),
         });
         Ok(())
     }
@@ -3568,6 +3636,12 @@ impl Session {
                 let store = self.resolve_store(graph_name);
                 store.discard_uncommitted_versions(transaction_id);
             }
+        }
+
+        // Truncate CDC event buffer to the savepoint position.
+        #[cfg(feature = "cdc")]
+        if let Some(ref pending) = self.cdc_pending_events {
+            pending.lock().truncate(sp_state.cdc_event_position);
         }
 
         // Restore touched_graphs to only the graphs that were known at savepoint time.
@@ -3991,6 +4065,68 @@ impl Session {
             epoch,
             transaction_id.unwrap_or(TransactionId::SYSTEM),
         )
+    }
+
+    /// Creates an edge with properties within the active transaction context.
+    pub fn create_edge_with_props<'a>(
+        &self,
+        src: NodeId,
+        dst: NodeId,
+        edge_type: &str,
+        properties: impl IntoIterator<Item = (&'a str, Value)>,
+    ) -> grafeo_common::types::EdgeId {
+        let (epoch, transaction_id) = self.get_transaction_context();
+        let tid = transaction_id.unwrap_or(TransactionId::SYSTEM);
+        let store = self.active_lpg_store();
+        let eid = store.create_edge_versioned(src, dst, edge_type, epoch, tid);
+        for (key, value) in properties {
+            store.set_edge_property_versioned(eid, key, value, tid);
+        }
+        eid
+    }
+
+    /// Sets a node property within the active transaction context.
+    pub fn set_node_property(&self, id: NodeId, key: &str, value: Value) {
+        let (_, transaction_id) = self.get_transaction_context();
+        if let Some(tid) = transaction_id {
+            self.active_lpg_store()
+                .set_node_property_versioned(id, key, value, tid);
+        } else {
+            self.active_lpg_store().set_node_property(id, key, value);
+        }
+    }
+
+    /// Sets an edge property within the active transaction context.
+    pub fn set_edge_property(&self, id: grafeo_common::types::EdgeId, key: &str, value: Value) {
+        let (_, transaction_id) = self.get_transaction_context();
+        if let Some(tid) = transaction_id {
+            self.active_lpg_store()
+                .set_edge_property_versioned(id, key, value, tid);
+        } else {
+            self.active_lpg_store().set_edge_property(id, key, value);
+        }
+    }
+
+    /// Deletes a node within the active transaction context.
+    pub fn delete_node(&self, id: NodeId) -> bool {
+        let (epoch, transaction_id) = self.get_transaction_context();
+        if let Some(tid) = transaction_id {
+            self.active_lpg_store()
+                .delete_node_versioned(id, epoch, tid)
+        } else {
+            self.active_lpg_store().delete_node(id)
+        }
+    }
+
+    /// Deletes an edge within the active transaction context.
+    pub fn delete_edge(&self, id: grafeo_common::types::EdgeId) -> bool {
+        let (epoch, transaction_id) = self.get_transaction_context();
+        if let Some(tid) = transaction_id {
+            self.active_lpg_store()
+                .delete_edge_versioned(id, epoch, tid)
+        } else {
+            self.active_lpg_store().delete_edge(id)
+        }
     }
 
     // =========================================================================

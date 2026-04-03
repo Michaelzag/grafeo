@@ -9,7 +9,13 @@ pub fn value_to_js(value: &Value) -> JsValue {
     match value {
         Value::Null => JsValue::NULL,
         Value::Bool(b) => JsValue::from_bool(*b),
-        Value::Int64(n) => JsValue::from_f64(*n as f64),
+        Value::Int64(n) => {
+            if *n > -(1i64 << 53) && *n < (1i64 << 53) {
+                JsValue::from_f64(*n as f64)
+            } else {
+                js_sys::BigInt::from(*n).into()
+            }
+        }
         Value::Float64(f) => JsValue::from_f64(*f),
         Value::String(s) => JsValue::from_str(s),
         Value::Bytes(b) => {

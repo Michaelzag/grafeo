@@ -53,6 +53,8 @@ impl Session {
             wal_graph_context: None,
             #[cfg(feature = "cdc")]
             cdc_log: Arc::new(crate::cdc::CdcLog::new()),
+            #[cfg(feature = "cdc")]
+            cdc_pending_events: None,
             current_graph: parking_lot::Mutex::new(None),
             current_schema: parking_lot::Mutex::new(None),
             time_zone: parking_lot::Mutex::new(None),

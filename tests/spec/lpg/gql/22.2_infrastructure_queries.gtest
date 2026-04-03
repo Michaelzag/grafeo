@@ -1,0 +1,211 @@
+# GQL Infrastructure Real-World Queries
+#
+# Covers: dependency chain analysis, impact assessment, topology queries,
+# service health checks, network segmentation analysis.
+# Uses infrastructure dataset for DevOps/SRE query patterns.
+
+meta:
+  language: gql
+  model: lpg
+  section: "22.2"
+  title: Infrastructure real-world queries
+  dataset: infrastructure
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # Service dependency analysis
+  # ---------------------------------------------------------------------------
+
+  - name: direct_dependencies_of_api_gateway
+    query: |
+      MATCH (s:Service {name: 'api-gateway'})-[:DEPENDS_ON]->(dep:Service)
+      RETURN dep.name ORDER BY dep.name
+    expect:
+      ordered: true
+      rows:
+        - [auth-service]
+        - [order-service]
+        - [user-service]
+
+  - name: critical_dependencies_only
+    query: |
+      MATCH (s:Service {name: 'api-gateway'})-[d:DEPENDS_ON]->(dep:Service)
+      WHERE d.critical = true
+      RETURN dep.name ORDER BY dep.name
+    expect:
+      ordered: true
+      rows:
+        - [auth-service]
+        - [user-service]
+
+  - name: transitive_dependencies
+    query: |
+      MATCH (s:Service {name: 'api-gateway'})-[:DEPENDS_ON]->{1,3}(dep:Service)
+      RETURN DISTINCT dep.name ORDER BY dep.name
+    expect:
+      ordered: true
+      rows:
+        - [auth-service]
+        - [cache-layer]
+        - [order-service]
+        - [user-service]
+
+  - name: dependency_chain_to_cache
+    query: |
+      MATCH p = (s:Service {name: 'api-gateway'})-[:DEPENDS_ON]->{1,3}(t:Service {name: 'cache-layer'})
+      RETURN length(p) AS hops
+      ORDER BY hops
+    expect:
+      ordered: true
+      count: 3
+
+  # ---------------------------------------------------------------------------
+  # Impact analysis
+  # ---------------------------------------------------------------------------
+
+  - name: services_affected_by_cache_outage
+    query: |
+      MATCH (dep:Service)-[:DEPENDS_ON]->{1,3}(s:Service {name: 'cache-layer'})
+      RETURN DISTINCT dep.name ORDER BY dep.name
+    expect:
+      ordered: true
+      rows:
+        - [api-gateway]
+        - [auth-service]
+        - [order-service]
+        - [user-service]
+
+  - name: incident_impact_chain
+    query: |
+      MATCH (i:Incident {id: 'INC-001'})-[:AFFECTS]->(s:Service)
+      RETURN s.name, s.status
+    expect:
+      rows:
+        - [cache-layer, degraded]
+
+  - name: indirect_incident_impact
+    query: |
+      MATCH (i:Incident {id: 'INC-001'})-[:AFFECTS]->(s:Service),
+            (upstream:Service)-[:DEPENDS_ON]->{1,2}(s)
+      RETURN DISTINCT upstream.name ORDER BY upstream.name
+    expect:
+      ordered: true
+      rows:
+        - [api-gateway]
+        - [auth-service]
+        - [order-service]
+        - [user-service]
+
+  # ---------------------------------------------------------------------------
+  # Server topology
+  # ---------------------------------------------------------------------------
+
+  - name: services_per_server
+    query: |
+      MATCH (s:Service)-[:RUNS_ON]->(sv:Server)
+      RETURN sv.name, count(s) AS service_count
+      ORDER BY service_count DESC
+    expect:
+      ordered: true
+      rows:
+        - [srv-web-1, 2]
+        - [srv-web-2, 2]
+        - [srv-cache-1, 1]
+
+  - name: servers_in_backend_network
+    query: |
+      MATCH (sv:Server)-[:IN_NETWORK]->(n:Network {name: 'backend-net'})
+      RETURN sv.name ORDER BY sv.name
+    expect:
+      ordered: true
+      rows:
+        - [srv-cache-1]
+        - [srv-web-1]
+        - [srv-web-2]
+
+  - name: networks_per_server
+    query: |
+      MATCH (sv:Server)-[:IN_NETWORK]->(n:Network)
+      RETURN sv.name, count(n) AS networks, collect(n.name) AS network_names
+      ORDER BY sv.name
+    expect:
+      ordered: true
+      count: 4
+
+  # ---------------------------------------------------------------------------
+  # Service health
+  # ---------------------------------------------------------------------------
+
+  - name: degraded_services_and_servers
+    query: |
+      MATCH (s:Service)-[:RUNS_ON]->(sv:Server)
+      WHERE s.status = 'degraded' OR sv.status = 'degraded'
+      RETURN s.name AS service, s.status AS svc_status, sv.name AS server, sv.status AS srv_status
+    expect:
+      count: 1
+
+  - name: high_priority_services_and_their_servers
+    query: |
+      MATCH (s:Service)-[:RUNS_ON]->(sv:Server)
+      WHERE s.priority = 1
+      RETURN s.name, sv.name, sv.memory_gb ORDER BY s.name
+    expect:
+      ordered: true
+      rows:
+        - [api-gateway, srv-web-1, 32]
+        - [auth-service, srv-web-1, 32]
+
+  # ---------------------------------------------------------------------------
+  # Latency analysis
+  # ---------------------------------------------------------------------------
+
+  - name: total_latency_api_to_cache
+    query: |
+      MATCH (s:Service {name: 'api-gateway'})-[d1:DEPENDS_ON]->(mid:Service)-[d2:DEPENDS_ON]->(t:Service {name: 'cache-layer'})
+      RETURN mid.name, d1.latency_ms + d2.latency_ms AS total_latency_ms
+      ORDER BY total_latency_ms
+    expect:
+      ordered: true
+      rows:
+        - [auth-service, 7]
+        - [user-service, 10]
+
+  - name: max_latency_direct_dependency
+    query: |
+      MATCH (s:Service {name: 'api-gateway'})-[d:DEPENDS_ON]->(dep:Service)
+      RETURN max(d.latency_ms) AS max_latency
+    expect:
+      rows:
+        - [10]
+
+  - name: avg_latency_all_dependencies
+    query: |
+      MATCH (s:Service)-[d:DEPENDS_ON]->(dep:Service)
+      RETURN avg(d.latency_ms) AS avg_latency
+    expect:
+      precision: 1
+      count: 1
+
+  # ---------------------------------------------------------------------------
+  # Cross-domain: full stack trace
+  # ---------------------------------------------------------------------------
+
+  - name: full_stack_api_gateway
+    query: |
+      MATCH (s:Service {name: 'api-gateway'})-[:RUNS_ON]->(sv:Server)-[:IN_NETWORK]->(n:Network)
+      RETURN s.name, sv.name, collect(n.name) AS networks
+    expect:
+      count: 1
+
+  - name: collocated_services
+    query: |
+      MATCH (s1:Service)-[:RUNS_ON]->(sv:Server)<-[:RUNS_ON]-(s2:Service)
+      WHERE s1.name < s2.name
+      RETURN sv.name, s1.name, s2.name
+      ORDER BY sv.name
+    expect:
+      ordered: true
+      rows:
+        - [srv-web-1, api-gateway, auth-service]
+        - [srv-web-2, order-service, user-service]

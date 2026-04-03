@@ -151,10 +151,68 @@ be more events available: poll again using the epoch of the last event you recei
 `id_mappings` maps each create request (by its zero-based index in `changes`) to the
 server-assigned entity ID. Use these to update your local ID→server-ID table.
 
+## Timestamps and Ordering
+
+### Hybrid Logical Clock (HLC)
+
+*Since 0.5.32.* CDC events use a Hybrid Logical Clock timestamp instead of raw wall-clock time.
+Each `timestamp` field is a 64-bit value packing physical milliseconds (48 bits) and a logical
+counter (16 bits):
+
+```text
+┌──────────────────────────────────┬──────────┐
+│  physical ms (48 bits)           │ logical  │
+│  milliseconds since Unix epoch   │ (16 bits)│
+└──────────────────────────────────┴──────────┘
+```
+
+The logical counter increments when multiple events occur within the same millisecond, guaranteeing
+**strict monotonic ordering** even under clock skew. This means:
+
+- Events from the same node are always totally ordered
+- `timestamp_a < timestamp_b` implies event A happened before event B (on the same node)
+- Cross-node ordering uses the physical component for last-write-wins resolution
+
+For display, extract the physical component: `physical_ms = timestamp >> 16`.
+
+### Session-driven CDC
+
+*Since 0.5.32.* Mutations made through query sessions (`INSERT`, `SET`, `DELETE` via GQL, Cypher,
+or any supported language) now generate CDC events. Previously, only direct API mutations
+(`create_node`, `set_node_property`) were tracked.
+
+CDC events are buffered during a transaction and flushed atomically on commit. If a transaction
+rolls back, its CDC events are discarded. This guarantees that the change feed reflects only
+committed state.
+
+### Epoch monotonicity
+
+The `epoch` field in change events is strictly monotonic: `changes_between(from, to)` returns
+events with no gaps, no duplicates, and strictly increasing epoch values. This is enforced by
+stress tests with 5 concurrent writers.
+
+### Atomic sync apply
+
+*Since 0.5.32.* When a replica applies incoming changes via `POST /db/{name}/sync`, all mutations
+are wrapped in a single session transaction. Readers on the replica never see a partially applied
+batch: either all changes become visible (on commit) or none (on rollback or crash).
+
+### Persistent replica epoch
+
+*Since 0.5.32.* Replicas that run with `--data-dir` persist the last-applied epoch per database to
+`{data_dir}/.replica-epochs`. After a restart, the replica resumes pulling from where it left off
+instead of re-fetching from epoch 0.
+
+### CDC auto-activation
+
+*Since 0.5.32.* CDC is opt-in per database in the engine. The server automatically enables CDC on
+all databases when running as a replication primary (`--replication-mode primary`), so that all
+mutations (both direct API and session-driven) produce change events for replicas to consume.
+
 ## Conflict Resolution
 
-The server uses **last-write-wins (LWW)**: wall-clock timestamps are compared. If the server has
-a CDC record for the target entity with a `timestamp` strictly greater than the client's
+The server uses **last-write-wins (LWW)**: HLC timestamps are compared. If the server has a CDC
+record for the target entity with a `timestamp` strictly greater than the client's
 `change.timestamp`, the server's version wins and the client change is skipped. Skipped changes
 appear in `conflicts`.
 

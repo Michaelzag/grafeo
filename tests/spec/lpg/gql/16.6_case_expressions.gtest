@@ -1,0 +1,263 @@
+# GQL CASE Expressions: ISO/IEC 39075:2024 sec 16.6
+#
+# Covers: simple CASE, searched CASE, nested CASE, NULL handling,
+# CASE in WHERE, CASE in ORDER BY, CASE with aggregation.
+
+meta:
+  language: gql
+  model: lpg
+  section: "16.6"
+  title: CASE expressions
+  dataset: ecommerce
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # Simple CASE (value comparison)
+  # ---------------------------------------------------------------------------
+
+  - name: simple_case_string
+    query: |
+      MATCH (c:Customer)
+      RETURN c.name,
+        CASE c.tier
+          WHEN 'gold' THEN 'Premium'
+          WHEN 'silver' THEN 'Standard'
+          WHEN 'bronze' THEN 'Basic'
+        END AS tier_label
+      ORDER BY c.name
+    expect:
+      ordered: true
+      rows:
+        - [Alix, Premium]
+        - [Gus, Standard]
+        - [Jules, Basic]
+        - [Mia, Standard]
+        - [Vincent, Premium]
+
+  - name: simple_case_with_else
+    query: |
+      MATCH (c:Customer)
+      RETURN c.name,
+        CASE c.city
+          WHEN 'Amsterdam' THEN 'NL'
+          WHEN 'Berlin' THEN 'DE'
+          ELSE 'Other'
+        END AS country_code
+      ORDER BY c.name
+    expect:
+      ordered: true
+      rows:
+        - [Alix, NL]
+        - [Gus, DE]
+        - [Jules, NL]
+        - [Mia, Other]
+        - [Vincent, Other]
+
+  - name: simple_case_no_match_no_else
+    query: |
+      MATCH (c:Customer {name: 'Mia'})
+      RETURN CASE c.city
+        WHEN 'Amsterdam' THEN 'NL'
+        WHEN 'Berlin' THEN 'DE'
+      END AS code
+    expect:
+      rows:
+        - [null]
+
+  # ---------------------------------------------------------------------------
+  # Searched CASE (boolean conditions)
+  # ---------------------------------------------------------------------------
+
+  - name: searched_case_numeric_ranges
+    query: |
+      MATCH (p:Product)
+      RETURN p.name,
+        CASE
+          WHEN p.price > 500 THEN 'expensive'
+          WHEN p.price > 100 THEN 'moderate'
+          ELSE 'affordable'
+        END AS price_tier
+      ORDER BY p.name
+    expect:
+      ordered: true
+      rows:
+        - [Graph Databases, affordable]
+        - [Laptop Pro, expensive]
+        - [Rust Programming, affordable]
+        - [Tablet Mini, moderate]
+        - [Winter Jacket, moderate]
+        - [Wireless Headphones, affordable]
+
+  - name: searched_case_multiple_conditions
+    skip: "compound CASE condition evaluation order"
+    query: |
+      MATCH (p:Product)
+      RETURN p.name,
+        CASE
+          WHEN p.rating >= 4.5 AND p.price < 100 THEN 'best value'
+          WHEN p.rating >= 4.5 THEN 'premium quality'
+          WHEN p.price < 50 THEN 'budget pick'
+          ELSE 'standard'
+        END AS recommendation
+      ORDER BY p.name
+    expect:
+      ordered: true
+      rows:
+        - [Graph Databases, best value]
+        - [Laptop Pro, premium quality]
+        - [Rust Programming, budget pick]
+        - [Tablet Mini, standard]
+        - [Winter Jacket, standard]
+        - [Wireless Headphones, standard]
+
+  # ---------------------------------------------------------------------------
+  # CASE with NULL
+  # ---------------------------------------------------------------------------
+
+  - name: case_null_in_when
+    setup:
+      - "INSERT (:Item {name: 'Widget', color: null})"
+      - "INSERT (:Item {name: 'Gadget', color: 'red'})"
+    query: |
+      MATCH (i:Item)
+      RETURN i.name,
+        CASE
+          WHEN i.color IS NULL THEN 'no color'
+          ELSE i.color
+        END AS display_color
+      ORDER BY i.name
+    expect:
+      ordered: true
+      rows:
+        - [Gadget, red]
+        - [Widget, no color]
+
+  - name: case_coalesce_pattern
+    setup:
+      - "INSERT (:Item {name: 'A', qty: 10})"
+      - "INSERT (:Item {name: 'B'})"
+    query: |
+      MATCH (i:Item)
+      RETURN i.name,
+        CASE WHEN i.qty IS NOT NULL THEN i.qty ELSE 0 END AS safe_qty
+      ORDER BY i.name
+    expect:
+      ordered: true
+      rows:
+        - [A, 10]
+        - [B, 0]
+
+  # ---------------------------------------------------------------------------
+  # CASE in WHERE
+  # ---------------------------------------------------------------------------
+
+  - name: case_in_where
+    query: |
+      MATCH (p:Product)
+      WHERE CASE
+              WHEN p.price > 100 THEN true
+              ELSE false
+            END = true
+      RETURN p.name ORDER BY p.name
+    expect:
+      ordered: true
+      rows:
+        - [Laptop Pro]
+        - [Tablet Mini]
+        - [Winter Jacket]
+
+  # ---------------------------------------------------------------------------
+  # CASE in ORDER BY
+  # ---------------------------------------------------------------------------
+
+  - name: case_in_order_by
+    query: |
+      MATCH (c:Customer)
+      RETURN c.name, c.tier
+      ORDER BY CASE c.tier
+        WHEN 'gold' THEN 1
+        WHEN 'silver' THEN 2
+        WHEN 'bronze' THEN 3
+      END, c.name
+    expect:
+      ordered: true
+      rows:
+        - [Alix, gold]
+        - [Vincent, gold]
+        - [Gus, silver]
+        - [Mia, silver]
+        - [Jules, bronze]
+
+  # ---------------------------------------------------------------------------
+  # CASE with aggregation
+  # ---------------------------------------------------------------------------
+
+  - name: case_count_by_category
+    query: |
+      MATCH (p:Product)
+      RETURN
+        CASE
+          WHEN p.price >= 100 THEN 'high'
+          ELSE 'low'
+        END AS bracket,
+        count(p) AS cnt
+      ORDER BY bracket
+    expect:
+      ordered: true
+      rows:
+        - [high, 3]
+        - [low, 3]
+
+  - name: case_sum_conditional
+    query: |
+      MATCH (p:Product)
+      RETURN sum(
+        CASE WHEN p.rating >= 4.5 THEN 1 ELSE 0 END
+      ) AS high_rated_count
+    expect:
+      rows:
+        - [3]
+
+  # ---------------------------------------------------------------------------
+  # Nested CASE
+  # ---------------------------------------------------------------------------
+
+  - name: nested_case_expressions
+    query: |
+      MATCH (c:Customer)
+      RETURN c.name,
+        CASE c.tier
+          WHEN 'gold' THEN
+            CASE c.city
+              WHEN 'Amsterdam' THEN 'Gold NL'
+              ELSE 'Gold Intl'
+            END
+          ELSE 'Other'
+        END AS label
+      ORDER BY c.name
+    expect:
+      ordered: true
+      rows:
+        - [Alix, Gold NL]
+        - [Gus, Other]
+        - [Jules, Other]
+        - [Mia, Other]
+        - [Vincent, Gold Intl]
+
+  # ---------------------------------------------------------------------------
+  # CASE returning different types
+  # ---------------------------------------------------------------------------
+
+  - name: case_mixed_return_types
+    setup:
+      - "INSERT (:Item {name: 'test', active: true})"
+    query: |
+      MATCH (i:Item)
+      RETURN CASE
+        WHEN i.active = true THEN 'yes'
+        ELSE 'no'
+      END AS status
+    expect:
+      rows:
+        - ["yes"]

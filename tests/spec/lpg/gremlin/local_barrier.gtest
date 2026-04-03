@@ -1,0 +1,173 @@
+# Gremlin Local Scope, Barrier, and Cap Steps
+#
+# Covers: local() for scoped operations, barrier() for synchronization,
+# cap() for side-effect collection, count(local), order(local).
+#
+# Social network topology (from dataset):
+#   Persons: Alix(30, Amsterdam), Gus(25, Berlin), Vincent(35, Paris)
+#   Company: Grafeo OSS (founded 2025)
+#   Edges: Alix-KNOWS->Gus, Gus-KNOWS->Vincent, Alix-WORKS_AT->Grafeo OSS
+
+meta:
+  language: gremlin
+  model: lpg
+  section: "local-barrier"
+  title: Local scope and barrier steps
+  dataset: social_network
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # local() - apply operations within sub-traversal scope
+  # ---------------------------------------------------------------------------
+
+  - name: local_count_per_vertex
+    skip: "local/barrier not implemented"
+    query: |
+      g.V().hasLabel('Person')
+        .local(outE().count())
+    expect:
+      count: 3
+
+  - name: local_limit_per_vertex
+    skip: "local/barrier not implemented"
+    query: |
+      g.V().hasLabel('Person')
+        .local(out().limit(1))
+        .values('name')
+    expect:
+      count: 2
+
+  - name: local_order_per_vertex
+    skip: "local/barrier not implemented"
+    query: |
+      g.V().hasLabel('Person')
+        .local(properties('name', 'age', 'city').count())
+    expect:
+      count: 3
+
+  - name: local_value_map_limit
+    skip: "local/barrier not implemented"
+    query: |
+      g.V().hasLabel('Person')
+        .local(values('name'))
+    expect:
+      count: 3
+
+  # ---------------------------------------------------------------------------
+  # count(local) vs global count
+  # ---------------------------------------------------------------------------
+
+  - name: count_local_on_path
+    skip: "local/barrier not implemented"
+    query: |
+      g.V().has('Person', 'name', 'Alix')
+        .out('KNOWS')
+        .out('KNOWS')
+        .path()
+        .count(local)
+    expect:
+      rows:
+        - [3]
+
+  - name: count_global_vs_local
+    skip: "local/barrier not implemented"
+    query: |
+      g.V().hasLabel('Person')
+        .values('name')
+        .fold()
+        .count(local)
+    expect:
+      rows:
+        - [3]
+
+  # ---------------------------------------------------------------------------
+  # order(local) - sort within scope
+  # ---------------------------------------------------------------------------
+
+  - name: order_local_list
+    skip: "local/barrier not implemented"
+    query: |
+      g.V().hasLabel('Person')
+        .values('age')
+        .fold()
+        .order(local).by(asc)
+        .unfold()
+    expect:
+      ordered: true
+      rows:
+        - [25]
+        - [30]
+        - [35]
+
+  # ---------------------------------------------------------------------------
+  # barrier() - force all traversers to sync
+  # ---------------------------------------------------------------------------
+
+  - name: barrier_basic
+    skip: "local/barrier not implemented"
+    query: |
+      g.V().hasLabel('Person')
+        .barrier()
+        .values('name')
+    expect:
+      count: 3
+
+  - name: barrier_with_dedup
+    skip: "local/barrier not implemented"
+    query: |
+      g.V().hasLabel('Person')
+        .out()
+        .barrier()
+        .dedup()
+        .count()
+    expect:
+      count: 1
+
+  # ---------------------------------------------------------------------------
+  # fold/unfold with local operations
+  # ---------------------------------------------------------------------------
+
+  - name: fold_unfold_roundtrip
+    skip: "local/barrier not implemented"
+    query: |
+      g.V().hasLabel('Person')
+        .values('name')
+        .fold()
+        .unfold()
+    expect:
+      count: 3
+
+  - name: fold_count_local
+    skip: "local/barrier not implemented"
+    query: |
+      g.V().hasLabel('Person')
+        .out('KNOWS')
+        .values('name')
+        .fold()
+        .count(local)
+    expect:
+      rows:
+        - [2]
+
+  # ---------------------------------------------------------------------------
+  # Real-world: local scope for per-node aggregation
+  # ---------------------------------------------------------------------------
+
+  - name: local_outgoing_edge_properties
+    skip: "local/barrier not implemented"
+    query: |
+      g.V().has('Person', 'name', 'Alix')
+        .local(outE().values('since').fold())
+    expect:
+      count: 1
+
+  - name: local_degree_distribution
+    skip: "local/barrier not implemented"
+    query: |
+      g.V().hasLabel('Person')
+        .project('name', 'out_degree')
+        .by('name')
+        .by(local(outE().count()))
+    expect:
+      count: 3

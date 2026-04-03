@@ -126,6 +126,127 @@ impl ColumnCodec {
         self.len() == 0
     }
 
+    /// Returns the offsets of all rows whose value equals `target`.
+    ///
+    /// Operates in the codec's native domain to avoid per-row `Value`
+    /// allocation:
+    /// - [`BitPacked`](Self::BitPacked): compares raw `u64` values via
+    ///   [`BitPackedInts::get`]
+    /// - [`Dict`](Self::Dict): resolves the target string to a dictionary
+    ///   code once, then scans integer codes via
+    ///   [`DictionaryEncoding::filter_by_code`]
+    /// - [`Bitmap`](Self::Bitmap): checks bits directly
+    ///
+    /// Falls back to [`get`](Self::get)-based comparison for type mismatches.
+    pub fn find_eq(&self, target: &Value) -> Vec<usize> {
+        match (self, target) {
+            (Self::BitPacked(bp), &Value::Int64(v)) => {
+                if v < 0 {
+                    return Vec::new();
+                }
+                let target_u64 = v as u64;
+                (0..bp.len())
+                    .filter(|&i| bp.get(i) == Some(target_u64))
+                    .collect()
+            }
+            (Self::Dict(dict), Value::String(s)) => match dict.encode(s.as_str()) {
+                Some(code) => dict.filter_by_code(|c| c == code),
+                None => Vec::new(),
+            },
+            (Self::Bitmap(bv), &Value::Bool(target_bool)) => (0..bv.len())
+                .filter(|&i| bv.get(i) == Some(target_bool))
+                .collect(),
+            _ => (0..self.len())
+                .filter(|&i| self.get(i).as_ref() == Some(target))
+                .collect(),
+        }
+    }
+
+    /// Returns the offsets of all rows whose value falls within the given range.
+    ///
+    /// Like [`find_eq`](Self::find_eq), operates in the codec's native domain
+    /// to avoid per-row `Value` allocation for integer columns.
+    pub fn find_in_range(
+        &self,
+        min: Option<&Value>,
+        max: Option<&Value>,
+        min_inclusive: bool,
+        max_inclusive: bool,
+    ) -> Vec<usize> {
+        if let Self::BitPacked(bp) = self {
+            let min_u64 = match min {
+                Some(&Value::Int64(v)) if v >= 0 => Some(v as u64),
+                Some(&Value::Int64(_)) => Some(0),
+                None => None,
+                _ => return self.find_in_range_fallback(min, max, min_inclusive, max_inclusive),
+            };
+            let max_u64 = match max {
+                Some(&Value::Int64(v)) if v >= 0 => Some(v as u64),
+                Some(&Value::Int64(v)) if v < 0 => return Vec::new(),
+                None => None,
+                _ => return self.find_in_range_fallback(min, max, min_inclusive, max_inclusive),
+            };
+
+            return (0..bp.len())
+                .filter(|&i| {
+                    if let Some(v) = bp.get(i) {
+                        let above_min = match min_u64 {
+                            Some(lo) if min_inclusive => v >= lo,
+                            Some(lo) => v > lo,
+                            None => true,
+                        };
+                        let below_max = match max_u64 {
+                            Some(hi) if max_inclusive => v <= hi,
+                            Some(hi) => v < hi,
+                            None => true,
+                        };
+                        above_min && below_max
+                    } else {
+                        false
+                    }
+                })
+                .collect();
+        }
+
+        self.find_in_range_fallback(min, max, min_inclusive, max_inclusive)
+    }
+
+    /// Fallback range scan via per-row `Value` decode.
+    fn find_in_range_fallback(
+        &self,
+        min: Option<&Value>,
+        max: Option<&Value>,
+        min_inclusive: bool,
+        max_inclusive: bool,
+    ) -> Vec<usize> {
+        use super::zone_map::compare_values;
+
+        (0..self.len())
+            .filter(|&i| {
+                let Some(v) = self.get(i) else {
+                    return false;
+                };
+                if let Some(min_val) = min {
+                    match compare_values(&v, min_val) {
+                        Some(std::cmp::Ordering::Less) => return false,
+                        Some(std::cmp::Ordering::Equal) if !min_inclusive => return false,
+                        None => return false,
+                        _ => {}
+                    }
+                }
+                if let Some(max_val) = max {
+                    match compare_values(&v, max_val) {
+                        Some(std::cmp::Ordering::Greater) => return false,
+                        Some(std::cmp::Ordering::Equal) if !max_inclusive => return false,
+                        None => return false,
+                        _ => {}
+                    }
+                }
+                true
+            })
+            .collect()
+    }
+
     /// Returns an estimate of heap memory used by this column in bytes.
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
@@ -271,5 +392,117 @@ mod tests {
         };
         assert_eq!(vec_col.get(1), None);
         assert_eq!(vec_col.get_int8_vector(1), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // find_eq tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_find_eq_bitpacked() {
+        let values = vec![0u64, 5, 10, 5, 3, 5];
+        let bp = BitPackedInts::pack(&values);
+        let col = ColumnCodec::BitPacked(bp);
+
+        assert_eq!(col.find_eq(&Value::Int64(5)), vec![1, 3, 5]);
+        assert_eq!(col.find_eq(&Value::Int64(0)), vec![0]);
+        assert_eq!(col.find_eq(&Value::Int64(99)), Vec::<usize>::new());
+        // Negative target: BitPacked stores unsigned values, no matches.
+        assert_eq!(col.find_eq(&Value::Int64(-1)), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn test_find_eq_dict() {
+        let mut builder = DictionaryBuilder::new();
+        for name in ["Vincent", "Jules", "Vincent", "Mia", "Jules"] {
+            builder.add(name);
+        }
+        let col = ColumnCodec::Dict(builder.build());
+
+        assert_eq!(col.find_eq(&Value::String("Vincent".into())), vec![0, 2]);
+        assert_eq!(col.find_eq(&Value::String("Mia".into())), vec![3]);
+        assert_eq!(
+            col.find_eq(&Value::String("Butch".into())),
+            Vec::<usize>::new()
+        );
+    }
+
+    #[test]
+    fn test_find_eq_bitmap() {
+        let bools = vec![true, false, true, true, false];
+        let col = ColumnCodec::Bitmap(BitVector::from_bools(&bools));
+
+        assert_eq!(col.find_eq(&Value::Bool(true)), vec![0, 2, 3]);
+        assert_eq!(col.find_eq(&Value::Bool(false)), vec![1, 4]);
+    }
+
+    #[test]
+    fn test_find_eq_type_mismatch_uses_fallback() {
+        let values = vec![1u64, 2, 3];
+        let col = ColumnCodec::BitPacked(BitPackedInts::pack(&values));
+
+        // String target on BitPacked column: type mismatch, falls back.
+        assert_eq!(
+            col.find_eq(&Value::String("hello".into())),
+            Vec::<usize>::new()
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // find_in_range tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_find_in_range_bitpacked_inclusive() {
+        // values: 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
+        let values: Vec<u64> = (0..10).collect();
+        let col = ColumnCodec::BitPacked(BitPackedInts::pack(&values));
+
+        // [3, 6] inclusive
+        let result = col.find_in_range(Some(&Value::Int64(3)), Some(&Value::Int64(6)), true, true);
+        assert_eq!(result, vec![3, 4, 5, 6]);
+    }
+
+    #[test]
+    fn test_find_in_range_bitpacked_exclusive() {
+        let values: Vec<u64> = (0..10).collect();
+        let col = ColumnCodec::BitPacked(BitPackedInts::pack(&values));
+
+        // (3, 6) exclusive
+        let result =
+            col.find_in_range(Some(&Value::Int64(3)), Some(&Value::Int64(6)), false, false);
+        assert_eq!(result, vec![4, 5]);
+    }
+
+    #[test]
+    fn test_find_in_range_bitpacked_open_ended() {
+        let values: Vec<u64> = (0..10).collect();
+        let col = ColumnCodec::BitPacked(BitPackedInts::pack(&values));
+
+        // > 7 (no upper bound)
+        let result = col.find_in_range(Some(&Value::Int64(7)), None, false, false);
+        assert_eq!(result, vec![8, 9]);
+
+        // <= 2 (no lower bound)
+        let result = col.find_in_range(None, Some(&Value::Int64(2)), false, true);
+        assert_eq!(result, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn test_find_in_range_fallback_for_dict() {
+        let mut builder = DictionaryBuilder::new();
+        for name in ["Amsterdam", "Berlin", "Paris", "Prague"] {
+            builder.add(name);
+        }
+        let col = ColumnCodec::Dict(builder.build());
+
+        // String range ["Berlin", "Prague"] inclusive: Berlin, Paris, Prague
+        let result = col.find_in_range(
+            Some(&Value::String("Berlin".into())),
+            Some(&Value::String("Prague".into())),
+            true,
+            true,
+        );
+        assert_eq!(result, vec![1, 2, 3]);
     }
 }

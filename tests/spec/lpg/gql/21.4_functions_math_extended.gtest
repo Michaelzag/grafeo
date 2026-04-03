@@ -1,0 +1,293 @@
+# GQL Extended Math Functions: ISO/IEC 39075:2024 sec 21.4
+#
+# Covers: logarithmic, exponential, power, trigonometric, pi, e,
+# random, modulo edge cases.
+
+meta:
+  language: gql
+  model: lpg
+  section: "21.4"
+  title: Extended math functions
+  dataset: empty
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # Logarithmic functions
+  # ---------------------------------------------------------------------------
+
+  - name: log_natural
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN log(e()) AS result"
+    expect:
+      precision: 6
+      rows:
+        - [1.0]
+
+  - name: log_of_one
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN log(1) AS result"
+    expect:
+      precision: 6
+      rows:
+        - [0.0]
+
+  - name: log10_of_hundred
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN log10(100) AS result"
+    expect:
+      precision: 6
+      rows:
+        - [2.0]
+
+  - name: log10_of_one
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN log10(1) AS result"
+    expect:
+      precision: 6
+      rows:
+        - [0.0]
+
+  # ---------------------------------------------------------------------------
+  # Exponential and power
+  # ---------------------------------------------------------------------------
+
+  - name: exp_of_zero
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN exp(0) AS result"
+    expect:
+      precision: 6
+      rows:
+        - [1.0]
+
+  - name: exp_of_one
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN exp(1) AS result"
+    expect:
+      precision: 4
+      rows:
+        - [2.7183]
+
+  - name: power_squared
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN power(3, 2) AS result"
+    expect:
+      precision: 6
+      rows:
+        - [9.0]
+
+  - name: power_cubed
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN power(2, 10) AS result"
+    expect:
+      precision: 6
+      rows:
+        - [1024.0]
+
+  - name: power_zero_exponent
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN power(999, 0) AS result"
+    expect:
+      precision: 6
+      rows:
+        - [1.0]
+
+  - name: power_fractional_exponent
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN power(16, 0.5) AS result"
+    expect:
+      precision: 6
+      rows:
+        - [4.0]
+
+  # ---------------------------------------------------------------------------
+  # Constants
+  # ---------------------------------------------------------------------------
+
+  - name: pi_value
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN pi() AS result"
+    expect:
+      precision: 4
+      rows:
+        - [3.1416]
+
+  - name: e_value
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN e() AS result"
+    expect:
+      precision: 4
+      rows:
+        - [2.7183]
+
+  # ---------------------------------------------------------------------------
+  # Trigonometric functions (radians)
+  # ---------------------------------------------------------------------------
+
+  - name: sin_of_zero
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN sin(0) AS result"
+    expect:
+      precision: 6
+      rows:
+        - [0.0]
+
+  - name: sin_of_pi_half
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN sin(pi() / 2) AS result"
+    expect:
+      precision: 6
+      rows:
+        - [1.0]
+
+  - name: cos_of_zero
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN cos(0) AS result"
+    expect:
+      precision: 6
+      rows:
+        - [1.0]
+
+  - name: cos_of_pi
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN cos(pi()) AS result"
+    expect:
+      precision: 6
+      rows:
+        - [-1.0]
+
+  - name: tan_of_zero
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN tan(0) AS result"
+    expect:
+      precision: 6
+      rows:
+        - [0.0]
+
+  # ---------------------------------------------------------------------------
+  # Inverse trigonometric
+  # ---------------------------------------------------------------------------
+
+  - name: asin_of_one
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN asin(1) AS result"
+    expect:
+      precision: 4
+      rows:
+        - [1.5708]
+
+  - name: acos_of_one
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN acos(1) AS result"
+    expect:
+      precision: 6
+      rows:
+        - [0.0]
+
+  - name: atan_of_one
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN atan(1) AS result"
+    expect:
+      precision: 4
+      rows:
+        - [0.7854]
+
+  - name: atan2_basic
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN atan2(1, 1) AS result"
+    expect:
+      precision: 4
+      rows:
+        - [0.7854]
+
+  # ---------------------------------------------------------------------------
+  # Degrees / radians conversion
+  # ---------------------------------------------------------------------------
+
+  - name: degrees_from_pi
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN degrees(pi()) AS result"
+    expect:
+      precision: 4
+      rows:
+        - [180.0]
+
+  - name: radians_from_180
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN radians(180) AS result"
+    expect:
+      precision: 4
+      rows:
+        - [3.1416]
+
+  # ---------------------------------------------------------------------------
+  # random()
+  # ---------------------------------------------------------------------------
+
+  - name: random_returns_value
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN random() AS r"
+    expect:
+      count: 1
+
+  - name: random_between_zero_and_one
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) WHERE random() >= 0 AND random() < 1 RETURN true AS ok"
+    expect:
+      count: 1
+
+  # ---------------------------------------------------------------------------
+  # sqrt
+  # ---------------------------------------------------------------------------
+
+  - name: sqrt_perfect_square
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN sqrt(144) AS result"
+    expect:
+      precision: 6
+      rows:
+        - [12.0]
+
+  - name: sqrt_of_zero
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN sqrt(0) AS result"
+    expect:
+      precision: 6
+      rows:
+        - [0.0]
+
+  - name: sqrt_of_two
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN sqrt(2) AS result"
+    expect:
+      precision: 4
+      rows:
+        - [1.4142]

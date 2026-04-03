@@ -290,6 +290,13 @@ impl super::Planner {
                 .with_session_context(self.session_context.clone()),
             );
 
+            // RETURN materializes all outputs (PropertyAccess, NodeResolve,
+            // expressions, etc.). Register them as scalar so enclosing Apply
+            // operators do not misinterpret them as raw node/edge IDs.
+            for col in &columns {
+                self.scalar_columns.borrow_mut().insert(col.clone());
+            }
+
             Ok((operator, columns))
         } else {
             // Simple case: all return items are bare variables
@@ -313,6 +320,11 @@ impl super::Planner {
                         output_types.push(LogicalType::Any);
                     }
                 }
+            }
+
+            // RETURN materializes all outputs; register as scalar.
+            for col in &columns {
+                self.scalar_columns.borrow_mut().insert(col.clone());
             }
 
             // Skip ProjectOperator only when all projections are plain Column pass-throughs
@@ -566,6 +578,22 @@ impl super::Planner {
                         if !inner_vars.contains_key(variable) {
                             continue;
                         }
+                        // Skip if the Return already materializes this exact
+                        // property access (possibly under an alias). E.g.
+                        // RETURN caller.name AS caller ORDER BY caller.name
+                        // already has caller.name in the Return items.
+                        let already_in_return = ret.items.iter().any(|item| {
+                            matches!(
+                                &item.expression,
+                                LogicalExpression::Property {
+                                    variable: v,
+                                    property: p,
+                                } if v == variable && p == property
+                            )
+                        });
+                        if already_in_return {
+                            continue;
+                        }
                         let col_name = format!("{}_{}", variable, property);
                         if seen.insert(col_name.clone()) {
                             augmented_items.push(crate::query::plan::ReturnItem {
@@ -609,6 +637,30 @@ impl super::Planner {
             .enumerate()
             .map(|(i, name)| (name.clone(), i))
             .collect();
+
+        // When the sort input is a Return, some sort key expressions may
+        // already be computed by the Return under an alias. For example,
+        // RETURN caller.name AS caller ORDER BY caller.name: the property
+        // access is already materialized in column "caller". Register the
+        // sort-style name ("caller_name") so the loop below resolves to the
+        // existing column instead of adding a broken extra PropertyAccess
+        // on a non-entity column.
+        if let LogicalOperator::Return(ret) = sort.input.as_ref() {
+            for item in &ret.items {
+                if let LogicalExpression::Property { variable, property } = &item.expression {
+                    let sort_col_name = format!("{variable}_{property}");
+                    if !variable_columns.contains_key(&sort_col_name) {
+                        let output_name = item
+                            .alias
+                            .clone()
+                            .unwrap_or_else(|| expression_to_string(&item.expression));
+                        if let Some(&col_idx) = variable_columns.get(&output_name) {
+                            variable_columns.insert(sort_col_name, col_idx);
+                        }
+                    }
+                }
+            }
+        }
 
         // Collect extra projections in a single ordered list so that column
         // index assignment matches the order they are added to the ProjectOperator.
@@ -669,11 +721,14 @@ impl super::Planner {
             let mut projections = Vec::new();
             let mut output_types = Vec::new();
 
-            // First, pass through all existing columns (use Node type to preserve node IDs
-            // for subsequent property access - nodes need VectorData::NodeId for get_node_id())
+            // Pass through existing columns with correct types. Using Any
+            // (Generic vectors) preserves all value kinds: strings, maps,
+            // node IDs, edge IDs. PropertyAccess handles Generic vectors
+            // via get_node_id()/get_edge_id() fallback paths.
+            let pass_through_types = self.derive_schema_from_columns(&input_columns);
             for (i, _) in input_columns.iter().enumerate() {
                 projections.push(ProjectExpr::Column(i));
-                output_types.push(LogicalType::Node);
+                output_types.push(pass_through_types[i].clone());
             }
 
             // Add extra projections in the same order as index assignment

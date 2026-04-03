@@ -1,0 +1,195 @@
+# Index Correctness Under Mutation
+#
+# Verifies that indexes return correct results after insert, update,
+# and delete cycles. Uses Cypher CREATE INDEX syntax (the only supported
+# index DDL). Setup uses GQL (file default), index ops use Cypher via
+# language override on the statement.
+
+meta:
+  language: cypher
+  model: lpg
+  section: indexes
+  title: Index correctness
+  dataset: empty
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # Hash index point lookups
+  # ---------------------------------------------------------------------------
+
+  - name: create_index_then_query
+    statements:
+      - "CREATE INDEX idx_person_name FOR (n:Person) ON (n.name)"
+      - "CREATE (:Person {name: 'Alix', age: 30})"
+      - "CREATE (:Person {name: 'Gus', age: 25})"
+      - "MATCH (p:Person {name: 'Alix'}) RETURN p.name, p.age"
+    expect:
+      rows:
+        - [Alix, 30]
+
+  - name: index_query_no_match
+    statements:
+      - "CREATE INDEX idx_name FOR (n:Person) ON (n.name)"
+      - "CREATE (:Person {name: 'Alix'})"
+      - "MATCH (p:Person {name: 'Nobody'}) RETURN p.name"
+    expect:
+      empty: true
+
+  - name: index_multiple_matches
+    statements:
+      - "CREATE INDEX idx_city FOR (n:Person) ON (n.city)"
+      - "CREATE (:Person {name: 'Alix', city: 'Amsterdam'})"
+      - "CREATE (:Person {name: 'Jules', city: 'Amsterdam'})"
+      - "CREATE (:Person {name: 'Gus', city: 'Berlin'})"
+      - "MATCH (p:Person {city: 'Amsterdam'}) RETURN p.name ORDER BY p.name"
+    expect:
+      ordered: true
+      rows:
+        - [Alix]
+        - [Jules]
+
+  - name: index_with_null_property
+    statements:
+      - "CREATE INDEX idx_email FOR (n:Person) ON (n.email)"
+      - "CREATE (:Person {name: 'Alix', email: 'alix@example.org'})"
+      - "CREATE (:Person {name: 'Gus'})"
+      - "MATCH (p:Person {email: 'alix@example.org'}) RETURN p.name"
+    expect:
+      rows:
+        - [Alix]
+
+  # ---------------------------------------------------------------------------
+  # Index survives property update
+  # ---------------------------------------------------------------------------
+
+  - name: index_after_property_update
+    statements:
+      - "CREATE INDEX idx_name FOR (n:Person) ON (n.name)"
+      - "CREATE (:Person {name: 'Alix', age: 30})"
+      - "MATCH (p:Person {name: 'Alix'}) SET p.name = 'Alexandra'"
+      - "MATCH (p:Person {name: 'Alexandra'}) RETURN p.age"
+    expect:
+      rows:
+        - [30]
+
+  - name: index_old_value_gone_after_update
+    statements:
+      - "CREATE INDEX idx_name FOR (n:Person) ON (n.name)"
+      - "CREATE (:Person {name: 'Alix'})"
+      - "MATCH (p:Person {name: 'Alix'}) SET p.name = 'Alexandra'"
+      - "MATCH (p:Person {name: 'Alix'}) RETURN count(p) AS cnt"
+    expect:
+      rows:
+        - [0]
+
+  # ---------------------------------------------------------------------------
+  # Index survives deletion
+  # ---------------------------------------------------------------------------
+
+  - name: index_after_delete
+    statements:
+      - "CREATE INDEX idx_name FOR (n:Person) ON (n.name)"
+      - "CREATE (:Person {name: 'Alix'})"
+      - "CREATE (:Person {name: 'Gus'})"
+      - "MATCH (p:Person {name: 'Alix'}) DELETE p"
+      - "MATCH (p:Person {name: 'Alix'}) RETURN count(p) AS cnt"
+    expect:
+      rows:
+        - [0]
+
+  - name: index_remaining_after_delete
+    statements:
+      - "CREATE INDEX idx_name FOR (n:Person) ON (n.name)"
+      - "CREATE (:Person {name: 'Alix'})"
+      - "CREATE (:Person {name: 'Gus'})"
+      - "MATCH (p:Person {name: 'Alix'}) DELETE p"
+      - "MATCH (p:Person {name: 'Gus'}) RETURN p.name"
+    expect:
+      rows:
+        - [Gus]
+
+  # ---------------------------------------------------------------------------
+  # Insert-delete-reinsert cycle
+  # ---------------------------------------------------------------------------
+
+  - name: index_reinsert_after_delete
+    statements:
+      - "CREATE INDEX idx_name FOR (n:Person) ON (n.name)"
+      - "CREATE (:Person {name: 'Alix', age: 30})"
+      - "MATCH (p:Person {name: 'Alix'}) DELETE p"
+      - "CREATE (:Person {name: 'Alix', age: 31})"
+      - "MATCH (p:Person {name: 'Alix'}) RETURN p.age"
+    expect:
+      rows:
+        - [31]
+
+  # ---------------------------------------------------------------------------
+  # Index on numeric property
+  # ---------------------------------------------------------------------------
+
+  - name: numeric_index_exact_lookup
+    statements:
+      - "CREATE INDEX idx_age FOR (n:Person) ON (n.age)"
+      - "CREATE (:Person {name: 'Alix', age: 30})"
+      - "CREATE (:Person {name: 'Gus', age: 25})"
+      - "CREATE (:Person {name: 'Vincent', age: 35})"
+      - "MATCH (p:Person {age: 30}) RETURN p.name"
+    expect:
+      rows:
+        - [Alix]
+
+  - name: numeric_index_range_query
+    statements:
+      - "CREATE INDEX idx_age FOR (n:Person) ON (n.age)"
+      - "CREATE (:Person {name: 'Alix', age: 30})"
+      - "CREATE (:Person {name: 'Gus', age: 25})"
+      - "CREATE (:Person {name: 'Vincent', age: 35})"
+      - "MATCH (p:Person) WHERE p.age > 28 RETURN p.name ORDER BY p.name"
+    expect:
+      ordered: true
+      rows:
+        - [Alix]
+        - [Vincent]
+
+  # ---------------------------------------------------------------------------
+  # Bulk insert then index query
+  # ---------------------------------------------------------------------------
+
+  - name: bulk_insert_then_index
+    statements:
+      - "CREATE (:Item {sku: 'A001', name: 'Alpha'})"
+      - "CREATE (:Item {sku: 'A002', name: 'Beta'})"
+      - "CREATE (:Item {sku: 'A003', name: 'Gamma'})"
+      - "CREATE (:Item {sku: 'A004', name: 'Delta'})"
+      - "CREATE (:Item {sku: 'A005', name: 'Epsilon'})"
+      - "CREATE INDEX idx_sku FOR (n:Item) ON (n.sku)"
+      - "MATCH (i:Item {sku: 'A003'}) RETURN i.name"
+    expect:
+      rows:
+        - [Gamma]
+
+  - name: index_count_all
+    statements:
+      - "CREATE INDEX idx_name FOR (n:Tag) ON (n.name)"
+      - "CREATE (:Tag {name: 'rust'})"
+      - "CREATE (:Tag {name: 'graph'})"
+      - "CREATE (:Tag {name: 'database'})"
+      - "MATCH (t:Tag) RETURN count(t) AS cnt"
+    expect:
+      rows:
+        - [3]
+
+  # ---------------------------------------------------------------------------
+  # Drop index
+  # ---------------------------------------------------------------------------
+
+  - name: drop_index_query_still_works
+    statements:
+      - "CREATE INDEX idx_name FOR (n:Person) ON (n.name)"
+      - "CREATE (:Person {name: 'Alix'})"
+      - "DROP INDEX idx_name"
+      - "MATCH (p:Person {name: 'Alix'}) RETURN p.name"
+    expect:
+      rows:
+        - [Alix]

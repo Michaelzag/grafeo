@@ -42,6 +42,13 @@ public class SpecTests : IDisposable
     /// <summary>Cached set of compiled feature flags from db.Info().</summary>
     private static readonly HashSet<string> CompiledFeatures = LoadCompiledFeatures();
 
+    /// <summary>
+    /// Capabilities provided by this runner itself (not compiled into the native
+    /// library). For example, C# natively supports 64-bit integers, so
+    /// "int64-safe" is always available.
+    /// </summary>
+    private static readonly HashSet<string> RunnerCapabilities = new() { "int64-safe" };
+
     private GrafeoDB? _db;
 
     public void Dispose()
@@ -99,7 +106,15 @@ public class SpecTests : IDisposable
         {
             if (!HasFeature(req))
             {
-                Skip.If(true, $"Required feature '{req}' not available");
+                Skip.If(true, $"Required capability '{req}' not available");
+                return;
+            }
+        }
+        foreach (var req in tc.Requires)
+        {
+            if (!HasFeature(req))
+            {
+                Skip.If(true, $"Required capability '{req}' not available");
                 return;
             }
         }
@@ -341,7 +356,7 @@ public class SpecTests : IDisposable
         // Compound language key: "graphql-rdf" requires both "graphql" and "rdf"
         if (key == "graphql-rdf")
             return CompiledFeatures.Contains("graphql") && CompiledFeatures.Contains("rdf");
-        return CompiledFeatures.Contains(key);
+        return CompiledFeatures.Contains(key) || RunnerCapabilities.Contains(key);
     }
 
     // =========================================================================

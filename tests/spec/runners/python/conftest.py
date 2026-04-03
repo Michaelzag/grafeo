@@ -56,6 +56,9 @@ _LANGUAGE_METHODS: Dict[str, str] = {
     "sql_pgq": "execute_sql",
 }
 
+# Capabilities declared by this runner (not compiled features, but runner-level support)
+_RUNNER_CAPABILITIES = {"int64-safe"}
+
 # Cached set of compiled feature flags from db.info()["features"]
 _compiled_features: Optional[set] = None
 
@@ -164,7 +167,7 @@ class GtestItem(pytest.Item):
         language = self.variant_lang or tc.language or meta.language or "gql"
 
         # Check requires: skip if the compiled build lacks the feature
-        all_requires = list(meta.requires)
+        all_requires = list(meta.requires) + list(tc.requires)
         if language not in ("gql", "") and language not in all_requires:
             all_requires.append(language)
 
@@ -177,7 +180,7 @@ class GtestItem(pytest.Item):
             if key == "graphql-rdf":
                 if "graphql" not in features or "rdf" not in features:
                     pytest.skip(f"grafeo build does not include '{key}' feature")
-            elif key not in features:
+            elif key not in features and key not in _RUNNER_CAPABILITIES:
                 pytest.skip(f"grafeo build does not include '{key}' feature")
 
         # Fresh database per test
@@ -198,8 +201,8 @@ class GtestItem(pytest.Item):
 
         if statements:
             queries = list(statements)
-        elif query:
-            queries = [query]
+        elif query or tc.expect.error is not None:
+            queries = [query or ""]
         else:
             pytest.fail(f"No query or statements in test '{tc.name}' in {self.path}")
             return  # unreachable, but keeps linters happy
@@ -293,7 +296,7 @@ def _load_dataset(db, dataset_name: str) -> None:
         db.execute(trimmed)
 
 
-def _coerce_params(raw_params: Dict[str, str]) -> Optional[Dict[str, object]]:
+def _coerce_params(raw_params: Dict[str, object]) -> Optional[Dict[str, object]]:
     """Convert string param values to typed Python values.
 
     Mirrors the Rust build.rs coercion order: int, float, bool, string.
@@ -303,7 +306,15 @@ def _coerce_params(raw_params: Dict[str, str]) -> Optional[Dict[str, object]]:
         return None
     coerced: Dict[str, object] = {}
     for key, value in raw_params.items():
-        # int first
+        # Already typed (YAML parser returns bool/int/float directly)
+        # Check bool first because bool is a subclass of int in Python
+        if isinstance(value, bool):
+            coerced[key] = value
+            continue
+        if isinstance(value, (int, float)):
+            coerced[key] = value
+            continue
+        # String coercion: int first
         try:
             coerced[key] = int(value)
             continue

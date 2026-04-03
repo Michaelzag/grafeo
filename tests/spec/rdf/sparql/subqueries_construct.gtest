@@ -1,0 +1,257 @@
+# SPARQL Advanced Subqueries and Output Forms
+#
+# Covers: nested subqueries, correlated subqueries, CONSTRUCT patterns,
+# DESCRIBE output, ASK with complex patterns, nested OPTIONAL.
+# Uses inline data for self-contained tests.
+
+meta:
+  language: sparql
+  model: rdf
+  section: subqueries
+  title: Advanced subqueries and output forms
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # Nested SELECT subqueries
+  # ---------------------------------------------------------------------------
+
+  - name: subquery_top_n_per_group
+    setup:
+      - |
+        INSERT DATA {
+          <http://ex.org/m/1> <http://ex.org/title> "The Heist" ;
+                              <http://ex.org/genre> "Action" ;
+                              <http://ex.org/rating> 82 .
+          <http://ex.org/m/2> <http://ex.org/title> "Berlin Express" ;
+                              <http://ex.org/genre> "Action" ;
+                              <http://ex.org/rating> 87 .
+          <http://ex.org/m/3> <http://ex.org/title> "Midnight Code" ;
+                              <http://ex.org/genre> "SciFi" ;
+                              <http://ex.org/rating> 75 .
+          <http://ex.org/m/4> <http://ex.org/title> "The Algorithm" ;
+                              <http://ex.org/genre> "SciFi" ;
+                              <http://ex.org/rating> 80 .
+        }
+    query: |
+      PREFIX ex: <http://ex.org/>
+      SELECT ?title ?rating WHERE {
+        {
+          SELECT ?title ?rating WHERE {
+            ?m ex:title ?title ; ex:rating ?rating ; ex:genre "Action" .
+          }
+          ORDER BY DESC(?rating)
+          LIMIT 1
+        }
+      }
+    expect:
+      rows:
+        - [Berlin Express, 87]
+
+  - name: subquery_with_aggregation
+    skip: "subquery aggregate feeding outer filter"
+    setup:
+      - |
+        INSERT DATA {
+          <http://ex.org/p/alix> <http://ex.org/name> "Alix" ; <http://ex.org/age> 30 .
+          <http://ex.org/p/gus> <http://ex.org/name> "Gus" ; <http://ex.org/age> 25 .
+          <http://ex.org/p/vincent> <http://ex.org/name> "Vincent" ; <http://ex.org/age> 35 .
+        }
+    query: |
+      PREFIX ex: <http://ex.org/>
+      SELECT ?name ?age WHERE {
+        ?p ex:name ?name ; ex:age ?age .
+        {
+          SELECT (AVG(?a) AS ?avg_age) WHERE {
+            ?x ex:age ?a .
+          }
+        }
+        FILTER(?age > ?avg_age)
+      }
+      ORDER BY ?name
+    expect:
+      ordered: true
+      rows:
+        - [Alix, 30]
+        - [Vincent, 35]
+
+  # ---------------------------------------------------------------------------
+  # CONSTRUCT
+  # ---------------------------------------------------------------------------
+
+  - name: construct_basic_template
+    setup:
+      - |
+        INSERT DATA {
+          <http://ex.org/p/alix> <http://ex.org/name> "Alix" ;
+                                 <http://ex.org/knows> <http://ex.org/p/gus> .
+          <http://ex.org/p/gus> <http://ex.org/name> "Gus" .
+        }
+    query: |
+      PREFIX ex: <http://ex.org/>
+      CONSTRUCT {
+        ?p ex:label ?name .
+      }
+      WHERE {
+        ?p ex:name ?name .
+      }
+    expect:
+      count: 2
+
+  - name: construct_with_filter
+    setup:
+      - |
+        INSERT DATA {
+          <http://ex.org/p/alix> <http://ex.org/name> "Alix" ; <http://ex.org/age> 30 .
+          <http://ex.org/p/gus> <http://ex.org/name> "Gus" ; <http://ex.org/age> 25 .
+          <http://ex.org/p/vincent> <http://ex.org/name> "Vincent" ; <http://ex.org/age> 35 .
+        }
+    query: |
+      PREFIX ex: <http://ex.org/>
+      CONSTRUCT {
+        ?p ex:senior ?name .
+      }
+      WHERE {
+        ?p ex:name ?name ; ex:age ?age .
+        FILTER(?age >= 30)
+      }
+    expect:
+      count: 2
+
+  # ---------------------------------------------------------------------------
+  # DESCRIBE
+  # ---------------------------------------------------------------------------
+
+  - name: describe_single_resource
+    setup:
+      - |
+        INSERT DATA {
+          <http://ex.org/p/alix> <http://ex.org/name> "Alix" ;
+                                 <http://ex.org/age> 30 ;
+                                 <http://ex.org/city> "Amsterdam" .
+        }
+    query: "DESCRIBE <http://ex.org/p/alix>"
+    expect:
+      count: 3
+
+  - name: describe_variable
+    setup:
+      - |
+        INSERT DATA {
+          <http://ex.org/p/alix> <http://ex.org/name> "Alix" ; <http://ex.org/age> 30 .
+          <http://ex.org/p/gus> <http://ex.org/name> "Gus" ; <http://ex.org/age> 25 .
+        }
+    query: |
+      PREFIX ex: <http://ex.org/>
+      DESCRIBE ?p WHERE { ?p ex:name "Alix" }
+    expect:
+      count: 2
+
+  # ---------------------------------------------------------------------------
+  # ASK with complex patterns
+  # ---------------------------------------------------------------------------
+
+  - name: ask_with_property_path
+    skip: "ASK with property path"
+    setup:
+      - |
+        INSERT DATA {
+          <http://ex.org/p/alix> <http://ex.org/knows> <http://ex.org/p/gus> .
+          <http://ex.org/p/gus> <http://ex.org/knows> <http://ex.org/p/vincent> .
+        }
+    query: |
+      PREFIX ex: <http://ex.org/>
+      ASK { <http://ex.org/p/alix> ex:knows+ <http://ex.org/p/vincent> }
+    expect:
+      rows:
+        - [true]
+
+  - name: ask_negative
+    skip: "ASK returns false"
+    setup:
+      - |
+        INSERT DATA {
+          <http://ex.org/p/alix> <http://ex.org/knows> <http://ex.org/p/gus> .
+        }
+    query: |
+      PREFIX ex: <http://ex.org/>
+      ASK { <http://ex.org/p/alix> ex:knows <http://ex.org/p/vincent> }
+    expect:
+      rows:
+        - [false]
+
+  # ---------------------------------------------------------------------------
+  # Nested OPTIONAL
+  # ---------------------------------------------------------------------------
+
+  - name: nested_optional
+    setup:
+      - |
+        INSERT DATA {
+          <http://ex.org/p/alix> <http://ex.org/name> "Alix" .
+          <http://ex.org/p/alix> <http://ex.org/knows> <http://ex.org/p/gus> .
+          <http://ex.org/p/gus> <http://ex.org/name> "Gus" .
+          <http://ex.org/p/vincent> <http://ex.org/name> "Vincent" .
+        }
+    query: |
+      PREFIX ex: <http://ex.org/>
+      SELECT ?name ?friend ?foaf WHERE {
+        ?p ex:name ?name .
+        OPTIONAL {
+          ?p ex:knows ?f .
+          ?f ex:name ?friend .
+          OPTIONAL {
+            ?f ex:knows ?ff .
+            ?ff ex:name ?foaf .
+          }
+        }
+      }
+      ORDER BY ?name
+    expect:
+      ordered: true
+      count: 3
+
+  # ---------------------------------------------------------------------------
+  # VALUES clause with multiple variables
+  # ---------------------------------------------------------------------------
+
+  - name: values_multi_variable
+    setup:
+      - |
+        INSERT DATA {
+          <http://ex.org/p/alix> <http://ex.org/name> "Alix" ; <http://ex.org/city> "Amsterdam" .
+          <http://ex.org/p/gus> <http://ex.org/name> "Gus" ; <http://ex.org/city> "Berlin" .
+          <http://ex.org/p/vincent> <http://ex.org/name> "Vincent" ; <http://ex.org/city> "Paris" .
+        }
+    query: |
+      PREFIX ex: <http://ex.org/>
+      SELECT ?name ?city WHERE {
+        ?p ex:name ?name ; ex:city ?city .
+        VALUES (?name ?city) { ("Alix" "Amsterdam") ("Vincent" "Paris") }
+      }
+      ORDER BY ?name
+    expect:
+      ordered: true
+      rows:
+        - [Alix, Amsterdam]
+        - [Vincent, Paris]
+
+  - name: values_with_undef
+    setup:
+      - |
+        INSERT DATA {
+          <http://ex.org/p/alix> <http://ex.org/name> "Alix" ; <http://ex.org/city> "Amsterdam" .
+          <http://ex.org/p/gus> <http://ex.org/name> "Gus" ; <http://ex.org/city> "Berlin" .
+        }
+    query: |
+      PREFIX ex: <http://ex.org/>
+      SELECT ?name ?city WHERE {
+        ?p ex:name ?name ; ex:city ?city .
+        VALUES (?name ?city) { ("Alix" UNDEF) (UNDEF "Berlin") }
+      }
+      ORDER BY ?name
+    expect:
+      ordered: true
+      rows:
+        - [Alix, Amsterdam]
+        - [Gus, Berlin]

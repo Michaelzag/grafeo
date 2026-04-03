@@ -8,7 +8,7 @@ description = "Declarative .gtest spec tests for Grafeo"
 publish = false
 
 [features]
-default = ["gql", "cypher", "gremlin", "graphql", "sparql", "sql-pgq", "vector-index", "text-index", "algos"]
+default = ["gql", "cypher", "gremlin", "graphql", "sparql", "sql-pgq", "rdf", "vector-index", "text-index", "algos"]
 gql = []
 cypher = []
 gremlin = []

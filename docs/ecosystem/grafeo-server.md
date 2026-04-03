@@ -32,7 +32,7 @@ Four tiers are published to Docker Hub on every release:
 | **standard** | `grafeo-server:latest` | HTTP (:7474) | All 6 | No | Studio | ~21 MB |
 | **full** | `grafeo-server:full` | HTTP + GWP + Bolt | All 6 | Yes + embed | Studio | ~25 MB |
 
-Versioned tags follow the pattern: `0.4.6`, `0.4.6-gwp`, `0.4.6-bolt`, `0.4.6-full`.
+Versioned tags follow the pattern: `0.5.32`, `0.5.32-gwp`, `0.5.32-bolt`, `0.5.32-full`.
 
 ### GWP
 
@@ -301,7 +301,7 @@ A pure Rust implementation of the [Bolt v5.x wire protocol](https://neo4j.com/do
 - ROUTE message support for cluster-aware drivers
 - Graceful connection draining on shutdown
 
-**Status:** v0.1.1, active development. Spec-complete for Bolt 5.1-5.4 including ROUTE and TELEMETRY messages. Rust-only at this time (existing Neo4j drivers in other languages work out of the box).
+**Status:** v0.1.2, active development. Spec-complete for Bolt 5.1-5.4 including ROUTE and TELEMETRY messages. Rust-only at this time (existing Neo4j drivers in other languages work out of the box).
 
 ### Protocol Comparison
 

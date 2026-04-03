@@ -140,6 +140,16 @@ console.log(result); // { triples: 3 }
 
 Objects can be a plain string (treated as IRI), or a structured literal with `value`, optional `datatype` and optional `language` fields.
 
+## Compact Store
+
+Convert to a read-only columnar store for faster queries. See the [CompactStore guide](../../user-guide/compact-store.md).
+
+```javascript
+db.compact();  // switches to read-only columnar mode
+```
+
+After this call, write operations will throw. Queries continue to work with ~60x lower memory and 100x+ faster traversal. Particularly useful for WASM deployments where memory is constrained.
+
 ## Snapshots (Persistence)
 
 Export/import the entire database as a binary snapshot for IndexedDB persistence:

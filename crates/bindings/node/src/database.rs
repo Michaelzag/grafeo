@@ -724,6 +724,20 @@ impl JsGrafeoDB {
             .map_err(napi::Error::from)
     }
 
+    /// Converts the database to a read-only CompactStore for faster queries.
+    ///
+    /// Takes a snapshot of all nodes and edges, builds a columnar store with
+    /// CSR adjacency, and switches to read-only mode. After this call, write
+    /// operations will fail.
+    #[cfg(feature = "compact-store")]
+    #[napi]
+    pub fn compact(&self) -> Result<()> {
+        let mut db = self.inner.write();
+        db.compact()
+            .map_err(NodeGrafeoError::from)
+            .map_err(napi::Error::from)
+    }
+
     /// Close the database.
     #[napi]
     pub fn close(&self) -> Result<()> {
@@ -735,6 +749,27 @@ impl JsGrafeoDB {
     }
 
     // ── Change Data Capture ─────────────────────────────────────────────
+
+    /// Enable CDC for all future sessions.
+    #[cfg(feature = "cdc")]
+    #[napi(js_name = "enableCdc")]
+    pub fn enable_cdc(&self) {
+        self.inner.read().set_cdc_enabled(true);
+    }
+
+    /// Disable CDC for all future sessions.
+    #[cfg(feature = "cdc")]
+    #[napi(js_name = "disableCdc")]
+    pub fn disable_cdc(&self) {
+        self.inner.read().set_cdc_enabled(false);
+    }
+
+    /// Returns whether CDC is currently enabled for new sessions.
+    #[cfg(feature = "cdc")]
+    #[napi(js_name = "isCdcEnabled", getter)]
+    pub fn is_cdc_enabled(&self) -> bool {
+        self.inner.read().is_cdc_enabled()
+    }
 
     /// Returns the full change history for a node.
     #[cfg(feature = "cdc")]

@@ -37,6 +37,7 @@ public sealed class TestCase
     public List<string> Setup { get; set; } = [];
     public Dictionary<string, string> Params { get; set; } = new();
     public List<string> Tags { get; set; } = [];
+    public List<string> Requires { get; set; } = [];
     public string? Skip { get; set; }
     public string? Language { get; set; }
     public Expect Expect { get; set; } = new();

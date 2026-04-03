@@ -1,0 +1,250 @@
+# Temporal Real-World Queries
+#
+# Date-based filtering, ordering, and aggregation on the ecommerce dataset.
+# Tests production patterns: date ranges, ordering by date,
+# grouping by date components, temporal CASE expressions.
+
+meta:
+  language: gql
+  model: lpg
+  section: temporal
+  title: Temporal real-world queries
+  dataset: ecommerce
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # Date filtering
+  # ---------------------------------------------------------------------------
+
+  - name: orders_after_date
+    query: |
+      MATCH (o:Order)
+      WHERE o.placed > DATE '2024-01-01'
+      RETURN o.order_id ORDER BY o.order_id
+    expect:
+      ordered: true
+      rows:
+        - [ORD-004]
+        - [ORD-005]
+        - [ORD-006]
+        - [ORD-007]
+        - [ORD-008]
+
+  - name: orders_before_date
+    query: |
+      MATCH (o:Order)
+      WHERE o.placed < DATE '2023-08-01'
+      RETURN o.order_id ORDER BY o.order_id
+    expect:
+      ordered: true
+      rows:
+        - [ORD-001]
+        - [ORD-002]
+
+  - name: orders_in_date_range
+    query: |
+      MATCH (o:Order)
+      WHERE o.placed >= DATE '2024-01-01' AND o.placed < DATE '2024-04-01'
+      RETURN o.order_id ORDER BY o.order_id
+    expect:
+      ordered: true
+      rows:
+        - [ORD-004]
+        - [ORD-005]
+        - [ORD-006]
+        - [ORD-007]
+        - [ORD-008]
+
+  - name: orders_on_exact_date
+    query: |
+      MATCH (o:Order)
+      WHERE o.placed = DATE '2024-02-14'
+      RETURN o.order_id
+    expect:
+      rows:
+        - [ORD-005]
+
+  # ---------------------------------------------------------------------------
+  # Date ordering
+  # ---------------------------------------------------------------------------
+
+  - name: orders_chronological
+    query: |
+      MATCH (o:Order)
+      RETURN o.order_id, o.placed
+      ORDER BY o.placed ASC
+      LIMIT 3
+    expect:
+      ordered: true
+      rows:
+        - [ORD-001, 2023-06-15]
+        - [ORD-002, 2023-07-20]
+        - [ORD-003, 2023-09-01]
+
+  - name: orders_reverse_chronological
+    skip: "ORDER BY DESC on Date properties returns ASC order"
+    query: |
+      MATCH (o:Order)
+      RETURN o.order_id, o.placed
+      ORDER BY o.placed DESC
+      LIMIT 3
+    expect:
+      ordered: true
+      rows:
+        - [ORD-008, 2024-03-20]
+        - [ORD-007, 2024-03-15]
+        - [ORD-006, 2024-03-01]
+
+  - name: newest_order
+    skip: "ORDER BY DESC on Date properties returns ASC order"
+    query: |
+      MATCH (o:Order)
+      RETURN o.order_id
+      ORDER BY o.placed DESC
+      LIMIT 1
+    expect:
+      rows:
+        - [ORD-008]
+
+  - name: oldest_order
+    query: |
+      MATCH (o:Order)
+      RETURN o.order_id
+      ORDER BY o.placed ASC
+      LIMIT 1
+    expect:
+      rows:
+        - [ORD-001]
+
+  # ---------------------------------------------------------------------------
+  # Date aggregation
+  # ---------------------------------------------------------------------------
+
+  - name: first_order_per_customer
+    skip: "min() on Date properties returns 0"
+    query: |
+      MATCH (c:Customer)-[:PLACED]->(o:Order)
+      RETURN c.name, min(o.placed) AS first_order
+      ORDER BY c.name
+    expect:
+      ordered: true
+      rows:
+        - [Alix, 2023-06-15]
+        - [Gus, 2023-07-20]
+        - [Jules, 2024-01-10]
+        - [Mia, 2024-03-01]
+        - [Vincent, 2023-09-01]
+
+  - name: last_order_per_customer
+    skip: "max() on Date properties returns 0"
+    query: |
+      MATCH (c:Customer)-[:PLACED]->(o:Order)
+      RETURN c.name, max(o.placed) AS last_order
+      ORDER BY c.name
+    expect:
+      ordered: true
+      rows:
+        - [Alix, 2024-02-14]
+        - [Gus, 2024-03-15]
+        - [Jules, 2024-01-10]
+        - [Mia, 2024-03-01]
+        - [Vincent, 2024-03-20]
+
+  - name: orders_per_year
+    query: |
+      MATCH (o:Order)
+      RETURN year(o.placed) AS yr, count(o) AS cnt
+      ORDER BY yr
+    expect:
+      ordered: true
+      rows:
+        - [2023, 3]
+        - [2024, 5]
+
+  # ---------------------------------------------------------------------------
+  # Date in CASE expression
+  # ---------------------------------------------------------------------------
+
+  - name: order_recency_case
+    query: |
+      MATCH (o:Order)
+      RETURN o.order_id,
+        CASE
+          WHEN o.placed >= DATE '2024-01-01' THEN 'recent'
+          ELSE 'older'
+        END AS recency
+      ORDER BY o.order_id
+    expect:
+      ordered: true
+      rows:
+        - [ORD-001, older]
+        - [ORD-002, older]
+        - [ORD-003, older]
+        - [ORD-004, recent]
+        - [ORD-005, recent]
+        - [ORD-006, recent]
+        - [ORD-007, recent]
+        - [ORD-008, recent]
+
+  # ---------------------------------------------------------------------------
+  # Customer join date queries
+  # ---------------------------------------------------------------------------
+
+  - name: customers_joined_after
+    query: |
+      MATCH (c:Customer)
+      WHERE c.joined > DATE '2023-06-01'
+      RETURN c.name ORDER BY c.name
+    expect:
+      ordered: true
+      rows:
+        - [Jules]
+        - [Mia]
+
+  - name: customers_by_join_date
+    query: |
+      MATCH (c:Customer)
+      RETURN c.name, c.joined
+      ORDER BY c.joined ASC
+    expect:
+      ordered: true
+      rows:
+        - [Alix, 2022-01-15]
+        - [Gus, 2022-06-01]
+        - [Vincent, 2023-03-10]
+        - [Jules, 2023-08-20]
+        - [Mia, 2024-01-05]
+
+  - name: earliest_customer
+    query: |
+      MATCH (c:Customer)
+      RETURN c.name
+      ORDER BY c.joined ASC
+      LIMIT 1
+    expect:
+      rows:
+        - [Alix]
+
+  # ---------------------------------------------------------------------------
+  # Date comparison with edge timestamp
+  # ---------------------------------------------------------------------------
+
+  - name: orders_placed_after_customer_joined
+    query: |
+      MATCH (c:Customer)-[:PLACED]->(o:Order)
+      WHERE o.placed > c.joined
+      RETURN count(o) AS cnt
+    expect:
+      rows:
+        - [8]
+
+  - name: orders_within_year_of_joining
+    query: |
+      MATCH (c:Customer)-[:PLACED]->(o:Order)
+      WHERE o.placed < c.joined + DURATION 'P1Y'
+      RETURN c.name, o.order_id
+      ORDER BY c.name, o.order_id
+    expect:
+      ordered: true
+      count: 3

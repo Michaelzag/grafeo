@@ -127,3 +127,92 @@ fn create_rejected_on_read_only_store() {
     let result = session.execute("CREATE (:Item {name: 'lambda'})");
     assert!(result.is_err(), "CREATE should fail on a read-only store");
 }
+
+// ── GrafeoDB::compact() ────────────────────────────────────────
+
+#[test]
+fn compact_converts_lpg_to_compact() {
+    let mut db = GrafeoDB::new_in_memory();
+
+    // Insert data via GQL.
+    db.execute("INSERT (:Person {name: 'Alix', age: 30})")
+        .unwrap();
+    db.execute("INSERT (:Person {name: 'Gus', age: 25})")
+        .unwrap();
+    db.execute("INSERT (:City {name: 'Amsterdam'})").unwrap();
+    db.execute(
+        "MATCH (p:Person {name: 'Alix'}), (c:City {name: 'Amsterdam'}) \
+         INSERT (p)-[:LIVES_IN]->(c)",
+    )
+    .unwrap();
+    db.execute(
+        "MATCH (p:Person {name: 'Gus'}), (c:City {name: 'Amsterdam'}) \
+         INSERT (p)-[:LIVES_IN]->(c)",
+    )
+    .unwrap();
+
+    // Compact.
+    db.compact().unwrap();
+
+    // Verify read queries still work.
+    let session = db.session();
+    let persons = session
+        .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name")
+        .unwrap();
+    assert_eq!(persons.rows.len(), 2);
+
+    let cities = session.execute("MATCH (c:City) RETURN c.name").unwrap();
+    assert_eq!(cities.rows.len(), 1);
+
+    // Verify edge traversal.
+    let edges = session
+        .execute("MATCH (p:Person)-[:LIVES_IN]->(c:City) RETURN p.name, c.name")
+        .unwrap();
+    assert_eq!(edges.rows.len(), 2);
+
+    // Verify write queries fail.
+    let write_result = session.execute("INSERT (:Person {name: 'Vincent'})");
+    assert!(write_result.is_err(), "writes should fail after compact()");
+}
+
+#[test]
+fn compact_preserves_bool_and_string_properties() {
+    let mut db = GrafeoDB::new_in_memory();
+
+    db.execute("INSERT (:Item {name: 'alpha', active: true})")
+        .unwrap();
+    db.execute("INSERT (:Item {name: 'beta', active: false})")
+        .unwrap();
+
+    db.compact().unwrap();
+
+    let session = db.session();
+    let result = session
+        .execute("MATCH (n:Item) RETURN n.name, n.active ORDER BY n.name")
+        .unwrap();
+    assert_eq!(result.rows.len(), 2);
+
+    // First row: "alpha", true
+    assert_eq!(
+        result.rows[0][0],
+        grafeo_common::types::Value::String(arcstr::literal!("alpha"))
+    );
+    assert_eq!(result.rows[0][1], grafeo_common::types::Value::Bool(true));
+
+    // Second row: "beta", false
+    assert_eq!(
+        result.rows[1][0],
+        grafeo_common::types::Value::String(arcstr::literal!("beta"))
+    );
+    assert_eq!(result.rows[1][1], grafeo_common::types::Value::Bool(false));
+}
+
+#[test]
+fn compact_empty_database() {
+    let mut db = GrafeoDB::new_in_memory();
+    db.compact().unwrap();
+
+    let session = db.session();
+    let result = session.execute("MATCH (n) RETURN count(n)").unwrap();
+    assert_eq!(result.rows[0][0], grafeo_common::types::Value::Int64(0));
+}

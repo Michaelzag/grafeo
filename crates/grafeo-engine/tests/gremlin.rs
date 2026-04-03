@@ -1828,3 +1828,66 @@ fn test_filter_has_key_existence() {
         "Only Acme has the 'revenue' property"
     );
 }
+
+// ============================================================================
+// valueMap() and elementMap() with no arguments
+// ============================================================================
+
+#[test]
+fn test_value_map_no_args() {
+    let db = create_social_network();
+    let result = db
+        .execute_gremlin("g.V().hasLabel('Person').has('name', 'Alix').valueMap()")
+        .unwrap();
+    assert_eq!(result.row_count(), 1, "Should return one row for Alix");
+    // The result should be a map containing all properties
+    let val = &result.rows[0][0];
+    match val {
+        Value::Map(map) => {
+            assert!(
+                map.iter().any(|(k, _)| k.as_str() == "name"),
+                "Map should contain 'name' key, got: {map:?}"
+            );
+            assert!(
+                map.iter().any(|(k, _)| k.as_str() == "age"),
+                "Map should contain 'age' key, got: {map:?}"
+            );
+            assert!(
+                map.iter().any(|(k, _)| k.as_str() == "city"),
+                "Map should contain 'city' key, got: {map:?}"
+            );
+        }
+        other => panic!("Expected Map value from valueMap(), got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_element_map_no_args() {
+    let db = create_social_network();
+    let result = db
+        .execute_gremlin("g.V().hasLabel('Person').has('name', 'Alix').elementMap()")
+        .unwrap();
+    assert_eq!(result.row_count(), 1, "Should return one row for Alix");
+    let val = &result.rows[0][0];
+    match val {
+        Value::Map(map) => {
+            assert!(
+                map.iter().any(|(k, _)| k.as_str() == "id"),
+                "Map should contain 'id' key, got: {map:?}"
+            );
+            assert!(
+                map.iter().any(|(k, _)| k.as_str() == "label"),
+                "Map should contain 'label' key, got: {map:?}"
+            );
+            assert!(
+                map.iter().any(|(k, _)| k.as_str() == "name"),
+                "Map should contain 'name' key, got: {map:?}"
+            );
+            assert!(
+                map.iter().any(|(k, _)| k.as_str() == "age"),
+                "Map should contain 'age' key, got: {map:?}"
+            );
+        }
+        other => panic!("Expected Map value from elementMap(), got: {other:?}"),
+    }
+}

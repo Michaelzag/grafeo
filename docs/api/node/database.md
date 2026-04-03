@@ -517,6 +517,23 @@ Returns the Grafeo engine version string.
 version(): string
 ```
 
+### compact()
+
+Converts the database to a read-only [CompactStore](../../user-guide/compact-store.md). Takes a snapshot of all nodes and edges, builds a columnar store with CSR adjacency, and switches to read-only mode. Write operations will throw after this call.
+
+```typescript
+compact(): void
+```
+
+```typescript
+const db = GrafeoDB.create();
+await db.execute("INSERT (:Person {name: 'Alix', age: 30})");
+
+db.compact();
+
+const result = await db.execute("MATCH (p:Person) RETURN p.name"); // fast
+```
+
 ### close()
 
 Close the database and release resources.

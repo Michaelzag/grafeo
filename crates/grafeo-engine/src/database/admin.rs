@@ -371,6 +371,22 @@ impl super::GrafeoDB {
     // ADMIN API: Change Data Capture
     // =========================================================================
 
+    /// Returns whether CDC is enabled by default for new sessions.
+    #[cfg(feature = "cdc")]
+    #[must_use]
+    pub fn is_cdc_enabled(&self) -> bool {
+        self.cdc_active()
+    }
+
+    /// Sets whether CDC is enabled by default for new sessions.
+    ///
+    /// Does not affect sessions that were already created.
+    #[cfg(feature = "cdc")]
+    pub fn set_cdc_enabled(&self, enabled: bool) {
+        self.cdc_enabled
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
+    }
+
     /// Returns the full change history for an entity (node or edge).
     ///
     /// Events are ordered chronologically by epoch.

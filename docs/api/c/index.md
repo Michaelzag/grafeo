@@ -109,6 +109,16 @@ GrafeoResult* grafeo_vector_search(db, label, property, query, dims, k, ef);
 GrafeoResult* grafeo_mmr_search(db, label, property, query, dims, k, fetch_k, lambda, ef);
 ```
 
+## Compact Store
+
+Convert to a read-only columnar store for faster queries. See the [CompactStore guide](../../user-guide/compact-store.md).
+
+```c
+GrafeoStatus grafeo_compact(GrafeoDatabase *db);
+```
+
+After this call, all write operations return `ErrorDatabase`. Queries continue to work with ~60x lower memory and 100x+ faster traversal.
+
 ## Error Handling
 
 Functions return `NULL` on error. Check with `grafeo_last_error()`:

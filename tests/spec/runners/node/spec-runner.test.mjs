@@ -119,6 +119,8 @@ async function executeQuery(db, language, query, params) {
   }
 }
 
+const RUNNER_CAPABILITIES = new Set(['int64-safe'])
+
 /** Cached set of compiled feature flags, populated on first use. */
 let _features = null
 function getFeatures(db) {
@@ -138,7 +140,7 @@ function isAvailable(db, requirement) {
     const f = getFeatures(db)
     return f.has('graphql') && f.has('rdf')
   }
-  return getFeatures(db).has(key)
+  return getFeatures(db).has(key) || RUNNER_CAPABILITIES.has(key)
 }
 
 // ---------------------------------------------------------------------------
@@ -174,9 +176,14 @@ for (const filePath of gtestFiles) {
         for (const [lang, query] of Object.entries(tc.variants)) {
           it(`${tc.name}_${lang}`, async (ctx) => {
             if (!GRAFEO_AVAILABLE) return ctx.skip()
+            if (tc.skip) return ctx.skip()
             const db = GrafeoDB.create()
             try {
               if (!isAvailable(db, lang)) return ctx.skip()
+              // Check per-test requires
+              for (const req of (tc.requires || [])) {
+                if (!isAvailable(db, req)) return ctx.skip()
+              }
               if (meta.dataset && meta.dataset !== 'empty') {
                 await loadDataset(db, meta.dataset)
               }
@@ -197,11 +204,17 @@ for (const filePath of gtestFiles) {
 
         const db = GrafeoDB.create()
         try {
-          // Check language availability
+          // Check language availability (file-level and per-test)
           if (!isAvailable(db, meta.language)) return ctx.skip()
+          if (tc.language && !isAvailable(db, tc.language)) return ctx.skip()
 
           // Check requires: skip if the compiled build lacks the feature
           for (const req of meta.requires) {
+            if (!isAvailable(db, req)) return ctx.skip()
+          }
+
+          // Check per-test requires
+          for (const req of (tc.requires || [])) {
             if (!isAvailable(db, req)) return ctx.skip()
           }
 
@@ -232,11 +245,11 @@ async function runTestCase(db, tc, language, setupLanguage) {
   const params = coerceParams(tc.params)
 
   // Determine queries
-  const queries = tc.statements.length > 0 ? tc.statements : tc.query ? [tc.query] : []
+  const queries = tc.statements.length > 0 ? tc.statements : (tc.query || exp.error != null) ? [tc.query ?? ''] : []
   if (queries.length === 0) throw new Error(`No query or statements in test '${tc.name}'`)
 
   // Error case: execute all-but-last normally, only last should fail
-  if (exp.error) {
+  if (exp.error != null) {
     for (let i = 0; i < queries.length - 1; i++) {
       await executeQuery(db, language, queries[i])
     }

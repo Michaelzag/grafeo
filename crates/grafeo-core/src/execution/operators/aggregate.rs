@@ -12,7 +12,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use arcstr::ArcStr;
-use grafeo_common::types::{LogicalType, Value};
+use grafeo_common::types::{LogicalType, PropertyKey, Value};
 
 use super::accumulator::{AggregateExpr, AggregateFunction, HashableValue};
 use super::{Operator, OperatorError, OperatorResult};
@@ -625,7 +625,14 @@ enum GroupKeyPart {
     Bool(bool),
     Int64(i64),
     String(ArcStr),
+    Bytes(Arc<[u8]>),
+    Date(grafeo_common::types::Date),
+    Time(grafeo_common::types::Time),
+    Timestamp(grafeo_common::types::Timestamp),
+    Duration(grafeo_common::types::Duration),
+    ZonedDatetime(grafeo_common::types::ZonedDatetime),
     List(Vec<GroupKeyPart>),
+    Map(Vec<(ArcStr, GroupKeyPart)>),
 }
 
 impl GroupKeyPart {
@@ -636,7 +643,22 @@ impl GroupKeyPart {
             Value::Int64(i) => Self::Int64(i),
             Value::Float64(f) => Self::Int64(f.to_bits() as i64),
             Value::String(s) => Self::String(s.clone()),
+            Value::Bytes(b) => Self::Bytes(b),
+            Value::Date(d) => Self::Date(d),
+            Value::Time(t) => Self::Time(t),
+            Value::Timestamp(ts) => Self::Timestamp(ts),
+            Value::Duration(d) => Self::Duration(d),
+            Value::ZonedDatetime(zdt) => Self::ZonedDatetime(zdt),
             Value::List(items) => Self::List(items.iter().cloned().map(Self::from_value).collect()),
+            Value::Map(map) => {
+                // BTreeMap already iterates in key order, so this is deterministic
+                let entries: Vec<(ArcStr, GroupKeyPart)> = map
+                    .iter()
+                    .map(|(k, v)| (ArcStr::from(k.as_str()), Self::from_value(v.clone())))
+                    .collect();
+                Self::Map(entries)
+            }
+            // Path, Vector, GCounter, OnCounter: use Debug string as fallback
             other => Self::String(ArcStr::from(format!("{other:?}"))),
         }
     }
@@ -647,9 +669,22 @@ impl GroupKeyPart {
             Self::Bool(b) => Value::Bool(*b),
             Self::Int64(i) => Value::Int64(*i),
             Self::String(s) => Value::String(s.clone()),
+            Self::Bytes(b) => Value::Bytes(Arc::clone(b)),
+            Self::Date(d) => Value::Date(*d),
+            Self::Time(t) => Value::Time(*t),
+            Self::Timestamp(ts) => Value::Timestamp(*ts),
+            Self::Duration(d) => Value::Duration(*d),
+            Self::ZonedDatetime(zdt) => Value::ZonedDatetime(*zdt),
             Self::List(parts) => {
                 let values: Vec<Value> = parts.iter().map(Self::to_value).collect();
                 Value::List(Arc::from(values.into_boxed_slice()))
+            }
+            Self::Map(entries) => {
+                let map: std::collections::BTreeMap<PropertyKey, Value> = entries
+                    .iter()
+                    .map(|(k, v)| (PropertyKey::new(k.as_str()), v.to_value()))
+                    .collect();
+                Value::Map(Arc::new(map))
             }
         }
     }

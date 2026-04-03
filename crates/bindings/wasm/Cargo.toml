@@ -49,8 +49,9 @@ text-index = ["grafeo-engine/text-index"]
 hybrid-search = ["grafeo-engine/hybrid-search"]
 languages = ["gql", "cypher", "sparql", "gremlin", "graphql", "sql-pgq"]
 ai = ["vector-index", "text-index", "hybrid-search"]
+compact-store = ["grafeo-engine/compact-store"]
 # Named profiles
-browser = ["gql", "grafeo-engine/regex-lite"]       # GQL only (~507 KB gzip)
+browser = ["gql", "compact-store", "grafeo-engine/regex-lite"]  # GQL + compact (~507 KB gzip)
 lpg = ["languages", "ai", "grafeo-engine/regex"]    # All LPG languages + AI search
 rdf = ["sparql", "graphql", "grafeo-engine/regex-lite"]  # SPARQL + GraphQL over RDF
 full = ["languages", "ai"]                          # All languages + AI search

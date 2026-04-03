@@ -14,7 +14,7 @@ except ImportError:
 def db():
     if not GRAFEO_AVAILABLE:
         pytest.skip("grafeo not installed")
-    return GrafeoDB()
+    return GrafeoDB(cdc=True)
 
 
 class TestCDC:

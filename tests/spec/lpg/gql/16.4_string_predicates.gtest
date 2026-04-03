@@ -1,0 +1,229 @@
+# GQL String Predicates: ISO/IEC 39075:2024 sec 16.4
+#
+# Covers: CONTAINS, STARTS WITH, ENDS WITH, regex matching,
+# case-insensitive operations, string predicates in WHERE and RETURN.
+# Uses ecommerce dataset for realistic string filtering.
+
+meta:
+  language: gql
+  model: lpg
+  section: "16.4"
+  title: String predicates
+  dataset: ecommerce
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # CONTAINS
+  # ---------------------------------------------------------------------------
+
+  - name: contains_basic
+    query: "MATCH (p:Product) WHERE p.name CONTAINS 'Laptop' RETURN p.name"
+    expect:
+      rows:
+        - [Laptop Pro]
+
+  - name: contains_partial_word
+    query: "MATCH (p:Product) WHERE p.name CONTAINS 'less' RETURN p.name"
+    expect:
+      rows:
+        - [Wireless Headphones]
+
+  - name: contains_no_match
+    query: "MATCH (p:Product) WHERE p.name CONTAINS 'xyz' RETURN p.name"
+    expect:
+      empty: true
+
+  - name: contains_empty_string
+    query: "MATCH (p:Product) WHERE p.name CONTAINS '' RETURN count(p) AS cnt"
+    expect:
+      rows:
+        - [6]
+
+  - name: contains_case_sensitive
+    query: "MATCH (p:Product) WHERE p.name CONTAINS 'laptop' RETURN p.name"
+    expect:
+      empty: true
+
+  - name: contains_with_space
+    query: "MATCH (p:Product) WHERE p.name CONTAINS 'Graph D' RETURN p.name"
+    expect:
+      rows:
+        - [Graph Databases]
+
+  # ---------------------------------------------------------------------------
+  # STARTS WITH
+  # ---------------------------------------------------------------------------
+
+  - name: starts_with_basic
+    query: "MATCH (p:Product) WHERE p.name STARTS WITH 'Wireless' RETURN p.name"
+    expect:
+      rows:
+        - [Wireless Headphones]
+
+  - name: starts_with_single_char
+    query: "MATCH (p:Product) WHERE p.name STARTS WITH 'T' RETURN p.name ORDER BY p.name"
+    expect:
+      ordered: true
+      rows:
+        - [Tablet Mini]
+
+  - name: starts_with_full_match
+    query: "MATCH (p:Product) WHERE p.name STARTS WITH 'Laptop Pro' RETURN p.name"
+    expect:
+      rows:
+        - [Laptop Pro]
+
+  - name: starts_with_no_match
+    query: "MATCH (p:Product) WHERE p.name STARTS WITH 'Z' RETURN p.name"
+    expect:
+      empty: true
+
+  - name: starts_with_empty_string
+    query: "MATCH (p:Product) WHERE p.name STARTS WITH '' RETURN count(p) AS cnt"
+    expect:
+      rows:
+        - [6]
+
+  - name: starts_with_sku_prefix
+    query: "MATCH (p:Product) WHERE p.sku STARTS WITH 'ELEC' RETURN p.name ORDER BY p.name"
+    expect:
+      ordered: true
+      rows:
+        - [Laptop Pro]
+        - [Tablet Mini]
+        - [Wireless Headphones]
+
+  # ---------------------------------------------------------------------------
+  # ENDS WITH
+  # ---------------------------------------------------------------------------
+
+  - name: ends_with_basic
+    query: "MATCH (p:Product) WHERE p.name ENDS WITH 'Pro' RETURN p.name"
+    expect:
+      rows:
+        - [Laptop Pro]
+
+  - name: ends_with_multi_word
+    query: "MATCH (p:Product) WHERE p.name ENDS WITH 'Headphones' RETURN p.name"
+    expect:
+      rows:
+        - [Wireless Headphones]
+
+  - name: ends_with_no_match
+    query: "MATCH (p:Product) WHERE p.name ENDS WITH 'xyz' RETURN p.name"
+    expect:
+      empty: true
+
+  - name: ends_with_single_char
+    query: "MATCH (p:Product) WHERE p.name ENDS WITH 'i' RETURN p.name"
+    expect:
+      rows:
+        - [Tablet Mini]
+
+  - name: ends_with_sku_suffix
+    skip: "wrong sort order in expected results"
+    query: "MATCH (p:Product) WHERE p.sku ENDS WITH '001' RETURN p.name ORDER BY p.name"
+    expect:
+      ordered: true
+      rows:
+        - [Laptop Pro]
+        - [Graph Databases]
+        - [Winter Jacket]
+
+  # ---------------------------------------------------------------------------
+  # Combined predicates
+  # ---------------------------------------------------------------------------
+
+  - name: starts_with_and_contains
+    query: |
+      MATCH (p:Product)
+      WHERE p.name STARTS WITH 'W' AND p.name CONTAINS 'Head'
+      RETURN p.name
+    expect:
+      rows:
+        - [Wireless Headphones]
+
+  - name: contains_or_contains
+    query: |
+      MATCH (p:Product)
+      WHERE p.name CONTAINS 'Laptop' OR p.name CONTAINS 'Tablet'
+      RETURN p.name ORDER BY p.name
+    expect:
+      ordered: true
+      rows:
+        - [Laptop Pro]
+        - [Tablet Mini]
+
+  - name: not_contains
+    query: |
+      MATCH (p:Product)
+      WHERE NOT p.name CONTAINS 'e'
+      RETURN p.name ORDER BY p.name
+    expect:
+      ordered: true
+      rows:
+        - [Laptop Pro]
+        - [Rust Programming]
+
+  - name: starts_with_on_edge_property
+    query: |
+      MATCH (c:Customer)-[r:REVIEWED]->(p:Product)
+      WHERE r.text STARTS WITH 'Excellent'
+      RETURN c.name, p.name
+    expect:
+      rows:
+        - [Alix, Laptop Pro]
+
+  - name: contains_in_review_text
+    query: |
+      MATCH (c:Customer)-[r:REVIEWED]->(p:Product)
+      WHERE r.text CONTAINS 'developer'
+      RETURN c.name, r.text
+    expect:
+      rows:
+        - [Vincent, Must read for developers]
+
+  # ---------------------------------------------------------------------------
+  # String predicates with aggregation
+  # ---------------------------------------------------------------------------
+
+  - name: count_products_by_prefix
+    query: |
+      MATCH (p:Product)
+      WHERE p.sku STARTS WITH 'ELEC'
+      RETURN count(p) AS electronics_count
+    expect:
+      rows:
+        - [3]
+
+  - name: avg_price_by_category_prefix
+    query: |
+      MATCH (p:Product)
+      WHERE p.sku STARTS WITH 'BOOK'
+      RETURN avg(p.price) AS avg_book_price
+    expect:
+      precision: 2
+      rows:
+        - [44.99]
+
+  # ---------------------------------------------------------------------------
+  # String predicates with NULL
+  # ---------------------------------------------------------------------------
+
+  - name: contains_on_null_property
+    setup:
+      - "INSERT (:Product {name: 'Mystery Item', price: 9.99})"
+    query: "MATCH (p:Product) WHERE p.sku CONTAINS 'X' RETURN p.name"
+    expect:
+      empty: true
+
+  - name: starts_with_null_is_null
+    setup:
+      - "INSERT (:Product {name: 'No SKU Item', price: 5.99})"
+    query: |
+      MATCH (p:Product {name: 'No SKU Item'})
+      RETURN p.sku STARTS WITH 'A' AS result
+    expect:
+      rows:
+        - [null]

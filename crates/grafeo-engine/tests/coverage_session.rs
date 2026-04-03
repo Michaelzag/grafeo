@@ -579,11 +579,15 @@ fn test_execute_sparql_with_params() {
 #[cfg(feature = "cdc")]
 mod cdc_tests {
     use grafeo_common::types::{EpochId, Value};
-    use grafeo_engine::GrafeoDB;
+    use grafeo_engine::{Config, GrafeoDB};
+
+    fn cdc_db() -> GrafeoDB {
+        GrafeoDB::with_config(Config::in_memory().with_cdc()).unwrap()
+    }
 
     #[test]
     fn test_cdc_history_records_create() {
-        let db = GrafeoDB::new_in_memory();
+        let db = cdc_db();
         let node_id = db.create_node(&["Person"]);
         db.set_node_property(node_id, "name", Value::String("Alix".into()));
 
@@ -604,7 +608,7 @@ mod cdc_tests {
 
     #[test]
     fn test_cdc_history_records_update() {
-        let db = GrafeoDB::new_in_memory();
+        let db = cdc_db();
         let node_id = db.create_node(&["Person"]);
         db.set_node_property(node_id, "name", Value::String("Alix".into()));
         db.set_node_property(node_id, "name", Value::String("Gus".into()));
@@ -623,7 +627,7 @@ mod cdc_tests {
 
     #[test]
     fn test_cdc_history_since_filters_by_epoch() {
-        let db = GrafeoDB::new_in_memory();
+        let db = cdc_db();
         let node_id = db.create_node(&["Person"]);
         db.set_node_property(node_id, "name", Value::String("Alix".into()));
 
@@ -647,7 +651,7 @@ mod cdc_tests {
 
     #[test]
     fn test_cdc_changes_between_epoch_range() {
-        let db = GrafeoDB::new_in_memory();
+        let db = cdc_db();
         db.create_node(&["Person"]);
         db.create_node(&["Person"]);
 

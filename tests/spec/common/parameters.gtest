@@ -1,0 +1,223 @@
+# Parameter Substitution
+#
+# Verifies $param syntax across query languages.
+# Parameters are passed via the gtest params: field and substituted
+# before query planning via execute_language().
+
+meta:
+  language: gql
+  model: lpg
+  section: parameters
+  title: Parameter substitution
+  dataset: empty
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # GQL string parameter
+  # ---------------------------------------------------------------------------
+
+  - name: gql_string_param
+    setup:
+      - "INSERT (:Person {name: 'Alix', age: 30})"
+      - "INSERT (:Person {name: 'Gus', age: 25})"
+    query: "MATCH (p:Person) WHERE p.name = $name RETURN p.name, p.age"
+    params:
+      name: "Alix"
+    expect:
+      rows:
+        - [Alix, 30]
+
+  - name: gql_string_param_no_match
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+    query: "MATCH (p:Person) WHERE p.name = $name RETURN p.name"
+    params:
+      name: "Nobody"
+    expect:
+      empty: true
+
+  # ---------------------------------------------------------------------------
+  # GQL integer parameter
+  # ---------------------------------------------------------------------------
+
+  - name: gql_int_param_greater_than
+    setup:
+      - "INSERT (:Person {name: 'Alix', age: 30})"
+      - "INSERT (:Person {name: 'Gus', age: 25})"
+      - "INSERT (:Person {name: 'Vincent', age: 35})"
+    query: "MATCH (p:Person) WHERE p.age > $min RETURN p.name ORDER BY p.name"
+    params:
+      min: 28
+    expect:
+      ordered: true
+      rows:
+        - [Alix]
+        - [Vincent]
+
+  - name: gql_int_param_equal
+    setup:
+      - "INSERT (:Person {name: 'Alix', age: 30})"
+      - "INSERT (:Person {name: 'Gus', age: 25})"
+    query: "MATCH (p:Person) WHERE p.age = $age RETURN p.name"
+    params:
+      age: 25
+    expect:
+      rows:
+        - [Gus]
+
+  # ---------------------------------------------------------------------------
+  # GQL float parameter
+  # ---------------------------------------------------------------------------
+
+  - name: gql_float_param
+    setup:
+      - "INSERT (:Product {name: 'Widget', price: 9.99})"
+      - "INSERT (:Product {name: 'Gadget', price: 49.99})"
+    query: "MATCH (p:Product) WHERE p.price < $max RETURN p.name"
+    params:
+      max: 20.0
+    expect:
+      rows:
+        - [Widget]
+
+  # ---------------------------------------------------------------------------
+  # GQL boolean parameter
+  # ---------------------------------------------------------------------------
+
+  - name: gql_bool_param_true
+    setup:
+      - "INSERT (:Item {name: 'A', active: true})"
+      - "INSERT (:Item {name: 'B', active: false})"
+    query: "MATCH (i:Item) WHERE i.active = $flag RETURN i.name"
+    params:
+      flag: true
+    expect:
+      rows:
+        - [A]
+
+  - name: gql_bool_param_false
+    setup:
+      - "INSERT (:Item {name: 'A', active: true})"
+      - "INSERT (:Item {name: 'B', active: false})"
+    query: "MATCH (i:Item) WHERE i.active = $flag RETURN i.name"
+    params:
+      flag: false
+    expect:
+      rows:
+        - [B]
+
+  # ---------------------------------------------------------------------------
+  # GQL multiple parameters
+  # ---------------------------------------------------------------------------
+
+  - name: gql_multiple_params
+    setup:
+      - "INSERT (:Person {name: 'Alix', age: 30})"
+      - "INSERT (:Person {name: 'Gus', age: 25})"
+      - "INSERT (:Person {name: 'Vincent', age: 35})"
+    query: "MATCH (p:Person) WHERE p.age >= $min AND p.age <= $max RETURN p.name ORDER BY p.name"
+    params:
+      min: 26
+      max: 34
+    expect:
+      ordered: true
+      rows:
+        - [Alix]
+
+  # ---------------------------------------------------------------------------
+  # GQL parameter in INSERT
+  # ---------------------------------------------------------------------------
+
+  - name: gql_param_in_insert
+    skip: "$param in INSERT stores literal string, not substituted"
+    statements:
+      - "INSERT (:Person {name: $name, age: $age})"
+      - "MATCH (p:Person) RETURN p.name, p.age"
+    params:
+      name: "Jules"
+      age: 28
+    expect:
+      rows:
+        - [Jules, 28]
+
+  # ---------------------------------------------------------------------------
+  # GQL parameter in SET
+  # ---------------------------------------------------------------------------
+
+  - name: gql_param_in_set
+    skip: "$param in SET not substituted"
+    statements:
+      - "INSERT (:Person {name: 'Alix', age: 30})"
+      - "MATCH (p:Person {name: 'Alix'}) SET p.age = $new_age"
+      - "MATCH (p:Person {name: 'Alix'}) RETURN p.age"
+    params:
+      new_age: 31
+    expect:
+      rows:
+        - [31]
+
+  # ---------------------------------------------------------------------------
+  # Cypher parameter support
+  # ---------------------------------------------------------------------------
+
+  - name: cypher_string_param
+    language: cypher
+    setup:
+      - "INSERT (:Person {name: 'Alix', age: 30})"
+      - "INSERT (:Person {name: 'Gus', age: 25})"
+    query: "MATCH (p:Person) WHERE p.name = $name RETURN p.name, p.age"
+    params:
+      name: "Alix"
+    expect:
+      rows:
+        - [Alix, 30]
+
+  - name: cypher_int_param
+    language: cypher
+    setup:
+      - "INSERT (:Person {name: 'Alix', age: 30})"
+      - "INSERT (:Person {name: 'Gus', age: 25})"
+    query: "MATCH (p:Person) WHERE p.age > $min RETURN p.name"
+    params:
+      min: 28
+    expect:
+      rows:
+        - [Alix]
+
+  # ---------------------------------------------------------------------------
+  # SQL/PGQ parameter support
+  # ---------------------------------------------------------------------------
+
+  - name: sql_pgq_string_param
+    language: sql-pgq
+    setup:
+      - "INSERT (:Person {name: 'Alix', age: 30})"
+    query: |
+      SELECT name, age FROM GRAPH_TABLE (
+        MATCH (p:Person)
+        WHERE p.name = $name
+        COLUMNS (p.name AS name, p.age AS age)
+      )
+    params:
+      name: "Alix"
+    expect:
+      rows:
+        - [Alix, 30]
+
+  # ---------------------------------------------------------------------------
+  # Gremlin parameter support
+  # ---------------------------------------------------------------------------
+
+  - name: gremlin_has_param
+    skip: "Gremlin $param in has() not substituted"
+    language: gremlin
+    setup:
+      - "INSERT (:Person {name: 'Alix', age: 30})"
+      - "INSERT (:Person {name: 'Gus', age: 25})"
+    query: "g.V().has('Person', 'name', $name).values('age')"
+    params:
+      name: "Alix"
+    expect:
+      rows:
+        - [30]

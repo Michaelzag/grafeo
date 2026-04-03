@@ -562,3 +562,39 @@ tests:
       rows:
         - [Alix, Lix]
         - [Gus, "no nickname"]
+
+  # ---------------------------------------------------------------------------
+  # ORDER BY with function expressions (0.5.32 regression: bug 19)
+  # STR() in ORDER BY must not error with "Store required for expression evaluation"
+  # ---------------------------------------------------------------------------
+
+  - name: order_by_asc_str_function
+    setup:
+      - |
+        INSERT DATA {
+          <http://ex.org/gus>  <http://ex.org/name> "Gus" .
+          <http://ex.org/alix> <http://ex.org/name> "Alix" .
+        }
+    query: |
+      SELECT ?s WHERE {
+        ?s <http://ex.org/name> ?o
+      } ORDER BY ASC(STR(?s))
+    expect:
+      count: 2
+
+  - name: group_by_variable_with_count
+    # GROUP BY on raw variable (not STR) produces correct distinct groups
+    setup:
+      - |
+        INSERT DATA {
+          <http://ex.org/alix> <http://ex.org/name> "Alix" .
+          <http://ex.org/alix> <http://ex.org/age>  "30" .
+          <http://ex.org/gus>  <http://ex.org/name> "Gus" .
+          <http://ex.org/gus>  <http://ex.org/age>  "25" .
+        }
+    query: |
+      SELECT ?s (COUNT(*) AS ?cnt)
+      WHERE { ?s ?p ?o }
+      GROUP BY ?s
+    expect:
+      count: 2

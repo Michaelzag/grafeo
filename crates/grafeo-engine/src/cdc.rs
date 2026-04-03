@@ -22,11 +22,12 @@
 //! # }
 //! ```
 
-use grafeo_common::types::{EdgeId, EpochId, NodeId, Value};
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use grafeo_common::types::{EdgeId, EpochId, HlcClock, HlcTimestamp, NodeId, Value};
 use hashbrown::HashMap as HbHashMap;
 use parking_lot::RwLock;
-use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The kind of mutation that occurred.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -96,8 +97,12 @@ pub struct ChangeEvent {
     pub kind: ChangeKind,
     /// MVCC epoch when the change occurred.
     pub epoch: EpochId,
-    /// Wall-clock timestamp (milliseconds since Unix epoch).
-    pub timestamp: u64,
+    /// Hybrid Logical Clock timestamp for causal ordering.
+    ///
+    /// Encodes physical milliseconds (upper 48 bits) and a logical counter
+    /// (lower 16 bits) into a `u64`. Backward-compatible: plain wall-clock
+    /// values have logical counter = 0.
+    pub timestamp: HlcTimestamp,
     /// Properties before the change (None for Create and for triple events).
     pub before: Option<HashMap<String, Value>>,
     /// Properties after the change (None for Delete and for triple events).
@@ -131,19 +136,34 @@ pub struct ChangeEvent {
 
 /// The CDC log that records entity mutations.
 ///
-/// Thread-safe: uses `RwLock<HashMap>` for concurrent access.
+/// Thread-safe: uses `RwLock<HashMap>` for concurrent access. Timestamps
+/// are assigned by the embedded [`HlcClock`] to guarantee monotonicity.
 #[derive(Debug)]
 pub struct CdcLog {
     events: RwLock<HbHashMap<EntityId, Vec<ChangeEvent>>>,
+    clock: Arc<HlcClock>,
 }
 
 impl CdcLog {
-    /// Creates a new empty CDC log.
+    /// Creates a new empty CDC log with a fresh HLC clock.
     #[must_use]
     pub fn new() -> Self {
         Self {
             events: RwLock::new(HbHashMap::new()),
+            clock: Arc::new(HlcClock::new()),
         }
+    }
+
+    /// Returns the next HLC timestamp from this log's clock.
+    ///
+    /// Used by `CdcGraphStore` to assign timestamps to buffered events.
+    pub fn next_timestamp(&self) -> HlcTimestamp {
+        self.clock.now()
+    }
+
+    /// Returns a reference to the HLC clock for remote timestamp merging.
+    pub fn clock(&self) -> &Arc<HlcClock> {
+        &self.clock
     }
 
     /// Records a change event.
@@ -153,6 +173,14 @@ impl CdcLog {
             .entry(event.entity_id)
             .or_default()
             .push(event);
+    }
+
+    /// Records a batch of change events with a single write-lock acquisition.
+    pub fn record_batch(&self, events: impl IntoIterator<Item = ChangeEvent>) {
+        let mut guard = self.events.write();
+        for event in events {
+            guard.entry(event.entity_id).or_default().push(event);
+        }
     }
 
     /// Records a node creation.
@@ -167,7 +195,7 @@ impl CdcLog {
             entity_id: EntityId::Node(id),
             kind: ChangeKind::Create,
             epoch,
-            timestamp: now_millis(),
+            timestamp: self.clock.now(),
             before: None,
             after: props,
             labels,
@@ -195,7 +223,7 @@ impl CdcLog {
             entity_id: EntityId::Edge(id),
             kind: ChangeKind::Create,
             epoch,
-            timestamp: now_millis(),
+            timestamp: self.clock.now(),
             before: None,
             after: props,
             labels: None,
@@ -226,7 +254,7 @@ impl CdcLog {
             entity_id: EntityId::Triple(id),
             kind: ChangeKind::Create,
             epoch,
-            timestamp: now_millis(),
+            timestamp: self.clock.now(),
             before: None,
             after: None,
             labels: None,
@@ -256,7 +284,7 @@ impl CdcLog {
             entity_id: EntityId::Triple(id),
             kind: ChangeKind::Delete,
             epoch,
-            timestamp: now_millis(),
+            timestamp: self.clock.now(),
             before: None,
             after: None,
             labels: None,
@@ -291,7 +319,7 @@ impl CdcLog {
             entity_id,
             kind: ChangeKind::Update,
             epoch,
-            timestamp: now_millis(),
+            timestamp: self.clock.now(),
             before,
             after: Some(after_map),
             labels: None,
@@ -316,7 +344,7 @@ impl CdcLog {
             entity_id,
             kind: ChangeKind::Delete,
             epoch,
-            timestamp: now_millis(),
+            timestamp: self.clock.now(),
             before: props,
             after: None,
             labels: None,
@@ -397,13 +425,6 @@ fn triple_hash(subject: &str, predicate: &str, object: &str, graph: Option<&str>
     object.hash(&mut h);
     graph.hash(&mut h);
     h.finish()
-}
-
-fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
 }
 
 #[cfg(test)]

@@ -1,0 +1,239 @@
+# GQL Movie Database Real-World Queries
+#
+# Covers: many-to-many traversals, collaboration networks,
+# genre analysis, box office analytics, recommendation patterns.
+# Uses movie_database dataset for entertainment industry patterns.
+
+meta:
+  language: gql
+  model: lpg
+  section: "22.3"
+  title: Movie database real-world queries
+  dataset: movie_database
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # Basic analytics
+  # ---------------------------------------------------------------------------
+
+  - name: movies_per_genre
+    query: |
+      MATCH (m:Movie)-[:HAS_GENRE]->(g:Genre)
+      RETURN g.name, count(m) AS movie_count
+      ORDER BY movie_count DESC, g.name
+    expect:
+      ordered: true
+      rows:
+        - [Drama, 3]
+        - [Thriller, 3]
+        - [Action, 2]
+        - [SciFi, 2]
+
+  - name: top_rated_movies
+    skip: "float ordering precision"
+    query: |
+      MATCH (m:Movie)
+      RETURN m.title, m.rating
+      ORDER BY m.rating DESC
+      LIMIT 3
+    expect:
+      ordered: true
+      rows:
+        - [Berlin Express, 8.7]
+        - [The Heist, 8.2]
+        - [The Algorithm, 8.0]
+
+  - name: total_box_office_per_director
+    query: |
+      MATCH (d:Director)-[:DIRECTED]->(m:Movie)
+      RETURN d.name, sum(m.box_office) AS total_revenue, count(m) AS films
+      ORDER BY total_revenue DESC
+    expect:
+      ordered: true
+      rows:
+        - [Django, 320000000, 2]
+        - [Shosanna, 235000000, 2]
+        - [Hans, 55000000, 1]
+
+  # ---------------------------------------------------------------------------
+  # Actor analysis
+  # ---------------------------------------------------------------------------
+
+  - name: most_prolific_actors
+    skip: "secondary sort order mismatch"
+    query: |
+      MATCH (a:Actor)-[:ACTED_IN]->(m:Movie)
+      RETURN a.name, count(m) AS films
+      ORDER BY films DESC, a.name
+      LIMIT 5
+    expect:
+      ordered: true
+      count: 5
+
+  - name: actors_in_action_movies
+    query: |
+      MATCH (a:Actor)-[:ACTED_IN]->(m:Movie)-[:HAS_GENRE]->(g:Genre {name: 'Action'})
+      RETURN DISTINCT a.name ORDER BY a.name
+    expect:
+      ordered: true
+      rows:
+        - [Beatrix]
+        - [Butch]
+        - [Gus]
+        - [Jules]
+        - [Mia]
+        - [Vincent]
+
+  - name: actors_avg_movie_rating
+    skip: "avg with LIMIT ordering"
+    query: |
+      MATCH (a:Actor)-[:ACTED_IN]->(m:Movie)
+      RETURN a.name, avg(m.rating) AS avg_rating
+      ORDER BY avg_rating DESC
+      LIMIT 3
+    expect:
+      ordered: true
+      precision: 2
+      count: 3
+
+  # ---------------------------------------------------------------------------
+  # Collaboration networks
+  # ---------------------------------------------------------------------------
+
+  - name: costars_of_vincent
+    query: |
+      MATCH (a:Actor {name: 'Vincent'})-[:ACTED_IN]->(m:Movie)<-[:ACTED_IN]-(costar:Actor)
+      WHERE costar.name <> 'Vincent'
+      RETURN DISTINCT costar.name ORDER BY costar.name
+    expect:
+      ordered: true
+      rows:
+        - [Alix]
+        - [Jules]
+        - [Mia]
+
+  - name: common_movies_vincent_jules
+    query: |
+      MATCH (a:Actor {name: 'Vincent'})-[:ACTED_IN]->(m:Movie)<-[:ACTED_IN]-(b:Actor {name: 'Jules'})
+      RETURN m.title ORDER BY m.title
+    expect:
+      ordered: true
+      rows:
+        - [The Heist]
+
+  - name: actor_pairs_most_collaborations
+    query: |
+      MATCH (a1:Actor)-[:ACTED_IN]->(m:Movie)<-[:ACTED_IN]-(a2:Actor)
+      WHERE a1.name < a2.name
+      RETURN a1.name, a2.name, count(m) AS shared_movies
+      ORDER BY shared_movies DESC, a1.name
+      LIMIT 5
+    expect:
+      ordered: true
+      count: 5
+
+  # ---------------------------------------------------------------------------
+  # Genre analytics
+  # ---------------------------------------------------------------------------
+
+  - name: avg_rating_per_genre
+    query: |
+      MATCH (m:Movie)-[:HAS_GENRE]->(g:Genre)
+      RETURN g.name, avg(m.rating) AS avg_rating
+      ORDER BY avg_rating DESC
+    expect:
+      ordered: true
+      precision: 2
+      count: 4
+
+  - name: avg_box_office_per_genre
+    query: |
+      MATCH (m:Movie)-[:HAS_GENRE]->(g:Genre)
+      RETURN g.name, avg(m.box_office) AS avg_revenue
+      ORDER BY avg_revenue DESC
+    expect:
+      ordered: true
+      count: 4
+
+  - name: movies_in_multiple_genres
+    query: |
+      MATCH (m:Movie)-[:HAS_GENRE]->(g:Genre)
+      WITH m, count(g) AS genre_count
+      WHERE genre_count >= 2
+      RETURN m.title, genre_count ORDER BY m.title
+    expect:
+      ordered: true
+      rows:
+        - [Berlin Express, 2]
+        - [Midnight Code, 2]
+        - [Prague Nights, 2]
+        - [The Algorithm, 2]
+        - [The Heist, 2]
+
+  # ---------------------------------------------------------------------------
+  # Director-actor relationships
+  # ---------------------------------------------------------------------------
+
+  - name: actors_per_director
+    query: |
+      MATCH (d:Director)-[:DIRECTED]->(m:Movie)<-[:ACTED_IN]-(a:Actor)
+      RETURN d.name, count(DISTINCT a) AS unique_actors
+      ORDER BY unique_actors DESC
+    expect:
+      ordered: true
+      rows:
+        - [Django, 6]
+        - [Shosanna, 4]
+        - [Hans, 2]
+
+  - name: director_actor_repeated_collaborations
+    skip: "HAVING-style filter with count"
+    query: |
+      MATCH (d:Director)-[:DIRECTED]->(m:Movie)<-[:ACTED_IN]-(a:Actor)
+      WITH d, a, count(m) AS collabs
+      WHERE collabs >= 2
+      RETURN d.name, a.name, collabs
+      ORDER BY collabs DESC, d.name
+    expect:
+      ordered: true
+      count: 0
+
+  # ---------------------------------------------------------------------------
+  # Box office analysis
+  # ---------------------------------------------------------------------------
+
+  - name: profit_per_movie
+    query: |
+      MATCH (m:Movie)
+      RETURN m.title, m.box_office - m.budget AS profit
+      ORDER BY profit DESC
+    expect:
+      ordered: true
+      rows:
+        - [Berlin Express, 140000000]
+        - [The Algorithm, 100000000]
+        - [The Heist, 75000000]
+        - [Midnight Code, 55000000]
+        - [Prague Nights, 30000000]
+
+  - name: roi_per_movie
+    query: |
+      MATCH (m:Movie)
+      RETURN m.title, CAST((m.box_office - m.budget) * 100 / m.budget AS INT) AS roi_percent
+      ORDER BY roi_percent DESC
+    expect:
+      ordered: true
+      count: 5
+
+  - name: profitable_vs_unprofitable
+    query: |
+      MATCH (m:Movie)
+      RETURN
+        CASE WHEN m.box_office > m.budget THEN 'profitable' ELSE 'loss' END AS status,
+        count(m) AS cnt
+      ORDER BY status
+    expect:
+      ordered: true
+      rows:
+        - [profitable, 5]

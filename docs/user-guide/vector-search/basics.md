@@ -171,6 +171,12 @@ results = db.vector_search("Doc", "embedding", query, k=10,
 Filters are evaluated before the HNSW search, narrowing the candidate set for
 better relevance and performance.
 
+**NULL handling**: nodes that lack a filtered property are excluded from results.
+This applies to all filter operators including `$ne` and `$nin`. For example,
+`{"color": {"$ne": "red"}}` excludes nodes with no `color` property, not just
+those with `color = "red"`. This follows SQL three-valued NULL semantics where
+comparisons with NULL yield unknown (treated as non-matching).
+
 ## Best Practices
 
 ### 1. Use Consistent Dimensions

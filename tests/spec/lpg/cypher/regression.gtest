@@ -363,3 +363,45 @@ tests:
     query: MATCH (n:N) RETURN DISTINCT n.val
     expect:
       count: 2
+
+  # ---------------------------------------------------------------------------
+  # Bug: ORDER BY returns zeros with relationship traversal (#218)
+  # ---------------------------------------------------------------------------
+
+  - name: order_by_property_matching_return_alias_with_edge
+    setup:
+      - "CREATE (:Method {name: 'foo', qn: 'java://A:foo()'})"
+      - "CREATE (:Method {name: 'bar', qn: 'java://B:bar()'})"
+      - "CREATE (:Method {name: 'baz', qn: 'java://C:baz()'})"
+      - "MATCH (a:Method {name: 'foo'}), (b:Method {name: 'bar'}) CREATE (a)-[:CALLS]->(b)"
+      - "MATCH (a:Method {name: 'baz'}), (b:Method {name: 'bar'}) CREATE (a)-[:CALLS]->(b)"
+    query: |
+      MATCH (caller)-[:CALLS]->(target)
+      WHERE target.name = 'bar'
+      RETURN caller.name AS caller, caller.qn AS caller_qn
+      ORDER BY caller.name
+    expect:
+      ordered: true
+      columns: [caller, caller_qn]
+      rows:
+        - [baz, "java://C:baz()"]
+        - [foo, "java://A:foo()"]
+
+  - name: order_by_desc_with_relationship_traversal
+    setup:
+      - "CREATE (:Method {name: 'foo', qn: 'java://A:foo()'})"
+      - "CREATE (:Method {name: 'bar', qn: 'java://B:bar()'})"
+      - "CREATE (:Method {name: 'baz', qn: 'java://C:baz()'})"
+      - "MATCH (a:Method {name: 'foo'}), (b:Method {name: 'bar'}) CREATE (a)-[:CALLS]->(b)"
+      - "MATCH (a:Method {name: 'baz'}), (b:Method {name: 'bar'}) CREATE (a)-[:CALLS]->(b)"
+    query: |
+      MATCH (caller)-[:CALLS]->(target)
+      WHERE target.name = 'bar'
+      RETURN caller.name AS caller, caller.qn AS caller_qn
+      ORDER BY caller.name DESC
+    expect:
+      ordered: true
+      columns: [caller, caller_qn]
+      rows:
+        - [foo, "java://A:foo()"]
+        - [baz, "java://C:baz()"]

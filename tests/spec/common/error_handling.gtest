@@ -1,0 +1,181 @@
+# Common Error Handling and Edge Cases
+#
+# Covers: syntax errors, semantic errors, invalid operations,
+# constraint violations, type errors across query execution.
+# Uses GQL as the primary language for error scenario testing.
+
+meta:
+  language: gql
+  model: lpg
+  section: errors
+  title: Error handling
+  dataset: empty
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # Syntax errors
+  # ---------------------------------------------------------------------------
+
+  - name: unclosed_parenthesis
+    skip: "error kind is Syntax not parse"
+    query: "MATCH (n:Person RETURN n.name"
+    expect:
+      error: "parse"
+
+  - name: missing_return_clause
+    query: "MATCH (n:Person)"
+    expect:
+      error: ""
+
+  - name: unknown_clause
+    skip: "error kind is Syntax not parse"
+    query: "FROBNICATE (n:Person) RETURN n.name"
+    expect:
+      error: "parse"
+
+  - name: empty_query
+    query: ""
+    expect:
+      error: ""
+
+  # ---------------------------------------------------------------------------
+  # Invalid pattern syntax
+  # ---------------------------------------------------------------------------
+
+  - name: edge_without_nodes
+    skip: "error kind is Syntax not parse"
+    query: "MATCH -[:KNOWS]-> RETURN count(*)"
+    expect:
+      error: "parse"
+
+  - name: double_arrow
+    skip: "error kind is Syntax not parse"
+    query: "MATCH (a)-->(b) RETURN a"
+    expect:
+      error: "parse"
+
+  # ---------------------------------------------------------------------------
+  # Semantic errors: operations on wrong types
+  # ---------------------------------------------------------------------------
+
+  - name: add_string_and_integer
+    skip: "string + int coercion behavior"
+    setup:
+      - "INSERT (:N {name: 'hello', age: 30})"
+    query: "MATCH (n:N) RETURN n.name + n.age AS result"
+    expect:
+      error: ""
+
+  - name: negate_string
+    skip: "negate string behavior"
+    setup:
+      - "INSERT (:N {name: 'hello'})"
+    query: "MATCH (n:N) RETURN -n.name AS result"
+    expect:
+      error: ""
+
+  # ---------------------------------------------------------------------------
+  # Delete with dependencies
+  # ---------------------------------------------------------------------------
+
+  - name: delete_node_with_edges_no_detach
+    setup:
+      - "INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})"
+    query: "MATCH (p:Person {name: 'Alix'}) DELETE p"
+    expect:
+      error: ""
+
+  - name: detach_delete_works
+    setup:
+      - "INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})"
+    query: |
+      MATCH (p:Person {name: 'Alix'}) DETACH DELETE p
+      RETURN count(*) AS cnt
+    expect:
+      count: 1
+
+  # ---------------------------------------------------------------------------
+  # Invalid aggregation
+  # ---------------------------------------------------------------------------
+
+  - name: non_aggregated_column_without_group_by
+    setup:
+      - "INSERT (:Person {name: 'Alix', age: 30})"
+      - "INSERT (:Person {name: 'Gus', age: 25})"
+    query: "MATCH (p:Person) RETURN p.name, sum(p.age)"
+    expect:
+      count: 2
+
+  # ---------------------------------------------------------------------------
+  # Division and modulo edge cases
+  # ---------------------------------------------------------------------------
+
+  - name: integer_division_by_zero_error
+    skip: "returns Infinity instead of error"
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN 10 / 0"
+    expect:
+      error: "division"
+
+  - name: float_division_by_zero_infinity
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN 10.0 / 0.0"
+    expect:
+      rows:
+        - [Infinity]
+
+  - name: zero_divided_by_zero_float
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN 0.0 / 0.0"
+    expect:
+      rows:
+        - [NaN]
+
+  # ---------------------------------------------------------------------------
+  # Invalid function calls
+  # ---------------------------------------------------------------------------
+
+  - name: unknown_function
+    skip: "error message format"
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN nonexistent_function(n.v)"
+    expect:
+      error: ""
+
+  - name: wrong_argument_count
+    skip: "error message format"
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN abs(1, 2)"
+    expect:
+      error: ""
+
+  # ---------------------------------------------------------------------------
+  # Insert/Delete edge cases
+  # ---------------------------------------------------------------------------
+
+  - name: insert_edge_nonexistent_source
+    query: |
+      MATCH (a:Person {name: 'Ghost'}), (b:Person {name: 'Nobody'})
+      INSERT (a)-[:KNOWS]->(b)
+      RETURN count(*) AS cnt
+    expect:
+      rows:
+        - [0]
+
+  - name: set_property_on_empty_match
+    query: "MATCH (n:NonExistent) SET n.x = 42 RETURN count(*) AS cnt"
+    expect:
+      rows:
+        - [0]
+
+  - name: delete_from_empty_match
+    query: "MATCH (n:NonExistent) DELETE n RETURN count(*) AS cnt"
+    expect:
+      rows:
+        - [0]

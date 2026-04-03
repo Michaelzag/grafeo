@@ -152,6 +152,8 @@ public static class GtestParser
                     ctx.Idx++; tc.Statements = ParseStringList(ctx); break;
                 case "tags":
                     tc.Tags = ParseYamlList(value); ctx.Idx++; break;
+                case "requires":
+                    tc.Requires = ParseYamlList(value); ctx.Idx++; break;
                 case "params":
                     ctx.Idx++; tc.Params = ParseMap(ctx, 6); break;
                 case "expect":
@@ -271,7 +273,9 @@ public static class GtestParser
     }
 
     /// <summary>
-    /// Strip surrounding quotes and unescape common sequences.
+    /// Strip surrounding quotes and unescape YAML-level escapes only.
+    /// Does NOT process \n or \t: those are GQL string escapes handled
+    /// by the engine's parser.
     /// </summary>
     internal static string Unquote(string s)
     {
@@ -280,11 +284,10 @@ public static class GtestParser
             ((s[0] == '"' && s[^1] == '"') || (s[0] == '\'' && s[^1] == '\'')))
         {
             return s[1..^1]
-                .Replace("\\n", "\n")
-                .Replace("\\t", "\t")
+                .Replace("\\\\", "\x00")
                 .Replace("\\\"", "\"")
                 .Replace("\\'", "'")
-                .Replace("\\\\", "\\");
+                .Replace("\x00", "\\");
         }
         return s;
     }

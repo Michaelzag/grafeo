@@ -1,0 +1,306 @@
+# Rosetta: cross-language pattern matching equivalence
+#
+# Verifies that pattern matching operations return the same results
+# across GQL, Cypher, Gremlin, and SQL/PGQ. Each test uses variants
+# to express the same semantic query in multiple languages.
+#
+# Uses movie_database for rich pattern scenarios.
+
+meta:
+  model: lpg
+  section: rosetta
+  title: Pattern matching cross-language equivalence
+  dataset: movie_database
+  requires: [cypher, gremlin, sql-pgq]
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # Single node match by label
+  # ---------------------------------------------------------------------------
+
+  - name: count_actors
+    variants:
+      gql: MATCH (a:Actor) RETURN count(a) AS cnt
+      cypher: MATCH (a:Actor) RETURN count(a) AS cnt
+    expect:
+      rows:
+        - [7]
+
+  - name: count_actors_gremlin
+    variants:
+      gremlin: "g.V().hasLabel('Actor').count()"
+    expect:
+      rows:
+        - [7]
+
+  - name: count_actors_sql_pgq
+    skip: "SQL/PGQ aggregate in COLUMNS not supported"
+    variants:
+      sql-pgq: |
+        SELECT cnt FROM GRAPH_TABLE (
+          MATCH (a:Actor)
+          COLUMNS (count(a) AS cnt)
+        )
+    expect:
+      rows:
+        - [7]
+
+  # ---------------------------------------------------------------------------
+  # Node match with property filter
+  # ---------------------------------------------------------------------------
+
+  - name: find_actor_by_name
+    variants:
+      gql: "MATCH (a:Actor {name: 'Vincent'}) RETURN a.city"
+      cypher: "MATCH (a:Actor {name: 'Vincent'}) RETURN a.city"
+    expect:
+      rows:
+        - [Paris]
+
+  - name: find_actor_by_name_gremlin
+    variants:
+      gremlin: "g.V().has('Actor', 'name', 'Vincent').values('city')"
+    expect:
+      rows:
+        - [Paris]
+
+  - name: find_actor_by_name_sql_pgq
+    variants:
+      sql-pgq: |
+        SELECT city FROM GRAPH_TABLE (
+          MATCH (a:Actor)
+          WHERE a.name = 'Vincent'
+          COLUMNS (a.city AS city)
+        )
+    expect:
+      rows:
+        - [Paris]
+
+  # ---------------------------------------------------------------------------
+  # Edge traversal
+  # ---------------------------------------------------------------------------
+
+  - name: actors_in_heist
+    variants:
+      gql: |
+        MATCH (a:Actor)-[:ACTED_IN]->(m:Movie {title: 'The Heist'})
+        RETURN a.name ORDER BY a.name
+      cypher: |
+        MATCH (a:Actor)-[:ACTED_IN]->(m:Movie {title: 'The Heist'})
+        RETURN a.name ORDER BY a.name
+    expect:
+      ordered: true
+      rows:
+        - [Jules]
+        - [Mia]
+        - [Vincent]
+
+  - name: actors_in_heist_gremlin
+    variants:
+      gremlin: |
+        g.V().has('Movie', 'title', 'The Heist')
+          .in('ACTED_IN').hasLabel('Actor')
+          .values('name').order()
+    expect:
+      ordered: true
+      rows:
+        - [Jules]
+        - [Mia]
+        - [Vincent]
+
+  - name: actors_in_heist_sql_pgq
+    variants:
+      sql-pgq: |
+        SELECT name FROM GRAPH_TABLE (
+          MATCH (a:Actor)-[:ACTED_IN]->(m:Movie)
+          WHERE m.title = 'The Heist'
+          COLUMNS (a.name AS name)
+        ) ORDER BY name
+    expect:
+      ordered: true
+      rows:
+        - [Jules]
+        - [Mia]
+        - [Vincent]
+
+  # ---------------------------------------------------------------------------
+  # Two-hop traversal (actor -> movie -> genre)
+  # ---------------------------------------------------------------------------
+
+  - name: genres_of_vincent
+    variants:
+      gql: |
+        MATCH (a:Actor {name: 'Vincent'})-[:ACTED_IN]->(m:Movie)-[:HAS_GENRE]->(g:Genre)
+        RETURN DISTINCT g.name ORDER BY g.name
+      cypher: |
+        MATCH (a:Actor {name: 'Vincent'})-[:ACTED_IN]->(m:Movie)-[:HAS_GENRE]->(g:Genre)
+        RETURN DISTINCT g.name ORDER BY g.name
+    expect:
+      ordered: true
+      rows:
+        - [Action]
+        - [SciFi]
+        - [Thriller]
+
+  - name: genres_of_vincent_gremlin
+    variants:
+      gremlin: |
+        g.V().has('Actor', 'name', 'Vincent')
+          .out('ACTED_IN').out('HAS_GENRE')
+          .dedup().values('name').order()
+    expect:
+      ordered: true
+      rows:
+        - [Action]
+        - [SciFi]
+        - [Thriller]
+
+  - name: genres_of_vincent_sql_pgq
+    variants:
+      sql-pgq: |
+        SELECT DISTINCT genre FROM GRAPH_TABLE (
+          MATCH (a:Actor)-[:ACTED_IN]->(m:Movie)-[:HAS_GENRE]->(g:Genre)
+          WHERE a.name = 'Vincent'
+          COLUMNS (g.name AS genre)
+        ) ORDER BY genre
+    expect:
+      ordered: true
+      rows:
+        - [Action]
+        - [SciFi]
+        - [Thriller]
+
+  # ---------------------------------------------------------------------------
+  # Aggregation: movies per director
+  # ---------------------------------------------------------------------------
+
+  - name: movies_per_director
+    variants:
+      gql: |
+        MATCH (d:Director)-[:DIRECTED]->(m:Movie)
+        RETURN d.name, count(m) AS cnt ORDER BY d.name
+    expect:
+      ordered: true
+      rows:
+        - [Django, 2]
+        - [Hans, 1]
+        - [Shosanna, 2]
+
+  - name: movies_per_director_cypher
+    skip: "Cypher ORDER BY after aggregation"
+    variants:
+      cypher: |
+        MATCH (d:Director)-[:DIRECTED]->(m:Movie)
+        RETURN d.name, count(m) AS cnt ORDER BY d.name
+    expect:
+      ordered: true
+      rows:
+        - [Django, 2]
+        - [Hans, 1]
+        - [Shosanna, 2]
+
+  - name: movies_per_director_gremlin
+    skip: "Gremlin nested traversal in by()"
+    variants:
+      gremlin: |
+        g.V().hasLabel('Director')
+          .project('name', 'cnt')
+          .by('name')
+          .by(out('DIRECTED').count())
+          .order().by(select('name'))
+    expect:
+      ordered: true
+      count: 3
+
+  - name: movies_per_director_sql_pgq
+    skip: "SQL/PGQ aggregate in COLUMNS not supported"
+    variants:
+      sql-pgq: |
+        SELECT name, cnt FROM GRAPH_TABLE (
+          MATCH (d:Director)-[:DIRECTED]->(m:Movie)
+          COLUMNS (d.name AS name, count(m) AS cnt)
+        ) ORDER BY name
+    expect:
+      ordered: true
+      rows:
+        - [Django, 2]
+        - [Hans, 1]
+        - [Shosanna, 2]
+
+  # ---------------------------------------------------------------------------
+  # Edge property access
+  # ---------------------------------------------------------------------------
+
+  - name: actor_roles_in_movie
+    variants:
+      gql: |
+        MATCH (a:Actor)-[r:ACTED_IN]->(m:Movie {title: 'Berlin Express'})
+        RETURN a.name, r.role ORDER BY r.billing
+      cypher: |
+        MATCH (a:Actor)-[r:ACTED_IN]->(m:Movie {title: 'Berlin Express'})
+        RETURN a.name, r.role ORDER BY r.billing
+    expect:
+      ordered: true
+      rows:
+        - [Jules, Detective]
+        - [Butch, Villain]
+        - [Beatrix, Spy]
+        - [Gus, Rookie]
+
+  - name: actor_roles_gremlin
+    skip: "Gremlin outV() in by() modulator"
+    variants:
+      gremlin: |
+        g.V().has('Movie', 'title', 'Berlin Express')
+          .inE('ACTED_IN').order().by('billing')
+          .project('name', 'role')
+          .by(outV().values('name'))
+          .by('role')
+    expect:
+      ordered: true
+      count: 4
+
+  # ---------------------------------------------------------------------------
+  # Numeric filtering
+  # ---------------------------------------------------------------------------
+
+  - name: high_rated_movies
+    variants:
+      gql: |
+        MATCH (m:Movie) WHERE m.rating > 8.0
+        RETURN m.title ORDER BY m.rating DESC
+      cypher: |
+        MATCH (m:Movie) WHERE m.rating > 8.0
+        RETURN m.title ORDER BY m.rating DESC
+    expect:
+      ordered: true
+      rows:
+        - [Berlin Express]
+        - [The Heist]
+
+  - name: high_rated_movies_gremlin
+    variants:
+      gremlin: |
+        g.V().hasLabel('Movie').has('rating', gt(8.0))
+          .order().by('rating', desc)
+          .values('title')
+    expect:
+      ordered: true
+      rows:
+        - [Berlin Express]
+        - [The Heist]
+
+  - name: high_rated_movies_sql_pgq
+    variants:
+      sql-pgq: |
+        SELECT title FROM GRAPH_TABLE (
+          MATCH (m:Movie)
+          WHERE m.rating > 8.0
+          COLUMNS (m.title AS title, m.rating AS rating)
+        ) ORDER BY rating DESC
+    expect:
+      ordered: true
+      rows:
+        - [Berlin Express]
+        - [The Heist]

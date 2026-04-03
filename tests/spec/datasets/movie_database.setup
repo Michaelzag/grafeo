@@ -1,0 +1,63 @@
+# Movie Database Dataset
+# 7 Actors, 3 Directors, 5 Movies, 4 Genres
+# Topology: Actor -[ACTED_IN {role}]-> Movie -[HAS_GENRE]-> Genre
+#           Director -[DIRECTED]-> Movie
+#           Actor -[KNOWS]-> Actor (collaborators)
+#
+# Use case: many-to-many traversals, string operations, complex aggregation,
+#           path finding (actor collaboration chains)
+
+INSERT (:Genre {name: 'Action'})
+INSERT (:Genre {name: 'Drama'})
+INSERT (:Genre {name: 'SciFi'})
+INSERT (:Genre {name: 'Thriller'})
+
+INSERT (:Director {name: 'Django', born: 1963, city: 'Amsterdam'})
+INSERT (:Director {name: 'Shosanna', born: 1975, city: 'Paris'})
+INSERT (:Director {name: 'Hans', born: 1968, city: 'Berlin'})
+
+INSERT (:Actor {name: 'Vincent', born: 1980, city: 'Paris'})
+INSERT (:Actor {name: 'Jules', born: 1978, city: 'Amsterdam'})
+INSERT (:Actor {name: 'Mia', born: 1985, city: 'Prague'})
+INSERT (:Actor {name: 'Butch', born: 1970, city: 'Berlin'})
+INSERT (:Actor {name: 'Beatrix', born: 1982, city: 'Barcelona'})
+INSERT (:Actor {name: 'Alix', born: 1990, city: 'Amsterdam'})
+INSERT (:Actor {name: 'Gus', born: 1992, city: 'Berlin'})
+
+INSERT (:Movie {title: 'The Heist', year: 2020, budget: 45000000, box_office: 120000000, rating: 8.2})
+INSERT (:Movie {title: 'Midnight Code', year: 2021, budget: 30000000, box_office: 85000000, rating: 7.5})
+INSERT (:Movie {title: 'Berlin Express', year: 2022, budget: 60000000, box_office: 200000000, rating: 8.7})
+INSERT (:Movie {title: 'Prague Nights', year: 2023, budget: 25000000, box_office: 55000000, rating: 6.9})
+INSERT (:Movie {title: 'The Algorithm', year: 2024, budget: 50000000, box_office: 150000000, rating: 8.0})
+
+MATCH (d:Director {name: 'Django'}), (m:Movie {title: 'The Heist'}) INSERT (d)-[:DIRECTED]->(m)
+MATCH (d:Director {name: 'Django'}), (m:Movie {title: 'Berlin Express'}) INSERT (d)-[:DIRECTED]->(m)
+MATCH (d:Director {name: 'Shosanna'}), (m:Movie {title: 'Midnight Code'}) INSERT (d)-[:DIRECTED]->(m)
+MATCH (d:Director {name: 'Shosanna'}), (m:Movie {title: 'The Algorithm'}) INSERT (d)-[:DIRECTED]->(m)
+MATCH (d:Director {name: 'Hans'}), (m:Movie {title: 'Prague Nights'}) INSERT (d)-[:DIRECTED]->(m)
+
+MATCH (a:Actor {name: 'Vincent'}), (m:Movie {title: 'The Heist'}) INSERT (a)-[:ACTED_IN {role: 'Lead', billing: 1}]->(m)
+MATCH (a:Actor {name: 'Jules'}), (m:Movie {title: 'The Heist'}) INSERT (a)-[:ACTED_IN {role: 'Partner', billing: 2}]->(m)
+MATCH (a:Actor {name: 'Mia'}), (m:Movie {title: 'The Heist'}) INSERT (a)-[:ACTED_IN {role: 'Informant', billing: 3}]->(m)
+MATCH (a:Actor {name: 'Vincent'}), (m:Movie {title: 'Midnight Code'}) INSERT (a)-[:ACTED_IN {role: 'Hacker', billing: 1}]->(m)
+MATCH (a:Actor {name: 'Alix'}), (m:Movie {title: 'Midnight Code'}) INSERT (a)-[:ACTED_IN {role: 'Agent', billing: 2}]->(m)
+MATCH (a:Actor {name: 'Jules'}), (m:Movie {title: 'Berlin Express'}) INSERT (a)-[:ACTED_IN {role: 'Detective', billing: 1}]->(m)
+MATCH (a:Actor {name: 'Butch'}), (m:Movie {title: 'Berlin Express'}) INSERT (a)-[:ACTED_IN {role: 'Villain', billing: 2}]->(m)
+MATCH (a:Actor {name: 'Beatrix'}), (m:Movie {title: 'Berlin Express'}) INSERT (a)-[:ACTED_IN {role: 'Spy', billing: 3}]->(m)
+MATCH (a:Actor {name: 'Gus'}), (m:Movie {title: 'Berlin Express'}) INSERT (a)-[:ACTED_IN {role: 'Rookie', billing: 4}]->(m)
+MATCH (a:Actor {name: 'Mia'}), (m:Movie {title: 'Prague Nights'}) INSERT (a)-[:ACTED_IN {role: 'Lead', billing: 1}]->(m)
+MATCH (a:Actor {name: 'Butch'}), (m:Movie {title: 'Prague Nights'}) INSERT (a)-[:ACTED_IN {role: 'Stranger', billing: 2}]->(m)
+MATCH (a:Actor {name: 'Alix'}), (m:Movie {title: 'The Algorithm'}) INSERT (a)-[:ACTED_IN {role: 'Scientist', billing: 1}]->(m)
+MATCH (a:Actor {name: 'Gus'}), (m:Movie {title: 'The Algorithm'}) INSERT (a)-[:ACTED_IN {role: 'Engineer', billing: 2}]->(m)
+MATCH (a:Actor {name: 'Beatrix'}), (m:Movie {title: 'The Algorithm'}) INSERT (a)-[:ACTED_IN {role: 'Director', billing: 3}]->(m)
+
+MATCH (m:Movie {title: 'The Heist'}), (g:Genre {name: 'Action'}) INSERT (m)-[:HAS_GENRE]->(g)
+MATCH (m:Movie {title: 'The Heist'}), (g:Genre {name: 'Thriller'}) INSERT (m)-[:HAS_GENRE]->(g)
+MATCH (m:Movie {title: 'Midnight Code'}), (g:Genre {name: 'SciFi'}) INSERT (m)-[:HAS_GENRE]->(g)
+MATCH (m:Movie {title: 'Midnight Code'}), (g:Genre {name: 'Thriller'}) INSERT (m)-[:HAS_GENRE]->(g)
+MATCH (m:Movie {title: 'Berlin Express'}), (g:Genre {name: 'Action'}) INSERT (m)-[:HAS_GENRE]->(g)
+MATCH (m:Movie {title: 'Berlin Express'}), (g:Genre {name: 'Drama'}) INSERT (m)-[:HAS_GENRE]->(g)
+MATCH (m:Movie {title: 'Prague Nights'}), (g:Genre {name: 'Drama'}) INSERT (m)-[:HAS_GENRE]->(g)
+MATCH (m:Movie {title: 'Prague Nights'}), (g:Genre {name: 'Thriller'}) INSERT (m)-[:HAS_GENRE]->(g)
+MATCH (m:Movie {title: 'The Algorithm'}), (g:Genre {name: 'SciFi'}) INSERT (m)-[:HAS_GENRE]->(g)
+MATCH (m:Movie {title: 'The Algorithm'}), (g:Genre {name: 'Drama'}) INSERT (m)-[:HAS_GENRE]->(g)

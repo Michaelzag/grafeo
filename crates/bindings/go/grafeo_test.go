@@ -1,6 +1,7 @@
 package grafeo
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
@@ -797,20 +798,18 @@ func TestAggregateCount(t *testing.T) {
 	if !ok {
 		t.Fatal("expected 'cnt' column in result row")
 	}
-	// The count value may come back as float64 (JSON number) or int.
-	var countVal float64
+	// The count value comes back as json.Number (due to UseNumber decoder).
 	switch v := cnt.(type) {
+	case json.Number:
+		if v.String() != "3" {
+			t.Errorf("expected count 3, got %v", v)
+		}
 	case float64:
-		countVal = v
-	case int:
-		countVal = float64(v)
-	case int64:
-		countVal = float64(v)
+		if v != 3 {
+			t.Errorf("expected count 3, got %v", v)
+		}
 	default:
 		t.Fatalf("unexpected type for cnt: %T (%v)", cnt, cnt)
-	}
-	if countVal != 3 {
-		t.Errorf("expected count 3, got %v", countVal)
 	}
 }
 

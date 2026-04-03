@@ -1,0 +1,321 @@
+# GQL List Functions: ISO/IEC 39075:2024 sec 16.5
+#
+# Covers: head(), last(), tail(), range(), list indexing, list slicing,
+# list concatenation, single() predicate, list comprehension patterns.
+
+meta:
+  language: gql
+  model: lpg
+  section: "16.5"
+  title: List functions
+  dataset: empty
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # head() - first element of a list
+  # ---------------------------------------------------------------------------
+
+  - name: head_of_literal_list
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN head([10, 20, 30]) AS h"
+    expect:
+      rows:
+        - [10]
+
+  - name: head_of_string_list
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN head(['Alix', 'Gus', 'Vincent']) AS h"
+    expect:
+      rows:
+        - [Alix]
+
+  - name: head_of_empty_list
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN head([]) AS h"
+    expect:
+      rows:
+        - [null]
+
+  - name: head_of_single_element
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN head([42]) AS h"
+    expect:
+      rows:
+        - [42]
+
+  # ---------------------------------------------------------------------------
+  # last() - last element of a list
+  # ---------------------------------------------------------------------------
+
+  - name: last_of_literal_list
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN last([10, 20, 30]) AS l"
+    expect:
+      rows:
+        - [30]
+
+  - name: last_of_empty_list
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN last([]) AS l"
+    expect:
+      rows:
+        - [null]
+
+  - name: last_of_single_element
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN last([99]) AS l"
+    expect:
+      rows:
+        - [99]
+
+  # ---------------------------------------------------------------------------
+  # tail() - all elements except the first
+  # ---------------------------------------------------------------------------
+
+  - name: tail_of_list
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN tail([10, 20, 30]) AS t"
+    expect:
+      rows:
+        - ["[20, 30]"]
+
+  - name: tail_of_single_element
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN tail([42]) AS t"
+    expect:
+      rows:
+        - ["[]"]
+
+  - name: tail_of_empty_list
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN tail([]) AS t"
+    expect:
+      rows:
+        - ["[]"]
+
+  # ---------------------------------------------------------------------------
+  # range() - generate integer sequences
+  # ---------------------------------------------------------------------------
+
+  - name: range_basic
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN range(1, 5) AS r"
+    expect:
+      rows:
+        - ["[1, 2, 3, 4, 5]"]
+
+  - name: range_with_step
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN range(0, 10, 3) AS r"
+    expect:
+      rows:
+        - ["[0, 3, 6, 9]"]
+
+  - name: range_single_value
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN range(5, 5) AS r"
+    expect:
+      rows:
+        - ["[5]"]
+
+  - name: range_empty_when_start_greater
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN range(5, 1) AS r"
+    expect:
+      rows:
+        - ["[]"]
+
+  # ---------------------------------------------------------------------------
+  # List indexing (zero-based)
+  # ---------------------------------------------------------------------------
+
+  - name: list_index_first
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN [10, 20, 30][0] AS val"
+    expect:
+      rows:
+        - [10]
+
+  - name: list_index_last_negative
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN [10, 20, 30][-1] AS val"
+    expect:
+      rows:
+        - [30]
+
+  - name: list_index_out_of_bounds
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN [10, 20, 30][5] AS val"
+    expect:
+      rows:
+        - [null]
+
+  # ---------------------------------------------------------------------------
+  # List slicing
+  # ---------------------------------------------------------------------------
+
+  - name: list_slice_basic
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN [10, 20, 30, 40, 50][1..3] AS s"
+    expect:
+      rows:
+        - ["[20, 30]"]
+
+  - name: list_slice_from_start
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN [10, 20, 30, 40][..2] AS s"
+    expect:
+      rows:
+        - ["[10, 20]"]
+
+  - name: list_slice_to_end
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN [10, 20, 30, 40][2..] AS s"
+    expect:
+      rows:
+        - ["[30, 40]"]
+
+  # ---------------------------------------------------------------------------
+  # size() on lists
+  # ---------------------------------------------------------------------------
+
+  - name: size_of_list
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN size([10, 20, 30]) AS s"
+    expect:
+      rows:
+        - [3]
+
+  - name: size_of_empty_list
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN size([]) AS s"
+    expect:
+      rows:
+        - [0]
+
+  # ---------------------------------------------------------------------------
+  # List + operator (concatenation)
+  # ---------------------------------------------------------------------------
+
+  - name: list_concatenation
+    skip: "list + operator not implemented"
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN [1, 2] + [3, 4] AS combined"
+    expect:
+      rows:
+        - ["[1, 2, 3, 4]"]
+
+  - name: list_concat_with_empty
+    skip: "list + operator not implemented"
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN [1, 2] + [] AS combined"
+    expect:
+      rows:
+        - ["[1, 2]"]
+
+  # ---------------------------------------------------------------------------
+  # IN operator with lists
+  # ---------------------------------------------------------------------------
+
+  - name: in_literal_list
+    setup:
+      - "INSERT (:Person {name: 'Alix', age: 30})"
+      - "INSERT (:Person {name: 'Gus', age: 25})"
+      - "INSERT (:Person {name: 'Vincent', age: 35})"
+    query: "MATCH (p:Person) WHERE p.name IN ['Alix', 'Gus'] RETURN p.name ORDER BY p.name"
+    expect:
+      ordered: true
+      rows:
+        - [Alix]
+        - [Gus]
+
+  - name: not_in_list
+    setup:
+      - "INSERT (:Person {name: 'Alix', age: 30})"
+      - "INSERT (:Person {name: 'Gus', age: 25})"
+      - "INSERT (:Person {name: 'Vincent', age: 35})"
+    query: "MATCH (p:Person) WHERE NOT p.name IN ['Alix'] RETURN p.name ORDER BY p.name"
+    expect:
+      ordered: true
+      rows:
+        - [Gus]
+        - [Vincent]
+
+  # ---------------------------------------------------------------------------
+  # single() predicate
+  # ---------------------------------------------------------------------------
+
+  - name: single_predicate_true
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN single(x IN [1, 2, 3] WHERE x > 2) AS result"
+    expect:
+      rows:
+        - [true]
+
+  - name: single_predicate_false_none
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN single(x IN [1, 2, 3] WHERE x > 5) AS result"
+    expect:
+      rows:
+        - [false]
+
+  - name: single_predicate_false_multiple
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN single(x IN [1, 2, 3] WHERE x > 1) AS result"
+    expect:
+      rows:
+        - [false]
+
+  # ---------------------------------------------------------------------------
+  # collect() with list operations
+  # ---------------------------------------------------------------------------
+
+  - name: collect_then_head
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:Person {name: 'Gus'})"
+      - "INSERT (:Person {name: 'Vincent'})"
+    query: |
+      MATCH (p:Person)
+      WITH collect(p.name) AS names
+      RETURN head(names) AS first_name, size(names) AS total
+    expect:
+      count: 1
+
+  - name: collect_then_size
+    skip: "size(collect()) not supported"
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:Person {name: 'Gus'})"
+    query: "MATCH (p:Person) RETURN size(collect(p.name)) AS cnt"
+    expect:
+      rows:
+        - [2]

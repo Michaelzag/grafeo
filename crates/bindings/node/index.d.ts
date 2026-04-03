@@ -118,6 +118,12 @@ export declare class GrafeoDB {
   save(path: string): void
   /** Close the database. */
   close(): void
+  /** Enable CDC for all future sessions. */
+  enableCdc(): void
+  /** Disable CDC for all future sessions. */
+  disableCdc(): void
+  /** Returns whether CDC is currently enabled for new sessions. */
+  get isCdcEnabled(): boolean
   /** Returns the full change history for a node. */
   nodeHistory(nodeId: number): Promise<Array<any>>
   /** Returns the full change history for an edge. */

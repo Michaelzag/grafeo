@@ -787,6 +787,30 @@ file_db = GrafeoDB("./production.db")
 test_db = file_db.to_memory()  # safe copy for experiments
 ```
 
+### compact()
+
+Converts the database to a read-only [CompactStore](../../user-guide/compact-store.md) for faster queries. Takes a snapshot of all nodes and edges, builds a columnar store with CSR adjacency, and switches to read-only mode. The original store is dropped to free memory.
+
+After calling this, write queries will raise an error. Gives ~60x memory reduction and 100x+ traversal speedup for read-only workloads.
+
+```python
+def compact(self) -> None
+```
+
+```python
+db = grafeo.GrafeoDB()
+db.execute("INSERT (:Person {name: 'Alix', age: 30})")
+db.execute("INSERT (:Person {name: 'Gus', age: 25})")
+
+db.compact()  # switch to read-only columnar mode
+
+result = db.execute("MATCH (p:Person) RETURN p.name")  # fast
+db.execute("INSERT (:Person {name: 'Vincent'})")        # raises error
+```
+
+!!! note
+    Requires the `compact-store` feature (included in the default `embedded` profile).
+
 ### close()
 
 Close the database, flushing any pending writes.

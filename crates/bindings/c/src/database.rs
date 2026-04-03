@@ -258,6 +258,28 @@ pub extern "C" fn grafeo_version() -> *const c_char {
 }
 
 // =========================================================================
+// Change Data Capture
+// =========================================================================
+
+/// Enable or disable CDC for all future sessions.
+///
+/// Does not affect sessions that were already created.
+#[cfg(feature = "cdc")]
+#[unsafe(no_mangle)]
+pub extern "C" fn grafeo_set_cdc_enabled(db: *mut GrafeoDatabase, enabled: bool) {
+    if let Some(db) = unsafe { db.as_ref() } {
+        db.inner.read().set_cdc_enabled(enabled);
+    }
+}
+
+/// Returns whether CDC is currently enabled for new sessions.
+#[cfg(feature = "cdc")]
+#[unsafe(no_mangle)]
+pub extern "C" fn grafeo_is_cdc_enabled(db: *mut GrafeoDatabase) -> bool {
+    unsafe { db.as_ref() }.map_or(false, |db| db.inner.read().is_cdc_enabled())
+}
+
+// =========================================================================
 // Query Execution
 // =========================================================================
 
@@ -1921,6 +1943,26 @@ pub extern "C" fn grafeo_save(db: *mut GrafeoDatabase, path: *const c_char) -> G
 pub extern "C" fn grafeo_wal_checkpoint(db: *mut GrafeoDatabase) -> GrafeoStatus {
     let db = db_ref!(db);
     match db.inner.read().wal_checkpoint() {
+        Ok(()) => GrafeoStatus::Ok,
+        Err(e) => set_error(&e),
+    }
+}
+
+// =========================================================================
+// CompactStore
+// =========================================================================
+
+/// Converts the database to a read-only CompactStore for faster queries.
+///
+/// Takes a snapshot of all nodes and edges, builds a columnar store with
+/// CSR adjacency, and switches to read-only mode. After this call, write
+/// operations will fail.
+#[cfg(feature = "compact-store")]
+#[unsafe(no_mangle)]
+pub extern "C" fn grafeo_compact(db: *mut GrafeoDatabase) -> GrafeoStatus {
+    let db = db_ref!(db);
+    let mut guard = db.inner.write();
+    match guard.compact() {
         Ok(()) => GrafeoStatus::Ok,
         Err(e) => set_error(&e),
     }

@@ -51,8 +51,8 @@ export function valueToString(val) {
   if (typeof val === 'boolean') return val ? 'true' : 'false'
   if (typeof val === 'bigint') return val.toString()
   if (typeof val === 'number') {
-    if (!isFinite(val)) return val > 0 ? 'Infinity' : '-Infinity'
     if (isNaN(val)) return 'NaN'
+    if (!isFinite(val)) return val > 0 ? 'Infinity' : '-Infinity'
     // Rust: format!("{}", 15.0_f64) -> "15" (no trailing .0)
     if (Number.isInteger(val)) return val.toString()
     return val.toString()

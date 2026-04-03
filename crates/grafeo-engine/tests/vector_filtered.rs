@@ -583,3 +583,49 @@ fn test_filtered_vector_search_results_ordered_by_distance() {
         );
     }
 }
+
+// ============================================================================
+// NULL semantics: $ne and $nin exclude nodes missing the filtered property
+// ============================================================================
+
+/// Documents that nodes without the filtered property are excluded from
+/// $ne/$nin results (SQL three-valued NULL semantics).
+#[test]
+fn test_filter_ne_excludes_nodes_missing_property() {
+    let db = GrafeoDB::new_in_memory();
+
+    // 3 nodes: two with color, one without
+    let n1 = db.create_node(&["Item"]);
+    db.set_node_property(n1, "emb", vec3(1.0, 0.0, 0.0));
+    db.set_node_property(n1, "color", Value::String("red".into()));
+    db.create_vector_index("Item", "emb", Some(3), None, None, None)
+        .unwrap();
+
+    let n2 = db.create_node(&["Item"]);
+    db.set_node_property(n2, "emb", vec3(0.0, 1.0, 0.0));
+    db.set_node_property(n2, "color", Value::String("blue".into()));
+
+    let n3 = db.create_node(&["Item"]);
+    db.set_node_property(n3, "emb", vec3(0.0, 0.0, 1.0));
+    // n3 has no "color" property
+
+    // $ne: "red" should match n2 (blue) but NOT n3 (no color)
+    let filters: HashMap<String, Value> = [(
+        "color".to_string(),
+        op_filter(vec![("$ne", Value::String("red".into()))]),
+    )]
+    .into_iter()
+    .collect();
+
+    let results = db
+        .vector_search("Item", "emb", &[0.5, 0.5, 0.5], 10, None, Some(&filters))
+        .expect("ne filter");
+
+    // Only n2 matches: n1 is red, n3 lacks the property entirely
+    assert_eq!(
+        results.len(),
+        1,
+        "$ne excludes nodes missing the property (NULL != 'red' is unknown): got {}",
+        results.len()
+    );
+}

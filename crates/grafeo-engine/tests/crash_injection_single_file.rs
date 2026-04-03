@@ -337,3 +337,213 @@ fn crash_before_sidecar_wal_removal_recovered_on_reopen() {
         "sidecar WAL must be removed after the second (clean) close"
     );
 }
+
+// =========================================================================
+// WAL-disabled single-file crash injection tests
+// =========================================================================
+
+/// Helper: build a WAL-disabled persistent config for a `.grafeo` path.
+fn wal_disabled_config(path: &std::path::Path) -> Config {
+    Config {
+        wal_enabled: false,
+        ..Config::persistent(path)
+    }
+}
+
+/// With WAL disabled, a clean close triggers `checkpoint_to_file` which writes
+/// the snapshot. On reopen the data should be fully intact.
+#[test]
+#[ignore = "crash injection test"]
+fn wal_disabled_checkpoint_preserves_data() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("wal_off_persist.grafeo");
+
+    // Phase 1: Create, populate, close cleanly (checkpoint on close)
+    {
+        let db = GrafeoDB::with_config(wal_disabled_config(&path)).unwrap();
+        let session = db.session();
+        session.execute("INSERT (:Person {name: 'Alix'})").unwrap();
+        session.execute("INSERT (:Person {name: 'Gus'})").unwrap();
+        session
+            .execute(
+                "MATCH (a:Person {name: 'Alix'}), (b:Person {name: 'Gus'}) \
+                 INSERT (a)-[:KNOWS]->(b)",
+            )
+            .unwrap();
+
+        // No sidecar WAL should exist
+        assert!(
+            !sidecar_wal_path(&path).exists(),
+            "no sidecar WAL should be created when WAL is disabled"
+        );
+
+        db.close().unwrap();
+    }
+
+    // Phase 2: Reopen with WAL disabled and verify everything survived
+    assert!(
+        path.exists(),
+        "checkpoint must have written the .grafeo file"
+    );
+
+    let db = GrafeoDB::with_config(wal_disabled_config(&path)).unwrap();
+    let session = db.session();
+
+    let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
+    let names = extract_strings(&result.rows);
+    assert_eq!(
+        names,
+        vec!["Alix", "Gus"],
+        "both nodes must survive close-reopen with WAL disabled"
+    );
+
+    assert_eq!(
+        db.edge_count(),
+        1,
+        "edge must survive close-reopen with WAL disabled"
+    );
+
+    db.close().unwrap();
+}
+
+/// With WAL disabled, crashing during `checkpoint_to_file` on close means there
+/// is no sidecar WAL to replay. If a prior successful checkpoint exists, data
+/// from that checkpoint should survive. On a first write with no prior
+/// checkpoint, data may be lost entirely.
+///
+/// This test does two rounds:
+///   1. Write initial data, close cleanly (successful checkpoint).
+///   2. Write more data, crash during the close checkpoint.
+///
+/// On reopen, at least the first-round data must survive.
+#[test]
+#[ignore = "crash injection test"]
+fn wal_disabled_crash_during_checkpoint_recovers() {
+    for crash_point in 1..=3 {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("wal_off_crash.grafeo");
+
+        // Round 1: Create, populate, close cleanly to establish a valid checkpoint
+        {
+            let db = GrafeoDB::with_config(wal_disabled_config(&path)).unwrap();
+            let session = db.session();
+            session
+                .execute("INSERT (:Person {name: 'Vincent'})")
+                .unwrap();
+            session.execute("INSERT (:Person {name: 'Jules'})").unwrap();
+            db.close().unwrap();
+        }
+
+        // Round 2: Reopen, add more data, crash during close checkpoint
+        {
+            let db = GrafeoDB::with_config(wal_disabled_config(&path)).unwrap();
+            let session = db.session();
+            session.execute("INSERT (:Person {name: 'Mia'})").unwrap();
+
+            let db = AssertUnwindSafe(db);
+            let result = with_crash_at(crash_point, move || {
+                let _ = db.close();
+            });
+
+            match result {
+                CrashResult::Crashed => {
+                    // Expected: checkpoint was interrupted, no WAL fallback
+                }
+                CrashResult::Completed(()) => {
+                    // Close completed before crash point was reached
+                }
+            }
+        }
+
+        // Reopen: the .grafeo file should still have a valid snapshot
+        // from round 1, so at least those 2 nodes must survive.
+        assert!(
+            path.exists(),
+            "crash_point={crash_point}: .grafeo file must exist from round-1 checkpoint"
+        );
+
+        let db = GrafeoDB::with_config(wal_disabled_config(&path)).unwrap();
+        let session = db.session();
+
+        let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
+        let names = extract_strings(&result.rows);
+
+        // Round-1 data must survive
+        assert!(
+            names.contains(&"Vincent".to_string()),
+            "crash_point={crash_point}: Vincent missing after crash"
+        );
+        assert!(
+            names.contains(&"Jules".to_string()),
+            "crash_point={crash_point}: Jules missing after crash"
+        );
+
+        // Round-2 data (Mia) may or may not survive depending on whether
+        // the crash happened before or after the snapshot was written.
+        // We do not assert on Mia: either outcome is valid.
+
+        db.close().unwrap();
+    }
+}
+
+/// With WAL disabled, uncommitted transaction data should not be persisted.
+/// If the process crashes (or simply drops) before committing, the
+/// checkpoint-on-close only captures committed state.
+#[test]
+#[ignore = "crash injection test"]
+fn wal_disabled_uncommitted_data_lost_on_crash() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("wal_off_uncommitted.grafeo");
+
+    // Phase 1: Write committed data, close cleanly
+    {
+        let db = GrafeoDB::with_config(wal_disabled_config(&path)).unwrap();
+        let session = db.session();
+        session.execute("INSERT (:Person {name: 'Butch'})").unwrap();
+        db.close().unwrap();
+    }
+
+    // Phase 2: Reopen, start an explicit transaction, write data, crash
+    // without committing
+    {
+        let db = GrafeoDB::with_config(wal_disabled_config(&path)).unwrap();
+        let mut session = db.session();
+
+        // Begin explicit transaction (auto-commit is off)
+        session.begin_transaction().unwrap();
+        session
+            .execute("INSERT (:Person {name: 'Django'})")
+            .unwrap();
+        // Do NOT commit: simulate a crash while the transaction is open
+
+        let db = AssertUnwindSafe(db);
+        let _result = with_crash_at(1, move || {
+            let _ = db.close();
+        });
+    }
+
+    // Phase 3: Reopen and verify only the committed data (Butch) is present.
+    // Django was never committed, so it must not appear.
+    assert!(
+        path.exists(),
+        ".grafeo file must exist from phase-1 checkpoint"
+    );
+
+    let db = GrafeoDB::with_config(wal_disabled_config(&path)).unwrap();
+    let session = db.session();
+
+    let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
+    let names = extract_strings(&result.rows);
+
+    assert!(
+        names.contains(&"Butch".to_string()),
+        "committed data (Butch) must survive"
+    );
+    assert!(
+        !names.contains(&"Django".to_string()),
+        "uncommitted data (Django) must NOT be present after crash"
+    );
+    assert_eq!(db.node_count(), 1, "only the committed node should exist");
+
+    db.close().unwrap();
+}

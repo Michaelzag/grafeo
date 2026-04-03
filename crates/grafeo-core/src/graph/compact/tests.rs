@@ -959,3 +959,383 @@ fn test_value_in_range_incomparable() {
     );
     assert!(results.is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// GraphStore: invalid ID handling
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_get_node_invalid_table_id() {
+    let store = build_test_store();
+    // Table ID 99 doesn't exist: should return None.
+    let fake_id = super::id::encode_node_id(99, 0);
+    assert!(store.get_node(fake_id).is_none());
+}
+
+#[test]
+fn test_get_node_out_of_bounds_offset() {
+    let store = build_test_store();
+    // Table 0 (Person) has 5 nodes. Offset 999 is out of bounds.
+    let fake_id = super::id::encode_node_id(0, 999);
+    assert!(store.get_node(fake_id).is_none());
+}
+
+#[test]
+fn test_get_edge_invalid_rel_table_id() {
+    let store = build_test_store();
+    let fake_id = super::id::encode_edge_id(99, 0);
+    assert!(store.get_edge(fake_id).is_none());
+}
+
+#[test]
+fn test_get_edge_out_of_bounds_position() {
+    let store = build_test_store();
+    // Rel table 0 exists but position 999 is beyond edge count.
+    let fake_id = super::id::encode_edge_id(0, 999);
+    assert!(store.get_edge(fake_id).is_none());
+}
+
+#[test]
+fn test_get_node_property_invalid_id() {
+    let store = build_test_store();
+    let fake_id = super::id::encode_node_id(99, 0);
+    assert!(
+        store
+            .get_node_property(fake_id, &PropertyKey::new("name"))
+            .is_none()
+    );
+}
+
+#[test]
+fn test_get_edge_property_invalid_id() {
+    let store = build_test_store();
+    let fake_id = super::id::encode_edge_id(99, 0);
+    assert!(
+        store
+            .get_edge_property(fake_id, &PropertyKey::new("score"))
+            .is_none()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// GraphStore: zone map pruning paths
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_find_nodes_by_property_zone_map_prunes() {
+    let store = build_test_store();
+    // Search for age = 999, which is outside the zone map [25, 45].
+    // The zone map should prune the Person table entirely.
+    let results = store.find_nodes_by_property("age", &Value::Int64(999));
+    assert!(results.is_empty());
+}
+
+#[test]
+fn test_find_nodes_by_property_nonexistent_property() {
+    let store = build_test_store();
+    // Property "color" doesn't exist: no zone map, no column, no results.
+    let results = store.find_nodes_by_property("color", &Value::Int64(1));
+    assert!(results.is_empty());
+}
+
+#[test]
+fn test_find_nodes_in_range_zone_map_prunes_min() {
+    let store = build_test_store();
+    // Range [100, 200]: min is above zone map max (45), should prune.
+    let results = store.find_nodes_in_range(
+        "age",
+        Some(&Value::Int64(100)),
+        Some(&Value::Int64(200)),
+        true,
+        true,
+    );
+    assert!(results.is_empty());
+}
+
+#[test]
+fn test_find_nodes_in_range_zone_map_prunes_max() {
+    let store = build_test_store();
+    // Range [1, 10]: max is below zone map min (25), should prune.
+    let results = store.find_nodes_in_range(
+        "age",
+        Some(&Value::Int64(1)),
+        Some(&Value::Int64(10)),
+        true,
+        true,
+    );
+    assert!(results.is_empty());
+}
+
+#[test]
+fn test_node_property_might_match_no_zone_map() {
+    let store = build_test_store();
+    // Property "color" has no zone map: should conservatively return true.
+    assert!(store.node_property_might_match(
+        &PropertyKey::new("color"),
+        CompareOp::Eq,
+        &Value::Int64(1),
+    ));
+}
+
+#[test]
+fn test_node_property_might_match_zone_map_rejects() {
+    // Use a single-label store so there's no table without a zone map
+    // for the property (which would trigger the conservative true path).
+    let store = CompactStoreBuilder::new()
+        .node_table("Person", |t| t.column_bitpacked("age", &[25, 30, 35], 6))
+        .build()
+        .unwrap();
+
+    // age zone map is [25, 35]. Asking "age == 999" should be rejected.
+    assert!(!store.node_property_might_match(
+        &PropertyKey::new("age"),
+        CompareOp::Eq,
+        &Value::Int64(999),
+    ));
+}
+
+#[test]
+fn test_node_property_might_match_multi_table_conservative() {
+    let store = build_test_store();
+    // City table has no zone map for "age", so even though Person's
+    // zone map [25,45] would reject 999, the function conservatively
+    // returns true because City *might* have matching values.
+    assert!(store.node_property_might_match(
+        &PropertyKey::new("age"),
+        CompareOp::Eq,
+        &Value::Int64(999),
+    ));
+}
+
+// ---------------------------------------------------------------------------
+// RelTable: source_node_id, dest_node_id, memory_bytes
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_rel_table_source_node_id_out_of_bounds() {
+    let store = build_test_store();
+    let rt = store.rel_table("LIVES_IN").unwrap();
+    // CSR position far beyond edge count should return None.
+    assert!(rt.source_node_id(9999).is_none());
+}
+
+#[test]
+fn test_rel_table_dest_node_id_out_of_bounds() {
+    let store = build_test_store();
+    let rt = store.rel_table("LIVES_IN").unwrap();
+    assert!(rt.dest_node_id(9999).is_none());
+}
+
+#[test]
+fn test_rel_table_memory_bytes_nonzero() {
+    let store = build_test_store();
+    let rt = store.rel_table("LIVES_IN").unwrap();
+    assert!(rt.memory_bytes() > 0);
+    // With backward CSR, memory should be higher.
+    let knows = store.rel_table("KNOWS").unwrap();
+    assert!(knows.memory_bytes() > 0);
+}
+
+#[test]
+fn test_rel_table_no_backward_dest_node_id() {
+    // Build a store without backward CSR.
+    let store = CompactStoreBuilder::new()
+        .node_table("A", |t| t.column_bitpacked("v", &[1, 2], 4))
+        .rel_table("LINK", "A", "A", |r| r.edges([(0, 1)]).backward(false))
+        .build()
+        .unwrap();
+
+    let rt = store.rel_table("LINK").unwrap();
+    // source_node_id should work (forward CSR).
+    assert!(rt.source_node_id(0).is_some());
+    // dest_node_id should also work (uses forward CSR only).
+    assert!(rt.dest_node_id(0).is_some());
+    // But in_degree should return None (no backward CSR).
+    assert!(rt.in_degree(0).is_none());
+}
+
+// ---------------------------------------------------------------------------
+// NodeTable: memory_bytes, property-not-found
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_node_table_memory_bytes_nonzero() {
+    let store = build_test_store();
+    let nt = store.node_table("Person").unwrap();
+    assert!(nt.memory_bytes() > 0);
+}
+
+#[test]
+fn test_node_table_get_property_nonexistent_key() {
+    let store = build_test_store();
+    let nt = store.node_table("Person").unwrap();
+    assert!(
+        nt.get_property(0, &PropertyKey::new("nonexistent"))
+            .is_none()
+    );
+}
+
+#[test]
+fn test_node_table_get_all_properties_out_of_bounds() {
+    let store = build_test_store();
+    let nt = store.node_table("Person").unwrap();
+    // Person table has 5 rows. Offset 999 is out of bounds.
+    let all = nt.get_all_properties(999);
+    assert!(all.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// CSR: edge_data_at, boundary conditions
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_csr_edge_data_at_no_data() {
+    use super::csr::CsrAdjacency;
+
+    let csr = CsrAdjacency::from_sorted_edges(3, &[(0, 1), (1, 2)]);
+    // No edge_data set: should return None.
+    assert!(!csr.has_edge_data());
+    assert!(csr.edge_data_at(0).is_none());
+}
+
+#[test]
+fn test_csr_edge_data_at_valid() {
+    use super::csr::CsrAdjacency;
+
+    let mut csr = CsrAdjacency::from_sorted_edges(3, &[(0, 1), (1, 2)]);
+    csr.set_edge_data(vec![10, 20]);
+    assert!(csr.has_edge_data());
+    assert_eq!(csr.edge_data_at(0), Some(10));
+    assert_eq!(csr.edge_data_at(1), Some(20));
+    assert_eq!(csr.edge_data_at(2), None); // out of bounds
+}
+
+#[test]
+fn test_csr_neighbors_out_of_bounds() {
+    use super::csr::CsrAdjacency;
+
+    let csr = CsrAdjacency::from_sorted_edges(2, &[(0, 1)]);
+    assert_eq!(csr.neighbors(0), &[1]);
+    assert!(csr.neighbors(1).is_empty());
+    // Node 99 is out of bounds: should return empty.
+    assert!(csr.neighbors(99).is_empty());
+}
+
+#[test]
+fn test_csr_source_for_position_zero_degree_nodes() {
+    use super::csr::CsrAdjacency;
+
+    // Node 0: no edges, Node 1: edge to 2, Node 2: no edges.
+    let csr = CsrAdjacency::from_sorted_edges(3, &[(1, 2)]);
+    assert_eq!(csr.degree(0), 0);
+    assert_eq!(csr.degree(1), 1);
+    assert_eq!(csr.degree(2), 0);
+
+    // Position 0 should map to source node 1 (skipping zero-degree node 0).
+    assert_eq!(csr.source_for_position(0), Some(1));
+    assert_eq!(csr.source_for_position(1), None);
+}
+
+#[test]
+fn test_csr_source_for_position_boundary() {
+    use super::csr::CsrAdjacency;
+
+    // Node 0: edges to [1, 2], Node 1: edge to [2].
+    let csr = CsrAdjacency::from_sorted_edges(2, &[(0, 1), (0, 2), (1, 2)]);
+    assert_eq!(csr.source_for_position(0), Some(0)); // first edge of node 0
+    assert_eq!(csr.source_for_position(1), Some(0)); // second edge of node 0
+    assert_eq!(csr.source_for_position(2), Some(1)); // boundary: first edge of node 1
+    assert_eq!(csr.source_for_position(3), None); // out of bounds
+}
+
+// ---------------------------------------------------------------------------
+// from_graph_store: additional coverage
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_from_graph_store_edges_with_sparse_properties() {
+    use crate::graph::compact::builder::from_graph_store;
+    use crate::graph::lpg::LpgStore;
+
+    let store = LpgStore::new().unwrap();
+
+    let a = store.create_node(&["Node"]);
+    let b = store.create_node(&["Node"]);
+    let c = store.create_node(&["Node"]);
+
+    // Edge 1 has "weight", edge 2 has "label", edge 3 has both.
+    // This exercises the null-padding logic for sparse edge properties.
+    let e1 = store.create_edge(a, b, "LINK");
+    store.set_edge_property(e1, "weight", Value::Int64(5));
+
+    let e2 = store.create_edge(b, c, "LINK");
+    store.set_edge_property(e2, "label", Value::from("fast"));
+
+    let e3 = store.create_edge(a, c, "LINK");
+    store.set_edge_property(e3, "weight", Value::Int64(10));
+    store.set_edge_property(e3, "label", Value::from("slow"));
+
+    let compact = from_graph_store(&store).unwrap();
+
+    let ids = compact.nodes_by_label("Node");
+    assert_eq!(ids.len(), 3);
+
+    let mut total_edges = 0;
+    for &id in &ids {
+        total_edges += compact.edges_from(id, Direction::Outgoing).len();
+    }
+    assert_eq!(total_edges, 3);
+}
+
+#[test]
+fn test_from_graph_store_multiple_edge_types() {
+    use crate::graph::compact::builder::from_graph_store;
+    use crate::graph::lpg::LpgStore;
+
+    let store = LpgStore::new().unwrap();
+
+    let a = store.create_node(&["Person"]);
+    store.set_node_property(a, "name", Value::from("Alix"));
+    let b = store.create_node(&["Person"]);
+    store.set_node_property(b, "name", Value::from("Gus"));
+    let c = store.create_node(&["City"]);
+    store.set_node_property(c, "name", Value::from("Amsterdam"));
+
+    store.create_edge(a, b, "KNOWS");
+    store.create_edge(a, c, "LIVES_IN");
+    store.create_edge(b, c, "LIVES_IN");
+
+    let compact = from_graph_store(&store).unwrap();
+
+    let mut edge_types = compact.all_edge_types();
+    edge_types.sort();
+    assert_eq!(edge_types.len(), 2);
+    assert!(edge_types.contains(&"KNOWS".to_string()));
+    assert!(edge_types.contains(&"LIVES_IN".to_string()));
+
+    // Person a should have 2 outgoing edges (1 KNOWS + 1 LIVES_IN).
+    let person_ids = compact.nodes_by_label("Person");
+    let mut max_out = 0;
+    for &pid in &person_ids {
+        max_out = max_out.max(compact.edges_from(pid, Direction::Outgoing).len());
+    }
+    assert_eq!(max_out, 2);
+}
+
+#[test]
+fn test_from_graph_store_nodes_without_edges() {
+    use crate::graph::compact::builder::from_graph_store;
+    use crate::graph::lpg::LpgStore;
+
+    let store = LpgStore::new().unwrap();
+
+    let a = store.create_node(&["Orphan"]);
+    store.set_node_property(a, "name", Value::from("solo"));
+
+    let compact = from_graph_store(&store).unwrap();
+
+    let ids = compact.nodes_by_label("Orphan");
+    assert_eq!(ids.len(), 1);
+    assert_eq!(compact.edge_count(), 0);
+    assert!(compact.edges_from(ids[0], Direction::Outgoing).is_empty());
+}

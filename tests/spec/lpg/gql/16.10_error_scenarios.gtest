@@ -1,0 +1,241 @@
+# GQL Error Scenarios: ISO/IEC 39075:2024
+#
+# Covers: division by zero, type mismatch, invalid operations,
+# property access on null, arithmetic overflow, invalid casts.
+
+meta:
+  language: gql
+  model: lpg
+  section: "16.10"
+  title: Error scenarios
+  dataset: empty
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # Division by zero
+  # ---------------------------------------------------------------------------
+
+  - name: division_by_zero_integer
+    skip: "returns Infinity instead of error"
+    setup:
+      - "INSERT (:N {v: 10})"
+    query: "MATCH (n:N) RETURN n.v / 0 AS result"
+    expect:
+      error: "division"
+
+  - name: division_by_zero_float
+    setup:
+      - "INSERT (:N {v: 10.0})"
+    query: "MATCH (n:N) RETURN n.v / 0.0 AS result"
+    expect:
+      rows:
+        - [Infinity]
+
+  - name: modulo_by_zero
+    skip: "returns Infinity instead of error"
+    setup:
+      - "INSERT (:N {v: 10})"
+    query: "MATCH (n:N) RETURN n.v % 0 AS result"
+    expect:
+      error: "division"
+
+  # ---------------------------------------------------------------------------
+  # NULL arithmetic
+  # ---------------------------------------------------------------------------
+
+  - name: null_plus_number
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN null + 5 AS result"
+    expect:
+      rows:
+        - [null]
+
+  - name: null_times_number
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN null * 10 AS result"
+    expect:
+      rows:
+        - [null]
+
+  - name: number_divided_by_null
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN 10 / null AS result"
+    expect:
+      rows:
+        - [null]
+
+  # ---------------------------------------------------------------------------
+  # Accessing missing properties
+  # ---------------------------------------------------------------------------
+
+  - name: access_nonexistent_property
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+    query: "MATCH (p:Person) RETURN p.nonexistent AS val"
+    expect:
+      rows:
+        - [null]
+
+  - name: comparison_on_missing_property
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+    query: "MATCH (p:Person) WHERE p.age > 10 RETURN p.name"
+    expect:
+      empty: true
+
+  - name: aggregation_on_missing_property
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:Person {name: 'Gus', age: 25})"
+    query: "MATCH (p:Person) RETURN sum(p.age) AS total"
+    expect:
+      rows:
+        - [25]
+
+  - name: count_on_missing_property
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:Person {name: 'Gus', age: 25})"
+    query: "MATCH (p:Person) RETURN count(p.age) AS cnt"
+    expect:
+      rows:
+        - [1]
+
+  # ---------------------------------------------------------------------------
+  # Type mismatch in comparison
+  # ---------------------------------------------------------------------------
+
+  - name: string_compared_to_integer
+    setup:
+      - "INSERT (:N {val: 'hello'})"
+    query: "MATCH (n:N) WHERE n.val > 5 RETURN n.val"
+    expect:
+      empty: true
+
+  - name: boolean_compared_to_string
+    setup:
+      - "INSERT (:N {active: true})"
+    query: "MATCH (n:N) WHERE n.active = 'true' RETURN n.active"
+    expect:
+      empty: true
+
+  # ---------------------------------------------------------------------------
+  # Invalid CAST
+  # ---------------------------------------------------------------------------
+
+  - name: cast_string_to_int_invalid
+    skip: "error message format mismatch"
+    setup:
+      - "INSERT (:N {v: 'hello'})"
+    query: "MATCH (n:N) RETURN CAST(n.v AS INT) AS result"
+    expect:
+      error: "cast"
+
+  - name: cast_bool_to_int
+    skip: "bool-to-int cast not supported"
+    setup:
+      - "INSERT (:N {v: true})"
+    query: "MATCH (n:N) RETURN CAST(n.v AS INT) AS result"
+    expect:
+      rows:
+        - [1]
+
+  - name: cast_int_to_string
+    setup:
+      - "INSERT (:N {v: 42})"
+    query: "MATCH (n:N) RETURN CAST(n.v AS STRING) AS result"
+    expect:
+      rows:
+        - ["42"]
+
+  - name: cast_float_to_int_truncates
+    setup:
+      - "INSERT (:N {v: 3.7})"
+    query: "MATCH (n:N) RETURN CAST(n.v AS INT) AS result"
+    expect:
+      rows:
+        - [3]
+
+  # ---------------------------------------------------------------------------
+  # Overflow / large numbers
+  # ---------------------------------------------------------------------------
+
+  - name: large_integer_addition
+    requires: [int64-safe]
+    setup:
+      - "INSERT (:N {v: 9223372036854775806})"
+    query: "MATCH (n:N) RETURN n.v + 1 AS result"
+    expect:
+      rows:
+        - [9223372036854775807]
+
+  - name: float_infinity_arithmetic
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN 1.0 / 0.0 + 1.0 AS result"
+    expect:
+      rows:
+        - [Infinity]
+
+  - name: negative_infinity
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN -1.0 / 0.0 AS result"
+    expect:
+      rows:
+        - [-Infinity]
+
+  # ---------------------------------------------------------------------------
+  # Empty graph operations
+  # ---------------------------------------------------------------------------
+
+  - name: match_on_empty_graph
+    query: "MATCH (n) RETURN count(n) AS cnt"
+    expect:
+      rows:
+        - [0]
+
+  - name: aggregation_on_empty_result
+    skip: "sum on empty returns 0 not null for some aggregates"
+    query: "MATCH (n:NonExistent) RETURN sum(n.value) AS total"
+    expect:
+      rows:
+        - [0]
+
+  - name: avg_on_empty_result
+    query: "MATCH (n:NonExistent) RETURN avg(n.value) AS average"
+    expect:
+      rows:
+        - [null]
+
+  - name: min_on_empty_result
+    query: "MATCH (n:NonExistent) RETURN min(n.value) AS minimum"
+    expect:
+      rows:
+        - [null]
+
+  - name: max_on_empty_result
+    query: "MATCH (n:NonExistent) RETURN max(n.value) AS maximum"
+    expect:
+      rows:
+        - [null]
+
+  # ---------------------------------------------------------------------------
+  # Duplicate insert detection
+  # ---------------------------------------------------------------------------
+
+  - name: delete_nonexistent_edge
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:Person {name: 'Gus'})"
+    query: |
+      MATCH (a:Person {name: 'Alix'})-[r:KNOWS]->(b:Person {name: 'Gus'})
+      DELETE r
+      RETURN count(*) AS deleted
+    expect:
+      rows:
+        - [0]

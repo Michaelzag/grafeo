@@ -1679,8 +1679,25 @@ impl GremlinTranslator {
                 Ok((plan, Some(new_var)))
             }
 
+            // valueMap() with no keys: return all properties as a map.
+            ast::Step::ValueMap(keys) if keys.is_empty() => {
+                let alias = self.var_gen.next();
+                let plan = LogicalOperator::Project(ProjectOp {
+                    projections: vec![Projection {
+                        expression: LogicalExpression::FunctionCall {
+                            name: "properties".to_string(),
+                            args: vec![LogicalExpression::Variable(current_var.to_string())],
+                            distinct: false,
+                        },
+                        alias: Some(alias.clone()),
+                    }],
+                    input: Box::new(input),
+                    pass_through_input: false,
+                });
+                Ok((plan, Some(alias)))
+            }
+
             // valueMap('key1', 'key2', ...) returns a map of specified properties.
-            // When keys is empty, pass through (all properties returned by default).
             ast::Step::ValueMap(keys) if !keys.is_empty() => {
                 let projections: Vec<Projection> = keys
                     .iter()
@@ -1701,9 +1718,47 @@ impl GremlinTranslator {
                 Ok((plan, first_key))
             }
 
+            // elementMap() with no keys: return id, label, plus all properties
+            // as a single map value.
+            ast::Step::ElementMap(keys) if keys.is_empty() => {
+                let alias = self.var_gen.next();
+                let plan = LogicalOperator::Project(ProjectOp {
+                    projections: vec![Projection {
+                        expression: LogicalExpression::Map(vec![
+                            (
+                                "id".to_string(),
+                                LogicalExpression::Id(current_var.to_string()),
+                            ),
+                            (
+                                "label".to_string(),
+                                LogicalExpression::IndexAccess {
+                                    base: Box::new(LogicalExpression::Labels(
+                                        current_var.to_string(),
+                                    )),
+                                    index: Box::new(LogicalExpression::Literal(Value::Int64(0))),
+                                },
+                            ),
+                            (
+                                "*".to_string(),
+                                LogicalExpression::FunctionCall {
+                                    name: "properties".to_string(),
+                                    args: vec![LogicalExpression::Variable(
+                                        current_var.to_string(),
+                                    )],
+                                    distinct: false,
+                                },
+                            ),
+                        ]),
+                        alias: Some(alias.clone()),
+                    }],
+                    input: Box::new(input),
+                    pass_through_input: false,
+                });
+                Ok((plan, Some(alias)))
+            }
+
             // elementMap('key1', 'key2', ...) returns id, label, plus specified
-            // properties. When keys is empty, pass through (all properties
-            // returned by default).
+            // properties.
             ast::Step::ElementMap(keys) if !keys.is_empty() => {
                 let mut projections = vec![
                     Projection {

@@ -2,6 +2,55 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
+## [0.5.32] - U2026-04-03
+
+Correctness hardening, Jepsen readiness, and Hybrid Logical Clock for causal consistency.
+
+### Added
+
+- **`GrafeoDB::compact()`**: converts a live database to a read-only `CompactStore` in one call. Snapshots all nodes and edges, builds columnar storage with CSR adjacency, and switches to read-only mode. Exposed as `db.compact()` in Python, Node.js, and WASM; `grafeo_compact(db)` in C (flows through to Dart, C#, Go). Included in the `embedded` and `browser` feature profiles by default ([#199](https://github.com/GrafeoDB/grafeo/issues/199))
+- **Gremlin `valueMap()` and `elementMap()` with no arguments**: `g.V().valueMap()` returns all properties as a map; `g.V().elementMap()` returns id, label, and all properties as a map
+- **WAL-disabled crash injection tests**: crash recovery tests for single-file format with WAL disabled
+- **High-contention stress tests**: concurrent MERGE, mixed read/write, and concurrent schema mutation scenarios
+- **CDC for session mutations**: `CdcGraphStore` decorator intercepts all `GraphStoreMut` methods, buffers CDC events during transactions, and flushes on commit (discards on rollback). Session-driven mutations (`INSERT`, `SET`, `DELETE` via GQL/Cypher) now generate CDC events for replication
+- **Hybrid Logical Clock (HLC)**: `HlcTimestamp` type in grafeo-common packs physical ms (48-bit) + logical counter (16-bit) into a u64. `HlcClock` with lock-free CAS loop guarantees monotonic timestamps even under clock skew. Replaces wall-clock `SystemTime::now()` in CDC events
+- **Epoch monotonicity tests**: 5 concurrent stress tests proving `changes_between()` has no gaps, no duplicates, and strictly monotonic epoch ordering. Found and fixed CDC epoch assignment bug (events now always use `PENDING` epoch in buffer, assigned real commit epoch at flush time)
+- **Session CRUD methods**: `set_node_property()`, `set_edge_property()`, `delete_node()`, `delete_edge()`, `create_edge_with_props()` on Session for transaction-aware direct mutations
+- **gtest regression suite for 0.5.32**: GROUP BY on labels, GROUP BY on dates, ORDER BY column stripping, SPARQL ORDER BY STR(), Gremlin valueMap/elementMap
+- **4 real-world gtest datasets**: e-commerce (customers, orders, products, reviews), movie database (actors, directors, genres), IT infrastructure (services, servers, dependency chains), transportation network (cities, weighted routes, airports)
+- **GQL gap tests**: string predicates (CONTAINS, STARTS WITH, ENDS WITH), list functions (head, last, tail, range, slicing), CASE expressions (simple, searched, nested, in WHERE/ORDER BY), extended math (log, exp, power, trig, pi, e), advanced subqueries (EXISTS multi-hop, COUNT with filter, correlated), error scenarios (division by zero, NULL arithmetic, invalid CAST, overflow)
+- **GQL real-world query suites**: e-commerce analytics (customer spend, product recommendations, order funnels), infrastructure topology (dependency chains, impact analysis, latency paths), movie analytics (collaboration networks, genre breakdown, box office ROI), transportation routing (multi-hop paths, connectivity, population)
+- **Cypher gap tests**: schema constraints (UNIQUE, NOT NULL, NODE KEY, DROP/SHOW), advanced comprehensions (pattern comprehension with size, list comprehension, EXISTS/COUNT subqueries, CALL subqueries, FOREACH)
+- **Gremlin gap tests**: repeat/until/emit/times loops, side-effect steps (sack, aggregate, store, cap), local/barrier steps (all skipped, pending implementation)
+- **SQL/PGQ gap tests**: window functions (ROW_NUMBER, RANK, SUM OVER), CTEs, scalar subqueries, COALESCE/NULLIF (all skipped, pending implementation)
+- **SPARQL gap tests**: advanced subqueries (nested SELECT, aggregate feeding outer filter), CONSTRUCT/DESCRIBE output forms, ASK with property paths, nested OPTIONAL, VALUES with UNDEF
+- **Rosetta cross-language tests**: pattern matching and aggregation equivalence across GQL, Cypher, Gremlin, and SQL/PGQ using movie and e-commerce datasets
+- **Common cross-cutting tests**: error handling (syntax errors, type mismatches, delete constraints), numeric edge cases (int64 boundaries, Infinity, NaN, rounding), string operations (case conversion, substring, trim, replace, split, reverse, NULL propagation)
+- **Production coverage gtests**: data type round-trips (every Value variant: int64, float64, string, bool, date, time, duration, datetime, list; property mutation roundtrips), mutation patterns (cascading DETACH DELETE, reinsert after delete, property type change, edge property update, batch UNWIND insert), input validation (special characters, long strings, identifier edge cases, type confusion, NULL three-valued logic, 5-hop patterns, large IN lists)
+- **Cross-language data fidelity (Rosetta)**: GQL insert verified readable in Cypher, Gremlin, and SQL/PGQ; int/bool/string/null type preservation; multi-label visibility; edge type and property fidelity across languages
+- **Parameter substitution tests**: $param in WHERE clause across GQL, Cypher, SQL/PGQ; string, int, float, bool parameter types; multiple parameters in single query
+- **Catalog diagnostics tests**: db.labels(), db.relationshipTypes(), db.propertyKeys() with WHERE filters, aliases, after insert, on empty database
+- **Index correctness tests**: Cypher CREATE INDEX then query, index survives property update, index survives deletion, insert-delete-reinsert cycle, numeric index range queries, bulk insert then index, DROP INDEX
+- **Temporal real-world queries**: date filtering (ranges, exact match), date ordering (ASC), date aggregation (year extraction, count per year), temporal CASE expressions, customer join date queries, date comparisons across relationships
+- **Production algorithm tests**: Dijkstra (unweighted, weighted, single-pair), PageRank, connected components, degree/betweenness/closeness centrality, BFS, strongly connected components on transportation and movie datasets
+
+### Fixed
+
+- **Sibling CALL block scope collision**: same-named variables in sibling `CALL` blocks no longer clobber each other; the first block's aliased output was incorrectly resolved as a node ID instead of a scalar value, returning `NULL` ([#213](https://github.com/GrafeoDB/grafeo/issues/213))
+- **Push-based aggregator hash collisions**: `hash_value()` now uses discriminant tags for all `Value` variants, preventing cross-type collisions in GROUP BY (e.g., `Value::Map` and `Value::Null` no longer hash identically)
+- **Pull-based `GroupKeyPart` catch-all**: added `Date`, `Time`, `Timestamp`, `Duration`, `ZonedDatetime`, `Bytes`, and `Map` variants so GROUP BY on temporal and map values produces correct distinct groups instead of falling through to Debug-string comparison
+- **Cypher ORDER BY zeros with relationship traversal**: `ORDER BY` on a property that duplicates a RETURN item (e.g., `RETURN caller.name AS caller ORDER BY caller.name`) no longer returns zeros; the planner now resolves to the existing projected column and uses correct types for sort pass-through columns ([#218](https://github.com/GrafeoDB/grafeo/issues/218))
+
+### Changed
+
+- **CDC is now opt-in per session**: CDC is no longer unconditionally active when the `cdc` feature flag is compiled in. A new `Config::with_cdc()` builder method and `GrafeoDB::set_cdc_enabled()` runtime toggle control the database-wide default (off by default). `GrafeoDB::session_with_cdc(bool)` overrides the default for individual sessions. This eliminates the HLC syscall and event-buffering overhead from the mutation hot path when CDC is not needed, fixing a +251% regression on single-node inserts under `--all-features` benchmarks. Python: `GrafeoDB(cdc=True)`, `db.enable_cdc()`, `db.disable_cdc()`. Node.js: `db.enableCdc()`, `db.disableCdc()`. C: `grafeo_set_cdc_enabled(db, true)`
+- **CompactStore property scans use native codec operations**: `ColumnCodec::find_eq()` and `find_in_range()` push equality and range checks into the codec's native domain (dictionary code comparison, raw u64 comparison) instead of decoding to `Value` per row. Thanks to [@temporaryfix](https://github.com/temporaryfix) for the pr/implementation ([#216](https://github.com/GrafeoDB/grafeo/pull/216))
+
+### Internal
+
+- **SPARQL ORDER BY STR() tests tightened**: removed error-accepting fallback from tests; `NullGraphStore` is correct for SPARQL expression evaluation since RDF values are already bound in columns
+- **Vector search `$ne`/`$nin` NULL semantics documented**: nodes missing the filtered property are excluded (SQL three-valued NULL semantics); added documentation note and regression test
+
 ## [0.5.31] - 2026-04-01
 
 CompactStore: a read-optimized columnar graph store for memory-constrained environments. Thanks to [@temporaryfix](https://github.com/temporaryfix) for the design, prototype and implementation ([#199](https://github.com/GrafeoDB/grafeo/issues/199), [#204](https://github.com/GrafeoDB/grafeo/pull/204)). Also, all remaining syntax gaps covered by the gtest suite are now fully implemented!

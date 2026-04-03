@@ -25,17 +25,16 @@ mod tests;
 /// Zone maps for skip-pruning predicate evaluation.
 pub mod zone_map;
 
-pub use builder::CompactStoreBuilder;
+pub use builder::{CompactStoreBuilder, from_graph_store};
 
 use std::sync::Arc;
 
 use arcstr::ArcStr;
-use grafeo_common::types::{EdgeId, NodeId, Value};
+use grafeo_common::types::{EdgeId, NodeId};
 use grafeo_common::utils::hash::FxHashMap;
 
 use self::node_table::NodeTable;
 use self::rel_table::RelTable;
-use self::zone_map::compare_values;
 use crate::graph::Direction;
 use crate::statistics::Statistics;
 
@@ -211,32 +210,5 @@ impl CompactStore {
             .map(|rt| rt.memory_bytes())
             .sum();
         node_bytes + rel_bytes
-    }
-
-    /// Checks if a value falls within a range.
-    fn value_in_range(
-        val: &Value,
-        min: Option<&Value>,
-        max: Option<&Value>,
-        min_inclusive: bool,
-        max_inclusive: bool,
-    ) -> bool {
-        if let Some(min_val) = min {
-            match compare_values(val, min_val) {
-                Some(std::cmp::Ordering::Less) => return false,
-                Some(std::cmp::Ordering::Equal) if !min_inclusive => return false,
-                None => return false,
-                _ => {}
-            }
-        }
-        if let Some(max_val) = max {
-            match compare_values(val, max_val) {
-                Some(std::cmp::Ordering::Greater) => return false,
-                Some(std::cmp::Ordering::Equal) if !max_inclusive => return false,
-                None => return false,
-                _ => {}
-            }
-        }
-        true
     }
 }

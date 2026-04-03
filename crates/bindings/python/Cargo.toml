@@ -40,11 +40,12 @@ embed = ["grafeo-engine/embed"]
 algos = ["grafeo-engine/algos"]
 rdf = ["grafeo-engine/rdf"]
 temporal = ["grafeo-engine/temporal"]
+compact-store = ["grafeo-engine/compact-store"]
 languages = ["gql", "cypher", "sparql", "gremlin", "graphql", "sql-pgq"]
 ai = ["vector-index", "text-index", "hybrid-search", "cdc"]
 storage = ["grafeo-engine/storage"]
 # Named profiles
-embedded = ["gql", "ai", "algos", "grafeo-engine/parallel", "grafeo-engine/regex", "grafeo-engine/grafeo-file"]
+embedded = ["gql", "ai", "algos", "compact-store", "grafeo-engine/parallel", "grafeo-engine/regex", "grafeo-engine/grafeo-file"]
 full = ["languages", "ai", "algos", "rdf"]
 
 [lints]

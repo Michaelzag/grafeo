@@ -16,6 +16,8 @@ mod admin;
 mod async_ops;
 #[cfg(feature = "async-storage")]
 pub(crate) mod async_wal_store;
+#[cfg(feature = "cdc")]
+pub(crate) mod cdc_store;
 mod crud;
 #[cfg(feature = "embed")]
 mod embed;
@@ -108,6 +110,9 @@ pub struct GrafeoDB {
     /// Change data capture log for tracking mutations.
     #[cfg(feature = "cdc")]
     pub(super) cdc_log: Arc<crate::cdc::CdcLog>,
+    /// Whether CDC is active for new sessions and direct CRUD (runtime-mutable).
+    #[cfg(feature = "cdc")]
+    cdc_enabled: std::sync::atomic::AtomicBool,
     /// Registered embedding models for text-to-vector conversion.
     #[cfg(feature = "embed")]
     pub(super) embedding_models:
@@ -150,6 +155,13 @@ impl GrafeoDB {
             "no built-in LpgStore: this GrafeoDB was created with an external store \
              (with_store / with_read_store). Use session() or graph_store() instead.",
         )
+    }
+
+    /// Returns whether CDC is active (runtime check).
+    #[cfg(feature = "cdc")]
+    #[inline]
+    pub(super) fn cdc_active(&self) -> bool {
+        self.cdc_enabled.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Creates an in-memory database, fast to create, gone when dropped.
@@ -441,6 +453,9 @@ impl GrafeoDB {
         #[cfg(feature = "temporal")]
         transaction_manager.sync_epoch(store.current_epoch());
 
+        #[cfg(feature = "cdc")]
+        let cdc_enabled_val = config.cdc_enabled;
+
         Ok(Self {
             config,
             store: Some(store),
@@ -458,6 +473,8 @@ impl GrafeoDB {
             is_open: RwLock::new(true),
             #[cfg(feature = "cdc")]
             cdc_log: Arc::new(crate::cdc::CdcLog::new()),
+            #[cfg(feature = "cdc")]
+            cdc_enabled: std::sync::atomic::AtomicBool::new(cdc_enabled_val),
             #[cfg(feature = "embed")]
             embedding_models: RwLock::new(hashbrown::HashMap::new()),
             #[cfg(feature = "grafeo-file")]
@@ -514,6 +531,9 @@ impl GrafeoDB {
 
         let query_cache = Arc::new(QueryCache::default());
 
+        #[cfg(feature = "cdc")]
+        let cdc_enabled_val = config.cdc_enabled;
+
         Ok(Self {
             config,
             store: None,
@@ -531,6 +551,8 @@ impl GrafeoDB {
             is_open: RwLock::new(true),
             #[cfg(feature = "cdc")]
             cdc_log: Arc::new(crate::cdc::CdcLog::new()),
+            #[cfg(feature = "cdc")]
+            cdc_enabled: std::sync::atomic::AtomicBool::new(cdc_enabled_val),
             #[cfg(feature = "embed")]
             embedding_models: RwLock::new(hashbrown::HashMap::new()),
             #[cfg(feature = "grafeo-file")]
@@ -583,6 +605,9 @@ impl GrafeoDB {
 
         let query_cache = Arc::new(QueryCache::default());
 
+        #[cfg(feature = "cdc")]
+        let cdc_enabled_val = config.cdc_enabled;
+
         Ok(Self {
             config,
             store: None,
@@ -600,6 +625,8 @@ impl GrafeoDB {
             is_open: RwLock::new(true),
             #[cfg(feature = "cdc")]
             cdc_log: Arc::new(crate::cdc::CdcLog::new()),
+            #[cfg(feature = "cdc")]
+            cdc_enabled: std::sync::atomic::AtomicBool::new(cdc_enabled_val),
             #[cfg(feature = "embed")]
             embedding_models: RwLock::new(hashbrown::HashMap::new()),
             #[cfg(feature = "grafeo-file")]
@@ -612,6 +639,40 @@ impl GrafeoDB {
             current_schema: RwLock::new(None),
             read_only: true,
         })
+    }
+
+    /// Converts the database to a read-only [`CompactStore`] for faster queries.
+    ///
+    /// Takes a snapshot of all nodes and edges from the current store, builds
+    /// a columnar `CompactStore` with CSR adjacency, and switches the database
+    /// to read-only mode. The original store is dropped to free memory.
+    ///
+    /// After calling this, all write queries will fail with
+    /// `TransactionError::ReadOnly`. Read queries (across all supported
+    /// languages) continue to work and benefit from ~60x memory reduction
+    /// and 100x+ traversal speedup.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the conversion fails (e.g. more than 32,767
+    /// distinct labels or edge types).
+    ///
+    /// [`CompactStore`]: grafeo_core::graph::compact::CompactStore
+    #[cfg(feature = "compact-store")]
+    pub fn compact(&mut self) -> Result<()> {
+        use grafeo_core::graph::compact::from_graph_store;
+
+        let current_store = self.graph_store();
+        let compact = from_graph_store(current_store.as_ref())
+            .map_err(|e| grafeo_common::utils::error::Error::Internal(e.to_string()))?;
+
+        self.external_read_store = Some(Arc::new(compact) as Arc<dyn GraphStore>);
+        self.external_write_store = None;
+        self.store = None;
+        self.read_only = true;
+        self.query_cache = Arc::new(QueryCache::default());
+
+        Ok(())
     }
 
     /// Applies WAL records to restore the database state.
@@ -998,6 +1059,60 @@ impl GrafeoDB {
     /// ```
     #[must_use]
     pub fn session(&self) -> Session {
+        self.create_session_inner(None)
+    }
+
+    /// Creates a session with an explicit CDC override.
+    ///
+    /// When `cdc_enabled` is `true`, mutations in this session are tracked
+    /// regardless of the database default. When `false`, mutations are not
+    /// tracked regardless of the database default.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use grafeo_engine::GrafeoDB;
+    ///
+    /// let db = GrafeoDB::new_in_memory();
+    ///
+    /// // Opt in to CDC for just this session
+    /// let tracked = db.session_with_cdc(true);
+    /// tracked.execute("INSERT (:Person {name: 'Alix'})")?;
+    /// # Ok::<(), grafeo_common::utils::error::Error>(())
+    /// ```
+    #[cfg(feature = "cdc")]
+    #[must_use]
+    pub fn session_with_cdc(&self, cdc_enabled: bool) -> Session {
+        self.create_session_inner(Some(cdc_enabled))
+    }
+
+    /// Creates a read-only session regardless of the database's access mode.
+    ///
+    /// Mutations executed through this session will fail with
+    /// `TransactionError::ReadOnly`. Useful for replication replicas where
+    /// the database itself must remain writable (for applying CDC changes)
+    /// but client-facing queries must be read-only.
+    #[must_use]
+    pub fn session_read_only(&self) -> Session {
+        self.create_session_inner_opts(None, true)
+    }
+
+    /// Shared session creation logic.
+    ///
+    /// `cdc_override` overrides the database-wide `cdc_enabled` default when
+    /// `Some`. `None` falls back to the database default.
+    #[allow(unused_variables)] // cdc_override unused when cdc feature is off
+    fn create_session_inner(&self, cdc_override: Option<bool>) -> Session {
+        self.create_session_inner_opts(cdc_override, false)
+    }
+
+    /// Shared session creation with all overrides.
+    #[allow(unused_variables)]
+    fn create_session_inner_opts(
+        &self,
+        cdc_override: Option<bool>,
+        force_read_only: bool,
+    ) -> Session {
         let session_cfg = || crate::session::SessionConfig {
             transaction_manager: Arc::clone(&self.transaction_manager),
             query_cache: Arc::clone(&self.query_cache),
@@ -1008,7 +1123,7 @@ impl GrafeoDB {
             query_timeout: self.config.query_timeout,
             commit_counter: Arc::clone(&self.commit_counter),
             gc_interval: self.config.gc_interval,
-            read_only: self.read_only,
+            read_only: self.read_only || force_read_only,
         };
 
         if let Some(ref ext_read) = self.external_read_store {
@@ -1035,7 +1150,12 @@ impl GrafeoDB {
         }
 
         #[cfg(feature = "cdc")]
-        session.set_cdc_log(Arc::clone(&self.cdc_log));
+        {
+            let should_enable = cdc_override.unwrap_or_else(|| self.cdc_active());
+            if should_enable {
+                session.set_cdc_log(Arc::clone(&self.cdc_log));
+            }
+        }
 
         #[cfg(feature = "metrics")]
         {
@@ -1985,9 +2105,14 @@ mod tests {
     mod cdc_integration {
         use super::*;
 
+        /// Helper: creates an in-memory database with CDC enabled.
+        fn cdc_db() -> GrafeoDB {
+            GrafeoDB::with_config(Config::in_memory().with_cdc()).unwrap()
+        }
+
         #[test]
         fn test_node_lifecycle_history() {
-            let db = GrafeoDB::new_in_memory();
+            let db = cdc_db();
 
             // Create
             let id = db.create_node(&["Person"]);
@@ -2009,7 +2134,7 @@ mod tests {
 
         #[test]
         fn test_edge_lifecycle_history() {
-            let db = GrafeoDB::new_in_memory();
+            let db = cdc_db();
 
             let alix = db.create_node(&["Person"]);
             let gus = db.create_node(&["Person"]);
@@ -2026,7 +2151,7 @@ mod tests {
 
         #[test]
         fn test_create_node_with_props_cdc() {
-            let db = GrafeoDB::new_in_memory();
+            let db = cdc_db();
 
             let id = db.create_node_with_props(
                 &["Person"],
@@ -2046,7 +2171,7 @@ mod tests {
 
         #[test]
         fn test_changes_between() {
-            let db = GrafeoDB::new_in_memory();
+            let db = cdc_db();
 
             let id1 = db.create_node(&["A"]);
             let _id2 = db.create_node(&["B"]);
@@ -2060,6 +2185,78 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(changes.len(), 3); // 2 creates + 1 update
+        }
+
+        #[test]
+        fn test_cdc_disabled_by_default() {
+            let db = GrafeoDB::new_in_memory();
+            assert!(!db.is_cdc_enabled());
+
+            let id = db.create_node(&["Person"]);
+            db.set_node_property(id, "name", "Alix".into());
+
+            let history = db.history(id).unwrap();
+            assert!(history.is_empty(), "CDC off by default: no events recorded");
+        }
+
+        #[test]
+        fn test_session_with_cdc_override_on() {
+            // Database default is off, but session opts in
+            let db = GrafeoDB::new_in_memory();
+            let session = db.session_with_cdc(true);
+            session.execute("INSERT (:Person {name: 'Alix'})").unwrap();
+            // The CDC log should have events from the opted-in session
+            let changes = db
+                .changes_between(
+                    grafeo_common::types::EpochId(0),
+                    grafeo_common::types::EpochId(u64::MAX),
+                )
+                .unwrap();
+            assert!(
+                !changes.is_empty(),
+                "session_with_cdc(true) should record events"
+            );
+        }
+
+        #[test]
+        fn test_session_with_cdc_override_off() {
+            // Database default is on, but session opts out
+            let db = cdc_db();
+            let session = db.session_with_cdc(false);
+            session.execute("INSERT (:Person {name: 'Alix'})").unwrap();
+            let changes = db
+                .changes_between(
+                    grafeo_common::types::EpochId(0),
+                    grafeo_common::types::EpochId(u64::MAX),
+                )
+                .unwrap();
+            assert!(
+                changes.is_empty(),
+                "session_with_cdc(false) should not record events"
+            );
+        }
+
+        #[test]
+        fn test_set_cdc_enabled_runtime() {
+            let db = GrafeoDB::new_in_memory();
+            assert!(!db.is_cdc_enabled());
+
+            // Enable at runtime
+            db.set_cdc_enabled(true);
+            assert!(db.is_cdc_enabled());
+
+            let id = db.create_node(&["Person"]);
+            let history = db.history(id).unwrap();
+            assert_eq!(history.len(), 1, "CDC enabled at runtime records events");
+
+            // Disable again
+            db.set_cdc_enabled(false);
+            let id2 = db.create_node(&["Person"]);
+            let history2 = db.history(id2).unwrap();
+            assert!(
+                history2.is_empty(),
+                "CDC disabled at runtime stops recording"
+            );
         }
     }
 

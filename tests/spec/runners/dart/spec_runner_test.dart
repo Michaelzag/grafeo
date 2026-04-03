@@ -66,11 +66,16 @@ Set<String> _getCompiledFeatures() {
   return _compiledFeatures!;
 }
 
+/// Capabilities provided by this runner itself (not compiled into the native
+/// library). For example, Dart natively supports 64-bit integers, so
+/// "int64-safe" is always available.
+const _runnerCapabilities = {'int64-safe'};
+
 /// Check whether a language or feature requirement is available.
 bool _isAvailable(String requirement) {
   final key = _normaliseLanguage(requirement).replaceAll('_', '-');
   if (key == 'gql' || key.isEmpty) return true;
-  return _getCompiledFeatures().contains(key);
+  return _getCompiledFeatures().contains(key) || _runnerCapabilities.contains(key);
 }
 
 // =============================================================================
@@ -432,6 +437,7 @@ class _TestCase {
   _Expect expect;
   Map<String, String> variants;
   List<String> tags;
+  List<String> requires;
   Map<String, String> params;
 
   _TestCase({
@@ -444,12 +450,14 @@ class _TestCase {
     _Expect? expect,
     Map<String, String>? variants,
     List<String>? tags,
+    List<String>? requires,
     Map<String, String>? params,
   })  : statements = statements ?? [],
         setup = setup ?? [],
         expect = expect ?? _Expect(),
         variants = variants ?? {},
         tags = tags ?? [],
+        requires = requires ?? [],
         params = params ?? {};
 }
 
@@ -591,6 +599,9 @@ _TestCase _parseSingleTest(_ParseContext ctx) {
       case 'tags':
         tc.tags = _parseYamlList(value);
         ctx.idx++;
+      case 'requires':
+        tc.requires = _parseYamlList(value);
+        ctx.idx++;
       case 'params':
         ctx.idx++;
         tc.params = _parseMap(ctx, 6);
@@ -710,17 +721,19 @@ List<List<String>> _parseRows(_ParseContext ctx) {
 }
 
 /// Strip surrounding quotes and process escape sequences.
+/// Strip surrounding quotes and unescape YAML-level escapes only.
+/// Do NOT process `\n` or `\t`: those are GQL string escapes handled
+/// by the engine's parser.
 String _unquote(String s) {
   s = s.trim();
   if ((s.startsWith('"') && s.endsWith('"')) ||
       (s.startsWith("'") && s.endsWith("'"))) {
     return s
         .substring(1, s.length - 1)
-        .replaceAll(r'\n', '\n')
-        .replaceAll(r'\t', '\t')
+        .replaceAll(r'\\', '\x00')
         .replaceAll(r'\"', '"')
         .replaceAll(r"\'", "'")
-        .replaceAll(r'\\', '\\');
+        .replaceAll('\x00', r'\');
   }
   return s;
 }
@@ -1051,6 +1064,10 @@ void main() {
             final lang = entry.key;
             final variantQuery = entry.value;
             test('${tc.name}_$lang', () {
+              if (tc.skip != null) {
+                markTestSkipped('skipped in .gtest: ${tc.skip}');
+                return;
+              }
               if (!_isAvailable(lang)) {
                 markTestSkipped('Language "$lang" not available');
                 return;
@@ -1084,10 +1101,16 @@ void main() {
             return;
           }
 
-          // Check language availability
+          // Check language availability (file-level and per-test)
           if (!_isAvailable(meta.language)) {
             markTestSkipped(
               'Language "${meta.language}" not available',
+            );
+            return;
+          }
+          if (tc.language != null && !_isAvailable(tc.language!)) {
+            markTestSkipped(
+              'Language "${tc.language}" not available',
             );
             return;
           }
@@ -1096,7 +1119,15 @@ void main() {
           for (final req in meta.requires) {
             if (!_isAvailable(req)) {
               markTestSkipped(
-                'Required language "$req" not available',
+                'Required capability "$req" not available',
+              );
+              return;
+            }
+          }
+          for (final req in tc.requires) {
+            if (!_isAvailable(req)) {
+              markTestSkipped(
+                'Required capability "$req" not available',
               );
               return;
             }
@@ -1109,7 +1140,8 @@ void main() {
               _loadDataset(db, meta.dataset);
             }
 
-            _runTestCase(db, tc, tc.language ?? meta.language);
+            _runTestCase(
+                db, tc, tc.language ?? meta.language, meta.language);
           } finally {
             db.close();
           }

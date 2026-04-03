@@ -1,0 +1,257 @@
+# Rosetta: cross-language data fidelity
+#
+# Verifies that data written by one query language reads correctly in others.
+# Setup always runs in GQL (file default). Variants read in other languages.
+# Tests property type preservation, edge properties, and label handling.
+
+meta:
+  model: lpg
+  section: rosetta
+  title: Cross-language data fidelity
+  dataset: empty
+  requires: [cypher, gremlin, sql-pgq]
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # GQL insert, read in Cypher
+  # ---------------------------------------------------------------------------
+
+  - name: gql_insert_cypher_read_name
+    setup:
+      - "INSERT (:Person {name: 'Alix', age: 30, city: 'Amsterdam'})"
+    variants:
+      cypher: "MATCH (p:Person {name: 'Alix'}) RETURN p.name, p.age, p.city"
+    expect:
+      rows:
+        - [Alix, 30, Amsterdam]
+
+  - name: gql_insert_cypher_read_count
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:Person {name: 'Gus'})"
+      - "INSERT (:Person {name: 'Vincent'})"
+    variants:
+      cypher: "MATCH (p:Person) RETURN count(p) AS cnt"
+    expect:
+      rows:
+        - [3]
+
+  - name: gql_insert_cypher_read_edge
+    setup:
+      - "INSERT (:Person {name: 'Alix'})-[:KNOWS {since: 2020}]->(:Person {name: 'Gus'})"
+    variants:
+      cypher: "MATCH (a:Person)-[r:KNOWS]->(b:Person) RETURN a.name, b.name, r.since"
+    expect:
+      rows:
+        - [Alix, Gus, 2020]
+
+  # ---------------------------------------------------------------------------
+  # GQL insert, read in Gremlin
+  # ---------------------------------------------------------------------------
+
+  - name: gql_insert_gremlin_read_name
+    setup:
+      - "INSERT (:Person {name: 'Alix', age: 30})"
+    variants:
+      gremlin: "g.V().has('Person', 'name', 'Alix').values('age')"
+    expect:
+      rows:
+        - [30]
+
+  - name: gql_insert_gremlin_read_count
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:Person {name: 'Gus'})"
+    variants:
+      gremlin: "g.V().hasLabel('Person').count()"
+    expect:
+      rows:
+        - [2]
+
+  - name: gql_insert_gremlin_read_edge
+    setup:
+      - "INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})"
+    variants:
+      gremlin: "g.V().has('Person', 'name', 'Alix').out('KNOWS').values('name')"
+    expect:
+      rows:
+        - [Gus]
+
+  # ---------------------------------------------------------------------------
+  # GQL insert, read in SQL/PGQ
+  # ---------------------------------------------------------------------------
+
+  - name: gql_insert_sql_pgq_read_name
+    setup:
+      - "INSERT (:Person {name: 'Alix', age: 30})"
+    variants:
+      sql-pgq: |
+        SELECT name, age FROM GRAPH_TABLE (
+          MATCH (p:Person)
+          WHERE p.name = 'Alix'
+          COLUMNS (p.name AS name, p.age AS age)
+        )
+    expect:
+      rows:
+        - [Alix, 30]
+
+  - name: gql_insert_sql_pgq_read_edge
+    setup:
+      - "INSERT (:Person {name: 'Alix'})-[:KNOWS {since: 2020}]->(:Person {name: 'Gus'})"
+    variants:
+      sql-pgq: |
+        SELECT src, dst, since FROM GRAPH_TABLE (
+          MATCH (a:Person)-[r:KNOWS]->(b:Person)
+          COLUMNS (a.name AS src, b.name AS dst, r.since AS since)
+        )
+    expect:
+      rows:
+        - [Alix, Gus, 2020]
+
+  # ---------------------------------------------------------------------------
+  # Integer property type preservation
+  # ---------------------------------------------------------------------------
+
+  - name: int_property_preserved_in_cypher
+    setup:
+      - "INSERT (:T {v: 42})"
+    variants:
+      cypher: "MATCH (n:T) RETURN n.v"
+    expect:
+      rows:
+        - [42]
+
+  - name: int_property_preserved_in_gremlin
+    setup:
+      - "INSERT (:T {v: 42})"
+    variants:
+      gremlin: "g.V().hasLabel('T').values('v')"
+    expect:
+      rows:
+        - [42]
+
+  # ---------------------------------------------------------------------------
+  # Boolean property type preservation
+  # ---------------------------------------------------------------------------
+
+  - name: bool_property_preserved_in_cypher
+    setup:
+      - "INSERT (:T {active: true})"
+    variants:
+      cypher: "MATCH (n:T) RETURN n.active"
+    expect:
+      rows:
+        - [true]
+
+  - name: bool_property_preserved_in_gremlin
+    setup:
+      - "INSERT (:T {active: true})"
+    variants:
+      gremlin: "g.V().hasLabel('T').values('active')"
+    expect:
+      rows:
+        - [true]
+
+  # ---------------------------------------------------------------------------
+  # String property type preservation
+  # ---------------------------------------------------------------------------
+
+  - name: string_property_preserved_in_cypher
+    setup:
+      - "INSERT (:T {name: 'Amsterdam'})"
+    variants:
+      cypher: "MATCH (n:T) RETURN n.name"
+    expect:
+      rows:
+        - [Amsterdam]
+
+  - name: string_property_preserved_in_gremlin
+    setup:
+      - "INSERT (:T {name: 'Amsterdam'})"
+    variants:
+      gremlin: "g.V().hasLabel('T').values('name')"
+    expect:
+      rows:
+        - [Amsterdam]
+
+  # ---------------------------------------------------------------------------
+  # Null property semantics across languages
+  # ---------------------------------------------------------------------------
+
+  - name: missing_property_null_in_cypher
+    setup:
+      - "INSERT (:T {name: 'Alix'})"
+    variants:
+      cypher: "MATCH (n:T) RETURN n.age"
+    expect:
+      rows:
+        - [null]
+
+  - name: missing_property_gremlin_empty
+    setup:
+      - "INSERT (:T {name: 'Alix'})"
+    variants:
+      gremlin: "g.V().hasLabel('T').has('age').count()"
+    expect:
+      rows:
+        - [0]
+
+  # ---------------------------------------------------------------------------
+  # Multiple labels across languages
+  # ---------------------------------------------------------------------------
+
+  - name: multi_label_visible_in_cypher
+    setup:
+      - "INSERT (:Person:Employee {name: 'Alix'})"
+    variants:
+      cypher: "MATCH (n:Person:Employee) RETURN n.name"
+    expect:
+      rows:
+        - [Alix]
+
+  - name: multi_label_visible_in_gremlin
+    setup:
+      - "INSERT (:Person:Employee {name: 'Alix'})"
+    variants:
+      gremlin: "g.V().hasLabel('Person').has('name', 'Alix').values('name')"
+    expect:
+      rows:
+        - [Alix]
+
+  # ---------------------------------------------------------------------------
+  # Edge type across languages
+  # ---------------------------------------------------------------------------
+
+  - name: edge_type_in_cypher
+    setup:
+      - "INSERT (:A {v: 1})-[:WORKS_AT {role: 'Engineer'}]->(:B {v: 2})"
+    variants:
+      cypher: "MATCH ()-[r:WORKS_AT]->() RETURN r.role"
+    expect:
+      rows:
+        - [Engineer]
+
+  - name: edge_type_in_gremlin
+    setup:
+      - "INSERT (:A {v: 1})-[:WORKS_AT]->(:B {v: 2})"
+    variants:
+      gremlin: "g.E().hasLabel('WORKS_AT').count()"
+    expect:
+      rows:
+        - [1]
+
+  # ---------------------------------------------------------------------------
+  # GQL insert, read in all languages
+  # ---------------------------------------------------------------------------
+
+  - name: gql_insert_all_read_count
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:Person {name: 'Gus'})"
+    variants:
+      gql: "MATCH (p:Person) RETURN count(p) AS cnt"
+      cypher: "MATCH (p:Person) RETURN count(p) AS cnt"
+    expect:
+      rows:
+        - [2]

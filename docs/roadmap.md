@@ -46,11 +46,19 @@ The beta series focuses on correctness, completeness and real-world durability. 
 
 **Ecosystem**: [grafeo-server](https://github.com/GrafeoDB/grafeo-server), [grafeo-web](https://github.com/GrafeoDB/grafeo-web), [grafeo-mcp](https://github.com/GrafeoDB/grafeo-mcp), [grafeo-memory](https://github.com/GrafeoDB/grafeo-memory), [grafeo-langchain](https://github.com/GrafeoDB/grafeo-langchain), [grafeo-llamaindex](https://github.com/GrafeoDB/grafeo-llamaindex).
 
+### Delivered in 0.5.30-0.5.32
+
+- **Async storage backend** (0.5.30): `AsyncStorageBackend` trait, `AsyncTypedWal` with async WAL operations, `AsyncLocalBackend` filesystem implementation
+- **CompactStore** (0.5.31): read-only columnar store with per-label tables, double-indexed CSR adjacency, zone-map skip optimization, `CompactStoreBuilder` API. Integrates via `GrafeoDB::with_read_store()`
+- **`compact()` method** (0.5.32): one-call conversion from live database to CompactStore. Available in Python, Node.js, WASM, C, Rust. ~60x memory reduction, 100x+ traversal speedup
+- **Hybrid Logical Clock** (0.5.32): monotonic HLC timestamps in CDC events for causal ordering
+- **Session CDC** (0.5.32): mutations via query sessions (`INSERT`, `SET`, `DELETE`) now generate CDC events, buffered per-transaction
+- **Correctness hardening** (0.5.32): epoch monotonicity guarantees, concurrent stress tests, write-write conflict detection improvements
+- **grafeo-server replication** (0.5.32): atomic sync apply (all-or-nothing transaction visibility on replicas), persistent replica epoch tracking (replicas resume from last position after restart), CDC auto-activation on replication primaries, relaxed replica guard for sync endpoints
+
 ### What's left in 0.5
 
-- Full test suite and missing language implementation gaps across all 6 query languages
-- Storage features: single-file `.grafeo` format, async storage backend, cost model calibration
-- Expanded test suite, crash recovery testing (failpoint injection), Jepsen testing for grafeo-server replication
+- Crash recovery testing (failpoint injection), Jepsen testing for grafeo-server replication
 - Bug fixes, stability monitoring, performance regression gates
 
 ---
@@ -66,7 +74,6 @@ The scope is intentionally narrow:
 - **API ergonomics** and documentation polish
 - **Binary size and compile time** optimization
 - **C FFI parity refactor**: expand grafeo-c to match Python/Node.js API surface, update downstream bindings
-
 
 The goal is confidence: if something works in 0.6, it works in 1.0.
 
@@ -94,4 +101,4 @@ Interested in contributing? Check the [GitHub Issues](https://github.com/GrafeoD
 
 ---
 
-Last updated: March 2026
+Last updated: April 2026

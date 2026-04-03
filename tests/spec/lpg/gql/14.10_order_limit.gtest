@@ -127,3 +127,24 @@ tests:
       rows:
         - [Gus]
         - [Alix]
+
+  # ---------------------------------------------------------------------------
+  # ORDER BY with complex expressions: no synthetic column leak
+  # ---------------------------------------------------------------------------
+
+  - name: order_by_labels_no_extra_columns
+    # Result columns must contain only what RETURN specifies, no __expr_*
+    query: MATCH (n:Person) RETURN n.name ORDER BY labels(n)[0]
+    expect:
+      columns: ["n.name"]
+      count: 3
+
+  - name: order_by_arithmetic_no_extra_columns
+    query: MATCH (n:Person) RETURN n.name, n.age ORDER BY n.age + 1
+    expect:
+      columns: ["n.name", "n.age"]
+      ordered: true
+      rows:
+        - [Gus, 25]
+        - [Alix, 30]
+        - [Vincent, 35]

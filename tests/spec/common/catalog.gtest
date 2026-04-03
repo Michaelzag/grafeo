@@ -1,0 +1,205 @@
+# Catalog and Diagnostics
+#
+# Verifies catalog procedures (db.labels, db.relationshipTypes, db.propertyKeys),
+# database metadata queries, and node/edge counting patterns.
+
+meta:
+  language: gql
+  model: lpg
+  section: catalog
+  title: Catalog and diagnostics
+  dataset: social_network
+  requires: [algos]
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # db.labels()
+  # ---------------------------------------------------------------------------
+
+  - name: labels_returns_all
+    query: "CALL db.labels() YIELD label RETURN label ORDER BY label"
+    expect:
+      ordered: true
+      rows:
+        - [Company]
+        - [Person]
+
+  - name: labels_after_insert
+    setup:
+      - "INSERT (:Animal {name: 'cat'})"
+    query: "CALL db.labels() YIELD label RETURN label ORDER BY label"
+    expect:
+      ordered: true
+      rows:
+        - [Animal]
+        - [Company]
+        - [Person]
+
+  - name: labels_with_where_filter
+    query: "CALL db.labels() YIELD label WHERE label = 'Person' RETURN label"
+    expect:
+      rows:
+        - [Person]
+
+  - name: labels_count
+    skip: "count() over CALL YIELD not aggregating"
+    query: "CALL db.labels() YIELD label RETURN count(label) AS cnt"
+    expect:
+      rows:
+        - [2]
+
+  # ---------------------------------------------------------------------------
+  # db.relationshipTypes()
+  # ---------------------------------------------------------------------------
+
+  - name: relationship_types_returns_all
+    query: "CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType ORDER BY relationshipType"
+    expect:
+      ordered: true
+      rows:
+        - [KNOWS]
+        - [WORKS_AT]
+
+  - name: relationship_types_after_insert
+    setup:
+      - "INSERT (:X {v: 1})-[:LIKES]->(:Y {v: 2})"
+    query: "CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType ORDER BY relationshipType"
+    expect:
+      ordered: true
+      rows:
+        - [KNOWS]
+        - [LIKES]
+        - [WORKS_AT]
+
+  - name: relationship_types_count
+    skip: "count() over CALL YIELD not aggregating"
+    query: "CALL db.relationshipTypes() YIELD relationshipType RETURN count(relationshipType) AS cnt"
+    expect:
+      rows:
+        - [2]
+
+  # ---------------------------------------------------------------------------
+  # db.propertyKeys()
+  # ---------------------------------------------------------------------------
+
+  - name: property_keys_returns_all
+    query: "CALL db.propertyKeys() YIELD propertyKey RETURN propertyKey ORDER BY propertyKey"
+    expect:
+      ordered: true
+      count: 6
+
+  - name: property_keys_contains_name
+    query: "CALL db.propertyKeys() YIELD propertyKey WHERE propertyKey = 'name' RETURN propertyKey"
+    expect:
+      rows:
+        - [name]
+
+  - name: property_keys_after_new_property
+    setup:
+      - "MATCH (p:Person {name: 'Alix'}) SET p.nickname = 'ally'"
+    query: "CALL db.propertyKeys() YIELD propertyKey WHERE propertyKey = 'nickname' RETURN propertyKey"
+    expect:
+      rows:
+        - [nickname]
+
+  # ---------------------------------------------------------------------------
+  # Node and edge counting (basic diagnostics)
+  # ---------------------------------------------------------------------------
+
+  - name: count_all_nodes
+    query: "MATCH (n) RETURN count(n) AS cnt"
+    expect:
+      rows:
+        - [4]
+
+  - name: count_by_label
+    query: "MATCH (n:Person) RETURN count(n) AS cnt"
+    expect:
+      rows:
+        - [3]
+
+  - name: count_all_edges
+    query: "MATCH ()-[r]->() RETURN count(r) AS cnt"
+    expect:
+      rows:
+        - [3]
+
+  - name: count_by_edge_type
+    query: "MATCH ()-[r:KNOWS]->() RETURN count(r) AS cnt"
+    expect:
+      rows:
+        - [2]
+
+  - name: count_nodes_per_label
+    query: |
+      MATCH (n)
+      RETURN labels(n) AS lbl, count(n) AS cnt
+      ORDER BY cnt DESC
+    expect:
+      ordered: true
+      count: 2
+
+  # ---------------------------------------------------------------------------
+  # Catalog on empty database
+  # ---------------------------------------------------------------------------
+
+  - name: labels_empty_database
+    skip: "count() over CALL YIELD not aggregating"
+    dataset: empty
+    query: "CALL db.labels() YIELD label RETURN count(label) AS cnt"
+    expect:
+      rows:
+        - [0]
+
+  - name: relationship_types_empty_database
+    skip: "count() over CALL YIELD not aggregating"
+    dataset: empty
+    query: "CALL db.relationshipTypes() YIELD relationshipType RETURN count(relationshipType) AS cnt"
+    expect:
+      rows:
+        - [0]
+
+  - name: property_keys_empty_database
+    skip: "count() over CALL YIELD not aggregating"
+    dataset: empty
+    query: "CALL db.propertyKeys() YIELD propertyKey RETURN count(propertyKey) AS cnt"
+    expect:
+      rows:
+        - [0]
+
+  # ---------------------------------------------------------------------------
+  # Catalog with aliases
+  # ---------------------------------------------------------------------------
+
+  - name: labels_with_alias
+    query: "CALL db.labels() YIELD label AS l RETURN l ORDER BY l"
+    expect:
+      ordered: true
+      rows:
+        - [Company]
+        - [Person]
+
+  - name: relationship_types_with_alias
+    query: "CALL db.relationshipTypes() YIELD relationshipType AS rt RETURN rt ORDER BY rt"
+    expect:
+      ordered: true
+      rows:
+        - [KNOWS]
+        - [WORKS_AT]
+
+  # ---------------------------------------------------------------------------
+  # Inline CALL subquery for catalog
+  # ---------------------------------------------------------------------------
+
+  - name: inline_call_labels
+    skip: "nested CALL with aggregation"
+    query: |
+      CALL {
+        CALL db.labels() YIELD label
+        RETURN count(label) AS label_count
+      }
+      RETURN label_count
+    expect:
+      rows:
+        - [2]

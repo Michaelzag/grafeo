@@ -1,0 +1,67 @@
+# E-Commerce Dataset
+# 5 Customers, 3 Categories, 6 Products, 8 Orders, 6 Reviews
+# Topology: Customer -[ORDERED]-> Order -[CONTAINS]-> Product -[IN_CATEGORY]-> Category
+#           Customer -[REVIEWED]-> Product
+#
+# Use case: multi-hop traversals, aggregation, temporal filtering, weighted paths
+
+INSERT (:Category {name: 'Electronics', slug: 'electronics'})
+INSERT (:Category {name: 'Books', slug: 'books'})
+INSERT (:Category {name: 'Clothing', slug: 'clothing'})
+
+INSERT (:Product {name: 'Laptop Pro', price: 1299.99, stock: 45, rating: 4.5, sku: 'ELEC-001'})
+INSERT (:Product {name: 'Wireless Headphones', price: 89.99, stock: 200, rating: 4.2, sku: 'ELEC-002'})
+INSERT (:Product {name: 'Tablet Mini', price: 499.99, stock: 78, rating: 3.8, sku: 'ELEC-003'})
+INSERT (:Product {name: 'Graph Databases', price: 49.99, stock: 150, rating: 4.9, sku: 'BOOK-001'})
+INSERT (:Product {name: 'Rust Programming', price: 39.99, stock: 120, rating: 4.7, sku: 'BOOK-002'})
+INSERT (:Product {name: 'Winter Jacket', price: 129.99, stock: 60, rating: 4.0, sku: 'CLTH-001'})
+
+MATCH (p:Product {name: 'Laptop Pro'}), (c:Category {name: 'Electronics'}) INSERT (p)-[:IN_CATEGORY]->(c)
+MATCH (p:Product {name: 'Wireless Headphones'}), (c:Category {name: 'Electronics'}) INSERT (p)-[:IN_CATEGORY]->(c)
+MATCH (p:Product {name: 'Tablet Mini'}), (c:Category {name: 'Electronics'}) INSERT (p)-[:IN_CATEGORY]->(c)
+MATCH (p:Product {name: 'Graph Databases'}), (c:Category {name: 'Books'}) INSERT (p)-[:IN_CATEGORY]->(c)
+MATCH (p:Product {name: 'Rust Programming'}), (c:Category {name: 'Books'}) INSERT (p)-[:IN_CATEGORY]->(c)
+MATCH (p:Product {name: 'Winter Jacket'}), (c:Category {name: 'Clothing'}) INSERT (p)-[:IN_CATEGORY]->(c)
+
+INSERT (:Customer {name: 'Alix', email: 'alix@example.org', city: 'Amsterdam', joined: DATE '2022-01-15', tier: 'gold'})
+INSERT (:Customer {name: 'Gus', email: 'gus@example.org', city: 'Berlin', joined: DATE '2022-06-01', tier: 'silver'})
+INSERT (:Customer {name: 'Vincent', email: 'vincent@example.org', city: 'Paris', joined: DATE '2023-03-10', tier: 'gold'})
+INSERT (:Customer {name: 'Jules', email: 'jules@example.org', city: 'Amsterdam', joined: DATE '2023-08-20', tier: 'bronze'})
+INSERT (:Customer {name: 'Mia', email: 'mia@example.org', city: 'Prague', joined: DATE '2024-01-05', tier: 'silver'})
+
+INSERT (:Order {order_id: 'ORD-001', total: 1389.98, status: 'delivered', placed: DATE '2023-06-15'})
+INSERT (:Order {order_id: 'ORD-002', total: 89.99, status: 'delivered', placed: DATE '2023-07-20'})
+INSERT (:Order {order_id: 'ORD-003', total: 549.98, status: 'delivered', placed: DATE '2023-09-01'})
+INSERT (:Order {order_id: 'ORD-004', total: 49.99, status: 'shipped', placed: DATE '2024-01-10'})
+INSERT (:Order {order_id: 'ORD-005', total: 1299.99, status: 'delivered', placed: DATE '2024-02-14'})
+INSERT (:Order {order_id: 'ORD-006', total: 129.99, status: 'pending', placed: DATE '2024-03-01'})
+INSERT (:Order {order_id: 'ORD-007', total: 89.98, status: 'delivered', placed: DATE '2024-03-15'})
+INSERT (:Order {order_id: 'ORD-008', total: 39.99, status: 'cancelled', placed: DATE '2024-03-20'})
+
+MATCH (c:Customer {name: 'Alix'}), (o:Order {order_id: 'ORD-001'}) INSERT (c)-[:PLACED]->(o)
+MATCH (c:Customer {name: 'Alix'}), (o:Order {order_id: 'ORD-005'}) INSERT (c)-[:PLACED]->(o)
+MATCH (c:Customer {name: 'Gus'}), (o:Order {order_id: 'ORD-002'}) INSERT (c)-[:PLACED]->(o)
+MATCH (c:Customer {name: 'Gus'}), (o:Order {order_id: 'ORD-007'}) INSERT (c)-[:PLACED]->(o)
+MATCH (c:Customer {name: 'Vincent'}), (o:Order {order_id: 'ORD-003'}) INSERT (c)-[:PLACED]->(o)
+MATCH (c:Customer {name: 'Vincent'}), (o:Order {order_id: 'ORD-008'}) INSERT (c)-[:PLACED]->(o)
+MATCH (c:Customer {name: 'Jules'}), (o:Order {order_id: 'ORD-004'}) INSERT (c)-[:PLACED]->(o)
+MATCH (c:Customer {name: 'Mia'}), (o:Order {order_id: 'ORD-006'}) INSERT (c)-[:PLACED]->(o)
+
+MATCH (o:Order {order_id: 'ORD-001'}), (p:Product {name: 'Laptop Pro'}) INSERT (o)-[:CONTAINS {quantity: 1}]->(p)
+MATCH (o:Order {order_id: 'ORD-001'}), (p:Product {name: 'Wireless Headphones'}) INSERT (o)-[:CONTAINS {quantity: 1}]->(p)
+MATCH (o:Order {order_id: 'ORD-002'}), (p:Product {name: 'Wireless Headphones'}) INSERT (o)-[:CONTAINS {quantity: 1}]->(p)
+MATCH (o:Order {order_id: 'ORD-003'}), (p:Product {name: 'Tablet Mini'}) INSERT (o)-[:CONTAINS {quantity: 1}]->(p)
+MATCH (o:Order {order_id: 'ORD-003'}), (p:Product {name: 'Graph Databases'}) INSERT (o)-[:CONTAINS {quantity: 1}]->(p)
+MATCH (o:Order {order_id: 'ORD-004'}), (p:Product {name: 'Graph Databases'}) INSERT (o)-[:CONTAINS {quantity: 1}]->(p)
+MATCH (o:Order {order_id: 'ORD-005'}), (p:Product {name: 'Laptop Pro'}) INSERT (o)-[:CONTAINS {quantity: 1}]->(p)
+MATCH (o:Order {order_id: 'ORD-006'}), (p:Product {name: 'Winter Jacket'}) INSERT (o)-[:CONTAINS {quantity: 1}]->(p)
+MATCH (o:Order {order_id: 'ORD-007'}), (p:Product {name: 'Rust Programming'}) INSERT (o)-[:CONTAINS {quantity: 1}]->(p)
+MATCH (o:Order {order_id: 'ORD-007'}), (p:Product {name: 'Graph Databases'}) INSERT (o)-[:CONTAINS {quantity: 1}]->(p)
+MATCH (o:Order {order_id: 'ORD-008'}), (p:Product {name: 'Rust Programming'}) INSERT (o)-[:CONTAINS {quantity: 1}]->(p)
+
+MATCH (c:Customer {name: 'Alix'}), (p:Product {name: 'Laptop Pro'}) INSERT (c)-[:REVIEWED {rating: 5, text: 'Excellent performance'}]->(p)
+MATCH (c:Customer {name: 'Alix'}), (p:Product {name: 'Wireless Headphones'}) INSERT (c)-[:REVIEWED {rating: 4, text: 'Good sound quality'}]->(p)
+MATCH (c:Customer {name: 'Gus'}), (p:Product {name: 'Wireless Headphones'}) INSERT (c)-[:REVIEWED {rating: 3, text: 'Battery could be better'}]->(p)
+MATCH (c:Customer {name: 'Vincent'}), (p:Product {name: 'Tablet Mini'}) INSERT (c)-[:REVIEWED {rating: 4, text: 'Great for reading'}]->(p)
+MATCH (c:Customer {name: 'Vincent'}), (p:Product {name: 'Graph Databases'}) INSERT (c)-[:REVIEWED {rating: 5, text: 'Must read for developers'}]->(p)
+MATCH (c:Customer {name: 'Jules'}), (p:Product {name: 'Graph Databases'}) INSERT (c)-[:REVIEWED {rating: 5, text: 'Changed how I think about data'}]->(p)

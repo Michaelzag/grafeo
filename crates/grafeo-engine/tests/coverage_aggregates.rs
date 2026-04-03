@@ -514,3 +514,53 @@ fn test_having_with_sum_aggregate() {
     assert_eq!(r.rows[0][0], Value::String("Engineering".into()));
     assert_eq!(r.rows[1][0], Value::String("Sales".into()));
 }
+
+// ============================================================================
+// Global aggregation on empty result set (pull-based path)
+// ============================================================================
+
+#[test]
+fn count_on_empty_result_returns_zero() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+    let r = session
+        .execute("MATCH (n:NonExistent) RETURN count(n) AS cnt")
+        .unwrap();
+    // Global COUNT on empty input should return one row with 0
+    assert_eq!(r.rows.len(), 1, "Global COUNT should always return one row");
+    assert_eq!(r.rows[0][0], Value::Int64(0));
+}
+
+#[test]
+fn sum_on_empty_result_returns_null() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+    let r = session
+        .execute("MATCH (n:NonExistent) RETURN sum(n.x) AS total")
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows[0][0], Value::Null);
+}
+
+#[test]
+fn avg_on_empty_result_returns_null() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+    let r = session
+        .execute("MATCH (n:NonExistent) RETURN avg(n.x) AS average")
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows[0][0], Value::Null);
+}
+
+#[test]
+fn min_max_on_empty_result_returns_null() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+    let r = session
+        .execute("MATCH (n:NonExistent) RETURN min(n.x) AS lo, max(n.x) AS hi")
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows[0][0], Value::Null);
+    assert_eq!(r.rows[0][1], Value::Null);
+}

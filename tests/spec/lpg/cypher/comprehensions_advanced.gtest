@@ -1,0 +1,264 @@
+# Cypher Advanced Comprehensions and Subqueries
+#
+# Covers: pattern comprehension, list comprehension edge cases,
+# CALL subquery patterns, EXISTS subquery, COUNT subquery,
+# FOREACH with various mutations.
+# Uses movie_database for realistic many-to-many traversals.
+
+meta:
+  language: cypher
+  model: lpg
+  section: comprehensions
+  title: Advanced comprehensions and subqueries
+  dataset: movie_database
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # Pattern comprehension
+  # ---------------------------------------------------------------------------
+
+  - name: pattern_comprehension_basic
+    query: |
+      MATCH (a:Actor)
+      RETURN a.name, [(a)-[:ACTED_IN]->(m:Movie) | m.title] AS movies
+      ORDER BY a.name
+    expect:
+      ordered: true
+      count: 7
+
+  - name: pattern_comprehension_with_filter
+    query: |
+      MATCH (a:Actor)
+      RETURN a.name,
+        [(a)-[:ACTED_IN]->(m:Movie) WHERE m.rating > 8.0 | m.title] AS top_movies
+      ORDER BY a.name
+    expect:
+      ordered: true
+      count: 7
+
+  - name: pattern_comprehension_size
+    skip: "pattern comprehension size() evaluation"
+    query: |
+      MATCH (a:Actor)
+      RETURN a.name, size([(a)-[:ACTED_IN]->(:Movie) | 1]) AS movie_count
+      ORDER BY movie_count DESC, a.name
+    expect:
+      ordered: true
+      rows:
+        - [Beatrix, 3]
+        - [Gus, 2]
+        - [Vincent, 2]
+        - [Alix, 2]
+        - [Jules, 2]
+        - [Butch, 2]
+        - [Mia, 2]
+
+  - name: pattern_comprehension_with_property_extraction
+    query: |
+      MATCH (d:Director)
+      RETURN d.name,
+        [(d)-[:DIRECTED]->(m:Movie) | m.year] AS years
+      ORDER BY d.name
+    expect:
+      ordered: true
+      count: 3
+
+  # ---------------------------------------------------------------------------
+  # List comprehension
+  # ---------------------------------------------------------------------------
+
+  - name: list_comprehension_basic
+    query: |
+      MATCH (a:Actor)
+      WITH collect(a.name) AS names
+      RETURN [n IN names WHERE n STARTS WITH 'A'] AS a_names
+    expect:
+      count: 1
+
+  - name: list_comprehension_transform
+    query: |
+      MATCH (m:Movie)
+      WITH collect(m.budget) AS budgets
+      RETURN [b IN budgets | b / 1000000] AS budget_millions
+    expect:
+      count: 1
+
+  - name: list_comprehension_filter_and_transform
+    query: |
+      MATCH (m:Movie)
+      WITH collect(m) AS movies
+      RETURN [m IN movies WHERE m.rating > 8.0 | m.title] AS top_titles
+    expect:
+      count: 1
+
+  - name: list_comprehension_nested
+    query: |
+      WITH [1, 2, 3, 4, 5] AS nums
+      RETURN [n IN nums WHERE n > 2 | n * n] AS squares
+    expect:
+      rows:
+        - ["[9, 16, 25]"]
+
+  # ---------------------------------------------------------------------------
+  # EXISTS subquery
+  # ---------------------------------------------------------------------------
+
+  - name: exists_subquery_actors_with_action_movies
+    query: |
+      MATCH (a:Actor)
+      WHERE EXISTS {
+        MATCH (a)-[:ACTED_IN]->(m:Movie)-[:HAS_GENRE]->(g:Genre {name: 'Action'})
+      }
+      RETURN a.name ORDER BY a.name
+    expect:
+      ordered: true
+      rows:
+        - [Beatrix]
+        - [Butch]
+        - [Gus]
+        - [Jules]
+        - [Mia]
+        - [Vincent]
+
+  - name: not_exists_subquery
+    skip: "NOT EXISTS subquery in Cypher"
+    query: |
+      MATCH (a:Actor)
+      WHERE NOT EXISTS {
+        MATCH (a)-[:ACTED_IN]->(m:Movie)
+        WHERE m.year < 2022
+      }
+      RETURN a.name ORDER BY a.name
+    expect:
+      ordered: true
+      rows:
+        - [Alix]
+        - [Gus]
+
+  # ---------------------------------------------------------------------------
+  # COUNT subquery
+  # ---------------------------------------------------------------------------
+
+  - name: count_subquery_movies_per_actor
+    query: |
+      MATCH (a:Actor)
+      WHERE COUNT { (a)-[:ACTED_IN]->(:Movie) } >= 2
+      RETURN a.name ORDER BY a.name
+    expect:
+      ordered: true
+      rows:
+        - [Alix]
+        - [Beatrix]
+        - [Butch]
+        - [Gus]
+        - [Jules]
+        - [Mia]
+        - [Vincent]
+
+  - name: count_subquery_prolific_directors
+    query: |
+      MATCH (d:Director)
+      WHERE COUNT { (d)-[:DIRECTED]->(:Movie) } = 2
+      RETURN d.name ORDER BY d.name
+    expect:
+      ordered: true
+      rows:
+        - [Django]
+        - [Shosanna]
+
+  # ---------------------------------------------------------------------------
+  # CALL subquery
+  # ---------------------------------------------------------------------------
+
+  - name: call_subquery_basic
+    skip: "CALL subquery with outer scope"
+    query: |
+      MATCH (g:Genre)
+      CALL {
+        WITH g
+        MATCH (m:Movie)-[:HAS_GENRE]->(g)
+        RETURN count(m) AS movie_count
+      }
+      RETURN g.name, movie_count
+      ORDER BY movie_count DESC, g.name
+    expect:
+      ordered: true
+      rows:
+        - [Drama, 3]
+        - [Thriller, 3]
+        - [Action, 2]
+        - [SciFi, 2]
+
+  - name: call_subquery_with_aggregation
+    query: |
+      MATCH (d:Director)
+      CALL {
+        WITH d
+        MATCH (d)-[:DIRECTED]->(m:Movie)
+        RETURN avg(m.rating) AS avg_rating
+      }
+      RETURN d.name, avg_rating
+      ORDER BY avg_rating DESC
+    expect:
+      ordered: true
+      precision: 1
+      count: 3
+
+  # ---------------------------------------------------------------------------
+  # FOREACH
+  # ---------------------------------------------------------------------------
+
+  - name: foreach_set_property
+    setup:
+      - "CREATE (:Tag {name: 'A'})"
+      - "CREATE (:Tag {name: 'B'})"
+      - "CREATE (:Tag {name: 'C'})"
+    query: |
+      MATCH (t:Tag)
+      WITH collect(t) AS tags
+      FOREACH (tag IN tags | SET tag.processed = true)
+      RETURN count(*) AS cnt
+    expect:
+      count: 1
+
+  - name: foreach_create_relationships
+    skip: "FOREACH with pattern comprehension"
+    setup:
+      - "CREATE (:Hub {name: 'center'})"
+      - "CREATE (:Leaf {name: 'L1'})"
+      - "CREATE (:Leaf {name: 'L2'})"
+      - "CREATE (:Leaf {name: 'L3'})"
+    query: |
+      MATCH (h:Hub), (l:Leaf)
+      WITH h, collect(l) AS leaves
+      FOREACH (leaf IN leaves | CREATE (h)-[:LINKED]->(leaf))
+      RETURN size([(h:Hub)-[:LINKED]->() | 1]) AS link_count
+    expect:
+      rows:
+        - [3]
+
+  # ---------------------------------------------------------------------------
+  # Multi-hop patterns with comprehensions
+  # ---------------------------------------------------------------------------
+
+  - name: actor_collaboration_via_comprehension
+    query: |
+      MATCH (a:Actor {name: 'Vincent'})
+      RETURN a.name,
+        [(a)-[:ACTED_IN]->(m:Movie)<-[:ACTED_IN]-(costar:Actor)
+         WHERE costar.name <> a.name | costar.name] AS costars
+    expect:
+      count: 1
+
+  - name: genre_diversity_per_actor
+    skip: "pattern comprehension in size()"
+    query: |
+      MATCH (a:Actor)
+      RETURN a.name,
+        size([(a)-[:ACTED_IN]->(m:Movie)-[:HAS_GENRE]->(g:Genre) | g.name]) AS genre_appearances
+      ORDER BY genre_appearances DESC, a.name
+      LIMIT 3
+    expect:
+      ordered: true
+      count: 3

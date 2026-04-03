@@ -578,6 +578,337 @@ fn compute_zone_map_bool(values: &[bool]) -> ZoneMap {
 }
 
 // ---------------------------------------------------------------------------
+// Conversion from GraphStore
+// ---------------------------------------------------------------------------
+
+/// Which columnar encoding to use for a property key, inferred from values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InferredType {
+    /// All non-null values are `Value::Int64` with value >= 0.
+    BitPacked,
+    /// All non-null values are `Value::Bool`.
+    Bitmap,
+    /// All non-null values are `Value::String`, or mixed/unsupported types.
+    Dict,
+}
+
+/// Converts any [`GraphStore`](crate::graph::GraphStore) into a [`CompactStore`].
+///
+/// Reads all nodes grouped by label, infers column types from property values,
+/// reads all edges grouped by type, and builds a `CompactStore` with backward
+/// CSR enabled for every relationship table.
+///
+/// # Type mapping
+///
+/// | Source type | Codec | Notes |
+/// |-------------|-------|-------|
+/// | `Int64` (>= 0) | `BitPacked` | Auto bit-width via `BitPackedInts::pack` |
+/// | `Bool` | `Bitmap` | |
+/// | `String` | `Dict` | |
+/// | All others | `Dict` | Serialized via `Display` |
+///
+/// Nodes with multiple labels use a canonical combined key (labels sorted,
+/// joined with `|`). `Null` values are stored as zero/false/empty-string
+/// depending on the inferred codec.
+///
+/// # Errors
+///
+/// Propagates any [`CompactStoreError`] from the underlying builder (e.g.
+/// if there are more than 32,767 distinct labels or edge types).
+pub fn from_graph_store(
+    store: &dyn crate::graph::traits::GraphStore,
+) -> Result<CompactStore, CompactStoreError> {
+    // Step 1: Collect all nodes grouped by label, build ID mapping.
+    let labels = store.all_labels();
+    if labels.is_empty() {
+        return CompactStoreBuilder::new().build();
+    }
+
+    // old_node_id -> (label_key, offset_within_label)
+    let mut id_map: FxHashMap<grafeo_common::types::NodeId, (ArcStr, u32)> = FxHashMap::default();
+
+    // label_key -> (ordered node IDs, property_key -> Vec<Value>)
+    // We use Vec<Value> to collect per-column values in row order.
+    let mut label_data: Vec<(
+        ArcStr,
+        Vec<grafeo_common::types::NodeId>,
+        FxHashMap<PropertyKey, Vec<Value>>,
+    )> = Vec::new();
+
+    // Collect all node IDs per label. Nodes with multiple labels use a
+    // compound key (sorted labels joined with "|").
+    let mut seen_node_ids: FxHashSet<grafeo_common::types::NodeId> = FxHashSet::default();
+    let mut label_key_index: FxHashMap<ArcStr, usize> = FxHashMap::default();
+
+    for label in &labels {
+        let node_ids = store.nodes_by_label(label);
+        for &nid in &node_ids {
+            if !seen_node_ids.insert(nid) {
+                continue; // already assigned via an earlier label
+            }
+
+            // Get the node to check its full label set.
+            let Some(node) = store.get_node(nid) else {
+                continue;
+            };
+
+            let label_key: ArcStr = if node.labels.len() <= 1 {
+                ArcStr::from(label.as_str())
+            } else {
+                let mut sorted: Vec<&str> = node.labels.iter().map(|l| l.as_str()).collect();
+                sorted.sort_unstable();
+                ArcStr::from(sorted.join("|"))
+            };
+
+            // Find or create the label_data entry.
+            let entry_idx = if let Some(&idx) = label_key_index.get(&label_key) {
+                idx
+            } else {
+                let idx = label_data.len();
+                label_key_index.insert(label_key.clone(), idx);
+                label_data.push((label_key.clone(), Vec::new(), FxHashMap::default()));
+                idx
+            };
+
+            let (_, ref mut node_ids_vec, ref mut props_map) = label_data[entry_idx];
+            let offset = node_ids_vec.len() as u32;
+            node_ids_vec.push(nid);
+            id_map.insert(nid, (label_key, offset));
+
+            // Collect properties.
+            for (key, value) in node.properties.iter() {
+                let col = props_map
+                    .entry(key.clone())
+                    .or_insert_with(|| vec![Value::Null; offset as usize]);
+                // Pad with nulls if this key appeared for the first time.
+                while col.len() < offset as usize {
+                    col.push(Value::Null);
+                }
+                col.push(value.clone());
+            }
+
+            // Pad all existing columns that this node didn't have.
+            let expected_len = offset as usize + 1;
+            for col in props_map.values_mut() {
+                while col.len() < expected_len {
+                    col.push(Value::Null);
+                }
+            }
+        }
+    }
+
+    // Step 2: Infer column types and build CompactStoreBuilder.
+    let mut builder = CompactStoreBuilder::new();
+
+    for (label_key, node_ids_for_label, props_map) in &label_data {
+        let node_count = node_ids_for_label.len();
+        builder = builder.node_table(label_key.as_str(), |t| {
+            // Ensure row count is set even when there are no properties.
+            t.record_len(node_count);
+            for (key, values) in props_map {
+                let inferred = infer_type_from_values(values);
+                match inferred {
+                    InferredType::BitPacked => {
+                        let u64_values: Vec<u64> = values
+                            .iter()
+                            .map(|v| match v {
+                                Value::Int64(n) => *n as u64,
+                                _ => 0,
+                            })
+                            .collect();
+                        let bp = BitPackedInts::pack(&u64_values);
+                        let zone_map = compute_zone_map_u64(&u64_values);
+                        t.zone_maps.push((key.clone(), zone_map));
+                        t.columns.push((key.clone(), ColumnCodec::BitPacked(bp)));
+                        t.record_len(u64_values.len());
+                    }
+                    InferredType::Bitmap => {
+                        let bool_values: Vec<bool> = values
+                            .iter()
+                            .map(|v| matches!(v, Value::Bool(true)))
+                            .collect();
+                        let bv = BitVector::from_bools(&bool_values);
+                        let zone_map = compute_zone_map_bool(&bool_values);
+                        t.zone_maps.push((key.clone(), zone_map));
+                        t.columns.push((key.clone(), ColumnCodec::Bitmap(bv)));
+                        t.record_len(bool_values.len());
+                    }
+                    InferredType::Dict => {
+                        let str_values: Vec<String> = values
+                            .iter()
+                            .map(|v| match v {
+                                Value::Null => String::new(),
+                                Value::String(s) => s.to_string(),
+                                other => format!("{other}"),
+                            })
+                            .collect();
+                        let str_refs: Vec<&str> = str_values.iter().map(String::as_str).collect();
+                        let mut dict_builder = DictionaryBuilder::new();
+                        for s in &str_refs {
+                            dict_builder.add(s);
+                        }
+                        let dict = dict_builder.build();
+                        let zone_map = compute_zone_map_strings(&str_refs);
+                        t.zone_maps.push((key.clone(), zone_map));
+                        t.columns.push((key.clone(), ColumnCodec::Dict(dict)));
+                        t.record_len(str_values.len());
+                    }
+                }
+            }
+            t
+        });
+    }
+
+    // Step 3: Collect all edges in a single pass, grouped by (edge_type, src_label, dst_label).
+    // Key: (edge_type, src_label_key, dst_label_key) -> Vec<(src_offset, dst_offset)>
+    type EdgeGroupKey = (ArcStr, ArcStr, ArcStr);
+    let mut edge_groups: FxHashMap<EdgeGroupKey, Vec<(u32, u32)>> = FxHashMap::default();
+    let mut edge_props_groups: FxHashMap<EdgeGroupKey, FxHashMap<PropertyKey, Vec<Value>>> =
+        FxHashMap::default();
+
+    // Iterate all nodes and their outgoing edges.
+    for (_label_key, node_ids, _) in &label_data {
+        for &nid in node_ids {
+            let outgoing = store.edges_from(nid, crate::graph::Direction::Outgoing);
+            for (_target_nid, edge_id) in outgoing {
+                let Some(edge) = store.get_edge(edge_id) else {
+                    continue;
+                };
+
+                let Some((src_label, src_offset)) = id_map.get(&edge.src) else {
+                    continue;
+                };
+                let Some((dst_label, dst_offset)) = id_map.get(&edge.dst) else {
+                    continue;
+                };
+
+                let group_key: EdgeGroupKey =
+                    (edge.edge_type.clone(), src_label.clone(), dst_label.clone());
+
+                let edges_vec = edge_groups.entry(group_key.clone()).or_default();
+                let edge_idx = edges_vec.len();
+                edges_vec.push((*src_offset, *dst_offset));
+
+                // Collect edge properties.
+                if !edge.properties.is_empty() {
+                    let props = edge_props_groups.entry(group_key).or_default();
+                    for (key, value) in edge.properties.iter() {
+                        let col = props
+                            .entry(key.clone())
+                            .or_insert_with(|| vec![Value::Null; edge_idx]);
+                        while col.len() < edge_idx {
+                            col.push(Value::Null);
+                        }
+                        col.push(value.clone());
+                    }
+                    let expected_len = edge_idx + 1;
+                    for col in props.values_mut() {
+                        while col.len() < expected_len {
+                            col.push(Value::Null);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Step 4: Add relationship tables to the builder.
+    for ((edge_type, src_label, dst_label), edges) in &edge_groups {
+        let edge_props =
+            edge_props_groups.get(&(edge_type.clone(), src_label.clone(), dst_label.clone()));
+
+        builder = builder.rel_table(
+            edge_type.as_str(),
+            src_label.as_str(),
+            dst_label.as_str(),
+            |r| {
+                r.edges(edges.clone()).backward(true);
+
+                // Add edge property columns.
+                if let Some(props) = edge_props {
+                    for (key, values) in props {
+                        let inferred = infer_type_from_values(values);
+                        match inferred {
+                            InferredType::BitPacked => {
+                                let u64_values: Vec<u64> = values
+                                    .iter()
+                                    .map(|v| match v {
+                                        Value::Int64(n) => *n as u64,
+                                        _ => 0,
+                                    })
+                                    .collect();
+                                let bp = BitPackedInts::pack(&u64_values);
+                                r.properties.push((key.clone(), ColumnCodec::BitPacked(bp)));
+                            }
+                            InferredType::Bitmap => {
+                                let bool_values: Vec<bool> = values
+                                    .iter()
+                                    .map(|v| matches!(v, Value::Bool(true)))
+                                    .collect();
+                                let bv = BitVector::from_bools(&bool_values);
+                                r.properties.push((key.clone(), ColumnCodec::Bitmap(bv)));
+                            }
+                            InferredType::Dict => {
+                                let str_values: Vec<String> = values
+                                    .iter()
+                                    .map(|v| match v {
+                                        Value::Null => String::new(),
+                                        Value::String(s) => s.to_string(),
+                                        other => format!("{other}"),
+                                    })
+                                    .collect();
+                                let mut dict_builder = DictionaryBuilder::new();
+                                for s in &str_values {
+                                    dict_builder.add(s);
+                                }
+                                let dict = dict_builder.build();
+                                r.properties.push((key.clone(), ColumnCodec::Dict(dict)));
+                            }
+                        }
+                    }
+                }
+
+                r
+            },
+        );
+    }
+
+    builder.build()
+}
+
+/// Infers the columnar encoding type from a slice of [`Value`]s.
+///
+/// Rules:
+/// - If all non-null values are `Int64` with value >= 0, returns `BitPacked`.
+/// - If all non-null values are `Bool`, returns `Bitmap`.
+/// - Otherwise returns `Dict` (string fallback).
+fn infer_type_from_values(values: &[Value]) -> InferredType {
+    let mut saw_int = false;
+    let mut saw_bool = false;
+    let mut saw_other = false;
+
+    for v in values {
+        match v {
+            Value::Null => {} // skip nulls
+            Value::Int64(n) if *n >= 0 => saw_int = true,
+            Value::Bool(_) => saw_bool = true,
+            _ => saw_other = true,
+        }
+    }
+
+    if saw_other || (saw_int && saw_bool) {
+        InferredType::Dict
+    } else if saw_int {
+        InferredType::BitPacked
+    } else if saw_bool {
+        InferredType::Bitmap
+    } else {
+        // All nulls: default to Dict.
+        InferredType::Dict
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -629,5 +960,453 @@ mod tests {
             .build();
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_from_graph_store_round_trip() {
+        // Build a CompactStore via the builder, then convert it back via
+        // from_graph_store and verify the data survives the round-trip.
+        let original = CompactStoreBuilder::new()
+            .node_table("Person", |t| {
+                t.column_bitpacked("age", &[25, 30, 35], 6)
+                    .column_dict("name", &["Alix", "Gus", "Vincent"])
+                    .column_bitmap("active", &[true, false, true])
+            })
+            .node_table("City", |t| t.column_dict("name", &["Amsterdam", "Berlin"]))
+            .rel_table("LIVES_IN", "Person", "City", |r| {
+                r.edges([(0, 0), (1, 1), (2, 0)]).backward(true)
+            })
+            .build()
+            .unwrap();
+
+        // Round-trip through from_graph_store.
+        let converted = from_graph_store(&original).unwrap();
+
+        // Verify node counts.
+        assert_eq!(converted.nodes_by_label("Person").len(), 3);
+        assert_eq!(converted.nodes_by_label("City").len(), 2);
+
+        // Verify properties survived.
+        let person_ids = converted.nodes_by_label("Person");
+        let mut ages: Vec<i64> = person_ids
+            .iter()
+            .filter_map(|&id| {
+                converted
+                    .get_node_property(id, &PropertyKey::new("age"))
+                    .and_then(|v| v.as_int64())
+            })
+            .collect();
+        ages.sort_unstable();
+        assert_eq!(ages, vec![25, 30, 35]);
+
+        // Verify edges survived.
+        let city_ids = converted.nodes_by_label("City");
+        let mut total_edges = 0;
+        for &pid in &person_ids {
+            let edges = converted.edges_from(pid, crate::graph::Direction::Outgoing);
+            total_edges += edges.len();
+        }
+        assert_eq!(total_edges, 3);
+
+        // Verify backward edges (incoming to cities).
+        for &cid in &city_ids {
+            let incoming = converted.edges_from(cid, crate::graph::Direction::Incoming);
+            assert!(!incoming.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_from_graph_store_empty() {
+        let empty = CompactStoreBuilder::new().build().unwrap();
+        let converted = from_graph_store(&empty).unwrap();
+        assert_eq!(converted.nodes_by_label("Anything").len(), 0);
+    }
+
+    #[test]
+    fn test_from_graph_store_with_lpg_store() {
+        use crate::graph::lpg::LpgStore;
+
+        let store = LpgStore::new().unwrap();
+
+        // Insert nodes.
+        let alix_id = store.create_node(&["Person"]);
+        store.set_node_property(alix_id, "name", Value::from("Alix"));
+        store.set_node_property(alix_id, "age", Value::Int64(30));
+
+        let gus_id = store.create_node(&["Person"]);
+        store.set_node_property(gus_id, "name", Value::from("Gus"));
+        store.set_node_property(gus_id, "age", Value::Int64(25));
+
+        let amsterdam_id = store.create_node(&["City"]);
+        store.set_node_property(amsterdam_id, "name", Value::from("Amsterdam"));
+
+        // Insert edges.
+        store.create_edge(alix_id, amsterdam_id, "LIVES_IN");
+        store.create_edge(gus_id, amsterdam_id, "LIVES_IN");
+
+        // Convert.
+        let compact = from_graph_store(&store).unwrap();
+
+        // Verify.
+        assert_eq!(compact.nodes_by_label("Person").len(), 2);
+        assert_eq!(compact.nodes_by_label("City").len(), 1);
+
+        // Check that properties are readable.
+        let person_ids = compact.nodes_by_label("Person");
+        let mut names: Vec<String> = person_ids
+            .iter()
+            .filter_map(|&id| {
+                compact
+                    .get_node_property(id, &PropertyKey::new("name"))
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+            })
+            .collect();
+        names.sort();
+        assert_eq!(names, vec!["Alix", "Gus"]);
+
+        // Check edges: both persons should have outgoing edges.
+        let mut total_outgoing = 0;
+        for &pid in &person_ids {
+            let edges = compact.edges_from(pid, crate::graph::Direction::Outgoing);
+            total_outgoing += edges.len();
+        }
+        assert_eq!(total_outgoing, 2);
+
+        // Check incoming edges on the city.
+        let city_ids = compact.nodes_by_label("City");
+        assert_eq!(city_ids.len(), 1);
+        let incoming = compact.edges_from(city_ids[0], crate::graph::Direction::Incoming);
+        assert_eq!(incoming.len(), 2);
+    }
+
+    #[test]
+    fn test_from_graph_store_edge_properties() {
+        use crate::graph::lpg::LpgStore;
+
+        let store = LpgStore::new().unwrap();
+
+        let alix = store.create_node(&["Person"]);
+        store.set_node_property(alix, "name", Value::from("Alix"));
+
+        let gus = store.create_node(&["Person"]);
+        store.set_node_property(gus, "name", Value::from("Gus"));
+
+        // Edge with int property (BitPacked path).
+        let e1 = store.create_edge(alix, gus, "KNOWS");
+        store.set_edge_property(e1, "since", Value::Int64(2020));
+
+        // Edge with string property (Dict path).
+        let e2 = store.create_edge(gus, alix, "KNOWS");
+        store.set_edge_property(e2, "since", Value::Int64(2021));
+
+        let compact = from_graph_store(&store).unwrap();
+
+        // Verify edge count.
+        let person_ids = compact.nodes_by_label("Person");
+        let mut total_edges = 0;
+        for &pid in &person_ids {
+            total_edges += compact
+                .edges_from(pid, crate::graph::Direction::Outgoing)
+                .len();
+        }
+        assert_eq!(total_edges, 2);
+
+        // Verify edge properties survived.
+        for &pid in &person_ids {
+            let edges = compact.edges_from(pid, crate::graph::Direction::Outgoing);
+            for (_target, eid) in &edges {
+                let edge = compact.get_edge(*eid).unwrap();
+                let since = edge.properties.get(&PropertyKey::new("since")).unwrap();
+                match since {
+                    Value::Int64(v) => assert!(*v == 2020 || *v == 2021),
+                    _ => panic!("expected Int64 for 'since', got {since:?}"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_from_graph_store_edge_bool_properties() {
+        use crate::graph::lpg::LpgStore;
+
+        let store = LpgStore::new().unwrap();
+
+        let a = store.create_node(&["Node"]);
+        let b = store.create_node(&["Node"]);
+
+        let e = store.create_edge(a, b, "LINK");
+        store.set_edge_property(e, "active", Value::Bool(true));
+
+        let compact = from_graph_store(&store).unwrap();
+
+        let ids = compact.nodes_by_label("Node");
+        let edges = compact.edges_from(ids[0], crate::graph::Direction::Outgoing);
+        assert_eq!(edges.len(), 1);
+
+        let edge = compact.get_edge(edges[0].1).unwrap();
+        assert_eq!(
+            edge.properties.get(&PropertyKey::new("active")),
+            Some(&Value::Bool(true))
+        );
+    }
+
+    #[test]
+    fn test_from_graph_store_edge_string_properties() {
+        use crate::graph::lpg::LpgStore;
+
+        let store = LpgStore::new().unwrap();
+
+        let a = store.create_node(&["Node"]);
+        let b = store.create_node(&["Node"]);
+
+        let e = store.create_edge(a, b, "LINK");
+        store.set_edge_property(e, "label", Value::from("primary"));
+
+        let compact = from_graph_store(&store).unwrap();
+
+        let ids = compact.nodes_by_label("Node");
+        let edges = compact.edges_from(ids[0], crate::graph::Direction::Outgoing);
+        let edge = compact.get_edge(edges[0].1).unwrap();
+        assert_eq!(
+            edge.properties.get(&PropertyKey::new("label")),
+            Some(&Value::String(ArcStr::from("primary")))
+        );
+    }
+
+    #[test]
+    fn test_from_graph_store_negative_int_falls_back_to_dict() {
+        use crate::graph::lpg::LpgStore;
+
+        let store = LpgStore::new().unwrap();
+
+        let a = store.create_node(&["Item"]);
+        store.set_node_property(a, "temp", Value::Int64(-10));
+
+        let b = store.create_node(&["Item"]);
+        store.set_node_property(b, "temp", Value::Int64(5));
+
+        let compact = from_graph_store(&store).unwrap();
+
+        // Negative Int64 falls back to Dict encoding (serialized as string).
+        let ids = compact.nodes_by_label("Item");
+        assert_eq!(ids.len(), 2);
+        let mut temps: Vec<String> = ids
+            .iter()
+            .filter_map(|&id| {
+                compact
+                    .get_node_property(id, &PropertyKey::new("temp"))
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+            })
+            .collect();
+        temps.sort();
+        assert_eq!(temps, vec!["-10", "5"]);
+    }
+
+    #[test]
+    fn test_from_graph_store_float_falls_back_to_dict() {
+        use crate::graph::lpg::LpgStore;
+
+        let store = LpgStore::new().unwrap();
+
+        let a = store.create_node(&["Sensor"]);
+        store.set_node_property(a, "reading", Value::Float64(98.6));
+
+        let compact = from_graph_store(&store).unwrap();
+
+        let ids = compact.nodes_by_label("Sensor");
+        assert_eq!(ids.len(), 1);
+
+        // Float64 falls back to Dict, serialized as string.
+        let val = compact
+            .get_node_property(ids[0], &PropertyKey::new("reading"))
+            .unwrap();
+        match val {
+            Value::String(s) => assert!(s.contains("98.6"), "expected '98.6' in '{s}'"),
+            other => panic!("expected String (Dict fallback), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_from_graph_store_mixed_types_fall_back_to_dict() {
+        use crate::graph::lpg::LpgStore;
+
+        let store = LpgStore::new().unwrap();
+
+        // Same property key with different types across nodes.
+        let a = store.create_node(&["Thing"]);
+        store.set_node_property(a, "value", Value::Int64(42));
+
+        let b = store.create_node(&["Thing"]);
+        store.set_node_property(b, "value", Value::Bool(true));
+
+        let compact = from_graph_store(&store).unwrap();
+
+        // Mixed Int64 + Bool should fall back to Dict.
+        let ids = compact.nodes_by_label("Thing");
+        assert_eq!(ids.len(), 2);
+
+        for &id in &ids {
+            let val = compact
+                .get_node_property(id, &PropertyKey::new("value"))
+                .unwrap();
+            // All values should be strings (Dict encoding).
+            assert!(
+                matches!(val, Value::String(_)),
+                "expected String (Dict fallback), got {val:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_from_graph_store_sparse_properties() {
+        use crate::graph::lpg::LpgStore;
+
+        let store = LpgStore::new().unwrap();
+
+        // Node A has both properties.
+        let a = store.create_node(&["Item"]);
+        store.set_node_property(a, "name", Value::from("alpha"));
+        store.set_node_property(a, "score", Value::Int64(10));
+
+        // Node B has only 'name', no 'score'.
+        let b = store.create_node(&["Item"]);
+        store.set_node_property(b, "name", Value::from("beta"));
+
+        // Node C has only 'score', no 'name'.
+        let c = store.create_node(&["Item"]);
+        store.set_node_property(c, "score", Value::Int64(20));
+
+        let compact = from_graph_store(&store).unwrap();
+
+        let ids = compact.nodes_by_label("Item");
+        assert_eq!(ids.len(), 3);
+
+        // All nodes should exist and have the properties they were given.
+        // Missing properties should be null-padded (0 for BitPacked, "" for Dict).
+        let mut name_count = 0;
+        let mut score_count = 0;
+        for &id in &ids {
+            if let Some(Value::String(s)) = compact.get_node_property(id, &PropertyKey::new("name"))
+                && !s.is_empty()
+            {
+                name_count += 1;
+            }
+            if let Some(Value::Int64(n)) = compact.get_node_property(id, &PropertyKey::new("score"))
+                && n > 0
+            {
+                score_count += 1;
+            }
+        }
+        // Two nodes have real names, two have real scores.
+        assert_eq!(name_count, 2);
+        assert_eq!(score_count, 2);
+    }
+
+    #[test]
+    fn test_from_graph_store_multi_label_nodes() {
+        use crate::graph::lpg::LpgStore;
+
+        let store = LpgStore::new().unwrap();
+
+        let a = store.create_node(&["Person", "Actor"]);
+        store.set_node_property(a, "name", Value::from("Vincent"));
+
+        let b = store.create_node(&["Person"]);
+        store.set_node_property(b, "name", Value::from("Jules"));
+
+        let compact = from_graph_store(&store).unwrap();
+
+        // Single-label node goes to "Person" table.
+        let person_ids = compact.nodes_by_label("Person");
+        assert_eq!(person_ids.len(), 1);
+
+        // Multi-label node goes to "Actor|Person" compound table.
+        let compound_ids = compact.nodes_by_label("Actor|Person");
+        assert_eq!(compound_ids.len(), 1);
+
+        // Verify the multi-label node's property survived.
+        let val = compact
+            .get_node_property(compound_ids[0], &PropertyKey::new("name"))
+            .unwrap();
+        assert_eq!(val, Value::String(ArcStr::from("Vincent")));
+    }
+
+    #[test]
+    fn test_from_graph_store_all_null_column() {
+        use crate::graph::lpg::LpgStore;
+
+        let store = LpgStore::new().unwrap();
+
+        // Two nodes with different property keys, creating gaps.
+        let a = store.create_node(&["Item"]);
+        store.set_node_property(a, "x", Value::Int64(1));
+
+        let b = store.create_node(&["Item"]);
+        store.set_node_property(b, "y", Value::Int64(2));
+
+        let compact = from_graph_store(&store).unwrap();
+
+        let ids = compact.nodes_by_label("Item");
+        assert_eq!(ids.len(), 2);
+
+        // Node a has 'x' but 'y' is null-padded.
+        // Node b has 'y' but 'x' is null-padded.
+        // This exercises the null-padding logic for sparse properties.
+    }
+
+    #[test]
+    fn test_infer_type_all_nulls() {
+        assert_eq!(
+            infer_type_from_values(&[Value::Null, Value::Null]),
+            InferredType::Dict
+        );
+    }
+
+    #[test]
+    fn test_infer_type_int_only() {
+        assert_eq!(
+            infer_type_from_values(&[Value::Int64(5), Value::Int64(10)]),
+            InferredType::BitPacked
+        );
+    }
+
+    #[test]
+    fn test_infer_type_bool_only() {
+        assert_eq!(
+            infer_type_from_values(&[Value::Bool(true), Value::Bool(false)]),
+            InferredType::Bitmap
+        );
+    }
+
+    #[test]
+    fn test_infer_type_mixed_int_bool() {
+        assert_eq!(
+            infer_type_from_values(&[Value::Int64(1), Value::Bool(true)]),
+            InferredType::Dict
+        );
+    }
+
+    #[test]
+    fn test_infer_type_negative_int() {
+        assert_eq!(
+            infer_type_from_values(&[Value::Int64(-5), Value::Int64(10)]),
+            InferredType::Dict
+        );
+    }
+
+    #[test]
+    fn test_infer_type_float() {
+        assert_eq!(
+            infer_type_from_values(&[Value::Float64(1.5)]),
+            InferredType::Dict
+        );
+    }
+
+    #[test]
+    fn test_infer_type_int_with_nulls() {
+        assert_eq!(
+            infer_type_from_values(&[Value::Int64(5), Value::Null, Value::Int64(10)]),
+            InferredType::BitPacked
+        );
     }
 }

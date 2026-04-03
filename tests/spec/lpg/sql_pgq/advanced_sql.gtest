@@ -1,0 +1,251 @@
+# SQL/PGQ Advanced SQL Features
+#
+# Covers: window functions (OVER clause), CTEs (WITH clause),
+# scalar subqueries, CASE in SQL context, COALESCE, NULLIF.
+# Tests features expected by SQL-proficient users.
+# Uses movie_database for rich aggregation scenarios.
+
+meta:
+  language: sql-pgq
+  model: lpg
+  section: advanced
+  title: Advanced SQL features
+  dataset: movie_database
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # Window functions: ROW_NUMBER
+  # ---------------------------------------------------------------------------
+
+  - name: row_number_basic
+    skip: "window functions not implemented"
+    query: |
+      SELECT title, rating, ROW_NUMBER() OVER (ORDER BY rating DESC) AS rank
+      FROM GRAPH_TABLE (
+        MATCH (m:Movie)
+        COLUMNS (m.title AS title, m.rating AS rating)
+      )
+    expect:
+      ordered: true
+      rows:
+        - [Berlin Express, 8.7, 1]
+        - [The Heist, 8.2, 2]
+        - [The Algorithm, 8.0, 3]
+        - [Midnight Code, 7.5, 4]
+        - [Prague Nights, 6.9, 5]
+
+  - name: row_number_partition_by_genre
+    skip: "window functions not implemented"
+    query: |
+      SELECT genre, title, rating,
+        ROW_NUMBER() OVER (PARTITION BY genre ORDER BY rating DESC) AS genre_rank
+      FROM GRAPH_TABLE (
+        MATCH (m:Movie)-[:HAS_GENRE]->(g:Genre)
+        COLUMNS (g.name AS genre, m.title AS title, m.rating AS rating)
+      )
+    expect:
+      count: 10
+
+  # ---------------------------------------------------------------------------
+  # Window functions: RANK / DENSE_RANK
+  # ---------------------------------------------------------------------------
+
+  - name: rank_movies
+    skip: "window functions not implemented"
+    query: |
+      SELECT title, box_office,
+        RANK() OVER (ORDER BY box_office DESC) AS revenue_rank
+      FROM GRAPH_TABLE (
+        MATCH (m:Movie)
+        COLUMNS (m.title AS title, m.box_office AS box_office)
+      )
+    expect:
+      ordered: true
+      count: 5
+
+  # ---------------------------------------------------------------------------
+  # Window functions: SUM/AVG OVER
+  # ---------------------------------------------------------------------------
+
+  - name: running_total_box_office
+    skip: "window functions not implemented"
+    query: |
+      SELECT title, year, box_office,
+        SUM(box_office) OVER (ORDER BY year) AS cumulative_revenue
+      FROM GRAPH_TABLE (
+        MATCH (m:Movie)
+        COLUMNS (m.title AS title, m.year AS year, m.box_office AS box_office)
+      )
+    expect:
+      ordered: true
+      count: 5
+
+  - name: avg_rating_over_partition
+    skip: "window functions not implemented"
+    query: |
+      SELECT genre, title, rating,
+        AVG(rating) OVER (PARTITION BY genre) AS genre_avg
+      FROM GRAPH_TABLE (
+        MATCH (m:Movie)-[:HAS_GENRE]->(g:Genre)
+        COLUMNS (g.name AS genre, m.title AS title, m.rating AS rating)
+      )
+    expect:
+      count: 10
+
+  # ---------------------------------------------------------------------------
+  # CTEs (WITH clause)
+  # ---------------------------------------------------------------------------
+
+  - name: cte_basic
+    skip: "CTEs not implemented"
+    query: |
+      WITH movie_stats AS (
+        SELECT title, rating
+        FROM GRAPH_TABLE (
+          MATCH (m:Movie)
+          COLUMNS (m.title AS title, m.rating AS rating)
+        )
+      )
+      SELECT title FROM movie_stats WHERE rating > 8.0 ORDER BY title
+    expect:
+      ordered: true
+      rows:
+        - [Berlin Express]
+        - [The Heist]
+
+  - name: cte_with_aggregation
+    skip: "CTEs not implemented"
+    query: |
+      WITH genre_counts AS (
+        SELECT genre, COUNT(*) AS cnt
+        FROM GRAPH_TABLE (
+          MATCH (m:Movie)-[:HAS_GENRE]->(g:Genre)
+          COLUMNS (g.name AS genre)
+        )
+        GROUP BY genre
+      )
+      SELECT genre, cnt FROM genre_counts ORDER BY cnt DESC, genre
+    expect:
+      ordered: true
+      rows:
+        - [Drama, 3]
+        - [Thriller, 3]
+        - [Action, 2]
+        - [SciFi, 2]
+
+  - name: cte_multiple
+    skip: "CTEs not implemented"
+    query: |
+      WITH actors AS (
+        SELECT actor, movie
+        FROM GRAPH_TABLE (
+          MATCH (a:Actor)-[:ACTED_IN]->(m:Movie)
+          COLUMNS (a.name AS actor, m.title AS movie)
+        )
+      ),
+      directors AS (
+        SELECT director, movie
+        FROM GRAPH_TABLE (
+          MATCH (d:Director)-[:DIRECTED]->(m:Movie)
+          COLUMNS (d.name AS director, m.title AS movie)
+        )
+      )
+      SELECT actors.actor, directors.director, actors.movie
+      FROM actors JOIN directors ON actors.movie = directors.movie
+      WHERE actors.actor = 'Vincent'
+      ORDER BY actors.movie
+    expect:
+      ordered: true
+      count: 2
+
+  # ---------------------------------------------------------------------------
+  # Scalar subqueries
+  # ---------------------------------------------------------------------------
+
+  - name: scalar_subquery_in_select
+    skip: "scalar subqueries not implemented"
+    query: |
+      SELECT title, rating,
+        (SELECT AVG(rating) FROM GRAPH_TABLE (
+          MATCH (m2:Movie) COLUMNS (m2.rating AS rating)
+        )) AS avg_rating
+      FROM GRAPH_TABLE (
+        MATCH (m:Movie)
+        COLUMNS (m.title AS title, m.rating AS rating)
+      )
+      WHERE rating > 8.0
+      ORDER BY title
+    expect:
+      ordered: true
+      count: 2
+
+  - name: scalar_subquery_in_where
+    skip: "scalar subqueries not implemented"
+    query: |
+      SELECT title, rating
+      FROM GRAPH_TABLE (
+        MATCH (m:Movie)
+        COLUMNS (m.title AS title, m.rating AS rating)
+      )
+      WHERE rating > (
+        SELECT AVG(rating) FROM GRAPH_TABLE (
+          MATCH (m2:Movie) COLUMNS (m2.rating AS rating)
+        )
+      )
+      ORDER BY rating DESC
+    expect:
+      ordered: true
+      count: 3
+
+  # ---------------------------------------------------------------------------
+  # CASE in SQL context
+  # ---------------------------------------------------------------------------
+
+  - name: case_expression_in_sql
+    query: |
+      SELECT title,
+        CASE
+          WHEN box_office > budget * 3 THEN 'blockbuster'
+          WHEN box_office > budget THEN 'profitable'
+          ELSE 'flop'
+        END AS category
+      FROM GRAPH_TABLE (
+        MATCH (m:Movie)
+        COLUMNS (m.title AS title, m.budget AS budget, m.box_office AS box_office)
+      )
+      ORDER BY title
+    expect:
+      ordered: true
+      count: 5
+
+  # ---------------------------------------------------------------------------
+  # COALESCE and NULLIF
+  # ---------------------------------------------------------------------------
+
+  - name: coalesce_with_null
+    skip: "COALESCE in SQL context not implemented"
+    setup:
+      - "INSERT (:Movie {title: 'Unknown Budget', year: 2025, rating: 5.0})"
+    query: |
+      SELECT title, COALESCE(budget, 0) AS safe_budget
+      FROM GRAPH_TABLE (
+        MATCH (m:Movie)
+        COLUMNS (m.title AS title, m.budget AS budget)
+      )
+      WHERE title = 'Unknown Budget'
+    expect:
+      rows:
+        - [Unknown Budget, 0]
+
+  - name: nullif_same_values
+    query: |
+      SELECT title, NULLIF(year, 2020) AS non_2020
+      FROM GRAPH_TABLE (
+        MATCH (m:Movie)
+        COLUMNS (m.title AS title, m.year AS year)
+      )
+      WHERE title = 'The Heist'
+    expect:
+      rows:
+        - [The Heist, null]

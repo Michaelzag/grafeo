@@ -1,0 +1,361 @@
+# Common String Operations and Unicode Handling
+#
+# Covers: case conversion, concatenation, substring, length,
+# trim/ltrim/rtrim, replace, split, unicode characters, multi-byte strings.
+
+meta:
+  language: gql
+  model: lpg
+  section: strings
+  title: String operations
+  dataset: empty
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # Case conversion
+  # ---------------------------------------------------------------------------
+
+  - name: to_upper
+    setup:
+      - "INSERT (:N {v: 'hello world'})"
+    query: "MATCH (n:N) RETURN toUpper(n.v) AS val"
+    expect:
+      rows:
+        - [HELLO WORLD]
+
+  - name: to_lower
+    setup:
+      - "INSERT (:N {v: 'HELLO WORLD'})"
+    query: "MATCH (n:N) RETURN toLower(n.v) AS val"
+    expect:
+      rows:
+        - [hello world]
+
+  - name: to_upper_already_upper
+    setup:
+      - "INSERT (:N {v: 'ABC'})"
+    query: "MATCH (n:N) RETURN toUpper(n.v) AS val"
+    expect:
+      rows:
+        - [ABC]
+
+  - name: to_lower_mixed
+    setup:
+      - "INSERT (:N {v: 'HeLLo'})"
+    query: "MATCH (n:N) RETURN toLower(n.v) AS val"
+    expect:
+      rows:
+        - [hello]
+
+  # ---------------------------------------------------------------------------
+  # String length
+  # ---------------------------------------------------------------------------
+
+  - name: char_length_basic
+    setup:
+      - "INSERT (:N {v: 'hello'})"
+    query: "MATCH (n:N) RETURN char_length(n.v) AS len"
+    expect:
+      rows:
+        - [5]
+
+  - name: char_length_empty
+    setup:
+      - "INSERT (:N {v: ''})"
+    query: "MATCH (n:N) RETURN char_length(n.v) AS len"
+    expect:
+      rows:
+        - [0]
+
+  - name: char_length_with_spaces
+    setup:
+      - "INSERT (:N {v: '  hi  '})"
+    query: "MATCH (n:N) RETURN char_length(n.v) AS len"
+    expect:
+      rows:
+        - [6]
+
+  # ---------------------------------------------------------------------------
+  # Substring
+  # ---------------------------------------------------------------------------
+
+  - name: substring_from_start
+    setup:
+      - "INSERT (:N {v: 'Amsterdam'})"
+    query: "MATCH (n:N) RETURN substring(n.v, 0, 4) AS val"
+    expect:
+      rows:
+        - [Amst]
+
+  - name: substring_from_middle
+    setup:
+      - "INSERT (:N {v: 'Amsterdam'})"
+    query: "MATCH (n:N) RETURN substring(n.v, 5) AS val"
+    expect:
+      rows:
+        - [rdam]
+
+  - name: substring_entire_string
+    setup:
+      - "INSERT (:N {v: 'hello'})"
+    query: "MATCH (n:N) RETURN substring(n.v, 0) AS val"
+    expect:
+      rows:
+        - [hello]
+
+  - name: substring_beyond_length
+    setup:
+      - "INSERT (:N {v: 'hi'})"
+    query: "MATCH (n:N) RETURN substring(n.v, 0, 100) AS val"
+    expect:
+      rows:
+        - [hi]
+
+  # ---------------------------------------------------------------------------
+  # left() and right()
+  # ---------------------------------------------------------------------------
+
+  - name: left_basic
+    setup:
+      - "INSERT (:N {v: 'Amsterdam'})"
+    query: "MATCH (n:N) RETURN left(n.v, 3) AS val"
+    expect:
+      rows:
+        - [Ams]
+
+  - name: right_basic
+    setup:
+      - "INSERT (:N {v: 'Amsterdam'})"
+    query: "MATCH (n:N) RETURN right(n.v, 3) AS val"
+    expect:
+      rows:
+        - [dam]
+
+  - name: left_zero
+    setup:
+      - "INSERT (:N {v: 'hello'})"
+    query: "MATCH (n:N) RETURN left(n.v, 0) AS val"
+    expect:
+      rows:
+        - [""]
+
+  - name: right_exceeds_length
+    setup:
+      - "INSERT (:N {v: 'hi'})"
+    query: "MATCH (n:N) RETURN right(n.v, 100) AS val"
+    expect:
+      rows:
+        - [hi]
+
+  # ---------------------------------------------------------------------------
+  # Trim
+  # ---------------------------------------------------------------------------
+
+  - name: trim_both
+    setup:
+      - "INSERT (:N {v: '  hello  '})"
+    query: "MATCH (n:N) RETURN trim(n.v) AS val"
+    expect:
+      rows:
+        - [hello]
+
+  - name: ltrim_basic
+    setup:
+      - "INSERT (:N {v: '  hello  '})"
+    query: "MATCH (n:N) RETURN ltrim(n.v) AS val"
+    expect:
+      rows:
+        - ["hello  "]
+
+  - name: rtrim_basic
+    setup:
+      - "INSERT (:N {v: '  hello  '})"
+    query: "MATCH (n:N) RETURN rtrim(n.v) AS val"
+    expect:
+      rows:
+        - ["  hello"]
+
+  - name: trim_no_whitespace
+    setup:
+      - "INSERT (:N {v: 'clean'})"
+    query: "MATCH (n:N) RETURN trim(n.v) AS val"
+    expect:
+      rows:
+        - [clean]
+
+  # ---------------------------------------------------------------------------
+  # Replace
+  # ---------------------------------------------------------------------------
+
+  - name: replace_basic
+    setup:
+      - "INSERT (:N {v: 'hello world'})"
+    query: "MATCH (n:N) RETURN replace(n.v, 'world', 'grafeo') AS val"
+    expect:
+      rows:
+        - [hello grafeo]
+
+  - name: replace_all_occurrences
+    setup:
+      - "INSERT (:N {v: 'aaa'})"
+    query: "MATCH (n:N) RETURN replace(n.v, 'a', 'b') AS val"
+    expect:
+      rows:
+        - [bbb]
+
+  - name: replace_not_found
+    setup:
+      - "INSERT (:N {v: 'hello'})"
+    query: "MATCH (n:N) RETURN replace(n.v, 'xyz', 'abc') AS val"
+    expect:
+      rows:
+        - [hello]
+
+  - name: replace_with_empty
+    setup:
+      - "INSERT (:N {v: 'hello world'})"
+    query: "MATCH (n:N) RETURN replace(n.v, ' world', '') AS val"
+    expect:
+      rows:
+        - [hello]
+
+  # ---------------------------------------------------------------------------
+  # Split
+  # ---------------------------------------------------------------------------
+
+  - name: split_basic
+    setup:
+      - "INSERT (:N {v: 'a,b,c'})"
+    query: "MATCH (n:N) RETURN split(n.v, ',') AS parts"
+    expect:
+      rows:
+        - ["[a, b, c]"]
+
+  - name: split_no_delimiter
+    setup:
+      - "INSERT (:N {v: 'hello'})"
+    query: "MATCH (n:N) RETURN split(n.v, ',') AS parts"
+    expect:
+      rows:
+        - ["[hello]"]
+
+  - name: split_empty_string
+    setup:
+      - "INSERT (:N {v: ''})"
+    query: "MATCH (n:N) RETURN split(n.v, ',') AS parts"
+    expect:
+      rows:
+        - ["[]"]
+
+  # ---------------------------------------------------------------------------
+  # String concatenation
+  # ---------------------------------------------------------------------------
+
+  - name: concat_operator
+    setup:
+      - "INSERT (:N {first: 'Alix', last: 'van Berg'})"
+    query: "MATCH (n:N) RETURN n.first + ' ' + n.last AS full_name"
+    expect:
+      rows:
+        - [Alix van Berg]
+
+  - name: concat_with_number_cast
+    skip: "CAST in string concatenation"
+    setup:
+      - "INSERT (:N {name: 'Alix', age: 30})"
+    query: "MATCH (n:N) RETURN n.name + ' is ' + CAST(n.age AS STRING) AS desc"
+    expect:
+      rows:
+        - [Alix is 30]
+
+  # ---------------------------------------------------------------------------
+  # Unicode and multi-byte characters
+  # ---------------------------------------------------------------------------
+
+  - name: unicode_emoji_roundtrip
+    setup:
+      - "INSERT (:N {v: 'hello \\U0001F600 world'})"
+    query: "MATCH (n:N) RETURN n.v AS val"
+    expect:
+      count: 1
+
+  - name: unicode_cjk_characters
+    setup:
+      - "INSERT (:City {name: 'Tokyo'})"
+    query: "MATCH (c:City {name: 'Tokyo'}) RETURN c.name"
+    expect:
+      rows:
+        - [Tokyo]
+
+  - name: unicode_accented_characters
+    setup:
+      - "INSERT (:City {name: 'Zurich'})"
+    query: "MATCH (c:City {name: 'Zurich'}) RETURN c.name"
+    expect:
+      rows:
+        - [Zurich]
+
+  - name: empty_string_property
+    setup:
+      - "INSERT (:N {v: ''})"
+    query: "MATCH (n:N) RETURN n.v AS val, char_length(n.v) AS len"
+    expect:
+      rows:
+        - ["", 0]
+
+  # ---------------------------------------------------------------------------
+  # NULL string operations
+  # ---------------------------------------------------------------------------
+
+  - name: to_upper_null
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN toUpper(null) AS val"
+    expect:
+      rows:
+        - [null]
+
+  - name: concat_with_null
+    setup:
+      - "INSERT (:N {name: 'Alix'})"
+    query: "MATCH (n:N) RETURN n.name + n.missing AS val"
+    expect:
+      rows:
+        - [null]
+
+  - name: char_length_null
+    setup:
+      - "INSERT (:N {v: 1})"
+    query: "MATCH (n:N) RETURN char_length(null) AS val"
+    expect:
+      rows:
+        - [null]
+
+  # ---------------------------------------------------------------------------
+  # Reverse
+  # ---------------------------------------------------------------------------
+
+  - name: reverse_basic
+    setup:
+      - "INSERT (:N {v: 'hello'})"
+    query: "MATCH (n:N) RETURN reverse(n.v) AS val"
+    expect:
+      rows:
+        - [olleh]
+
+  - name: reverse_palindrome
+    setup:
+      - "INSERT (:N {v: 'racecar'})"
+    query: "MATCH (n:N) RETURN reverse(n.v) AS val"
+    expect:
+      rows:
+        - [racecar]
+
+  - name: reverse_empty
+    setup:
+      - "INSERT (:N {v: ''})"
+    query: "MATCH (n:N) RETURN reverse(n.v) AS val"
+    expect:
+      rows:
+        - [""]

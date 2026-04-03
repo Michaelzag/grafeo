@@ -1,0 +1,160 @@
+# Cypher Constraints and Schema Enforcement
+#
+# Covers: UNIQUE constraints, NOT NULL constraints, PROPERTY EXISTENCE,
+# NODE KEY constraints, constraint violation errors, DROP CONSTRAINT.
+# Essential for production data integrity.
+
+meta:
+  language: cypher
+  model: lpg
+  section: constraints
+  title: Schema constraints
+  dataset: empty
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # CREATE UNIQUE constraint
+  # ---------------------------------------------------------------------------
+
+  - name: create_unique_constraint
+    query: "CREATE CONSTRAINT unique_person_email FOR (p:Person) REQUIRE p.email IS UNIQUE"
+    expect:
+      count: 0
+
+  - name: unique_constraint_allows_distinct_values
+    setup:
+      - "CREATE CONSTRAINT unique_email FOR (p:Person) REQUIRE p.email IS UNIQUE"
+      - "CREATE (:Person {name: 'Alix', email: 'alix@example.org'})"
+    query: |
+      CREATE (:Person {name: 'Gus', email: 'gus@example.org'})
+      RETURN count(*) AS cnt
+    expect:
+      count: 1
+
+  - name: unique_constraint_violation
+    setup:
+      - "CREATE CONSTRAINT unique_email FOR (p:Person) REQUIRE p.email IS UNIQUE"
+      - "CREATE (:Person {name: 'Alix', email: 'alix@example.org'})"
+    query: "CREATE (:Person {name: 'Duplicate', email: 'alix@example.org'})"
+    expect:
+      error: "constraint"
+
+  - name: unique_constraint_null_allowed
+    setup:
+      - "CREATE CONSTRAINT unique_email FOR (p:Person) REQUIRE p.email IS UNIQUE"
+      - "CREATE (:Person {name: 'Alix'})"
+    query: |
+      CREATE (:Person {name: 'Gus'})
+      RETURN count(*) AS cnt
+    expect:
+      count: 1
+
+  # ---------------------------------------------------------------------------
+  # NOT NULL / PROPERTY EXISTENCE constraint
+  # ---------------------------------------------------------------------------
+
+  - name: create_not_null_constraint
+    query: "CREATE CONSTRAINT person_name_exists FOR (p:Person) REQUIRE p.name IS NOT NULL"
+    expect:
+      count: 0
+
+  - name: not_null_constraint_satisfied
+    setup:
+      - "CREATE CONSTRAINT person_name_not_null FOR (p:Person) REQUIRE p.name IS NOT NULL"
+    query: |
+      CREATE (:Person {name: 'Alix', age: 30})
+      RETURN count(*) AS cnt
+    expect:
+      count: 1
+
+  - name: not_null_constraint_violation
+    setup:
+      - "CREATE CONSTRAINT person_name_not_null FOR (p:Person) REQUIRE p.name IS NOT NULL"
+    query: "CREATE (:Person {age: 30})"
+    expect:
+      error: "constraint"
+
+  - name: not_null_constraint_violation_on_set
+    skip: "constraint check on REMOVE"
+    setup:
+      - "CREATE CONSTRAINT person_name_not_null FOR (p:Person) REQUIRE p.name IS NOT NULL"
+      - "CREATE (:Person {name: 'Alix'})"
+    query: "MATCH (p:Person {name: 'Alix'}) REMOVE p.name"
+    expect:
+      error: "constraint"
+
+  # ---------------------------------------------------------------------------
+  # NODE KEY constraint (composite unique + not null)
+  # ---------------------------------------------------------------------------
+
+  - name: create_node_key_constraint
+    query: "CREATE CONSTRAINT person_key FOR (p:Person) REQUIRE (p.name, p.city) IS NODE KEY"
+    expect:
+      count: 0
+
+  - name: node_key_allows_different_combinations
+    skip: "NODE KEY constraint not implemented"
+    setup:
+      - "CREATE CONSTRAINT person_key FOR (p:Person) REQUIRE (p.name, p.city) IS NODE KEY"
+      - "CREATE (:Person {name: 'Alix', city: 'Amsterdam'})"
+    query: |
+      CREATE (:Person {name: 'Alix', city: 'Berlin'})
+      RETURN count(*) AS cnt
+    expect:
+      count: 1
+
+  - name: node_key_violation_duplicate
+    setup:
+      - "CREATE CONSTRAINT person_key FOR (p:Person) REQUIRE (p.name, p.city) IS NODE KEY"
+      - "CREATE (:Person {name: 'Alix', city: 'Amsterdam'})"
+    query: "CREATE (:Person {name: 'Alix', city: 'Amsterdam'})"
+    expect:
+      error: "constraint"
+
+  - name: node_key_violation_missing_property
+    skip: "NODE KEY constraint not implemented"
+    setup:
+      - "CREATE CONSTRAINT person_key FOR (p:Person) REQUIRE (p.name, p.city) IS NODE KEY"
+    query: "CREATE (:Person {name: 'Alix'})"
+    expect:
+      error: "constraint"
+
+  # ---------------------------------------------------------------------------
+  # DROP CONSTRAINT
+  # ---------------------------------------------------------------------------
+
+  - name: drop_constraint
+    setup:
+      - "CREATE CONSTRAINT my_constraint FOR (p:Person) REQUIRE p.email IS UNIQUE"
+    query: "DROP CONSTRAINT my_constraint"
+    expect:
+      count: 0
+
+  - name: drop_nonexistent_constraint
+    skip: "error on missing constraint"
+    query: "DROP CONSTRAINT no_such_constraint"
+    expect:
+      error: "constraint"
+
+  - name: drop_constraint_if_exists
+    query: "DROP CONSTRAINT no_such_constraint IF EXISTS"
+    expect:
+      count: 0
+
+  # ---------------------------------------------------------------------------
+  # SHOW CONSTRAINTS
+  # ---------------------------------------------------------------------------
+
+  - name: show_constraints_after_create
+    skip: "SHOW CONSTRAINTS not implemented"
+    setup:
+      - "CREATE CONSTRAINT unique_email FOR (p:Person) REQUIRE p.email IS UNIQUE"
+    query: "SHOW CONSTRAINTS"
+    expect:
+      count: 1
+
+  - name: show_constraints_empty
+    query: "SHOW CONSTRAINTS"
+    expect:
+      empty: true

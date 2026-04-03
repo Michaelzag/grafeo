@@ -1,0 +1,37 @@
+# Transportation Network Dataset
+# 6 Cities, 10 Routes (directed, weighted), 3 Airports
+# Topology: City -[ROUTE {distance_km, duration_h, mode}]-> City
+#           City -[HAS_AIRPORT]-> Airport
+#
+# Use case: shortest path, weighted traversals, graph algorithms,
+#           connectivity analysis, multi-modal routing
+
+INSERT (:City {name: 'Amsterdam', country: 'Netherlands', population: 905234, lat: 52.3676, lon: 4.9041})
+INSERT (:City {name: 'Berlin', country: 'Germany', population: 3748148, lat: 52.5200, lon: 13.4050})
+INSERT (:City {name: 'Paris', country: 'France', population: 2161000, lat: 48.8566, lon: 2.3522})
+INSERT (:City {name: 'Prague', country: 'Czechia', population: 1309000, lat: 50.0755, lon: 14.4378})
+INSERT (:City {name: 'Barcelona', country: 'Spain', population: 1636762, lat: 41.3874, lon: 2.1686})
+INSERT (:City {name: 'Brussels', country: 'Belgium', population: 1218255, lat: 50.8503, lon: 4.3517})
+
+INSERT (:Airport {code: 'AMS', name: 'Schiphol', terminals: 3})
+INSERT (:Airport {code: 'CDG', name: 'Charles de Gaulle', terminals: 4})
+INSERT (:Airport {code: 'TXL', name: 'Berlin Brandenburg', terminals: 2})
+
+MATCH (c:City {name: 'Amsterdam'}), (a:Airport {code: 'AMS'}) INSERT (c)-[:HAS_AIRPORT]->(a)
+MATCH (c:City {name: 'Paris'}), (a:Airport {code: 'CDG'}) INSERT (c)-[:HAS_AIRPORT]->(a)
+MATCH (c:City {name: 'Berlin'}), (a:Airport {code: 'TXL'}) INSERT (c)-[:HAS_AIRPORT]->(a)
+
+MATCH (a:City {name: 'Amsterdam'}), (b:City {name: 'Berlin'}) INSERT (a)-[:ROUTE {distance_km: 660, duration_h: 6.5, mode: 'train'}]->(b)
+MATCH (b:City {name: 'Berlin'}), (a:City {name: 'Amsterdam'}) INSERT (b)-[:ROUTE {distance_km: 660, duration_h: 6.5, mode: 'train'}]->(a)
+MATCH (a:City {name: 'Amsterdam'}), (p:City {name: 'Paris'}) INSERT (a)-[:ROUTE {distance_km: 500, duration_h: 3.5, mode: 'train'}]->(p)
+MATCH (p:City {name: 'Paris'}), (a:City {name: 'Amsterdam'}) INSERT (p)-[:ROUTE {distance_km: 500, duration_h: 3.5, mode: 'train'}]->(a)
+MATCH (a:City {name: 'Amsterdam'}), (b:City {name: 'Brussels'}) INSERT (a)-[:ROUTE {distance_km: 210, duration_h: 2.0, mode: 'train'}]->(b)
+MATCH (b:City {name: 'Brussels'}), (a:City {name: 'Amsterdam'}) INSERT (b)-[:ROUTE {distance_km: 210, duration_h: 2.0, mode: 'train'}]->(a)
+MATCH (b:City {name: 'Berlin'}), (p:City {name: 'Prague'}) INSERT (b)-[:ROUTE {distance_km: 350, duration_h: 4.5, mode: 'train'}]->(p)
+MATCH (p:City {name: 'Prague'}), (b:City {name: 'Berlin'}) INSERT (p)-[:ROUTE {distance_km: 350, duration_h: 4.5, mode: 'train'}]->(b)
+MATCH (p:City {name: 'Paris'}), (c:City {name: 'Barcelona'}) INSERT (p)-[:ROUTE {distance_km: 1040, duration_h: 6.5, mode: 'train'}]->(c)
+MATCH (c:City {name: 'Barcelona'}), (p:City {name: 'Paris'}) INSERT (c)-[:ROUTE {distance_km: 1040, duration_h: 6.5, mode: 'train'}]->(p)
+MATCH (b:City {name: 'Brussels'}), (p:City {name: 'Paris'}) INSERT (b)-[:ROUTE {distance_km: 320, duration_h: 1.5, mode: 'train'}]->(p)
+MATCH (p:City {name: 'Paris'}), (b:City {name: 'Brussels'}) INSERT (p)-[:ROUTE {distance_km: 320, duration_h: 1.5, mode: 'train'}]->(b)
+MATCH (a:City {name: 'Amsterdam'}), (c:City {name: 'Barcelona'}) INSERT (a)-[:ROUTE {distance_km: 1540, duration_h: 2.5, mode: 'flight'}]->(c)
+MATCH (c:City {name: 'Barcelona'}), (a:City {name: 'Amsterdam'}) INSERT (c)-[:ROUTE {distance_km: 1540, duration_h: 2.5, mode: 'flight'}]->(a)

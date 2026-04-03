@@ -1,0 +1,136 @@
+# Production Graph Algorithms
+#
+# Algorithm queries on real-world datasets using CALL grafeo.<algo>() syntax.
+# Tests weighted shortest paths, connectivity, centrality on the
+# transportation and movie datasets.
+
+meta:
+  language: gql
+  model: lpg
+  section: algorithms_prod
+  title: Production graph algorithms
+  dataset: transportation
+  requires: [algos]
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # Dijkstra on transportation network
+  # ---------------------------------------------------------------------------
+
+  - name: dijkstra_from_amsterdam_unweighted
+    query: "CALL grafeo.dijkstra(0)"
+    expect:
+      columns: [node_id, distance]
+      count: 9
+
+  - name: dijkstra_from_amsterdam_weighted
+    query: "CALL grafeo.dijkstra({source: 0, weight: 'distance_km'})"
+    expect:
+      count: 9
+
+  - name: dijkstra_single_pair
+    query: "CALL grafeo.dijkstra({source: 0, target: 3})"
+    expect:
+      count: 1
+
+  # ---------------------------------------------------------------------------
+  # PageRank on transportation
+  # ---------------------------------------------------------------------------
+
+  - name: pagerank_transportation
+    query: "CALL grafeo.pagerank()"
+    expect:
+      columns: [node_id, score]
+      count: 9
+
+  - name: pagerank_with_damping
+    query: "CALL grafeo.pagerank({damping: 0.85, max_iterations: 20})"
+    expect:
+      count: 9
+
+  # ---------------------------------------------------------------------------
+  # Connected components
+  # ---------------------------------------------------------------------------
+
+  - name: connected_components_transportation
+    query: "CALL grafeo.connected_components()"
+    expect:
+      columns: [node_id, component_id]
+      count: 9
+
+  # ---------------------------------------------------------------------------
+  # Degree centrality
+  # ---------------------------------------------------------------------------
+
+  - name: degree_centrality_transportation
+    query: "CALL grafeo.degree_centrality()"
+    expect:
+      columns: [node_id, in_degree, out_degree, total_degree]
+      count: 9
+
+  - name: degree_centrality_yield_total
+    query: "CALL grafeo.degree_centrality() YIELD total_degree"
+    expect:
+      columns: [total_degree]
+      count: 9
+
+  # ---------------------------------------------------------------------------
+  # Betweenness centrality
+  # ---------------------------------------------------------------------------
+
+  - name: betweenness_centrality_transportation
+    query: "CALL grafeo.betweenness_centrality()"
+    expect:
+      count: 9
+
+  # ---------------------------------------------------------------------------
+  # Closeness centrality
+  # ---------------------------------------------------------------------------
+
+  - name: closeness_centrality_transportation
+    query: "CALL grafeo.closeness_centrality()"
+    expect:
+      count: 9
+
+  # ---------------------------------------------------------------------------
+  # BFS
+  # ---------------------------------------------------------------------------
+
+  - name: bfs_from_first_node
+    query: "CALL grafeo.bfs(0)"
+    expect:
+      columns: [node_id, depth]
+      count: 9
+
+  # ---------------------------------------------------------------------------
+  # Strongly connected components
+  # ---------------------------------------------------------------------------
+
+  - name: scc_transportation
+    query: "CALL grafeo.strongly_connected_components()"
+    expect:
+      columns: [node_id, component_id]
+      count: 9
+
+  # ---------------------------------------------------------------------------
+  # Algorithm on movie dataset
+  # ---------------------------------------------------------------------------
+
+  - name: pagerank_movie_database
+    dataset: movie_database
+    query: "CALL grafeo.pagerank()"
+    expect:
+      count: 9
+
+  - name: connected_components_movie
+    dataset: movie_database
+    query: "CALL grafeo.connected_components()"
+    expect:
+      count: 9
+
+  - name: degree_centrality_movie
+    dataset: movie_database
+    query: "CALL grafeo.degree_centrality()"
+    expect:
+      count: 9

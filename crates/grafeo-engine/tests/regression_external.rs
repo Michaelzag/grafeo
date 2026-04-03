@@ -921,14 +921,9 @@ mod call_block_scope {
              CALL { MATCH (b:Person {name: 'Gus'}) RETURN b.age AS age_b } \
              RETURN age_a, age_b",
         );
-        assert!(
-            result.is_ok(),
-            "sibling CALL outputs should be accessible in outer RETURN, got: {result:?}"
-        );
-        // TODO: sibling CALL block outputs currently return Null instead of
-        // the actual values. Once the binder propagates outputs correctly:
-        //   assert_eq!(result.rows[0][0], Value::Int64(30));  // age_a
-        //   assert_eq!(result.rows[0][1], Value::Int64(25));  // age_b
+        let result = result.expect("sibling CALL outputs should be accessible in outer RETURN");
+        assert_eq!(result.rows[0][0], Value::Int64(30)); // age_a
+        assert_eq!(result.rows[0][1], Value::Int64(25)); // age_b
     }
 
     /// Internal variable `a` from CALL block 1 must not be visible in CALL block 2.
@@ -955,12 +950,7 @@ mod call_block_scope {
 
     /// Same-named variables in sibling CALL blocks should not conflict.
     /// Each block defines its own `n`, but exports under different aliases.
-    ///
-    /// Known issue: the second CALL block's internal `n` overwrites the binding
-    /// context from the first, causing person_name to resolve to NULL. This is
-    /// tracked as a binder scope isolation bug.
     #[test]
-    #[ignore = "known binder scope collision with same-named variables across sibling CALL blocks"]
     fn same_variable_name_in_sibling_calls_is_independent() {
         let db = db();
         let s = db.session();
@@ -3407,6 +3397,115 @@ mod order_by_aliased_property {
 }
 
 // ============================================================================
+// #218: Cypher ORDER BY returns zeros in MATCH with relationship traversal
+// ORDER BY on a property expression that duplicates a RETURN item should
+// resolve to the existing projected column, not create a broken extra
+// PropertyAccess on a non-entity column.
+// ============================================================================
+
+mod order_by_relationship_traversal_218 {
+    use super::*;
+
+    #[test]
+    fn order_by_property_matching_return_item() {
+        let db = db();
+        let s = db.session();
+        s.execute_cypher("CREATE (:Method {name: 'foo', qn: 'java://A:foo()'})")
+            .unwrap();
+        s.execute_cypher("CREATE (:Method {name: 'bar', qn: 'java://B:bar()'})")
+            .unwrap();
+        s.execute_cypher("CREATE (:Method {name: 'baz', qn: 'java://C:baz()'})")
+            .unwrap();
+        s.execute_cypher(
+            "MATCH (a:Method {name: 'foo'}), (b:Method {name: 'bar'}) CREATE (a)-[:CALLS]->(b)",
+        )
+        .unwrap();
+        s.execute_cypher(
+            "MATCH (a:Method {name: 'baz'}), (b:Method {name: 'bar'}) CREATE (a)-[:CALLS]->(b)",
+        )
+        .unwrap();
+
+        // Without ORDER BY: should return correct values
+        let r = s
+            .execute_cypher(
+                "MATCH (caller)-[:CALLS]->(target) \
+                 WHERE target.name = 'bar' \
+                 RETURN caller.name AS caller, caller.qn AS caller_qn",
+            )
+            .unwrap();
+        assert_eq!(r.row_count(), 2);
+        for row in &r.rows {
+            assert!(
+                matches!(&row[0], Value::String(s) if s == "foo" || s == "baz"),
+                "caller should be a string, got {:?}",
+                row[0]
+            );
+            assert!(
+                matches!(&row[1], Value::String(_)),
+                "caller_qn should be a string, got {:?}",
+                row[1]
+            );
+        }
+
+        // With ORDER BY on a property that matches a RETURN item expression:
+        // values must NOT become 0 and no extra spurious column should appear.
+        let r = s
+            .execute_cypher(
+                "MATCH (caller)-[:CALLS]->(target) \
+                 WHERE target.name = 'bar' \
+                 RETURN caller.name AS caller, caller.qn AS caller_qn \
+                 ORDER BY caller.name",
+            )
+            .unwrap();
+        assert_eq!(r.row_count(), 2);
+        assert_eq!(
+            r.columns.len(),
+            2,
+            "should have exactly 2 columns, got {:?}",
+            r.columns
+        );
+        // Sorted ascending by name: baz < foo
+        assert_eq!(r.rows[0][0], Value::String("baz".into()));
+        assert_eq!(r.rows[0][1], Value::String("java://C:baz()".into()));
+        assert_eq!(r.rows[1][0], Value::String("foo".into()));
+        assert_eq!(r.rows[1][1], Value::String("java://A:foo()".into()));
+    }
+
+    #[test]
+    fn order_by_desc_with_relationship_traversal() {
+        let db = db();
+        let s = db.session();
+        s.execute_cypher("CREATE (:Method {name: 'foo', qn: 'java://A:foo()'})")
+            .unwrap();
+        s.execute_cypher("CREATE (:Method {name: 'bar', qn: 'java://B:bar()'})")
+            .unwrap();
+        s.execute_cypher("CREATE (:Method {name: 'baz', qn: 'java://C:baz()'})")
+            .unwrap();
+        s.execute_cypher(
+            "MATCH (a:Method {name: 'foo'}), (b:Method {name: 'bar'}) CREATE (a)-[:CALLS]->(b)",
+        )
+        .unwrap();
+        s.execute_cypher(
+            "MATCH (a:Method {name: 'baz'}), (b:Method {name: 'bar'}) CREATE (a)-[:CALLS]->(b)",
+        )
+        .unwrap();
+
+        let r = s
+            .execute_cypher(
+                "MATCH (caller)-[:CALLS]->(target) \
+                 WHERE target.name = 'bar' \
+                 RETURN caller.name AS caller, caller.qn AS caller_qn \
+                 ORDER BY caller.name DESC",
+            )
+            .unwrap();
+        assert_eq!(r.row_count(), 2);
+        // Sorted descending: foo > baz
+        assert_eq!(r.rows[0][0], Value::String("foo".into()));
+        assert_eq!(r.rows[1][0], Value::String("baz".into()));
+    }
+}
+
+// ============================================================================
 // CALL subquery scope isolation
 // Inspired by Neo4j #13656 and Memgraph #3955: outer variables lost in CALL.
 // ============================================================================
@@ -4356,5 +4455,172 @@ mod persistence_roundtrip {
             .unwrap();
         assert_eq!(r.row_count(), 1);
         assert_eq!(r.rows[0][0], Value::Int64(42));
+    }
+}
+
+// ============================================================================
+// GROUP BY on list-valued keys (Bug 20 + Bug 24)
+// Push-based aggregator must hash lists distinctly; pull-based aggregator
+// must produce separate GroupKeyPart values for different lists.
+// ============================================================================
+
+// ============================================================================
+// ORDER BY with complex expressions should not leak synthetic columns (Bug 23)
+// ============================================================================
+
+mod order_by_synthetic_columns {
+    use super::*;
+
+    #[test]
+    fn order_by_labels_does_not_leak_expr_column() {
+        let db = db();
+        let s = db.session();
+        s.execute("INSERT (:Person {name: 'Alix'})").unwrap();
+        s.execute("INSERT (:Person {name: 'Gus'})").unwrap();
+
+        let r = s
+            .execute("MATCH (n:Person) RETURN n.name ORDER BY labels(n)[0]")
+            .unwrap();
+
+        assert_eq!(r.row_count(), 2);
+        // Should only have the 'n.name' column, no __expr_* columns
+        assert_eq!(
+            r.columns.len(),
+            1,
+            "Expected 1 column (n.name), got {}: {:?}",
+            r.columns.len(),
+            r.columns
+        );
+        for col in &r.columns {
+            assert!(
+                !col.starts_with("__expr"),
+                "Synthetic __expr column leaked into results: {col}"
+            );
+        }
+    }
+
+    #[test]
+    fn order_by_arithmetic_does_not_leak_expr_column() {
+        let db = db();
+        let s = db.session();
+        s.execute("INSERT (:Person {name: 'Alix', age: 30})")
+            .unwrap();
+        s.execute("INSERT (:Person {name: 'Gus', age: 25})")
+            .unwrap();
+
+        let r = s
+            .execute("MATCH (n:Person) RETURN n.name, n.age ORDER BY n.age + 1")
+            .unwrap();
+
+        assert_eq!(r.row_count(), 2);
+        assert_eq!(
+            r.columns.len(),
+            2,
+            "Expected 2 columns (n.name, n.age), got {}: {:?}",
+            r.columns.len(),
+            r.columns
+        );
+        for col in &r.columns {
+            assert!(
+                !col.starts_with("__expr"),
+                "Synthetic __expr column leaked into results: {col}"
+            );
+        }
+    }
+
+    #[test]
+    fn order_by_type_on_edges_does_not_leak() {
+        let db = db();
+        let s = db.session();
+        s.execute("INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})")
+            .unwrap();
+
+        let r = s
+            .execute("MATCH (a:Person)-[r]->(b:Person) RETURN a.name, b.name ORDER BY type(r)")
+            .unwrap();
+
+        assert_eq!(r.row_count(), 1);
+        for col in &r.columns {
+            assert!(
+                !col.starts_with("__expr"),
+                "Synthetic __expr column leaked into results: {col}"
+            );
+        }
+    }
+}
+
+mod group_by_list_keys {
+    use super::*;
+
+    #[test]
+    fn group_by_labels_multi_label_nodes() {
+        let db = db();
+        let s = db.session();
+        // Create nodes with different label sets
+        s.execute("INSERT (:Person {name: 'Alix'})").unwrap();
+        s.execute("INSERT (:Person:Employee {name: 'Gus'})")
+            .unwrap();
+        s.execute("INSERT (:Person:Employee {name: 'Jules'})")
+            .unwrap();
+        s.execute("INSERT (:Company {name: 'GrafeoDB'})").unwrap();
+
+        let r = s
+            .execute("MATCH (n) RETURN labels(n) AS lbl, count(*) AS cnt ORDER BY cnt DESC")
+            .unwrap();
+
+        // Should produce 3 groups: [Person, Employee] (2), [Person] (1), [Company] (1)
+        assert_eq!(
+            r.row_count(),
+            3,
+            "GROUP BY labels(n) should produce 3 distinct groups, got {}: {:?}",
+            r.row_count(),
+            r.rows
+        );
+    }
+
+    #[test]
+    fn group_by_labels_single_label_nodes() {
+        let db = db();
+        let s = db.session();
+        s.execute("INSERT (:Person {name: 'Alix'})").unwrap();
+        s.execute("INSERT (:Person {name: 'Gus'})").unwrap();
+        s.execute("INSERT (:Company {name: 'GrafeoDB'})").unwrap();
+
+        let r = s
+            .execute("MATCH (n) RETURN labels(n) AS lbl, count(*) AS cnt ORDER BY cnt DESC")
+            .unwrap();
+
+        // Should produce 2 groups: [Person] (2), [Company] (1)
+        assert_eq!(
+            r.row_count(),
+            2,
+            "GROUP BY labels(n) should produce 2 distinct groups, got {}: {:?}",
+            r.row_count(),
+            r.rows
+        );
+    }
+
+    #[test]
+    fn group_by_date_valued_property() {
+        let db = db();
+        let s = db.session();
+        s.execute("INSERT (:Event {name: 'A', day: date('2024-06-15')})")
+            .unwrap();
+        s.execute("INSERT (:Event {name: 'B', day: date('2024-06-15')})")
+            .unwrap();
+        s.execute("INSERT (:Event {name: 'C', day: date('2024-12-25')})")
+            .unwrap();
+
+        let r = s
+            .execute("MATCH (e:Event) RETURN e.day AS day, count(*) AS cnt ORDER BY cnt DESC")
+            .unwrap();
+
+        assert_eq!(
+            r.row_count(),
+            2,
+            "GROUP BY date should produce 2 distinct groups, got {}: {:?}",
+            r.row_count(),
+            r.rows
+        );
     }
 }

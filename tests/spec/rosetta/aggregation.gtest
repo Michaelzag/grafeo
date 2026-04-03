@@ -1,0 +1,315 @@
+# Rosetta: cross-language aggregation equivalence
+#
+# Verifies that aggregation operations return the same results
+# across GQL, Cypher, Gremlin, and SQL/PGQ.
+#
+# Uses ecommerce dataset for realistic aggregation scenarios.
+
+meta:
+  model: lpg
+  section: rosetta
+  title: Aggregation cross-language equivalence
+  dataset: ecommerce
+  requires: [cypher, gremlin, sql-pgq]
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # COUNT
+  # ---------------------------------------------------------------------------
+
+  - name: count_products
+    variants:
+      gql: MATCH (p:Product) RETURN count(p) AS cnt
+      cypher: MATCH (p:Product) RETURN count(p) AS cnt
+    expect:
+      rows:
+        - [6]
+
+  - name: count_products_gremlin
+    variants:
+      gremlin: "g.V().hasLabel('Product').count()"
+    expect:
+      rows:
+        - [6]
+
+  - name: count_products_sql_pgq
+    skip: "SQL/PGQ aggregate in COLUMNS not supported"
+    variants:
+      sql-pgq: |
+        SELECT cnt FROM GRAPH_TABLE (
+          MATCH (p:Product)
+          COLUMNS (count(p) AS cnt)
+        )
+    expect:
+      rows:
+        - [6]
+
+  # ---------------------------------------------------------------------------
+  # SUM
+  # ---------------------------------------------------------------------------
+
+  - name: sum_order_totals_gql
+    skip: "float precision mismatch in sum"
+    variants:
+      gql: MATCH (o:Order) RETURN sum(o.total) AS total_revenue
+    expect:
+      precision: 2
+      rows:
+        - [3639.91]
+
+  - name: sum_order_totals_cypher
+    skip: "float precision mismatch in sum"
+    variants:
+      cypher: MATCH (o:Order) RETURN sum(o.total) AS total_revenue
+    expect:
+      precision: 2
+      rows:
+        - [3639.91]
+
+  - name: sum_order_totals_gremlin
+    skip: "float precision mismatch in sum"
+    variants:
+      gremlin: "g.V().hasLabel('Order').values('total').sum()"
+    expect:
+      precision: 2
+      rows:
+        - [3639.91]
+
+  # ---------------------------------------------------------------------------
+  # AVG
+  # ---------------------------------------------------------------------------
+
+  - name: avg_product_price
+    variants:
+      gql: MATCH (p:Product) RETURN avg(p.price) AS avg_price
+      cypher: MATCH (p:Product) RETURN avg(p.price) AS avg_price
+    expect:
+      precision: 2
+      count: 1
+
+  - name: avg_product_price_gremlin
+    variants:
+      gremlin: "g.V().hasLabel('Product').values('price').mean()"
+    expect:
+      precision: 2
+      count: 1
+
+  # ---------------------------------------------------------------------------
+  # MIN / MAX
+  # ---------------------------------------------------------------------------
+
+  - name: min_max_price_gql
+    skip: "min/max returns 0 for float properties"
+    variants:
+      gql: MATCH (p:Product) RETURN min(p.price) AS cheapest, max(p.price) AS expensive
+    expect:
+      rows:
+        - [39.99, 1299.99]
+
+  - name: min_max_price_cypher
+    skip: "min/max returns 0 for float properties"
+    variants:
+      cypher: MATCH (p:Product) RETURN min(p.price) AS cheapest, max(p.price) AS expensive
+    expect:
+      rows:
+        - [39.99, 1299.99]
+
+  - name: min_price_gremlin
+    skip: "Gremlin min on float properties"
+    variants:
+      gremlin: "g.V().hasLabel('Product').values('price').min()"
+    expect:
+      rows:
+        - [39.99]
+
+  - name: max_price_gremlin
+    skip: "Gremlin max on float properties"
+    variants:
+      gremlin: "g.V().hasLabel('Product').values('price').max()"
+    expect:
+      rows:
+        - [1299.99]
+
+  # ---------------------------------------------------------------------------
+  # GROUP BY
+  # ---------------------------------------------------------------------------
+
+  - name: count_by_status
+    variants:
+      gql: |
+        MATCH (o:Order)
+        RETURN o.status, count(o) AS cnt
+        ORDER BY o.status
+    expect:
+      ordered: true
+      rows:
+        - [cancelled, 1]
+        - [delivered, 5]
+        - [pending, 1]
+        - [shipped, 1]
+
+  - name: count_by_status_cypher
+    skip: "Cypher ORDER BY after aggregation"
+    variants:
+      cypher: |
+        MATCH (o:Order)
+        RETURN o.status, count(o) AS cnt
+        ORDER BY o.status
+    expect:
+      ordered: true
+      rows:
+        - [cancelled, 1]
+        - [delivered, 5]
+        - [pending, 1]
+        - [shipped, 1]
+
+  - name: count_by_status_gremlin
+    variants:
+      gremlin: |
+        g.V().hasLabel('Order')
+          .groupCount().by('status')
+    expect:
+      count: 1
+
+  - name: count_by_status_sql_pgq
+    skip: "SQL/PGQ aggregate in COLUMNS not supported"
+    variants:
+      sql-pgq: |
+        SELECT status, cnt FROM GRAPH_TABLE (
+          MATCH (o:Order)
+          COLUMNS (o.status AS status, count(o) AS cnt)
+        ) ORDER BY status
+    expect:
+      ordered: true
+      rows:
+        - [cancelled, 1]
+        - [delivered, 5]
+        - [pending, 1]
+        - [shipped, 1]
+
+  # ---------------------------------------------------------------------------
+  # Aggregation through relationships
+  # ---------------------------------------------------------------------------
+
+  - name: orders_per_customer
+    variants:
+      gql: |
+        MATCH (c:Customer)-[:PLACED]->(o:Order)
+        RETURN c.name, count(o) AS orders
+        ORDER BY c.name
+    expect:
+      ordered: true
+      rows:
+        - [Alix, 2]
+        - [Gus, 2]
+        - [Jules, 1]
+        - [Mia, 1]
+        - [Vincent, 2]
+
+  - name: orders_per_customer_cypher
+    skip: "Cypher ORDER BY after aggregation"
+    variants:
+      cypher: |
+        MATCH (c:Customer)-[:PLACED]->(o:Order)
+        RETURN c.name, count(o) AS orders
+        ORDER BY c.name
+    expect:
+      ordered: true
+      rows:
+        - [Alix, 2]
+        - [Gus, 2]
+        - [Jules, 1]
+        - [Mia, 1]
+        - [Vincent, 2]
+
+  - name: total_spend_per_customer
+    variants:
+      gql: |
+        MATCH (c:Customer)-[:PLACED]->(o:Order)
+        WHERE o.status <> 'cancelled'
+        RETURN c.name, sum(o.total) AS spend
+        ORDER BY spend DESC
+    expect:
+      ordered: true
+      precision: 2
+      rows:
+        - [Alix, 2689.97]
+        - [Vincent, 549.98]
+        - [Gus, 179.97]
+        - [Mia, 129.99]
+        - [Jules, 49.99]
+
+  - name: total_spend_per_customer_cypher
+    skip: "Cypher <> operator parsing"
+    variants:
+      cypher: |
+        MATCH (c:Customer)-[:PLACED]->(o:Order)
+        WHERE o.status <> 'cancelled'
+        RETURN c.name, sum(o.total) AS spend
+        ORDER BY spend DESC
+    expect:
+      ordered: true
+      precision: 2
+      rows:
+        - [Alix, 2689.97]
+        - [Vincent, 549.98]
+        - [Gus, 179.97]
+        - [Mia, 129.99]
+        - [Jules, 49.99]
+
+  # ---------------------------------------------------------------------------
+  # HAVING equivalent (WHERE after aggregation)
+  # ---------------------------------------------------------------------------
+
+  - name: customers_with_multiple_orders
+    variants:
+      gql: |
+        MATCH (c:Customer)-[:PLACED]->(o:Order)
+        WITH c, count(o) AS cnt
+        WHERE cnt >= 2
+        RETURN c.name ORDER BY c.name
+    expect:
+      ordered: true
+      rows:
+        - [Alix]
+        - [Gus]
+        - [Vincent]
+
+  - name: customers_with_multiple_orders_cypher
+    skip: "Cypher WITH aggregation filter"
+    variants:
+      cypher: |
+        MATCH (c:Customer)-[:PLACED]->(o:Order)
+        WITH c, count(o) AS cnt
+        WHERE cnt >= 2
+        RETURN c.name ORDER BY c.name
+    expect:
+      ordered: true
+      rows:
+        - [Alix]
+        - [Gus]
+        - [Vincent]
+
+  # ---------------------------------------------------------------------------
+  # Average review rating per product
+  # ---------------------------------------------------------------------------
+
+  - name: avg_review_rating
+    variants:
+      gql: |
+        MATCH (c:Customer)-[r:REVIEWED]->(p:Product)
+        RETURN p.name, avg(r.rating) AS avg_rating, count(r) AS reviews
+        ORDER BY avg_rating DESC
+      cypher: |
+        MATCH (c:Customer)-[r:REVIEWED]->(p:Product)
+        RETURN p.name, avg(r.rating) AS avg_rating, count(r) AS reviews
+        ORDER BY avg_rating DESC
+    expect:
+      ordered: true
+      precision: 1
+      rows:
+        - [Laptop Pro, 5.0, 1]
+        - [Graph Databases, 5.0, 2]
+        - [Tablet Mini, 4.0, 1]
+        - [Wireless Headphones, 3.5, 2]

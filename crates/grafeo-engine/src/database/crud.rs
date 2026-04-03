@@ -34,12 +34,14 @@ impl super::GrafeoDB {
         }
 
         #[cfg(feature = "cdc")]
-        self.cdc_log.record_create_node(
-            id,
-            self.lpg_store().current_epoch(),
-            None,
-            Some(labels.iter().map(|s| (*s).to_string()).collect()),
-        );
+        if self.cdc_active() {
+            self.cdc_log.record_create_node(
+                id,
+                self.lpg_store().current_epoch(),
+                None,
+                Some(labels.iter().map(|s| (*s).to_string()).collect()),
+            );
+        }
 
         id
     }
@@ -72,10 +74,18 @@ impl super::GrafeoDB {
 
         // Build CDC snapshot before WAL consumes props
         #[cfg(feature = "cdc")]
-        let cdc_props: std::collections::HashMap<String, grafeo_common::types::Value> = props
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.clone()))
-            .collect();
+        let cdc_props: Option<
+            std::collections::HashMap<String, grafeo_common::types::Value>,
+        > = if self.cdc_active() {
+            Some(
+                props
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.clone()))
+                    .collect(),
+            )
+        } else {
+            None
+        };
 
         // Log node creation to WAL
         #[cfg(feature = "wal")]
@@ -100,16 +110,18 @@ impl super::GrafeoDB {
         }
 
         #[cfg(feature = "cdc")]
-        self.cdc_log.record_create_node(
-            id,
-            self.lpg_store().current_epoch(),
-            if cdc_props.is_empty() {
-                None
-            } else {
-                Some(cdc_props)
-            },
-            Some(labels.iter().map(|s| (*s).to_string()).collect()),
-        );
+        if let Some(cdc_props) = cdc_props {
+            self.cdc_log.record_create_node(
+                id,
+                self.lpg_store().current_epoch(),
+                if cdc_props.is_empty() {
+                    None
+                } else {
+                    Some(cdc_props)
+                },
+                Some(labels.iter().map(|s| (*s).to_string()).collect()),
+            );
+        }
 
         // Auto-insert into matching text indexes for the new node
         #[cfg(feature = "text-index")]
@@ -253,12 +265,16 @@ impl super::GrafeoDB {
     pub fn delete_node(&self, id: grafeo_common::types::NodeId) -> bool {
         // Capture properties for CDC before deletion
         #[cfg(feature = "cdc")]
-        let cdc_props = self.lpg_store().get_node(id).map(|node| {
-            node.properties
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.clone()))
-                .collect::<std::collections::HashMap<String, grafeo_common::types::Value>>()
-        });
+        let cdc_props = if self.cdc_active() {
+            self.lpg_store().get_node(id).map(|node| {
+                node.properties
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.clone()))
+                    .collect::<std::collections::HashMap<String, grafeo_common::types::Value>>()
+            })
+        } else {
+            None
+        };
 
         // Collect matching vector indexes BEFORE deletion removes labels
         #[cfg(feature = "vector-index")]
@@ -324,7 +340,7 @@ impl super::GrafeoDB {
         }
 
         #[cfg(feature = "cdc")]
-        if result {
+        if result && self.cdc_active() {
             self.cdc_log.record_delete(
                 crate::cdc::EntityId::Node(id),
                 self.lpg_store().current_epoch(),
@@ -363,22 +379,33 @@ impl super::GrafeoDB {
 
         // Capture old value for CDC before the store write
         #[cfg(feature = "cdc")]
-        let cdc_old_value = self
-            .lpg_store()
-            .get_node_property(id, &grafeo_common::types::PropertyKey::new(key));
+        let cdc_active = self.cdc_active();
         #[cfg(feature = "cdc")]
-        let cdc_new_value = value.clone();
+        let cdc_old_value = if cdc_active {
+            self.lpg_store()
+                .get_node_property(id, &grafeo_common::types::PropertyKey::new(key))
+        } else {
+            None
+        };
+        #[cfg(feature = "cdc")]
+        let cdc_new_value = if cdc_active {
+            Some(value.clone())
+        } else {
+            None
+        };
 
         self.lpg_store().set_node_property(id, key, value);
 
         #[cfg(feature = "cdc")]
-        self.cdc_log.record_update(
-            crate::cdc::EntityId::Node(id),
-            self.lpg_store().current_epoch(),
-            key,
-            cdc_old_value,
-            cdc_new_value,
-        );
+        if let Some(cdc_new_value) = cdc_new_value {
+            self.cdc_log.record_update(
+                crate::cdc::EntityId::Node(id),
+                self.lpg_store().current_epoch(),
+                key,
+                cdc_old_value,
+                cdc_new_value,
+            );
+        }
 
         // Auto-insert into matching vector indexes
         #[cfg(feature = "vector-index")]
@@ -605,14 +632,16 @@ impl super::GrafeoDB {
         }
 
         #[cfg(feature = "cdc")]
-        self.cdc_log.record_create_edge(
-            id,
-            self.lpg_store().current_epoch(),
-            None,
-            src.as_u64(),
-            dst.as_u64(),
-            edge_type.to_string(),
-        );
+        if self.cdc_active() {
+            self.cdc_log.record_create_edge(
+                id,
+                self.lpg_store().current_epoch(),
+                None,
+                src.as_u64(),
+                dst.as_u64(),
+                edge_type.to_string(),
+            );
+        }
 
         id
     }
@@ -650,10 +679,18 @@ impl super::GrafeoDB {
 
         // Build CDC snapshot before WAL consumes props
         #[cfg(feature = "cdc")]
-        let cdc_props: std::collections::HashMap<String, grafeo_common::types::Value> = props
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.clone()))
-            .collect();
+        let cdc_props: Option<
+            std::collections::HashMap<String, grafeo_common::types::Value>,
+        > = if self.cdc_active() {
+            Some(
+                props
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.clone()))
+                    .collect(),
+            )
+        } else {
+            None
+        };
 
         // Log edge creation to WAL
         #[cfg(feature = "wal")]
@@ -680,18 +717,20 @@ impl super::GrafeoDB {
         }
 
         #[cfg(feature = "cdc")]
-        self.cdc_log.record_create_edge(
-            id,
-            self.lpg_store().current_epoch(),
-            if cdc_props.is_empty() {
-                None
-            } else {
-                Some(cdc_props)
-            },
-            src.as_u64(),
-            dst.as_u64(),
-            edge_type.to_string(),
-        );
+        if let Some(cdc_props) = cdc_props {
+            self.cdc_log.record_create_edge(
+                id,
+                self.lpg_store().current_epoch(),
+                if cdc_props.is_empty() {
+                    None
+                } else {
+                    Some(cdc_props)
+                },
+                src.as_u64(),
+                dst.as_u64(),
+                edge_type.to_string(),
+            );
+        }
 
         id
     }
@@ -711,12 +750,16 @@ impl super::GrafeoDB {
     pub fn delete_edge(&self, id: grafeo_common::types::EdgeId) -> bool {
         // Capture properties for CDC before deletion
         #[cfg(feature = "cdc")]
-        let cdc_props = self.lpg_store().get_edge(id).map(|edge| {
-            edge.properties
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.clone()))
-                .collect::<std::collections::HashMap<String, grafeo_common::types::Value>>()
-        });
+        let cdc_props = if self.cdc_active() {
+            self.lpg_store().get_edge(id).map(|edge| {
+                edge.properties
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.clone()))
+                    .collect::<std::collections::HashMap<String, grafeo_common::types::Value>>()
+            })
+        } else {
+            None
+        };
 
         let result = self.lpg_store().delete_edge(id);
 
@@ -726,7 +769,7 @@ impl super::GrafeoDB {
         }
 
         #[cfg(feature = "cdc")]
-        if result {
+        if result && self.cdc_active() {
             self.cdc_log.record_delete(
                 crate::cdc::EntityId::Edge(id),
                 self.lpg_store().current_epoch(),
@@ -758,22 +801,33 @@ impl super::GrafeoDB {
 
         // Capture old value for CDC before the store write
         #[cfg(feature = "cdc")]
-        let cdc_old_value = self
-            .lpg_store()
-            .get_edge_property(id, &grafeo_common::types::PropertyKey::new(key));
+        let cdc_active = self.cdc_active();
         #[cfg(feature = "cdc")]
-        let cdc_new_value = value.clone();
+        let cdc_old_value = if cdc_active {
+            self.lpg_store()
+                .get_edge_property(id, &grafeo_common::types::PropertyKey::new(key))
+        } else {
+            None
+        };
+        #[cfg(feature = "cdc")]
+        let cdc_new_value = if cdc_active {
+            Some(value.clone())
+        } else {
+            None
+        };
 
         self.lpg_store().set_edge_property(id, key, value);
 
         #[cfg(feature = "cdc")]
-        self.cdc_log.record_update(
-            crate::cdc::EntityId::Edge(id),
-            self.lpg_store().current_epoch(),
-            key,
-            cdc_old_value,
-            cdc_new_value,
-        );
+        if let Some(cdc_new_value) = cdc_new_value {
+            self.cdc_log.record_update(
+                crate::cdc::EntityId::Edge(id),
+                self.lpg_store().current_epoch(),
+                key,
+                cdc_old_value,
+                cdc_new_value,
+            );
+        }
     }
 
     /// Removes a property from a node.
@@ -943,6 +997,7 @@ impl super::GrafeoDB {
             >,
         >,
     ) -> Vec<grafeo_common::types::NodeId> {
+        #[cfg(any(feature = "vector-index", feature = "text-index"))]
         use grafeo_common::types::Value;
 
         let labels: &[&str] = &[label];
@@ -957,13 +1012,18 @@ impl super::GrafeoDB {
 
                 // Build CDC snapshot before WAL consumes props
                 #[cfg(feature = "cdc")]
-                let cdc_props: std::collections::HashMap<
-                    String,
-                    grafeo_common::types::Value,
-                > = props
-                    .iter()
-                    .map(|(k, v)| (k.to_string(), v.clone()))
-                    .collect();
+                let cdc_props: Option<
+                    std::collections::HashMap<String, grafeo_common::types::Value>,
+                > = if self.cdc_active() {
+                    Some(
+                        props
+                            .iter()
+                            .map(|(k, v)| (k.to_string(), v.clone()))
+                            .collect(),
+                    )
+                } else {
+                    None
+                };
 
                 // Log to WAL
                 #[cfg(feature = "wal")]
@@ -986,16 +1046,18 @@ impl super::GrafeoDB {
                 }
 
                 #[cfg(feature = "cdc")]
-                self.cdc_log.record_create_node(
-                    id,
-                    self.lpg_store().current_epoch(),
-                    if cdc_props.is_empty() {
-                        None
-                    } else {
-                        Some(cdc_props)
-                    },
-                    Some(labels.iter().map(|s| (*s).to_string()).collect()),
-                );
+                if let Some(cdc_props) = cdc_props {
+                    self.cdc_log.record_create_node(
+                        id,
+                        self.lpg_store().current_epoch(),
+                        if cdc_props.is_empty() {
+                            None
+                        } else {
+                            Some(cdc_props)
+                        },
+                        Some(labels.iter().map(|s| (*s).to_string()).collect()),
+                    );
+                }
 
                 id
             })

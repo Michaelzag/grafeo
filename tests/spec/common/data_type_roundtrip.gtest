@@ -1,0 +1,370 @@
+# Data Type Property Roundtrip
+#
+# Verifies that every Value variant survives INSERT + MATCH correctly.
+# Focuses on property storage fidelity, not function evaluation.
+# Each test inserts a property value and reads it back.
+
+meta:
+  language: gql
+  model: lpg
+  section: roundtrip
+  title: Data type property roundtrip
+  dataset: empty
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # Int64
+  # ---------------------------------------------------------------------------
+
+  - name: int64_zero
+    setup:
+      - "INSERT (:T {v: 0})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      rows:
+        - [0]
+
+  - name: int64_positive
+    setup:
+      - "INSERT (:T {v: 42})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      rows:
+        - [42]
+
+  - name: int64_negative
+    setup:
+      - "INSERT (:T {v: -999})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      rows:
+        - [-999]
+
+  - name: int64_large
+    setup:
+      - "INSERT (:T {v: 1000000000})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      rows:
+        - [1000000000]
+
+  - name: int64_max
+    requires: [int64-safe]
+    setup:
+      - "INSERT (:T {v: 9223372036854775807})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      rows:
+        - [9223372036854775807]
+
+  # ---------------------------------------------------------------------------
+  # Float64
+  # ---------------------------------------------------------------------------
+
+  - name: float64_zero
+    setup:
+      - "INSERT (:T {v: 0.0})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      precision: 6
+      rows:
+        - [0.0]
+
+  - name: float64_pi
+    setup:
+      - "INSERT (:T {v: 3.141592653589793})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      precision: 10
+      rows:
+        - [3.141592653589793]
+
+  - name: float64_very_small
+    setup:
+      - "INSERT (:T {v: 0.0000000001})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      count: 1
+
+  - name: float64_very_large
+    setup:
+      - "INSERT (:T {v: 1.5e100})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      count: 1
+
+  - name: float64_negative
+    setup:
+      - "INSERT (:T {v: -273.15})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      precision: 2
+      rows:
+        - [-273.15]
+
+  # ---------------------------------------------------------------------------
+  # String
+  # ---------------------------------------------------------------------------
+
+  - name: string_basic
+    setup:
+      - "INSERT (:T {v: 'Amsterdam'})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      rows:
+        - [Amsterdam]
+
+  - name: string_empty
+    setup:
+      - "INSERT (:T {v: ''})"
+    query: "MATCH (n:T) WHERE n.v IS NOT NULL RETURN n.v AS val, char_length(n.v) AS len"
+    expect:
+      rows:
+        - ["", 0]
+
+  - name: string_with_spaces
+    setup:
+      - "INSERT (:T {v: 'hello world'})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      rows:
+        - [hello world]
+
+  - name: string_long
+    setup:
+      - "INSERT (:T {v: 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUV'})"
+    query: "MATCH (n:T) RETURN char_length(n.v) AS len"
+    expect:
+      rows:
+        - [204]
+
+  # ---------------------------------------------------------------------------
+  # Bool
+  # ---------------------------------------------------------------------------
+
+  - name: bool_true
+    setup:
+      - "INSERT (:T {v: true})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      rows:
+        - [true]
+
+  - name: bool_false
+    setup:
+      - "INSERT (:T {v: false})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      rows:
+        - [false]
+
+  - name: bool_false_is_not_null
+    setup:
+      - "INSERT (:T {v: false})"
+    query: "MATCH (n:T) WHERE n.v IS NOT NULL RETURN n.v AS val"
+    expect:
+      rows:
+        - [false]
+
+  # ---------------------------------------------------------------------------
+  # Null / missing property
+  # ---------------------------------------------------------------------------
+
+  - name: missing_property_returns_null
+    setup:
+      - "INSERT (:T {name: 'Alix'})"
+    query: "MATCH (n:T) RETURN n.nonexistent AS val"
+    expect:
+      rows:
+        - [null]
+
+  - name: explicit_null_not_stored
+    setup:
+      - "INSERT (:T {name: 'Alix', tag: null})"
+    query: "MATCH (n:T) RETURN n.tag AS val"
+    expect:
+      rows:
+        - [null]
+
+  # ---------------------------------------------------------------------------
+  # Date
+  # ---------------------------------------------------------------------------
+
+  - name: date_basic
+    setup:
+      - "INSERT (:T {v: DATE '2024-06-15'})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      rows:
+        - [2024-06-15]
+
+  - name: date_epoch
+    setup:
+      - "INSERT (:T {v: DATE '1970-01-01'})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      rows:
+        - [1970-01-01]
+
+  - name: date_far_future
+    setup:
+      - "INSERT (:T {v: DATE '2099-12-31'})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      rows:
+        - [2099-12-31]
+
+  - name: date_leap_day
+    setup:
+      - "INSERT (:T {v: DATE '2024-02-29'})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      rows:
+        - [2024-02-29]
+
+  # ---------------------------------------------------------------------------
+  # Time
+  # ---------------------------------------------------------------------------
+
+  - name: time_midnight
+    setup:
+      - "INSERT (:T {v: TIME '00:00:00'})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      rows:
+        - ["00:00:00"]
+
+  - name: time_noon
+    setup:
+      - "INSERT (:T {v: TIME '12:00:00'})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      rows:
+        - ["12:00:00"]
+
+  - name: time_end_of_day
+    setup:
+      - "INSERT (:T {v: TIME '23:59:59'})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      rows:
+        - ["23:59:59"]
+
+  # ---------------------------------------------------------------------------
+  # Duration
+  # ---------------------------------------------------------------------------
+
+  - name: duration_days
+    setup:
+      - "INSERT (:T {v: DURATION 'P5D'})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      rows:
+        - [P5D]
+
+  - name: duration_months_and_days
+    setup:
+      - "INSERT (:T {v: DURATION 'P3M10D'})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      rows:
+        - [P3M10D]
+
+  - name: duration_weeks_normalizes
+    setup:
+      - "INSERT (:T {v: DURATION 'P2W'})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      rows:
+        - [P14D]
+
+  # ---------------------------------------------------------------------------
+  # Datetime
+  # ---------------------------------------------------------------------------
+
+  - name: datetime_utc
+    setup:
+      - "INSERT (:T {v: DATETIME '2024-03-15T14:30:00Z'})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      count: 1
+
+  # ---------------------------------------------------------------------------
+  # List
+  # ---------------------------------------------------------------------------
+
+  - name: list_integers
+    setup:
+      - "INSERT (:T {v: [1, 2, 3]})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      rows:
+        - ["[1, 2, 3]"]
+
+  - name: list_strings
+    setup:
+      - "INSERT (:T {v: ['a', 'b', 'c']})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      rows:
+        - ["[a, b, c]"]
+
+  - name: list_empty
+    setup:
+      - "INSERT (:T {v: []})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      rows:
+        - ["[]"]
+
+  - name: list_nested
+    setup:
+      - "INSERT (:T {v: [[1, 2], [3, 4]]})"
+    query: "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      rows:
+        - ["[[1, 2], [3, 4]]"]
+
+  # ---------------------------------------------------------------------------
+  # Many properties on one node
+  # ---------------------------------------------------------------------------
+
+  - name: many_properties
+    setup:
+      - "INSERT (:T {a: 1, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7, h: 8, i: 9, j: 10, k: 'extra'})"
+    query: "MATCH (n:T) RETURN n.a, n.f, n.k"
+    expect:
+      rows:
+        - [1, 6, extra]
+
+  # ---------------------------------------------------------------------------
+  # Property mutation roundtrips (using statements:)
+  # ---------------------------------------------------------------------------
+
+  - name: property_overwrite_via_set
+    statements:
+      - "INSERT (:T {v: 'old'})"
+      - "MATCH (n:T) SET n.v = 'new'"
+      - "MATCH (n:T) RETURN n.v AS val"
+    expect:
+      rows:
+        - [new]
+
+  - name: property_remove_then_read
+    statements:
+      - "INSERT (:T {name: 'Alix', tag: 'temp'})"
+      - "MATCH (n:T) REMOVE n.tag"
+      - "MATCH (n:T) RETURN n.tag AS val"
+    expect:
+      rows:
+        - [null]
+
+  - name: property_add_after_insert
+    statements:
+      - "INSERT (:T {name: 'Alix'})"
+      - "MATCH (n:T) SET n.city = 'Amsterdam'"
+      - "MATCH (n:T) RETURN n.name, n.city"
+    expect:
+      rows:
+        - [Alix, Amsterdam]

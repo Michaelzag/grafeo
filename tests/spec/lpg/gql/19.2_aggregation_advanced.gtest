@@ -316,3 +316,49 @@ tests:
         - [Amsterdam, 2]
         - [Berlin, 2]
         - [Paris, 1]
+
+  # ---------------------------------------------------------------------------
+  # GROUP BY on list-valued keys (labels)
+  # Regression: push-based aggregator hash collisions, pull-based GroupKeyPart
+  # ---------------------------------------------------------------------------
+
+  - name: group_by_labels_multi_label
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:Person:Employee {name: 'Gus'})"
+      - "INSERT (:Person:Employee {name: 'Jules'})"
+      - "INSERT (:Company {name: 'GrafeoDB'})"
+    query: |
+      MATCH (n) RETURN labels(n) AS lbl, count(*) AS cnt
+      ORDER BY cnt DESC
+    expect:
+      count: 3
+
+  - name: group_by_labels_single_label
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:Person {name: 'Gus'})"
+      - "INSERT (:Company {name: 'GrafeoDB'})"
+    query: |
+      MATCH (n) RETURN labels(n) AS lbl, count(*) AS cnt
+      ORDER BY cnt DESC
+    expect:
+      ordered: true
+      rows:
+        - ["[Person]", 2]
+        - ["[Company]", 1]
+
+  # ---------------------------------------------------------------------------
+  # GROUP BY on date-valued property
+  # ---------------------------------------------------------------------------
+
+  - name: group_by_date_property
+    setup:
+      - "INSERT (:Event {name: 'A', day: date('2024-06-15')})"
+      - "INSERT (:Event {name: 'B', day: date('2024-06-15')})"
+      - "INSERT (:Event {name: 'C', day: date('2024-12-25')})"
+    query: |
+      MATCH (e:Event) RETURN e.day AS day, count(*) AS cnt
+      ORDER BY cnt DESC
+    expect:
+      count: 2

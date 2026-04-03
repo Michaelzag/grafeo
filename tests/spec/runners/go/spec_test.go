@@ -28,6 +28,11 @@ import (
 // into the grafeo-c library (e.g. "gql", "cypher", "algos").
 var compiledFeatures = map[string]bool{}
 
+// runnerCapabilities lists capabilities provided by this runner itself
+// (not compiled into the native library). For example, Go natively supports
+// 64-bit integers, so "int64-safe" is always available.
+var runnerCapabilities = map[string]bool{"int64-safe": true}
+
 func TestMain(m *testing.M) {
 	db, err := grafeo.OpenInMemory()
 	if err == nil {
@@ -45,7 +50,7 @@ func TestMain(m *testing.M) {
 // hasFeature checks if a feature or compound language key is available.
 // Handles compound keys like "graphql-rdf" by checking each part.
 func hasFeature(key string) bool {
-	if compiledFeatures[key] {
+	if compiledFeatures[key] || runnerCapabilities[key] {
 		return true
 	}
 	// Compound language key: "graphql-rdf" requires both "graphql" and "rdf"
@@ -84,6 +89,7 @@ type TestCase struct {
 	Setup      []string
 	Params     map[string]string
 	Tags       []string
+	Requires   []string
 	Skip       string
 	Language   string
 	Expect     Expect
@@ -175,6 +181,28 @@ func valueToString(v interface{}) string {
 		return "null"
 	}
 	switch val := v.(type) {
+	case json.Number:
+		// Try int64 first to preserve full precision for large integers,
+		// fall back to float64 for decimal values.
+		if i, err := val.Int64(); err == nil {
+			return strconv.FormatInt(i, 10)
+		}
+		if f, err := val.Float64(); err == nil {
+			if math.IsNaN(f) {
+				return "NaN"
+			}
+			if math.IsInf(f, 1) {
+				return "Infinity"
+			}
+			if math.IsInf(f, -1) {
+				return "-Infinity"
+			}
+			if f == math.Trunc(f) && math.Abs(f) < (1<<53) {
+				return strconv.FormatInt(int64(f), 10)
+			}
+			return strconv.FormatFloat(f, 'f', -1, 64)
+		}
+		return val.String()
 	case bool:
 		if val {
 			return "true"
@@ -711,6 +739,9 @@ func parseSingleTest(ctx *parseContext) TestCase {
 		case "tags":
 			tc.Tags = parseYamlList(value)
 			ctx.idx++
+		case "requires":
+			tc.Requires = parseYamlList(value)
+			ctx.idx++
 		case "params":
 			ctx.idx++
 			tc.Params = parseMap(ctx, 6)
@@ -843,18 +874,18 @@ func parseKV(s string) []string {
 	return nil
 }
 
-// unquote strips surrounding single or double quotes and handles common escape
-// sequences (\n, \t, \", \', \\).
+// unquote strips surrounding single or double quotes and handles YAML-level
+// escapes (quotes and backslashes). Does NOT process \n or \t: those are GQL
+// string escapes handled by the engine's parser.
 func unquote(s string) string {
 	s = strings.TrimSpace(s)
 	if len(s) >= 2 {
 		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
 			inner := s[1 : len(s)-1]
-			inner = strings.ReplaceAll(inner, `\n`, "\n")
-			inner = strings.ReplaceAll(inner, `\t`, "\t")
+			inner = strings.ReplaceAll(inner, `\\`, "\x00")
 			inner = strings.ReplaceAll(inner, `\"`, `"`)
 			inner = strings.ReplaceAll(inner, `\'`, `'`)
-			inner = strings.ReplaceAll(inner, `\\`, `\`)
+			inner = strings.ReplaceAll(inner, "\x00", `\`)
 			return inner
 		}
 	}
@@ -1124,6 +1155,12 @@ func runSingleTest(t *testing.T, gf *GtestFile, tc TestCase, variantLang, varian
 			t.Skipf("feature '%s' not available in this build", key)
 		}
 	}
+	for _, req := range tc.Requires {
+		key := strings.ReplaceAll(req, "_", "-")
+		if !hasFeature(key) {
+			t.Skipf("required capability '%s' not available", key)
+		}
+	}
 
 	// Fresh database per test
 	db, err := grafeo.OpenInMemory()
@@ -1155,6 +1192,9 @@ func runSingleTest(t *testing.T, gf *GtestFile, tc TestCase, variantLang, varian
 	if len(tc.Statements) > 0 {
 		queries = tc.Statements
 	} else if query != "" {
+		queries = []string{query}
+	} else if tc.Expect.Error != nil {
+		// Allow empty-string queries for error tests (e.g. empty input)
 		queries = []string{query}
 	} else {
 		t.Fatalf("No query or statements in test %q", tc.Name)
