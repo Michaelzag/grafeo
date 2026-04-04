@@ -15,7 +15,7 @@ use super::common::{
 };
 use crate::query::plan::{
     self as plan, AddLabelOp, AggregateExpr, AggregateFunction, AggregateOp, ApplyOp, BinaryOp,
-    CallProcedureOp, CreateEdgeOp, CreateNodeOp, DeleteNodeOp, EntityKind, ExceptOp,
+    CallProcedureOp, CountExpr, CreateEdgeOp, CreateNodeOp, DeleteNodeOp, EntityKind, ExceptOp,
     ExpandDirection, ExpandOp, HorizontalAggregateOp, IntersectOp, JoinCondition, JoinOp, JoinType,
     LeftJoinOp, LoadDataFormat, LoadDataOp, LogicalExpression, LogicalOperator, LogicalPlan,
     MergeOp, MergeRelationshipOp, NodeScanOp, NullsOrdering, OtherwiseOp, ParameterScanOp,
@@ -311,18 +311,12 @@ impl GqlTranslator {
                 plan = wrap_sort(plan, keys);
             }
 
-            // Apply SKIP
-            if let Some(skip_expr) = &return_clause.skip
-                && let ast::Expression::Literal(ast::Literal::Integer(n)) = skip_expr
-            {
-                plan = wrap_skip(plan, *n as usize);
+            if let Some(skip_expr) = &return_clause.skip {
+                plan = wrap_skip(plan, Self::eval_as_count_expr(skip_expr)?);
             }
 
-            // Apply LIMIT
-            if let Some(limit_expr) = &return_clause.limit
-                && let ast::Expression::Literal(ast::Literal::Integer(n)) = limit_expr
-            {
-                plan = wrap_limit(plan, *n as usize);
+            if let Some(limit_expr) = &return_clause.limit {
+                plan = wrap_limit(plan, Self::eval_as_count_expr(limit_expr)?);
             }
         }
 
@@ -919,26 +913,37 @@ impl GqlTranslator {
             }
         }
 
-        // Apply SKIP (after ORDER BY so sort sees all rows)
-        if let Some(skip_expr) = &query.return_clause.skip
-            && let ast::Expression::Literal(ast::Literal::Integer(n)) = skip_expr
-        {
-            plan = wrap_skip(plan, *n as usize);
+        if let Some(skip_expr) = &query.return_clause.skip {
+            plan = wrap_skip(plan, Self::eval_as_count_expr(skip_expr)?);
         }
 
-        // Apply LIMIT (after ORDER BY so sort sees all rows)
-        if let Some(limit_expr) = &query.return_clause.limit
-            && let ast::Expression::Literal(ast::Literal::Integer(n)) = limit_expr
-        {
-            plan = wrap_limit(plan, *n as usize);
+        if let Some(limit_expr) = &query.return_clause.limit {
+            plan = wrap_limit(plan, Self::eval_as_count_expr(limit_expr)?);
         }
 
         Ok(LogicalPlan::new(plan))
     }
 
-    /// Recursively replaces `Variable(name)` references in `expr` with the
-    /// corresponding binding expression from `bindings`, implementing LET
-    /// expression inline substitution.
+    fn eval_as_count_expr(expr: &ast::Expression) -> Result<CountExpr> {
+        match expr {
+            ast::Expression::Literal(ast::Literal::Integer(i)) => {
+                if *i >= 0 {
+                    Ok(CountExpr::Literal(*i as usize))
+                } else {
+                    Err(Error::Query(QueryError::new(
+                        QueryErrorKind::Semantic,
+                        "Expected non-negative integer for SKIP/LIMIT",
+                    )))
+                }
+            }
+            ast::Expression::Parameter(name) => Ok(CountExpr::Parameter(name.clone())),
+            _ => Err(Error::Query(QueryError::new(
+                QueryErrorKind::Semantic,
+                "Expected integer literal or parameter for SKIP/LIMIT",
+            ))),
+        }
+    }
+
     fn substitute_let_bindings(
         expr: LogicalExpression,
         bindings: &[(String, LogicalExpression)],
