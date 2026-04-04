@@ -212,10 +212,8 @@ pub fn global_clustering_coefficient(store: &dyn GraphStore) -> f64 {
 /// Counts the total number of unique triangles in the graph.
 ///
 /// Each triangle is counted exactly once using degree-ordered merge intersection.
-/// This is significantly faster than the per-node hash-based approach because:
-/// - Edges are oriented low-degree -> high-degree (halves work)
-/// - Sorted adjacency lists enable merge-based intersection (cache-friendly)
-/// - Each triangle is counted exactly once (no /3 correction)
+/// Builds the oriented adjacency directly from `GraphStore` without intermediate
+/// hash sets, making it significantly faster on CSR-backed stores.
 ///
 /// # Arguments
 ///
@@ -229,43 +227,66 @@ pub fn global_clustering_coefficient(store: &dyn GraphStore) -> f64 {
 ///
 /// O(m * sqrt(m)) where m is the number of edges
 pub fn total_triangles(store: &dyn GraphStore) -> u64 {
-    let neighbors = build_undirected_neighbors(store);
-    let n = neighbors.len();
+    let (oriented_adj, edge_list) = build_oriented_adjacency(store);
+    let mut total = 0u64;
+    for &(_u, v) in &edge_list {
+        total += sorted_intersection_count(&oriented_adj[_u], &oriented_adj[v]);
+    }
+    total
+}
+
+/// Builds degree-oriented adjacency lists directly from a GraphStore.
+///
+/// Skips the FxHashSet intermediary — collects undirected neighbors as sorted
+/// Vec<usize> per node, computes degrees, then orients edges from low-degree
+/// to high-degree. Returns (oriented_adj, edge_list) for triangle counting.
+fn build_oriented_adjacency(store: &dyn GraphStore) -> (Vec<Vec<usize>>, Vec<(usize, usize)>) {
+    let node_list = store.node_ids();
+    let n = node_list.len();
     if n == 0 {
-        return 0;
+        return (Vec::new(), Vec::new());
     }
 
-    // Build index-based adjacency with degree ordering.
-    let mut node_list: Vec<NodeId> = neighbors.keys().copied().collect();
-    node_list.sort_unstable();
-
+    // Map NodeId -> contiguous index
     let node_to_idx: FxHashMap<NodeId, usize> =
         node_list.iter().enumerate().map(|(i, &n)| (n, i)).collect();
 
-    let degrees: Vec<usize> = node_list.iter().map(|node| neighbors[node].len()).collect();
+    // Build undirected adjacency as sorted Vec<usize> per node.
+    // Collect both outgoing and incoming, deduplicate via sort+dedup.
+    let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for (u, &node_u) in node_list.iter().enumerate() {
+        for (neighbor, _) in store.edges_from(node_u, Direction::Outgoing) {
+            if let Some(&v) = node_to_idx.get(&neighbor) {
+                adj[u].push(v);
+                adj[v].push(u);
+            }
+        }
+    }
 
-    // Orient edges: u -> v only if deg(u) < deg(v), or (== and u < v).
+    // Sort and deduplicate each list
+    for list in &mut adj {
+        list.sort_unstable();
+        list.dedup();
+    }
+
+    // Degrees from the undirected adjacency
+    let degrees: Vec<usize> = adj.iter().map(Vec::len).collect();
+
+    // Orient: u -> v only if deg(u) < deg(v), or (== and u < v)
     let mut oriented_adj: Vec<Vec<usize>> = vec![Vec::new(); n];
+    let mut edge_list: Vec<(usize, usize)> = Vec::new();
+
     for u in 0..n {
-        let node_u = node_list[u];
-        for &nb in &neighbors[&node_u] {
-            let v = node_to_idx[&nb];
+        for &v in &adj[u] {
             if degrees[u] < degrees[v] || (degrees[u] == degrees[v] && u < v) {
                 oriented_adj[u].push(v);
+                edge_list.push((u, v));
             }
         }
         oriented_adj[u].sort_unstable();
     }
 
-    // Count: for each oriented edge (u, v), count common neighbors
-    // in the intersection of oriented_adj[u] and oriented_adj[v].
-    let mut total = 0u64;
-    for (u, adj) in oriented_adj.iter().enumerate() {
-        for &v in adj {
-            total += sorted_intersection_count(&oriented_adj[u], &oriented_adj[v]);
-        }
-    }
-    total
+    (oriented_adj, edge_list)
 }
 
 /// Computes all clustering metrics in a single pass.
@@ -443,53 +464,12 @@ pub fn total_triangles_parallel(store: &dyn GraphStore, parallel_threshold: usiz
         return total_triangles(store);
     }
 
-    // Phase 1: Build sorted undirected adjacency lists + degree array.
-    let neighbors = build_undirected_neighbors(store);
-    let n = neighbors.len();
-    if n == 0 {
+    let (oriented_adj, edge_list) = build_oriented_adjacency(store);
+    if oriented_adj.is_empty() {
         return 0;
     }
 
-    // Convert to index-based adjacency with degree-based orientation.
-    // Orient each undirected edge u -> v where degree(u) < degree(v)
-    // (tiebreak: u < v). A triangle {a, b, c} with a -> b, a -> c, b -> c
-    // is counted exactly once: from edge (a, b) when c appears in the
-    // oriented neighbors of BOTH a and b.
-    let mut node_list: Vec<NodeId> = neighbors.keys().copied().collect();
-    node_list.sort_unstable();
-
-    let node_to_idx: FxHashMap<NodeId, usize> =
-        node_list.iter().enumerate().map(|(i, &n)| (n, i)).collect();
-
-    let degrees: Vec<usize> = node_list.iter().map(|node| neighbors[node].len()).collect();
-
-    // Build degree-oriented adjacency: u -> v only if deg(u) < deg(v) or (== and u < v).
-    let mut oriented_adj: Vec<Vec<usize>> = vec![Vec::new(); n];
-    for u in 0..n {
-        let node_u = node_list[u];
-        for &nb in &neighbors[&node_u] {
-            let v = node_to_idx[&nb];
-            if degrees[u] < degrees[v] || (degrees[u] == degrees[v] && u < v) {
-                oriented_adj[u].push(v);
-            }
-        }
-        oriented_adj[u].sort_unstable();
-    }
-
-    // Collect oriented edges for parallel iteration.
-    let mut edge_list: Vec<(usize, usize)> = Vec::new();
-    for (u, adj) in oriented_adj.iter().enumerate() {
-        for &v in adj {
-            edge_list.push((u, v));
-        }
-    }
-
-    // Phase 3: Parallel triangle counting.
-    // For each oriented edge (u, v), count common neighbors w in the
-    // intersection of oriented_adj[u] and oriented_adj[v].
-    // Since w must be a neighbor of both u and v in the oriented graph,
-    // and orientation ensures u < v < w (in degree order), each triangle
-    // is counted exactly once.
+    // Parallel triangle counting over the edge list.
     let oriented_adj = Arc::new(oriented_adj);
     let counter = std::sync::atomic::AtomicU64::new(0);
 
