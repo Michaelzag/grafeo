@@ -197,72 +197,79 @@ impl WalManager {
 
         self.ensure_active_log()?;
 
-        let mut guard = self.active_log.lock();
-        let log_file = guard
-            .as_mut()
-            .ok_or_else(|| Error::Internal("WAL writer not available".to_string()))?;
+        // Phase 1: write frame data and flush buffer while holding the lock.
+        // Determine whether an fsync is needed, and if so clone the file handle
+        // so we can release the lock before the (potentially slow) sync_all().
+        let (needs_rotation, sync_file) = {
+            let mut guard = self.active_log.lock();
+            let log_file = guard
+                .as_mut()
+                .ok_or_else(|| Error::Internal("WAL writer not available".to_string()))?;
 
-        maybe_crash("wal_before_write");
+            maybe_crash("wal_before_write");
 
-        // Write length prefix
-        let len = data.len() as u32;
-        log_file.writer.write_all(&len.to_le_bytes())?;
+            // Write length prefix
+            let len = data.len() as u32;
+            log_file.writer.write_all(&len.to_le_bytes())?;
 
-        // Write data
-        log_file.writer.write_all(data)?;
+            // Write data
+            log_file.writer.write_all(data)?;
 
-        // Write checksum
-        let checksum = crc32fast::hash(data);
-        log_file.writer.write_all(&checksum.to_le_bytes())?;
+            // Write checksum
+            let checksum = crc32fast::hash(data);
+            log_file.writer.write_all(&checksum.to_le_bytes())?;
 
-        maybe_crash("wal_after_write");
+            maybe_crash("wal_after_write");
 
-        // Update size tracking
-        let record_size = 4 + data.len() as u64 + 4; // length + data + checksum
-        log_file.size += record_size;
+            // Update size tracking
+            let record_size = 4 + data.len() as u64 + 4; // length + data + checksum
+            log_file.size += record_size;
 
-        self.total_record_count.fetch_add(1, Ordering::Relaxed);
-        self.records_since_sync.fetch_add(1, Ordering::Relaxed);
+            self.total_record_count.fetch_add(1, Ordering::Relaxed);
+            self.records_since_sync.fetch_add(1, Ordering::Relaxed);
 
-        // Check if we need to rotate
-        let needs_rotation = log_file.size >= self.config.max_log_size;
+            let needs_rotation = log_file.size >= self.config.max_log_size;
 
-        // Handle durability mode
-        match &self.config.durability {
-            DurabilityMode::Sync => {
-                if force_sync {
-                    maybe_crash("wal_before_flush");
-                    log_file.writer.flush()?;
-                    log_file.writer.get_ref().sync_all()?;
-                    self.records_since_sync.store(0, Ordering::Relaxed);
-                    *self.last_sync.lock() = Instant::now();
+            // Decide whether we need to fsync based on durability mode.
+            // Always flush the BufWriter so data reaches the OS page cache.
+            let needs_sync = match &self.config.durability {
+                DurabilityMode::Sync => {
+                    if force_sync {
+                        maybe_crash("wal_before_flush");
+                    }
+                    force_sync
                 }
-            }
-            DurabilityMode::Batch {
-                max_delay_ms,
-                max_records,
-            } => {
-                let records = self.records_since_sync.load(Ordering::Relaxed);
-                let elapsed = self.last_sync.lock().elapsed();
-
-                if records >= *max_records || elapsed >= Duration::from_millis(*max_delay_ms) {
-                    log_file.writer.flush()?;
-                    log_file.writer.get_ref().sync_all()?;
-                    self.records_since_sync.store(0, Ordering::Relaxed);
-                    *self.last_sync.lock() = Instant::now();
+                DurabilityMode::Batch {
+                    max_delay_ms,
+                    max_records,
+                } => {
+                    let records = self.records_since_sync.load(Ordering::Relaxed);
+                    let elapsed = self.last_sync.lock().elapsed();
+                    records >= *max_records || elapsed >= Duration::from_millis(*max_delay_ms)
                 }
-            }
-            DurabilityMode::Adaptive { .. } => {
-                // Adaptive mode: just flush buffer, background thread handles sync
-                log_file.writer.flush()?;
-            }
-            DurabilityMode::NoSync => {
-                // Just flush buffer, no sync
-                log_file.writer.flush()?;
-            }
+                DurabilityMode::Adaptive { .. } | DurabilityMode::NoSync => false,
+            };
+
+            // Flush the BufWriter while holding the lock (pushes data to OS).
+            log_file.writer.flush()?;
+
+            // Clone the file handle for out-of-lock sync if needed.
+            let sync_file = if needs_sync {
+                Some(log_file.writer.get_ref().try_clone()?)
+            } else {
+                None
+            };
+
+            (needs_rotation, sync_file)
+            // guard dropped here: active_log lock released
+        };
+
+        // Phase 2: fsync outside the lock so other threads can write concurrently.
+        if let Some(file) = sync_file {
+            file.sync_all()?;
+            self.records_since_sync.store(0, Ordering::Relaxed);
+            *self.last_sync.lock() = Instant::now();
         }
-
-        drop(guard);
 
         // Rotate if needed
         if needs_rotation {
@@ -424,10 +431,18 @@ impl WalManager {
     ///
     /// Returns an error if the sync fails.
     pub fn sync(&self) -> Result<()> {
-        let mut guard = self.active_log.lock();
-        if let Some(log_file) = guard.as_mut() {
-            log_file.writer.flush()?;
-            log_file.writer.get_ref().sync_all()?;
+        // Flush buffer and clone handle while holding the lock, then sync outside.
+        let sync_file = {
+            let mut guard = self.active_log.lock();
+            if let Some(log_file) = guard.as_mut() {
+                log_file.writer.flush()?;
+                Some(log_file.writer.get_ref().try_clone()?)
+            } else {
+                None
+            }
+        };
+        if let Some(file) = sync_file {
+            file.sync_all()?;
         }
         self.records_since_sync.store(0, Ordering::Relaxed);
         *self.last_sync.lock() = Instant::now();
