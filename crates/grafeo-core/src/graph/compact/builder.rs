@@ -40,7 +40,7 @@ pub enum CompactStoreError {
     /// Two node tables were defined with the same label.
     #[error("duplicate node label: {0:?}")]
     DuplicateLabel(String),
-    /// Two relationship tables were defined with the same edge type.
+    /// Two relationship tables were defined with the same (edge type, src, dst) triple.
     #[error("duplicate edge type: {0:?}")]
     DuplicateEdgeType(String),
     /// A backward edge has no corresponding forward edge (data inconsistency).
@@ -335,9 +335,10 @@ impl CompactStoreBuilder {
             let mut seen_triples = FxHashSet::default();
             for rtb in &self.rel_table_builders {
                 if !seen_triples.insert((&rtb.edge_type, &rtb.src_label, &rtb.dst_label)) {
-                    return Err(CompactStoreError::DuplicateEdgeType(
-                        rtb.edge_type.to_string(),
-                    ));
+                    return Err(CompactStoreError::DuplicateEdgeType(format!(
+                        "{} ({} -> {})",
+                        rtb.edge_type, rtb.src_label, rtb.dst_label
+                    )));
                 }
             }
         }

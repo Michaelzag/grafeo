@@ -178,7 +178,7 @@ fn test_builder_duplicate_edge_type_error() {
 
     assert!(matches!(
         result,
-        Err(CompactStoreError::DuplicateEdgeType(ref s)) if s == "LIVES_IN"
+        Err(CompactStoreError::DuplicateEdgeType(ref s)) if s == "LIVES_IN (Person -> City)"
     ));
 }
 
