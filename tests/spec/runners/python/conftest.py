@@ -254,9 +254,8 @@ class GtestItem(pytest.Item):
         params=None,
     ) -> None:
         """Execute queries expecting the last one to raise an error."""
-        # Execute all-but-last normally
         for q in queries[:-1]:
-            _execute(db, language, q)
+            _execute(db, language, q, params)
 
         # Last query should fail (with params if present)
         try:
