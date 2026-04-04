@@ -60,7 +60,6 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: most_prolific_actors
-    skip: "secondary sort order mismatch"
     query: |
       MATCH (a:Actor)-[:ACTED_IN]->(m:Movie)
       RETURN a.name, count(m) AS films

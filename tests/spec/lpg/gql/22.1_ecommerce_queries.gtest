@@ -63,7 +63,6 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: products_ordered_most
-    skip: "secondary sort order mismatch"
     query: |
       MATCH (o:Order)-[:CONTAINS]->(p:Product)
       RETURN p.name, count(o) AS times_ordered

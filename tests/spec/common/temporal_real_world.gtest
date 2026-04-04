@@ -83,7 +83,6 @@ tests:
         - [ORD-003, 2023-09-01]
 
   - name: orders_reverse_chronological
-    skip: "ORDER BY DESC on Date properties returns ASC order"
     query: |
       MATCH (o:Order)
       RETURN o.order_id, o.placed
@@ -97,7 +96,6 @@ tests:
         - [ORD-006, 2024-03-01]
 
   - name: newest_order
-    skip: "ORDER BY DESC on Date properties returns ASC order"
     query: |
       MATCH (o:Order)
       RETURN o.order_id

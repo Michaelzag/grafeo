@@ -89,7 +89,6 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: cities_with_most_connections
-    skip: "outgoing edge count ordering"
     query: |
       MATCH (c:City)-[r:ROUTE]->(:City)
       RETURN c.name, count(r) AS outgoing_routes
