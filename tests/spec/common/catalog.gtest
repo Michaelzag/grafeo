@@ -43,7 +43,6 @@ tests:
         - [Person]
 
   - name: labels_count
-    skip: "count() over CALL YIELD not aggregating"
     query: "CALL db.labels() YIELD label RETURN count(label) AS cnt"
     expect:
       rows:
@@ -73,7 +72,6 @@ tests:
         - [WORKS_AT]
 
   - name: relationship_types_count
-    skip: "count() over CALL YIELD not aggregating"
     query: "CALL db.relationshipTypes() YIELD relationshipType RETURN count(relationshipType) AS cnt"
     expect:
       rows:
@@ -145,7 +143,6 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: labels_empty_database
-    skip: "count() over CALL YIELD not aggregating"
     dataset: empty
     query: "CALL db.labels() YIELD label RETURN count(label) AS cnt"
     expect:
@@ -153,7 +150,6 @@ tests:
         - [0]
 
   - name: relationship_types_empty_database
-    skip: "count() over CALL YIELD not aggregating"
     dataset: empty
     query: "CALL db.relationshipTypes() YIELD relationshipType RETURN count(relationshipType) AS cnt"
     expect:
@@ -161,7 +157,6 @@ tests:
         - [0]
 
   - name: property_keys_empty_database
-    skip: "count() over CALL YIELD not aggregating"
     dataset: empty
     query: "CALL db.propertyKeys() YIELD propertyKey RETURN count(propertyKey) AS cnt"
     expect:
