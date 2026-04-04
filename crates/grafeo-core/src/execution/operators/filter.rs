@@ -2563,7 +2563,7 @@ impl ExpressionPredicate {
                 let val = self.eval_expr(&args[0], chunk, row)?;
                 match val {
                     Value::Int64(i) => Some(Value::Int64(i)),
-                    Value::Float64(f) => Some(Value::Int64(f.ceil() as i64)),
+                    Value::Float64(f) => Some(Value::Float64(f.ceil())),
                     _ => None,
                 }
             }
@@ -2574,7 +2574,7 @@ impl ExpressionPredicate {
                 let val = self.eval_expr(&args[0], chunk, row)?;
                 match val {
                     Value::Int64(i) => Some(Value::Int64(i)),
-                    Value::Float64(f) => Some(Value::Int64(f.floor() as i64)),
+                    Value::Float64(f) => Some(Value::Float64(f.floor())),
                     _ => None,
                 }
             }
@@ -2585,7 +2585,7 @@ impl ExpressionPredicate {
                 let val = self.eval_expr(&args[0], chunk, row)?;
                 match val {
                     Value::Int64(i) => Some(Value::Int64(i)),
-                    Value::Float64(f) => Some(Value::Int64(f.round() as i64)),
+                    Value::Float64(f) => Some(Value::Float64(f.round())),
                     _ => None,
                 }
             }

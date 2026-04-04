@@ -18,10 +18,9 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: unclosed_parenthesis
-    skip: "error kind is Syntax not parse"
     query: "MATCH (n:Person RETURN n.name"
     expect:
-      error: "parse"
+      error: "syntax"
 
   - name: missing_return_clause
     query: "MATCH (n:Person)"
@@ -29,10 +28,9 @@ tests:
       error: ""
 
   - name: unknown_clause
-    skip: "error kind is Syntax not parse"
     query: "FROBNICATE (n:Person) RETURN n.name"
     expect:
-      error: "parse"
+      error: "syntax"
 
   - name: empty_query
     query: ""
@@ -44,16 +42,14 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: edge_without_nodes
-    skip: "error kind is Syntax not parse"
     query: "MATCH -[:KNOWS]-> RETURN count(*)"
     expect:
-      error: "parse"
+      error: "syntax"
 
   - name: double_arrow
-    skip: "error kind is Syntax not parse"
     query: "MATCH (a)-->(b) RETURN a"
     expect:
-      error: "parse"
+      error: "syntax"
 
   # ---------------------------------------------------------------------------
   # Semantic errors: operations on wrong types
