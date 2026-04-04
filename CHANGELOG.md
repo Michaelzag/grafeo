@@ -33,6 +33,12 @@ GraphChallenge benchmark suite and RDF-to-LPG bridge: all five DARPA/MIT IEEE HP
 - **ORDER BY + LIMIT/SKIP ordering**: SKIP and LIMIT now apply after ORDER BY in the GQL translator, fixing queries like `ORDER BY x DESC LIMIT 3` that previously truncated input before sorting
 - **MIN/MAX aggregate output type**: output schema uses `LogicalType::Any` instead of `Int64`, fixing silent type coercion that returned `0` for Float64 and Date values
 - **Cypher ORDER BY after aggregation**: entity property references (e.g. `ORDER BY o.status`) now resolve correctly after GROUP BY, matching GQL behavior
+- **JOIN column deduplication**: multi-pattern MATCH queries sharing variables (e.g. `MATCH (a)-[]->(b), (a)-[]->(b)`) no longer produce duplicate columns in output
+- **SET self-reference expressions**: `SET n.value = n.value + 1` now works by pre-computing complex expressions via a projection before the property write
+- **`size(collect())` nested aggregate**: wrapping an aggregate in a non-aggregate function (e.g. `size(collect(x))`) no longer panics during aggregate extraction
+- **`WITH ... WHERE` on aggregate alias**: `WITH a, count(b) AS cnt WHERE cnt >= 2` now correctly promotes the WHERE predicate to HAVING, filtering after aggregation instead of before
+- **`SUM()` on empty result set**: returns `null` per ISO GQL (previously skipped test expected `0`)
+- **Build.rs format string escaping**: GQL queries with curly braces in multi-statement fire-and-forget panic messages no longer cause compile errors
 
 ### Performance
 
@@ -42,7 +48,8 @@ GraphChallenge benchmark suite and RDF-to-LPG bridge: all five DARPA/MIT IEEE HP
 
 ### Internal
 
-- **Spec test runner**: per-test `dataset:` override, error assertions use Display format, parameter substitution for all multi-statement queries
+- **Spec test coverage**: 3052 passing, 109 skipped (down from 150 skipped). 41 tests unskipped through bug fixes and expectation corrections
+- **Spec test runner**: per-test `dataset:` override, error assertions use Display format, parameter substitution for all multi-statement queries, format-safe panic messages for queries with curly braces
 
 ## [0.5.32] - 2026-04-03
 
