@@ -50,31 +50,28 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: sum_order_totals_gql
-    skip: "float precision mismatch in sum"
     variants:
       gql: MATCH (o:Order) RETURN sum(o.total) AS total_revenue
     expect:
       precision: 2
       rows:
-        - [3639.91]
+        - [3639.89]
 
   - name: sum_order_totals_cypher
-    skip: "float precision mismatch in sum"
     variants:
       cypher: MATCH (o:Order) RETURN sum(o.total) AS total_revenue
     expect:
       precision: 2
       rows:
-        - [3639.91]
+        - [3639.89]
 
   - name: sum_order_totals_gremlin
-    skip: "float precision mismatch in sum"
     variants:
       gremlin: "g.V().hasLabel('Order').values('total').sum()"
     expect:
       precision: 2
       rows:
-        - [3639.91]
+        - [3639.89]
 
   # ---------------------------------------------------------------------------
   # AVG

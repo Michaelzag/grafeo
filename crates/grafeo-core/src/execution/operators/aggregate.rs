@@ -31,9 +31,9 @@ pub(crate) enum AggregateState {
     /// Sum distinct state (integer sum, count, seen values).
     SumIntDistinct(i64, i64, HashSet<HashableValue>),
     /// Sum state (float sum, count of values added).
-    SumFloat(f64, i64),
-    /// Sum distinct state (float sum, count, seen values).
-    SumFloatDistinct(f64, i64, HashSet<HashableValue>),
+    SumFloat(f64, f64, i64),
+    /// Sum distinct state (float sum, compensation, count, seen values).
+    SumFloatDistinct(f64, f64, i64, HashSet<HashableValue>),
     /// Average state (sum, count).
     Avg(f64, i64),
     /// Average distinct state (sum, count, seen values).
@@ -193,11 +193,11 @@ impl AggregateState {
                     *count += 1;
                 } else if let Some(Value::Float64(v)) = value {
                     // Convert to float sum, carrying count forward
-                    *self = AggregateState::SumFloat(*sum as f64 + v, *count + 1);
+                    *self = AggregateState::SumFloat(*sum as f64 + v, 0.0, *count + 1);
                 } else if let Some(ref v) = value {
                     // RDF stores numeric literals as strings - try to parse
                     if let Some(num) = value_to_f64(v) {
-                        *self = AggregateState::SumFloat(*sum as f64 + num, *count + 1);
+                        *self = AggregateState::SumFloat(*sum as f64 + num, 0.0, *count + 1);
                     }
                 }
             }
@@ -213,6 +213,7 @@ impl AggregateState {
                             let moved_seen = std::mem::take(seen);
                             *self = AggregateState::SumFloatDistinct(
                                 *sum as f64 + f,
+                                0.0,
                                 *count + 1,
                                 moved_seen,
                             );
@@ -221,6 +222,7 @@ impl AggregateState {
                             let moved_seen = std::mem::take(seen);
                             *self = AggregateState::SumFloatDistinct(
                                 *sum as f64 + num,
+                                0.0,
                                 *count + 1,
                                 moved_seen,
                             );
@@ -228,22 +230,29 @@ impl AggregateState {
                     }
                 }
             }
-            AggregateState::SumFloat(sum, count) => {
+            AggregateState::SumFloat(sum, comp, count) => {
                 if let Some(ref v) = value {
                     // Use value_to_f64 which now handles strings
                     if let Some(num) = value_to_f64(v) {
-                        *sum += num;
+                        // Kahan compensated summation to reduce rounding error
+                        let y = num - *comp;
+                        let t = *sum + y;
+                        *comp = (t - *sum) - y;
+                        *sum = t;
                         *count += 1;
                     }
                 }
             }
-            AggregateState::SumFloatDistinct(sum, count, seen) => {
+            AggregateState::SumFloatDistinct(sum, comp, count, seen) => {
                 if let Some(ref v) = value {
                     let hashable = HashableValue::from(v);
                     if seen.insert(hashable)
                         && let Some(num) = value_to_f64(v)
                     {
-                        *sum += num;
+                        let y = num - *comp;
+                        let t = *sum + y;
+                        *comp = (t - *sum) - y;
+                        *sum = t;
                         *count += 1;
                     }
                 }
@@ -409,8 +418,8 @@ impl AggregateState {
                     Value::Int64(*sum)
                 }
             }
-            AggregateState::SumFloat(sum, count)
-            | AggregateState::SumFloatDistinct(sum, count, _) => {
+            AggregateState::SumFloat(sum, _, count)
+            | AggregateState::SumFloatDistinct(sum, _, count, _) => {
                 if *count == 0 {
                     Value::Null
                 } else {
