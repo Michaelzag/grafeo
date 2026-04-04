@@ -211,7 +211,11 @@ pub fn global_clustering_coefficient(store: &dyn GraphStore) -> f64 {
 
 /// Counts the total number of unique triangles in the graph.
 ///
-/// Each triangle is counted exactly once (not three times).
+/// Each triangle is counted exactly once using degree-ordered merge intersection.
+/// This is significantly faster than the per-node hash-based approach because:
+/// - Edges are oriented low-degree -> high-degree (halves work)
+/// - Sorted adjacency lists enable merge-based intersection (cache-friendly)
+/// - Each triangle is counted exactly once (no /3 correction)
 ///
 /// # Arguments
 ///
@@ -223,11 +227,45 @@ pub fn global_clustering_coefficient(store: &dyn GraphStore) -> f64 {
 ///
 /// # Complexity
 ///
-/// O(V * d^2) where d is the average degree
+/// O(m * sqrt(m)) where m is the number of edges
 pub fn total_triangles(store: &dyn GraphStore) -> u64 {
-    let per_node = triangle_count(store);
-    // Each triangle is counted 3 times (once per vertex), so divide by 3
-    per_node.values().sum::<u64>() / 3
+    let neighbors = build_undirected_neighbors(store);
+    let n = neighbors.len();
+    if n == 0 {
+        return 0;
+    }
+
+    // Build index-based adjacency with degree ordering.
+    let mut node_list: Vec<NodeId> = neighbors.keys().copied().collect();
+    node_list.sort_unstable();
+
+    let node_to_idx: FxHashMap<NodeId, usize> =
+        node_list.iter().enumerate().map(|(i, &n)| (n, i)).collect();
+
+    let degrees: Vec<usize> = node_list.iter().map(|node| neighbors[node].len()).collect();
+
+    // Orient edges: u -> v only if deg(u) < deg(v), or (== and u < v).
+    let mut oriented_adj: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for u in 0..n {
+        let node_u = node_list[u];
+        for &nb in &neighbors[&node_u] {
+            let v = node_to_idx[&nb];
+            if degrees[u] < degrees[v] || (degrees[u] == degrees[v] && u < v) {
+                oriented_adj[u].push(v);
+            }
+        }
+        oriented_adj[u].sort_unstable();
+    }
+
+    // Count: for each oriented edge (u, v), count common neighbors
+    // in the intersection of oriented_adj[u] and oriented_adj[v].
+    let mut total = 0u64;
+    for (u, adj) in oriented_adj.iter().enumerate() {
+        for &v in adj {
+            total += sorted_intersection_count(&oriented_adj[u], &oriented_adj[v]);
+        }
+    }
+    total
 }
 
 /// Computes all clustering metrics in a single pass.
@@ -466,7 +504,6 @@ pub fn total_triangles_parallel(store: &dyn GraphStore, parallel_threshold: usiz
 /// Counts the size of the intersection of two sorted slices.
 ///
 /// Uses a merge-based approach: O(min(|a|, |b|)) with excellent cache behavior.
-#[cfg(feature = "parallel")]
 fn sorted_intersection_count(a: &[usize], b: &[usize]) -> u64 {
     let mut count = 0u64;
     let mut i = 0;
