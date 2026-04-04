@@ -1894,16 +1894,25 @@ fn test_order_by_desc_sort_key_in_return() {
     session
         .execute("INSERT (:Item {name: 'C', score: 8.0})")
         .unwrap();
+    session
+        .execute("INSERT (:Item {name: 'D', score: 6.9})")
+        .unwrap();
+    session
+        .execute("INSERT (:Item {name: 'E', score: 9.1})")
+        .unwrap();
 
     let result = session
-        .execute("MATCH (i:Item) RETURN i.name, i.score ORDER BY i.score DESC")
+        .execute("MATCH (i:Item) RETURN i.name, i.score ORDER BY i.score DESC LIMIT 3")
         .unwrap();
 
     assert_eq!(result.rows.len(), 3);
-    // Descending: B(8.7), C(8.0), A(7.5)
-    assert_eq!(result.rows[0][0], Value::String("B".into()));
-    assert_eq!(result.rows[1][0], Value::String("C".into()));
-    assert_eq!(result.rows[2][0], Value::String("A".into()));
+    for (i, row) in result.rows.iter().enumerate() {
+        eprintln!("row {i}: {:?}", row);
+    }
+    // Descending top 3: E(9.1), B(8.7), C(8.0)
+    assert_eq!(result.rows[0][0], Value::String("E".into()));
+    assert_eq!(result.rows[1][0], Value::String("B".into()));
+    assert_eq!(result.rows[2][0], Value::String("C".into()));
 }
 
 /// ORDER BY DESC on an integer property that is in the RETURN clause.
