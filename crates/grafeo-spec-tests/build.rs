@@ -929,10 +929,10 @@ fn generate_single_test(
             if has_params {
                 writeln!(
                     output,
-                    "        execute_query_result_with_params(&db, \"{}\", \"{}\", \"{}\", params.clone()).ok();",
+                    "        execute_query_result_with_params(&db, \"{}\", \"{}\", \"{}\", params.clone()).expect(\"setup statement failed\");",
                     escape_rust_string(language),
                     escape_rust_string(model),
-                    escape_rust_string(q)
+                    escape_rust_string(q),
                 )
                 .unwrap();
             } else {

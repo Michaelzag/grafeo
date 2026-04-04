@@ -2041,3 +2041,65 @@ fn test_min_max_float_properties() {
     assert_eq!(result.rows[0][0], Value::Float64(39.99));
     assert_eq!(result.rows[0][1], Value::Float64(1299.99));
 }
+
+#[test]
+fn test_multi_pattern_match_join() {
+    // Two comma-separated patterns sharing variables c and p
+    // should produce an equi-join, not a cross product.
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    // Customer -> PLACED -> Order -> CONTAINS -> Product
+    // Customer -> REVIEWED -> Product
+    session
+        .execute("INSERT (:Customer {name: 'Alix'})")
+        .unwrap();
+    session
+        .execute("INSERT (:Product {name: 'Laptop'})")
+        .unwrap();
+    session
+        .execute("INSERT (:Product {name: 'Phone'})")
+        .unwrap();
+    session.execute("INSERT (:Order {id: 'O1'})").unwrap();
+
+    session
+        .execute(
+            "MATCH (c:Customer {name: 'Alix'}), (o:Order {id: 'O1'}) \
+             INSERT (c)-[:PLACED]->(o)",
+        )
+        .unwrap();
+    session
+        .execute(
+            "MATCH (o:Order {id: 'O1'}), (p:Product {name: 'Laptop'}) \
+             INSERT (o)-[:CONTAINS]->(p)",
+        )
+        .unwrap();
+    session
+        .execute(
+            "MATCH (o:Order {id: 'O1'}), (p:Product {name: 'Phone'}) \
+             INSERT (o)-[:CONTAINS]->(p)",
+        )
+        .unwrap();
+    session
+        .execute(
+            "MATCH (c:Customer {name: 'Alix'}), (p:Product {name: 'Laptop'}) \
+             INSERT (c)-[:REVIEWED {rating: 5}]->(p)",
+        )
+        .unwrap();
+
+    // Multi-pattern: c ordered p AND c reviewed p
+    let result = session
+        .execute(
+            "MATCH (c:Customer)-[:PLACED]->(o:Order)-[:CONTAINS]->(p:Product), \
+                   (c)-[r:REVIEWED]->(p) \
+             RETURN c.name, p.name, r.rating ORDER BY c.name, p.name",
+        )
+        .unwrap();
+
+    eprintln!("multi-pattern result: {:?}", result.rows);
+    // Should only match (Alix, Laptop, 5) because Alix reviewed only Laptop
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows[0][1], Value::String("Laptop".into()));
+    assert_eq!(result.rows[0][2], Value::Int64(5));
+}

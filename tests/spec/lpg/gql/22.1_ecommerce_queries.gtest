@@ -175,7 +175,7 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: customer_reviewed_what_they_ordered
-    skip: "multi-pattern MATCH ordering"
+    skip: "multi-pattern MATCH produces duplicate rows from path multiplicity"
     query: |
       MATCH (c:Customer)-[:PLACED]->(o:Order)-[:CONTAINS]->(p:Product),
             (c)-[r:REVIEWED]->(p)

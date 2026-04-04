@@ -3,7 +3,7 @@
 use super::{
     ApplyOp, ApplyOperator, DistinctOp, Error, ExceptOp, HashJoinOperator, IntersectOp, JoinOp,
     JoinType, LeapfrogJoinOperator, LogicalExpression, MultiWayJoinOp, Operator, OtherwiseOp,
-    PhysicalJoinType, Result, UnionOp, common,
+    PhysicalJoinType, ProjectExpr, ProjectOperator, Result, UnionOp, common,
 };
 
 impl super::Planner {
@@ -51,7 +51,7 @@ impl super::Planner {
 
         let output_schema = self.derive_schema_from_columns(&all_columns);
 
-        let operator: Box<dyn Operator> = Box::new(HashJoinOperator::new(
+        let join_op: Box<dyn Operator> = Box::new(HashJoinOperator::new(
             left_op,
             right_op,
             probe_keys,
@@ -60,7 +60,34 @@ impl super::Planner {
             output_schema,
         ));
 
-        Ok((operator, all_columns))
+        // Deduplicate shared variable columns: right-side columns that also
+        // appear on the left are redundant (the join guarantees equality).
+        // Build a projection that keeps all left columns plus only the
+        // non-duplicate right columns.
+        let left_count = left_columns.len();
+        let mut keep_indices: Vec<usize> = (0..left_count).collect();
+        let mut deduped_columns: Vec<String> = left_columns;
+        for (ri, col_name) in right_columns.iter().enumerate() {
+            if !deduped_columns.contains(col_name) {
+                keep_indices.push(left_count + ri);
+                deduped_columns.push(col_name.clone());
+            }
+        }
+
+        // If no columns were removed, skip the projection wrapper.
+        if keep_indices.len() == all_columns.len() {
+            return Ok((join_op, deduped_columns));
+        }
+
+        let proj_exprs: Vec<ProjectExpr> = keep_indices
+            .iter()
+            .map(|&i| ProjectExpr::Column(i))
+            .collect();
+        let proj_schema = self.derive_schema_from_columns(&deduped_columns);
+        let operator: Box<dyn Operator> =
+            Box::new(ProjectOperator::new(join_op, proj_exprs, proj_schema));
+
+        Ok((operator, deduped_columns))
     }
 
     /// Plans a multi-way leapfrog join (WCOJ) operator.
