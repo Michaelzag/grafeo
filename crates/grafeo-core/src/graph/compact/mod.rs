@@ -50,8 +50,9 @@ pub struct CompactStore {
     label_to_table_id: FxHashMap<ArcStr, u16>,
     /// Relationship tables indexed by rel_table_id for O(1) lookup from EdgeId.
     rel_tables_by_id: Vec<RelTable>,
-    /// rel_table_id lookup from edge type string.
-    edge_type_to_rel_id: FxHashMap<ArcStr, u16>,
+    /// rel_table_id(s) lookup from edge type string. One edge type can span
+    /// multiple (src_label, dst_label) pairs, each with its own rel table.
+    edge_type_to_rel_id: FxHashMap<ArcStr, Vec<u16>>,
     /// Lookup: table ID -> label.
     table_id_to_label: Vec<ArcStr>,
     /// Lookup: rel table ID -> edge type.
@@ -86,7 +87,7 @@ impl CompactStore {
         node_tables_by_id: Vec<NodeTable>,
         label_to_table_id: FxHashMap<ArcStr, u16>,
         rel_tables_by_id: Vec<RelTable>,
-        edge_type_to_rel_id: FxHashMap<ArcStr, u16>,
+        edge_type_to_rel_id: FxHashMap<ArcStr, Vec<u16>>,
         table_id_to_label: Vec<ArcStr>,
         rel_table_id_to_type: Vec<ArcStr>,
         statistics: Statistics,
@@ -140,11 +141,18 @@ impl CompactStore {
         self.node_tables_by_id.get(tid as usize)
     }
 
-    /// Returns a reference to the relationship table for the given edge type.
+    /// Returns references to all relationship tables for the given edge type.
+    /// An edge type can have multiple rel tables if it spans different label pairs.
     #[must_use]
-    pub fn rel_table(&self, edge_type: &str) -> Option<&RelTable> {
-        let &rid = self.edge_type_to_rel_id.get(edge_type)?;
-        self.rel_tables_by_id.get(rid as usize)
+    pub fn rel_tables_for_type(&self, edge_type: &str) -> Vec<&RelTable> {
+        self.edge_type_to_rel_id
+            .get(edge_type)
+            .map(|rids| {
+                rids.iter()
+                    .filter_map(|&rid| self.rel_tables_by_id.get(rid as usize))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Returns the label for a given table ID, if valid.
