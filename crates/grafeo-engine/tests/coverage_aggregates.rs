@@ -564,3 +564,478 @@ fn min_max_on_empty_result_returns_null() {
     assert_eq!(r.rows[0][0], Value::Null);
     assert_eq!(r.rows[0][1], Value::Null);
 }
+
+// ===========================================================================
+// T3: Wrapped aggregates with CASE expressions
+// Exercises: extract_wrapped_aggregates CASE branch in gql/aggregate.rs
+// ===========================================================================
+
+#[test]
+fn test_case_wrapping_aggregate() {
+    let db = stats_graph();
+    let s = db.session();
+    // CASE WHEN count(d) > 3 THEN 'many' ELSE 'few' END
+    let r = s
+        .execute(
+            "MATCH (d:Data) \
+             RETURN CASE WHEN count(d) > 3 THEN 'many' ELSE 'few' END AS label",
+        )
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows[0][0], Value::String("many".into()));
+}
+
+#[test]
+fn test_case_wrapping_aggregate_else_branch() {
+    let db = stats_graph();
+    let s = db.session();
+    // CASE WHEN sum(d.score) > 9999 THEN 'huge' ELSE 'normal' END
+    let r = s
+        .execute(
+            "MATCH (d:Data) \
+             RETURN CASE WHEN sum(d.score) > 9999 THEN 'huge' ELSE 'normal' END AS label",
+        )
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows[0][0], Value::String("normal".into()));
+}
+
+#[test]
+fn test_case_aggregate_in_then_branch() {
+    let db = stats_graph();
+    let s = db.session();
+    // CASE WHEN true THEN count(d) ELSE 0 END
+    let r = s
+        .execute(
+            "MATCH (d:Data) \
+             RETURN CASE WHEN true THEN count(d) ELSE 0 END AS cnt",
+        )
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows[0][0], Value::Int64(5));
+}
+
+// ===========================================================================
+// T4: Non-aggregate function wrapping an aggregate argument
+// Exercises: extract_wrapped_aggregates FunctionCall non-aggregate branch
+// ===========================================================================
+
+#[test]
+fn test_non_aggregate_function_wrapping_aggregate() {
+    let db = stats_graph();
+    let s = db.session();
+    // abs(sum(d.score)) wraps aggregate inside non-aggregate abs()
+    let r = s
+        .execute("MATCH (d:Data) RETURN abs(sum(d.score)) AS total")
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    // sum(10+20+30+40+50) = 150
+    assert_eq!(r.rows[0][0], Value::Int64(150));
+}
+
+#[test]
+fn test_tostring_wrapping_count() {
+    let db = stats_graph();
+    let s = db.session();
+    let r = s
+        .execute("MATCH (d:Data) RETURN toString(count(d)) AS cnt_str")
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows[0][0], Value::String("5".into()));
+}
+
+// ===========================================================================
+// T5: Bivariate aggregates on empty result set (null finalize paths)
+// Exercises: Bivariate finalize with count=0 in aggregate.rs
+// ===========================================================================
+
+#[test]
+fn test_covar_samp_empty_returns_null() {
+    let db = GrafeoDB::new_in_memory();
+    let s = db.session();
+    let r = s
+        .execute("MATCH (p:NonExistent) RETURN COVAR_SAMP(p.y, p.x) AS cov")
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows[0][0], Value::Null);
+}
+
+#[test]
+fn test_corr_empty_returns_null() {
+    let db = GrafeoDB::new_in_memory();
+    let s = db.session();
+    let r = s
+        .execute("MATCH (p:NonExistent) RETURN CORR(p.y, p.x) AS r")
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows[0][0], Value::Null);
+}
+
+#[test]
+fn test_regr_slope_empty_returns_null() {
+    let db = GrafeoDB::new_in_memory();
+    let s = db.session();
+    let r = s
+        .execute("MATCH (p:NonExistent) RETURN REGR_SLOPE(p.y, p.x) AS slope")
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows[0][0], Value::Null);
+}
+
+#[test]
+fn test_regr_intercept_empty_returns_null() {
+    let db = GrafeoDB::new_in_memory();
+    let s = db.session();
+    let r = s
+        .execute("MATCH (p:NonExistent) RETURN REGR_INTERCEPT(p.y, p.x) AS intercept")
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows[0][0], Value::Null);
+}
+
+#[test]
+fn test_regr_r2_empty_returns_null() {
+    let db = GrafeoDB::new_in_memory();
+    let s = db.session();
+    let r = s
+        .execute("MATCH (p:NonExistent) RETURN REGR_R2(p.y, p.x) AS r2")
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows[0][0], Value::Null);
+}
+
+#[test]
+fn test_regr_sxx_syy_sxy_empty_returns_null() {
+    let db = GrafeoDB::new_in_memory();
+    let s = db.session();
+    let r = s
+        .execute(
+            "MATCH (p:NonExistent) \
+             RETURN REGR_SXX(p.y, p.x) AS sxx, REGR_SYY(p.y, p.x) AS syy, REGR_SXY(p.y, p.x) AS sxy",
+        )
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows[0][0], Value::Null);
+    assert_eq!(r.rows[0][1], Value::Null);
+    assert_eq!(r.rows[0][2], Value::Null);
+}
+
+#[test]
+fn test_regr_avgx_avgy_empty_returns_null() {
+    let db = GrafeoDB::new_in_memory();
+    let s = db.session();
+    let r = s
+        .execute(
+            "MATCH (p:NonExistent) \
+             RETURN REGR_AVGX(p.y, p.x) AS ax, REGR_AVGY(p.y, p.x) AS ay",
+        )
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows[0][0], Value::Null);
+    assert_eq!(r.rows[0][1], Value::Null);
+}
+
+#[test]
+fn test_regr_count_empty_returns_zero() {
+    let db = GrafeoDB::new_in_memory();
+    let s = db.session();
+    let r = s
+        .execute("MATCH (p:NonExistent) RETURN REGR_COUNT(p.y, p.x) AS cnt")
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    // REGR_COUNT returns the count of non-null pairs (0 for empty set)
+    assert_eq!(r.rows[0][0], Value::Int64(0));
+}
+
+// ===========================================================================
+// T6: GROUP_CONCAT DISTINCT
+// Exercises: GroupConcatDistinct update/finalize in aggregate.rs
+// ===========================================================================
+
+#[test]
+fn test_group_concat_distinct() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+    for city in ["Amsterdam", "Berlin", "Amsterdam", "Berlin", "Paris"] {
+        session.create_node_with_props(&["City"], [("name", Value::String(city.into()))]);
+    }
+    let r = session
+        .execute("MATCH (c:City) RETURN group_concat(DISTINCT c.name) AS names")
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    if let Value::String(names) = &r.rows[0][0] {
+        // Should have exactly 3 unique cities
+        assert_eq!(
+            names.split(' ').count(),
+            3,
+            "expected 3 unique cities: {names}"
+        );
+    } else {
+        panic!("expected string, got {:?}", r.rows[0][0]);
+    }
+}
+
+#[test]
+fn test_group_concat_distinct_with_separator() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+    for city in ["Amsterdam", "Berlin", "Amsterdam", "Berlin", "Paris"] {
+        session.create_node_with_props(&["City"], [("name", Value::String(city.into()))]);
+    }
+    let r = session
+        .execute("MATCH (c:City) RETURN group_concat(DISTINCT c.name, '|') AS names")
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    if let Value::String(names) = &r.rows[0][0] {
+        assert_eq!(
+            names.split('|').count(),
+            3,
+            "expected 3 unique cities: {names}"
+        );
+    } else {
+        panic!("expected string, got {:?}", r.rows[0][0]);
+    }
+}
+
+// ===========================================================================
+// T7: SUM DISTINCT with mixed int and float (SumIntDistinct -> SumFloatDistinct)
+// Exercises: SumIntDistinct float conversion path in aggregate.rs
+// ===========================================================================
+
+#[test]
+fn test_sum_distinct_mixed_int_float() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+    // Insert nodes with Int64 and Float64 values; duplicates should be excluded
+    session.create_node_with_props(&["Val"], [("v", Value::Int64(10))]);
+    session.create_node_with_props(&["Val"], [("v", Value::Int64(10))]); // duplicate
+    session.create_node_with_props(&["Val"], [("v", Value::Float64(20.5))]);
+    session.create_node_with_props(&["Val"], [("v", Value::Float64(20.5))]); // duplicate
+
+    let r = session
+        .execute("MATCH (n:Val) RETURN sum(DISTINCT n.v) AS total")
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    // 10 + 20.5 = 30.5 (converted to float when float encountered)
+    match &r.rows[0][0] {
+        Value::Float64(f) => assert!((*f - 30.5).abs() < 0.01, "expected 30.5, got {f}"),
+        other => panic!("expected Float64, got {other:?}"),
+    }
+}
+
+// ===========================================================================
+// T8: Wrapped aggregate with multiple aggregates in one expression
+// Exercises: extract_wrapped_aggregates recursion with multiple aggregates
+// ===========================================================================
+
+#[test]
+fn test_wrapped_two_aggregates_in_binary() {
+    let db = stats_graph();
+    let s = db.session();
+    // sum(d.score) + count(d): both sides contain aggregates
+    let r = s
+        .execute("MATCH (d:Data) RETURN sum(d.score) + count(d) AS combo")
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    // sum = 150, count = 5 -> 155
+    assert_eq!(r.rows[0][0], Value::Int64(155));
+}
+
+#[test]
+fn test_wrapped_aggregate_multiply() {
+    let db = stats_graph();
+    let s = db.session();
+    // avg(d.score) * 2: float multiplication
+    let r = s
+        .execute("MATCH (d:Data) RETURN avg(d.score) * 2 AS doubled")
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    // avg(10,20,30,40,50) = 30.0, * 2 = 60.0
+    match &r.rows[0][0] {
+        Value::Float64(f) => assert!((*f - 60.0).abs() < 0.01, "expected 60.0, got {f}"),
+        Value::Int64(v) => assert_eq!(*v, 60),
+        other => panic!("expected numeric, got {other:?}"),
+    }
+}
+
+// ===========================================================================
+// T9: Bivariate aggregates with insufficient data (single row)
+// Exercises: Bivariate finalize with count=1 (null for sample-based stats)
+// ===========================================================================
+
+#[test]
+fn test_covar_samp_single_row_returns_null() {
+    let db = GrafeoDB::new_in_memory();
+    let s = db.session();
+    s.create_node_with_props(
+        &["Point"],
+        [("x", Value::Float64(1.0)), ("y", Value::Float64(2.0))],
+    );
+    let r = s
+        .execute("MATCH (p:Point) RETURN COVAR_SAMP(p.y, p.x) AS cov")
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    // Sample covariance needs n >= 2
+    assert_eq!(r.rows[0][0], Value::Null);
+}
+
+#[test]
+fn test_covar_pop_single_row_returns_zero() {
+    let db = GrafeoDB::new_in_memory();
+    let s = db.session();
+    s.create_node_with_props(
+        &["Point"],
+        [("x", Value::Float64(1.0)), ("y", Value::Float64(2.0))],
+    );
+    let r = s
+        .execute("MATCH (p:Point) RETURN COVAR_POP(p.y, p.x) AS cov")
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    // Population covariance with n=1: c_xy/1 = 0/1 = 0.0
+    match &r.rows[0][0] {
+        Value::Float64(f) => assert!(f.abs() < 1e-10, "expected 0.0, got {f}"),
+        other => panic!("expected Float64, got {other:?}"),
+    }
+}
+
+// ===========================================================================
+// T10: OPTIONAL MATCH with aggregation (project.rs Expression path)
+// ===========================================================================
+
+#[test]
+fn test_optional_match_with_count_aggregate() {
+    let db = GrafeoDB::new_in_memory();
+    let s = db.session();
+    s.create_node_with_props(&["Person"], [("name", Value::String("Alix".into()))]);
+    s.create_node_with_props(&["Person"], [("name", Value::String("Gus".into()))]);
+    // Alix has a friend, Gus does not
+    s.execute(
+        "MATCH (a:Person {name: 'Alix'}) MATCH (b:Person {name: 'Gus'}) INSERT (a)-[:KNOWS]->(b)",
+    )
+    .unwrap();
+
+    let r = s
+        .execute(
+            "MATCH (p:Person) \
+             OPTIONAL MATCH (p)-[:KNOWS]->(f:Person) \
+             RETURN p.name AS name, count(f) AS friend_count \
+             ORDER BY name",
+        )
+        .unwrap();
+    assert_eq!(r.rows.len(), 2);
+    // Alix knows Gus
+    assert_eq!(r.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(r.rows[0][1], Value::Int64(1));
+    // Gus knows nobody
+    assert_eq!(r.rows[1][0], Value::String("Gus".into()));
+    assert_eq!(r.rows[1][1], Value::Int64(0));
+}
+
+// ===========================================================================
+// T11: Percentile with grouped data
+// Exercises: percentile finalize interpolation path in aggregate.rs
+// ===========================================================================
+
+#[test]
+fn test_percentile_cont_interpolation() {
+    let db = GrafeoDB::new_in_memory();
+    let s = db.session();
+    // Create 4 values: 10, 20, 30, 40
+    for v in [10, 20, 30, 40] {
+        s.create_node_with_props(&["Item"], [("v", Value::Int64(v))]);
+    }
+    // percentile_cont at 0.5 should interpolate between 20 and 30 = 25.0
+    let r = s
+        .execute("MATCH (i:Item) RETURN percentile_cont(i.v, 0.5) AS median")
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    match &r.rows[0][0] {
+        Value::Float64(f) => assert!((*f - 25.0).abs() < 0.01, "expected 25.0, got {f}"),
+        other => panic!("expected Float64, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_percentile_cont_at_boundary() {
+    let db = GrafeoDB::new_in_memory();
+    let s = db.session();
+    for v in [10, 20, 30, 40, 50] {
+        s.create_node_with_props(&["Item"], [("v", Value::Int64(v))]);
+    }
+    // percentile_cont at 0.25: rank = 0.25 * 4 = 1.0, so exact value at index 1 = 20.0
+    let r = s
+        .execute("MATCH (i:Item) RETURN percentile_cont(i.v, 0.25) AS p25")
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    match &r.rows[0][0] {
+        Value::Float64(f) => assert!((*f - 20.0).abs() < 0.01, "expected 20.0, got {f}"),
+        other => panic!("expected Float64, got {other:?}"),
+    }
+}
+
+// ===========================================================================
+// T12: Unary positive wrapping aggregate (Pos branch in extract_wrapped_aggregates)
+// ===========================================================================
+
+#[test]
+fn test_wrapped_aggregate_unary_negation() {
+    let db = stats_graph();
+    let s = db.session();
+    // -(count(d)): unary negation wrapping aggregate
+    let r = s
+        .execute("MATCH (d:Data) RETURN -(count(d)) AS neg")
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows[0][0], Value::Int64(-5));
+}
+
+// ===========================================================================
+// T13: COLLECT DISTINCT
+// Exercises: CollectDistinct update/finalize in aggregate.rs
+// ===========================================================================
+
+#[test]
+fn test_collect_distinct() {
+    let db = GrafeoDB::new_in_memory();
+    let s = db.session();
+    for city in ["Amsterdam", "Berlin", "Amsterdam", "Berlin", "Paris"] {
+        s.create_node_with_props(&["City"], [("name", Value::String(city.into()))]);
+    }
+    let r = s
+        .execute("MATCH (c:City) RETURN collect(DISTINCT c.name) AS names")
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    if let Value::List(items) = &r.rows[0][0] {
+        assert_eq!(
+            items.len(),
+            3,
+            "expected 3 unique cities, got {}",
+            items.len()
+        );
+    } else {
+        panic!("expected list, got {:?}", r.rows[0][0]);
+    }
+}
+
+// ===========================================================================
+// T14: AVG DISTINCT
+// Exercises: AvgDistinct update/finalize in aggregate.rs
+// ===========================================================================
+
+#[test]
+fn test_avg_distinct() {
+    let db = GrafeoDB::new_in_memory();
+    let s = db.session();
+    // Values: 10, 10, 20, 20, 30 -> distinct: 10, 20, 30 -> avg = 20.0
+    for v in [10, 10, 20, 20, 30] {
+        s.create_node_with_props(&["Val"], [("v", Value::Int64(v))]);
+    }
+    let r = s
+        .execute("MATCH (n:Val) RETURN avg(DISTINCT n.v) AS a")
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    match &r.rows[0][0] {
+        Value::Float64(f) => assert!((*f - 20.0).abs() < 0.01, "expected 20.0, got {f}"),
+        other => panic!("expected Float64, got {other:?}"),
+    }
+}

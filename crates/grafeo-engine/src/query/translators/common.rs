@@ -979,6 +979,166 @@ mod tests {
         assert!(to_aggregate_function("size").is_none());
     }
 
+    // --- is_aggregate_function: bivariate / concat / sample ---
+
+    #[test]
+    fn aggregate_functions_bivariate_recognized() {
+        for name in [
+            "group_concat",
+            "GROUPCONCAT",
+            "listagg",
+            "LISTAGG",
+            "sample",
+            "SAMPLE",
+            "covar_samp",
+            "COVAR_SAMP",
+            "covar_pop",
+            "COVAR_POP",
+            "corr",
+            "CORR",
+            "regr_slope",
+            "REGR_SLOPE",
+            "regr_intercept",
+            "REGR_INTERCEPT",
+            "regr_r2",
+            "REGR_R2",
+            "regr_count",
+            "REGR_COUNT",
+            "regr_sxx",
+            "REGR_SXX",
+            "regr_syy",
+            "REGR_SYY",
+            "regr_sxy",
+            "REGR_SXY",
+            "regr_avgx",
+            "REGR_AVGX",
+            "regr_avgy",
+            "REGR_AVGY",
+        ] {
+            assert!(is_aggregate_function(name), "{name} should be aggregate");
+        }
+    }
+
+    // --- to_aggregate_function: bivariate variants ---
+
+    #[test]
+    fn to_aggregate_bivariate_variants() {
+        assert!(matches!(
+            to_aggregate_function("group_concat"),
+            Some(AggregateFunction::GroupConcat)
+        ));
+        assert!(matches!(
+            to_aggregate_function("GROUPCONCAT"),
+            Some(AggregateFunction::GroupConcat)
+        ));
+        assert!(matches!(
+            to_aggregate_function("LISTAGG"),
+            Some(AggregateFunction::GroupConcat)
+        ));
+        assert!(matches!(
+            to_aggregate_function("sample"),
+            Some(AggregateFunction::Sample)
+        ));
+        assert!(matches!(
+            to_aggregate_function("COVAR_SAMP"),
+            Some(AggregateFunction::CovarSamp)
+        ));
+        assert!(matches!(
+            to_aggregate_function("COVAR_POP"),
+            Some(AggregateFunction::CovarPop)
+        ));
+        assert!(matches!(
+            to_aggregate_function("CORR"),
+            Some(AggregateFunction::Corr)
+        ));
+        assert!(matches!(
+            to_aggregate_function("REGR_SLOPE"),
+            Some(AggregateFunction::RegrSlope)
+        ));
+        assert!(matches!(
+            to_aggregate_function("REGR_INTERCEPT"),
+            Some(AggregateFunction::RegrIntercept)
+        ));
+        assert!(matches!(
+            to_aggregate_function("REGR_R2"),
+            Some(AggregateFunction::RegrR2)
+        ));
+        assert!(matches!(
+            to_aggregate_function("REGR_COUNT"),
+            Some(AggregateFunction::RegrCount)
+        ));
+        assert!(matches!(
+            to_aggregate_function("REGR_SXX"),
+            Some(AggregateFunction::RegrSxx)
+        ));
+        assert!(matches!(
+            to_aggregate_function("REGR_SYY"),
+            Some(AggregateFunction::RegrSyy)
+        ));
+        assert!(matches!(
+            to_aggregate_function("REGR_SXY"),
+            Some(AggregateFunction::RegrSxy)
+        ));
+        assert!(matches!(
+            to_aggregate_function("REGR_AVGX"),
+            Some(AggregateFunction::RegrAvgx)
+        ));
+        assert!(matches!(
+            to_aggregate_function("REGR_AVGY"),
+            Some(AggregateFunction::RegrAvgy)
+        ));
+    }
+
+    // --- is_binary_set_function ---
+
+    #[test]
+    fn binary_set_functions_recognized() {
+        let binary = [
+            AggregateFunction::CovarSamp,
+            AggregateFunction::CovarPop,
+            AggregateFunction::Corr,
+            AggregateFunction::RegrSlope,
+            AggregateFunction::RegrIntercept,
+            AggregateFunction::RegrR2,
+            AggregateFunction::RegrCount,
+            AggregateFunction::RegrSxx,
+            AggregateFunction::RegrSyy,
+            AggregateFunction::RegrSxy,
+            AggregateFunction::RegrAvgx,
+            AggregateFunction::RegrAvgy,
+        ];
+        for func in binary {
+            assert!(is_binary_set_function(func), "{func:?} should be binary");
+        }
+    }
+
+    #[test]
+    fn non_binary_set_functions_rejected() {
+        let non_binary = [
+            AggregateFunction::Count,
+            AggregateFunction::CountNonNull,
+            AggregateFunction::Sum,
+            AggregateFunction::Avg,
+            AggregateFunction::Min,
+            AggregateFunction::Max,
+            AggregateFunction::Collect,
+            AggregateFunction::StdDev,
+            AggregateFunction::StdDevPop,
+            AggregateFunction::Variance,
+            AggregateFunction::VariancePop,
+            AggregateFunction::PercentileDisc,
+            AggregateFunction::PercentileCont,
+            AggregateFunction::GroupConcat,
+            AggregateFunction::Sample,
+        ];
+        for func in non_binary {
+            assert!(
+                !is_binary_set_function(func),
+                "{func:?} should not be binary"
+            );
+        }
+    }
+
     // --- combine_with_and ---
 
     #[test]
