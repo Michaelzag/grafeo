@@ -330,14 +330,17 @@ impl CompactStoreBuilder {
             }
         }
 
-        // Step 2b: Validate no duplicate edge types.
+        // Step 2b: Validate no duplicate (edge_type, src_label, dst_label) triples.
+        // The same edge type can span multiple label pairs (e.g., CALLS between
+        // Method→Method and Class→Method) — this is normal in LPGs.
         {
-            let mut seen_types = FxHashSet::default();
+            let mut seen_triples = FxHashSet::default();
             for rtb in &self.rel_table_builders {
-                if !seen_types.insert(&rtb.edge_type) {
-                    return Err(CompactStoreError::DuplicateEdgeType(
-                        rtb.edge_type.to_string(),
-                    ));
+                if !seen_triples.insert((&rtb.edge_type, &rtb.src_label, &rtb.dst_label)) {
+                    return Err(CompactStoreError::DuplicateEdgeType(format!(
+                        "{}({} -> {})",
+                        rtb.edge_type, rtb.src_label, rtb.dst_label
+                    )));
                 }
             }
         }
@@ -382,7 +385,7 @@ impl CompactStoreBuilder {
 
         // Step 5: Build each RelTable.
         let mut rel_tables_by_id: Vec<RelTable> = Vec::with_capacity(self.rel_table_builders.len());
-        let mut edge_type_to_rel_id: FxHashMap<ArcStr, u16> = FxHashMap::default();
+        let mut edge_type_to_rel_id: FxHashMap<ArcStr, Vec<u16>> = FxHashMap::default();
         let mut rel_table_id_to_type: Vec<ArcStr> = Vec::new();
 
         for (idx, rtb) in self.rel_table_builders.into_iter().enumerate() {
@@ -463,7 +466,10 @@ impl CompactStoreBuilder {
                 rtb.properties.into_iter().collect();
 
             let table = RelTable::new(schema, fwd, bwd, properties, src_table_id, dst_table_id);
-            edge_type_to_rel_id.insert(rtb.edge_type.clone(), rel_table_id);
+            edge_type_to_rel_id
+                .entry(rtb.edge_type.clone())
+                .or_default()
+                .push(rel_table_id);
             rel_tables_by_id.push(table);
         }
 
@@ -479,11 +485,19 @@ impl CompactStoreBuilder {
             stats.update_label(label.as_str(), LabelStatistics::new(count));
         }
 
-        for (idx, rt) in rel_tables_by_id.iter().enumerate() {
-            let count = rt.num_edges() as u64;
-            total_edges += count;
-            let edge_type = &rel_table_id_to_type[idx];
-            stats.update_edge_type(edge_type.as_str(), EdgeTypeStatistics::new(count, 0.0, 0.0));
+        // Aggregate edge counts per edge type before inserting into stats,
+        // since the same edge type can span multiple rel tables.
+        {
+            let mut edge_type_counts: FxHashMap<&str, u64> = FxHashMap::default();
+            for (idx, rt) in rel_tables_by_id.iter().enumerate() {
+                let count = rt.num_edges() as u64;
+                total_edges += count;
+                let edge_type = rel_table_id_to_type[idx].as_str();
+                *edge_type_counts.entry(edge_type).or_default() += count;
+            }
+            for (edge_type, count) in &edge_type_counts {
+                stats.update_edge_type(edge_type, EdgeTypeStatistics::new(*count, 0.0, 0.0));
+            }
         }
 
         stats.total_nodes = total_nodes;
@@ -1407,6 +1421,92 @@ mod tests {
         assert_eq!(
             infer_type_from_values(&[Value::Int64(5), Value::Null, Value::Int64(10)]),
             InferredType::BitPacked
+        );
+    }
+
+    /// Same edge type spanning multiple label pairs — normal in LPGs.
+    /// Regression test for <https://github.com/GrafeoDB/grafeo/issues/221>.
+    #[test]
+    fn test_from_graph_store_multi_label_edge_type() {
+        use crate::graph::lpg::LpgStore;
+
+        let store = LpgStore::new().unwrap();
+
+        // Three node types
+        let m1 = store.create_node(&["Method"]);
+        store.set_node_property(m1, "name", Value::from("foo"));
+        let m2 = store.create_node(&["Method"]);
+        store.set_node_property(m2, "name", Value::from("bar"));
+        let c1 = store.create_node(&["Class"]);
+        store.set_node_property(c1, "name", Value::from("MyClass"));
+        let i1 = store.create_node(&["Interface"]);
+        store.set_node_property(i1, "name", Value::from("MyInterface"));
+
+        // CALLS edges between different label pairs
+        store.create_edge(m1, m2, "CALLS"); // Method -> Method
+        store.create_edge(c1, m1, "CALLS"); // Class -> Method
+        // USES_TYPE edges between different label pairs
+        store.create_edge(m1, c1, "USES_TYPE"); // Method -> Class
+        store.create_edge(m1, i1, "USES_TYPE"); // Method -> Interface
+
+        // This should not panic — same edge type across multiple label pairs is valid.
+        let compact = from_graph_store(&store).unwrap();
+
+        // Verify all nodes survived
+        assert_eq!(compact.nodes_by_label("Method").len(), 2);
+        assert_eq!(compact.nodes_by_label("Class").len(), 1);
+        assert_eq!(compact.nodes_by_label("Interface").len(), 1);
+
+        // Verify edges survived — check via rel_tables_for_type
+        let calls_tables = compact.rel_tables_for_type("CALLS");
+        let uses_tables = compact.rel_tables_for_type("USES_TYPE");
+
+        // CALLS spans 2 label pairs: Method→Method, Class→Method
+        assert_eq!(
+            calls_tables.len(),
+            2,
+            "CALLS should have 2 rel tables (different label pairs)"
+        );
+        // USES_TYPE spans 2 label pairs: Method→Class, Method→Interface
+        assert_eq!(
+            uses_tables.len(),
+            2,
+            "USES_TYPE should have 2 rel tables (different label pairs)"
+        );
+
+        // Total edges across all CALLS tables
+        let total_calls: usize = calls_tables.iter().map(|rt| rt.num_edges()).sum();
+        assert_eq!(total_calls, 2, "Should have 2 CALLS edges total");
+        // Total edges across all USES_TYPE tables
+        let total_uses: usize = uses_tables.iter().map(|rt| rt.num_edges()).sum();
+        assert_eq!(total_uses, 2, "Should have 2 USES_TYPE edges total");
+
+        // Verify all_edge_types returns deduplicated type names
+        use crate::graph::traits::GraphStore;
+        let mut edge_types = compact.all_edge_types();
+        edge_types.sort();
+        assert_eq!(
+            edge_types,
+            vec!["CALLS", "USES_TYPE"],
+            "all_edge_types should return each type once, not per rel table"
+        );
+
+        // Verify estimate_avg_degree deduplicates shared source labels.
+        // USES_TYPE has Method→Class and Method→Interface — Method appears as source in both
+        // rel tables but should only be counted once in the denominator.
+        // 2 edges / 2 source nodes (Method) = 1.0 (not 2 edges / 4 = 0.5 if double-counted)
+        let avg_out = compact.estimate_avg_degree("USES_TYPE", true);
+        assert!(avg_out > 0.0, "USES_TYPE outgoing degree should be > 0");
+        assert!(
+            (avg_out - 1.0).abs() < f64::EPSILON,
+            "USES_TYPE avg outgoing degree should be 1.0 (2 edges / 2 Method nodes), got {avg_out}"
+        );
+
+        // Verify unknown edge type returns 0
+        let unknown = compact.estimate_avg_degree("NONEXISTENT", true);
+        assert!(
+            (unknown - 0.0).abs() < f64::EPSILON,
+            "Unknown edge type should return 0.0 avg degree"
         );
     }
 }

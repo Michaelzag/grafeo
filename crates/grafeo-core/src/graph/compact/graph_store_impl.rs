@@ -357,26 +357,34 @@ impl GraphStore for CompactStore {
     }
 
     fn estimate_avg_degree(&self, edge_type: &str, outgoing: bool) -> f64 {
-        if let Some(rt) = self
-            .edge_type_to_rel_id
-            .get(edge_type)
-            .and_then(|&rid| self.rel_tables_by_id.get(rid as usize))
-        {
-            let num_edges = rt.num_edges();
-            if num_edges == 0 {
-                return 0.0;
-            }
-            let num_nodes = if outgoing {
-                self.resolve_node_table(rt.src_table_id())
-                    .map_or(1, |nt| nt.len().max(1))
-            } else {
-                self.resolve_node_table(rt.dst_table_id())
-                    .map_or(1, |nt| nt.len().max(1))
+        let Some(rids) = self.edge_type_to_rel_id.get(edge_type) else {
+            return 0.0;
+        };
+        let mut total_edges = 0usize;
+        // Deduplicate node tables to avoid double-counting when multiple
+        // rel tables share the same source/destination label.
+        let mut seen_table_ids = FxHashSet::default();
+        let mut total_nodes = 0usize;
+        for &rid in rids {
+            let Some(rt) = self.rel_tables_by_id.get(rid as usize) else {
+                continue;
             };
-            num_edges as f64 / num_nodes as f64
-        } else {
-            0.0
+            total_edges += rt.num_edges();
+            let table_id = if outgoing {
+                rt.src_table_id()
+            } else {
+                rt.dst_table_id()
+            };
+            if seen_table_ids.insert(table_id) {
+                total_nodes += self
+                    .resolve_node_table(table_id)
+                    .map_or(1, |nt| nt.len().max(1));
+            }
         }
+        if total_nodes == 0 {
+            return 0.0;
+        }
+        total_edges as f64 / total_nodes as f64
     }
 
     fn current_epoch(&self) -> EpochId {
@@ -391,8 +399,8 @@ impl GraphStore for CompactStore {
     }
 
     fn all_edge_types(&self) -> Vec<String> {
-        self.rel_table_id_to_type
-            .iter()
+        self.edge_type_to_rel_id
+            .keys()
             .map(|s| s.to_string())
             .collect()
     }
