@@ -20,7 +20,7 @@ GraphChallenge benchmark suite and RDF-to-LPG bridge: all five DARPA/MIT IEEE HP
 
 ### Fixed
 
-- **CompactStore multi-table edge types**: edge types spanning multiple src/dst label combinations now correctly produce multiple `RelTable`s instead of silently overwriting. Added `rel_tables_for_type()` for querying all matching tables ([#221](https://github.com/GrafeoDB/grafeo/issues/221))
+- **CompactStore multi-table edge types**: edge types spanning multiple src/dst label combinations now correctly produce multiple `RelTable`s instead of silently overwriting. Added `rel_tables_for_type()` for querying all matching tables ([#221](https://github.com/GrafeoDB/grafeo/issues/221), [#225](https://github.com/GrafeoDB/grafeo/pull/225) by [@Imaclean74](https://github.com/Imaclean74))
 - **WAL deadlock on property mutations**: `set_node_property()` and `set_edge_property()` now apply the store mutation before WAL logging, matching the lock ordering of create/delete methods and preventing ABBA deadlock under concurrent writes
 - **GQL `CREATE INDEX ... FOR` parsing**: `FOR` is now accepted whether lexed as keyword or identifier, fixing index creation in certain tokenizer contexts
 - **`round()`/`floor()`/`ceil()` return `Float64`**: float inputs now return `Float64` instead of truncating to `Int64`
