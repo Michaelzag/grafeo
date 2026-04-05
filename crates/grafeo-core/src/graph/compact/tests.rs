@@ -1114,7 +1114,7 @@ fn test_node_property_might_match_multi_table_conservative() {
 #[test]
 fn test_rel_table_source_node_id_out_of_bounds() {
     let store = build_test_store();
-    let rt = store.rel_table("LIVES_IN").unwrap();
+    let rt = store.rel_tables_for_type("LIVES_IN")[0];
     // CSR position far beyond edge count should return None.
     assert!(rt.source_node_id(9999).is_none());
 }
@@ -1122,17 +1122,17 @@ fn test_rel_table_source_node_id_out_of_bounds() {
 #[test]
 fn test_rel_table_dest_node_id_out_of_bounds() {
     let store = build_test_store();
-    let rt = store.rel_table("LIVES_IN").unwrap();
+    let rt = store.rel_tables_for_type("LIVES_IN")[0];
     assert!(rt.dest_node_id(9999).is_none());
 }
 
 #[test]
 fn test_rel_table_memory_bytes_nonzero() {
     let store = build_test_store();
-    let rt = store.rel_table("LIVES_IN").unwrap();
+    let rt = store.rel_tables_for_type("LIVES_IN")[0];
     assert!(rt.memory_bytes() > 0);
     // With backward CSR, memory should be higher.
-    let knows = store.rel_table("KNOWS").unwrap();
+    let knows = store.rel_tables_for_type("KNOWS")[0];
     assert!(knows.memory_bytes() > 0);
 }
 
@@ -1145,7 +1145,7 @@ fn test_rel_table_no_backward_dest_node_id() {
         .build()
         .unwrap();
 
-    let rt = store.rel_table("LINK").unwrap();
+    let rt = store.rel_tables_for_type("LINK")[0];
     // source_node_id should work (forward CSR).
     assert!(rt.source_node_id(0).is_some());
     // dest_node_id should also work (uses forward CSR only).
