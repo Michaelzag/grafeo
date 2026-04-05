@@ -1133,7 +1133,8 @@ impl super::Planner {
                     proj_schema,
                     Arc::clone(&self.store),
                 )
-                .with_transaction_context(self.viewing_epoch, self.transaction_id),
+                .with_transaction_context(self.viewing_epoch, self.transaction_id)
+                .with_session_context(self.session_context.clone()),
             )
         } else {
             input_op

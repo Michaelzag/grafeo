@@ -434,6 +434,7 @@ class _TestCase {
   List<String> setup;
   String? skip;
   String? language;
+  String? dataset;
   _Expect expect;
   Map<String, String> variants;
   List<String> tags;
@@ -447,6 +448,7 @@ class _TestCase {
     List<String>? setup,
     this.skip,
     this.language,
+    this.dataset,
     _Expect? expect,
     Map<String, String>? variants,
     List<String>? tags,
@@ -589,6 +591,9 @@ _TestCase _parseSingleTest(_ParseContext ctx) {
         ctx.idx++;
       case 'language':
         tc.language = _unquote(value);
+        ctx.idx++;
+      case 'dataset':
+        tc.dataset = _unquote(value);
         ctx.idx++;
       case 'setup':
         ctx.idx++;
@@ -1074,8 +1079,9 @@ void main() {
               }
               final db = GrafeoDB.memory();
               try {
-                if (meta.dataset.isNotEmpty && meta.dataset != 'empty') {
-                  _loadDataset(db, meta.dataset);
+                final effectiveDataset = tc.dataset ?? meta.dataset;
+                if (effectiveDataset.isNotEmpty && effectiveDataset != 'empty') {
+                  _loadDataset(db, effectiveDataset);
                 }
                 // Create a copy of the test case with the variant query
                 final variantTc = _TestCase(
@@ -1135,9 +1141,10 @@ void main() {
 
           final db = GrafeoDB.memory();
           try {
-            // Load dataset
-            if (meta.dataset.isNotEmpty && meta.dataset != 'empty') {
-              _loadDataset(db, meta.dataset);
+            // Load dataset (per-test override takes priority)
+            final effectiveDataset = tc.dataset ?? meta.dataset;
+            if (effectiveDataset.isNotEmpty && effectiveDataset != 'empty') {
+              _loadDataset(db, effectiveDataset);
             }
 
             _runTestCase(
