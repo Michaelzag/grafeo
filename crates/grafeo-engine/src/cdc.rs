@@ -31,6 +31,7 @@ use parking_lot::RwLock;
 
 /// The kind of mutation that occurred.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub enum ChangeKind {
     /// A new entity was created.
     Create,

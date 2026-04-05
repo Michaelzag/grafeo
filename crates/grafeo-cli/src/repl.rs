@@ -287,6 +287,7 @@ fn handle_meta_command(
                         }
                     }
                 }
+                _ => {}
             }
             MetaResult::Continue
         }

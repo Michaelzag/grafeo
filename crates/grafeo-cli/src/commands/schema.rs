@@ -189,6 +189,7 @@ pub fn run(path: &Path, format: OutputFormat, quiet: bool) -> Result<()> {
                 }
             }
         }
+        _ => {}
     }
 
     Ok(())

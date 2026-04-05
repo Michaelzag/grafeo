@@ -817,6 +817,7 @@ impl EdgeTypeCatalog {
 
 /// Type of index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum IndexType {
     /// Hash index for equality lookups.
     Hash,

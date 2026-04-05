@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 /// Database mode - either LPG (Labeled Property Graph) or RDF (Triple Store).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum DatabaseMode {
     /// Labeled Property Graph mode (nodes with labels and properties, typed edges).
     Lpg,
@@ -123,6 +124,7 @@ pub struct PredicateInfo {
 /// Combined schema information supporting both LPG and RDF.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "mode")]
+#[non_exhaustive]
 pub enum SchemaInfo {
     /// LPG schema information.
     #[serde(rename = "lpg")]
@@ -208,6 +210,7 @@ pub struct ValidationWarning {
 /// Dump format for export operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum DumpFormat {
     /// Apache Parquet format (default for LPG).
     Parquet,

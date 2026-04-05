@@ -26,6 +26,7 @@ use crate::transaction::TransactionManager;
 
 /// Supported query languages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum QueryLanguage {
     /// GQL (ISO/IEC 39075:2024) - default for LPG
     #[cfg(feature = "gql")]

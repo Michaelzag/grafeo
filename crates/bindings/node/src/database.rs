@@ -1165,6 +1165,7 @@ fn change_event_to_json(event: &grafeo_engine::cdc::ChangeEvent) -> serde_json::
         grafeo_engine::cdc::ChangeKind::Create => "create",
         grafeo_engine::cdc::ChangeKind::Update => "update",
         grafeo_engine::cdc::ChangeKind::Delete => "delete",
+        _ => "unknown",
     };
 
     let before = match &event.before {

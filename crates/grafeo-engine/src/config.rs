@@ -12,6 +12,7 @@ use std::time::Duration;
 /// Schema variants (OWL, RDFS, JSON Schema) are a server-level concern - from
 /// the engine's perspective those map to either `Lpg` or `Rdf`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum GraphModel {
     /// Labeled Property Graph (default). Supports GQL, Cypher, Gremlin, GraphQL.
     #[default]
@@ -36,6 +37,7 @@ impl fmt::Display for GraphModel {
 /// lock, allowing multiple processes to read the same `.grafeo` file
 /// concurrently.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum AccessMode {
     /// Full read-write access (default). Acquires an exclusive file lock.
     #[default]
@@ -61,6 +63,7 @@ impl fmt::Display for AccessMode {
 /// WAL directory. The default (`Auto`) auto-detects based on the path:
 /// files ending in `.grafeo` use single-file format, directories use WAL.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum StorageFormat {
     /// Auto-detect based on path: `.grafeo` extension = single file,
     /// existing directory = WAL directory, new path without extension = WAL directory.
@@ -89,6 +92,7 @@ impl fmt::Display for StorageFormat {
 /// durability regardless of whether the `wal` feature is compiled in. When
 /// WAL is enabled, the engine maps this to the adapter-level durability mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DurabilityMode {
     /// Fsync after every commit. Slowest but safest.
     Sync,

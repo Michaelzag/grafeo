@@ -1884,6 +1884,7 @@ impl PyGrafeoDB {
                 dict.set_item("subject_count", rdf.subject_count)?;
                 dict.set_item("object_count", rdf.object_count)?;
             }
+            _ => {}
         }
 
         Ok(dict.into())
@@ -2935,6 +2936,7 @@ fn change_event_to_dict(
         grafeo_engine::cdc::ChangeKind::Create => "create",
         grafeo_engine::cdc::ChangeKind::Update => "update",
         grafeo_engine::cdc::ChangeKind::Delete => "delete",
+        _ => "unknown",
     };
     map.insert(
         "kind".to_string(),

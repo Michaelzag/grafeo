@@ -11,6 +11,7 @@ use std::fmt;
 /// Follows the GQL type system. Used for schema definitions and query type
 /// checking. Supports coercion rules (e.g., Int32 can coerce to Int64).
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum LogicalType {
     /// Unknown or any type (used during type inference)
     Any,

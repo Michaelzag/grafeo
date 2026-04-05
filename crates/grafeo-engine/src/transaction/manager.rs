@@ -38,6 +38,7 @@ pub enum TransactionState {
 /// - `SnapshotIsolation`: Tracks writes + snapshot versioning
 /// - `Serializable`: Tracks writes + reads + SSI validation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum IsolationLevel {
     /// Read Committed: sees only committed data, but may see different
     /// versions of the same row within a transaction.

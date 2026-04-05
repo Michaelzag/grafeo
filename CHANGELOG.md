@@ -4,7 +4,11 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 
 ## [0.5.34] - Unreleased
 
-Deferred breaking changes before moving to rc.
+Pre-RC API hardening: `#[non_exhaustive]` on public enums, query engine correctness fixes, WAL race fix.
+
+### Changed
+
+- **`#[non_exhaustive]` on 13 public enums**: `GraphModel`, `AccessMode`, `StorageFormat`, `DurabilityMode`, `IndexType`, `ChangeKind`, `DatabaseMode`, `SchemaInfo`, `DumpFormat`, `QueryLanguage`, `IsolationLevel`, `EmbeddingModelConfig`, `LogicalType`. Future variants can be added without breaking semver
 
 ### Fixed
 
