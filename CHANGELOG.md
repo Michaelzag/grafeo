@@ -6,59 +6,48 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 
 ### Fixed
 
-- **WAL sync counter race**: `records_since_sync` now uses `fetch_sub` with a snapshot taken inside the lock instead of `store(0)` after lock release, preventing concurrent increments from being lost
-- **`references_any` completeness**: all `LogicalExpression` variants are now handled (was missing `IndexAccess`, `SliceAccess`, `Labels`, `Type`, `Id`, `ListComprehension`, `ListPredicate`, `Reduce`, `MapProjection`, `PatternComprehension`), fixing false negatives in aggregate-vs-WHERE classification
-- **Multi-aggregate extraction**: expressions like `sum(a) + count(b)` now correctly extract all aggregates instead of only the first one
-- **Mixed WITH WHERE/HAVING**: AND conjuncts in `WITH ... WHERE` are now split so only aggregate-referencing parts become HAVING, while the rest are applied as a post-aggregate filter
+- **WAL sync counter race**: snapshot record count inside the lock, `fetch_sub` after sync instead of `store(0)`, preserving concurrent increments
+- **Multi-aggregate extraction**: `sum(a) + count(b)` now correctly extracts all aggregates instead of only the first
+- **Mixed `WITH ... WHERE`/HAVING**: AND conjuncts are split so only aggregate-referencing parts become HAVING, the rest stay as a post-aggregate filter
+- **`references_any` completeness**: all `LogicalExpression` variants now handled, fixing false negatives in aggregate-vs-WHERE classification
 
 ## [0.5.33] - 2026-04-05
 
-GraphChallenge benchmark suite and RDF-to-LPG bridge: all five DARPA/MIT IEEE HPEC 2026 algorithms, bulk import, partition quality metrics, and an adapter that gives RDF graphs access to all 25+ graph algorithms.
+GraphChallenge benchmark suite, RDF-to-LPG bridge, and a large round of query engine correctness fixes.
 
 ### Added
 
-- **GraphChallenge algorithms** (DARPA/MIT IEEE HPEC 2026):
-  - **K-truss decomposition**: `ktruss_decomposition()`, `k_truss()`, `edge_triangle_support()` with `KTrussAlgorithm` plugin wrapper. Edge-based peeling that finds dense subgraphs where every edge is supported by at least k-2 triangles
-  - **Parallel triangle counting**: `total_triangles_parallel()` with degree-ordered edges, sorted merge-intersection, and `AtomicU64` accumulator. Dedicated fast path that skips clustering coefficient overhead
-  - **Subgraph isomorphism**: `subgraph_isomorphism_count()`, `subgraph_isomorphism()`, `subgraph_isomorphism_count_from_edges()` using VF2 backtracking with degree pruning and connectivity feasibility checks
-  - **Stochastic Block Partition**: `stochastic_block_partition()` with agglomerative merging to minimize description length under the degree-corrected SBM. Includes `stochastic_block_partition_incremental()` for warm-start after streaming edge additions
-  - **Partition quality metrics**: `rand_index()`, `adjusted_rand_index()`, `normalized_mutual_information()`, `pairwise_precision()`, `pairwise_recall()` for comparing community assignments against ground truth
-- **TSV/MMIO bulk import**: `import_tsv()`, `import_mmio()` for fast graph loading (bypasses per-edge transaction overhead), `import_tsv_rdf()` for loading edge lists directly into the RDF store
-- **`RdfGraphStoreAdapter`**: bridges `RdfStore` to `GraphStore`, giving RDF graphs access to all 25+ graph algorithms (PageRank, BFS, SSSP, k-core, k-truss, Louvain, triangle counting, subgraph isomorphism, etc.). Maps IRIs/blank nodes to nodes, predicates to edge types, `rdf:type` to labels, literals to properties
-- **grafeo-cli PyPI publish workflow**: automated release flow for the Python CLI package ([#222](https://github.com/GrafeoDB/grafeo/pull/222))
+- **GraphChallenge algorithms** (DARPA/MIT IEEE HPEC 2026): k-truss decomposition, parallel triangle counting, subgraph isomorphism (VF2), stochastic block partition, partition quality metrics (Rand index, NMI, precision, recall)
+- **TSV/MMIO bulk import**: `import_tsv()`, `import_mmio()`, `import_tsv_rdf()` for fast graph loading bypassing per-edge transaction overhead
+- **`RdfGraphStoreAdapter`**: bridges `RdfStore` to `GraphStore`, giving RDF graphs access to all 25+ graph algorithms
+- **grafeo-cli PyPI publish workflow** ([#222](https://github.com/GrafeoDB/grafeo/pull/222))
 
 ### Fixed
 
-- **CompactStore multi-table edge types**: edge types spanning multiple src/dst label combinations now correctly produce multiple `RelTable`s instead of silently overwriting. Added `rel_tables_for_type()` for querying all matching tables ([#221](https://github.com/GrafeoDB/grafeo/issues/221), [#225](https://github.com/GrafeoDB/grafeo/pull/225) by [@Imaclean74](https://github.com/Imaclean74))
-- **WAL deadlock on property mutations**: `set_node_property()` and `set_edge_property()` now apply the store mutation before WAL logging, matching the lock ordering of create/delete methods and preventing ABBA deadlock under concurrent writes
-- **GQL `CREATE INDEX ... FOR` parsing**: `FOR` is now accepted whether lexed as keyword or identifier, fixing index creation in certain tokenizer contexts
-- **`round()`/`floor()`/`ceil()` return `Float64`**: float inputs now return `Float64` instead of truncating to `Int64`
-- **`CALL ... YIELD` with aggregation**: `count()`, `sum()`, etc. now work over `CALL` procedure results (e.g. `CALL db.labels() YIELD label RETURN count(label)`)
-- **Cypher keyword-as-label collision**: `Order`, `By`, `Skip`, `Limit` can now be used as node labels in Cypher queries
-- **CompactStore edge type statistics**: `update_edge_type()` now aggregates counts when an edge type spans multiple rel tables instead of silently overwriting
+- **CompactStore multi-table edge types**: same edge type across multiple label pairs now produces separate `RelTable`s. Added `rel_tables_for_type()` ([#221](https://github.com/GrafeoDB/grafeo/issues/221), [#225](https://github.com/GrafeoDB/grafeo/pull/225) by [@Imaclean74](https://github.com/Imaclean74))
+- **WAL deadlock on property mutations**: store mutation now applied before WAL logging, matching lock ordering of create/delete methods
+- **GQL `CREATE INDEX ... FOR` parsing**: `FOR` accepted whether lexed as keyword or identifier
+- **`round()`/`floor()`/`ceil()`**: float inputs return `Float64` instead of truncating to `Int64`
+- **`CALL ... YIELD` with aggregation**: aggregates now work over procedure results
+- **Cypher keyword-as-label**: `Order`, `By`, `Skip`, `Limit` usable as node labels
+- **CompactStore edge type statistics**: counts aggregated across multiple rel tables
 - **`CAST(bool AS INT)`**: `true` casts to `1`, `false` to `0`
 - **List `+` concatenation**: `[1, 2] + [3, 4]` returns `[1, 2, 3, 4]`
-- **Parameter substitution in multi-statement queries**: `$param` variables in `INSERT`/`SET` statements now receive values when used with `statements:` in spec tests
-- **ORDER BY + LIMIT/SKIP ordering**: SKIP and LIMIT now apply after ORDER BY in the GQL translator, fixing queries like `ORDER BY x DESC LIMIT 3` that previously truncated input before sorting
-- **MIN/MAX aggregate output type**: output schema uses `LogicalType::Any` instead of `Int64`, fixing silent type coercion that returned `0` for Float64 and Date values
-- **Cypher ORDER BY after aggregation**: entity property references (e.g. `ORDER BY o.status`) now resolve correctly after GROUP BY, matching GQL behavior
-- **JOIN column deduplication**: multi-pattern MATCH queries sharing variables (e.g. `MATCH (a)-[]->(b), (a)-[]->(b)`) no longer produce duplicate columns in output
-- **SET self-reference expressions**: `SET n.value = n.value + 1` now works by pre-computing complex expressions via a projection before the property write
-- **`size(collect())` nested aggregate**: wrapping an aggregate in a non-aggregate function (e.g. `size(collect(x))`) no longer panics during aggregate extraction
-- **`WITH ... WHERE` on aggregate alias**: `WITH a, count(b) AS cnt WHERE cnt >= 2` now correctly promotes the WHERE predicate to HAVING, filtering after aggregation instead of before
-- **`SUM()` on empty result set**: returns `null` per ISO GQL (previously skipped test expected `0`)
-- **Build.rs format string escaping**: GQL queries with curly braces in multi-statement fire-and-forget panic messages no longer cause compile errors
+- **Parameter substitution in multi-statement queries**: `$param` variables now forwarded to intermediate statements
+- **ORDER BY + LIMIT/SKIP**: SKIP and LIMIT now apply after ORDER BY
+- **MIN/MAX aggregate output type**: uses `Any` instead of `Int64`, fixing coercion for Float64 and Date values
+- **Cypher ORDER BY after aggregation**: property references resolve correctly after GROUP BY
+- **JOIN column deduplication**: multi-pattern MATCH with shared variables no longer produces duplicate columns
+- **SET self-reference**: `SET n.value = n.value + 1` pre-computes expressions before the property write
+- **`size(collect())` nested aggregate**: no longer panics during aggregate extraction
+- **`WITH ... WHERE` on aggregate alias**: WHERE predicate correctly promoted to HAVING
+- **`SUM()` on empty result set**: returns `null` per ISO GQL
 
 ### Performance
 
-- **Triangle counting**: `total_triangles()` and `total_triangles_parallel()` build oriented adjacency directly from `GraphStore` without intermediate hash sets, improving cache efficiency on CSR-backed stores
-- **WAL `sync_all()` outside lock**: file sync is performed after releasing the active-log mutex, reducing lock contention under concurrent writes
-- **Kahan compensated summation**: `sum()` aggregate uses Kahan algorithm to reduce floating-point rounding errors
-
-### Internal
-
-- **Spec test coverage**: 3052 passing, 109 skipped (down from 150 skipped). 41 tests unskipped through bug fixes and expectation corrections
-- **Spec test runner**: per-test `dataset:` override, error assertions use Display format, parameter substitution for all multi-statement queries, format-safe panic messages for queries with curly braces
+- **Triangle counting**: oriented adjacency built directly from `GraphStore`, improving cache efficiency on CSR-backed stores
+- **WAL `sync_all()` outside lock**: reduces lock contention under concurrent writes
+- **Kahan compensated summation**: `sum()` uses Kahan algorithm to reduce floating-point rounding errors
 
 ## [0.5.32] - 2026-04-03
 
