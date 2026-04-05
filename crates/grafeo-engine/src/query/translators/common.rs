@@ -701,6 +701,20 @@ pub(crate) fn references_any(expr: &LogicalExpression, names: &[String]) -> bool
         LogicalExpression::FunctionCall { args, .. } => {
             args.iter().any(|a| references_any(a, names))
         }
+        LogicalExpression::Case {
+            operand,
+            when_clauses,
+            else_clause,
+        } => {
+            operand.as_ref().is_some_and(|e| references_any(e, names))
+                || when_clauses
+                    .iter()
+                    .any(|(cond, val)| references_any(cond, names) || references_any(val, names))
+                || else_clause
+                    .as_ref()
+                    .is_some_and(|e| references_any(e, names))
+        }
+        LogicalExpression::List(items) => items.iter().any(|i| references_any(i, names)),
         _ => false,
     }
 }
