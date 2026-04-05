@@ -2,6 +2,15 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
+## [0.5.34] - Unreleased
+
+### Fixed
+
+- **WAL sync counter race**: `records_since_sync` now uses `fetch_sub` with a snapshot taken inside the lock instead of `store(0)` after lock release, preventing concurrent increments from being lost
+- **`references_any` completeness**: all `LogicalExpression` variants are now handled (was missing `IndexAccess`, `SliceAccess`, `Labels`, `Type`, `Id`, `ListComprehension`, `ListPredicate`, `Reduce`, `MapProjection`, `PatternComprehension`), fixing false negatives in aggregate-vs-WHERE classification
+- **Multi-aggregate extraction**: expressions like `sum(a) + count(b)` now correctly extract all aggregates instead of only the first one
+- **Mixed WITH WHERE/HAVING**: AND conjuncts in `WITH ... WHERE` are now split so only aggregate-referencing parts become HAVING, while the rest are applied as a post-aggregate filter
+
 ## [0.5.33] - 2026-04-05
 
 GraphChallenge benchmark suite and RDF-to-LPG bridge: all five DARPA/MIT IEEE HPEC 2026 algorithms, bulk import, partition quality metrics, and an adapter that gives RDF graphs access to all 25+ graph algorithms.
