@@ -1,0 +1,284 @@
+# GQL Aggregation Coverage: wrapped, bivariate, distinct variants
+#
+# Targets coverage gaps in:
+#   - gql/aggregate.rs: CASE branch, function-wrapping, unary branch
+#   - common.rs: is_binary_set_function, bivariate recognition
+#   - aggregate.rs: bivariate finalize nulls, GroupConcatDistinct,
+#     SumIntDistinct->SumFloatDistinct, PercentileCont interpolation
+
+meta:
+  language: gql
+  model: lpg
+  section: "19.3"
+  title: Aggregation coverage
+  dataset: empty
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # CASE wrapping aggregate (extract_wrapped_aggregates CASE branch)
+  # ---------------------------------------------------------------------------
+
+  - name: case_wrapping_count_gt
+    setup:
+      - "INSERT (:D {v: 1})"
+      - "INSERT (:D {v: 2})"
+      - "INSERT (:D {v: 3})"
+    query: "MATCH (d:D) RETURN CASE WHEN count(d) > 2 THEN 'many' ELSE 'few' END AS label"
+    expect:
+      rows:
+        - [many]
+
+  - name: case_wrapping_aggregate_else
+    setup:
+      - "INSERT (:D {v: 1})"
+    query: "MATCH (d:D) RETURN CASE WHEN sum(d.v) > 9999 THEN 'huge' ELSE 'normal' END AS label"
+    expect:
+      rows:
+        - [normal]
+
+  - name: case_aggregate_in_then
+    setup:
+      - "INSERT (:D {v: 1})"
+      - "INSERT (:D {v: 2})"
+    query: "MATCH (d:D) RETURN CASE WHEN true THEN count(d) ELSE 0 END AS cnt"
+    expect:
+      rows:
+        - [2]
+
+  # ---------------------------------------------------------------------------
+  # Non-aggregate function wrapping aggregate argument
+  # ---------------------------------------------------------------------------
+
+  - name: abs_wrapping_sum
+    setup:
+      - "INSERT (:D {v: 10})"
+      - "INSERT (:D {v: 20})"
+      - "INSERT (:D {v: 30})"
+    query: "MATCH (d:D) RETURN abs(sum(d.v)) AS total"
+    expect:
+      rows:
+        - [60]
+
+  - name: tostring_wrapping_count
+    setup:
+      - "INSERT (:D {v: 1})"
+      - "INSERT (:D {v: 2})"
+      - "INSERT (:D {v: 3})"
+    query: "MATCH (d:D) RETURN toString(count(d)) AS cnt_str"
+    expect:
+      rows:
+        - ["3"]
+
+  # ---------------------------------------------------------------------------
+  # Two aggregates in one binary expression
+  # ---------------------------------------------------------------------------
+
+  - name: sum_plus_count
+    setup:
+      - "INSERT (:D {v: 10})"
+      - "INSERT (:D {v: 20})"
+      - "INSERT (:D {v: 30})"
+    query: "MATCH (d:D) RETURN sum(d.v) + count(d) AS combo"
+    expect:
+      rows:
+        - [63]
+
+  - name: avg_times_two
+    setup:
+      - "INSERT (:D {v: 10})"
+      - "INSERT (:D {v: 20})"
+      - "INSERT (:D {v: 30})"
+    query: "MATCH (d:D) RETURN avg(d.v) * 2 AS doubled"
+    expect:
+      rows:
+        - [40]
+
+  # ---------------------------------------------------------------------------
+  # Unary negation wrapping aggregate
+  # ---------------------------------------------------------------------------
+
+  - name: unary_negate_count
+    setup:
+      - "INSERT (:D {v: 1})"
+      - "INSERT (:D {v: 2})"
+      - "INSERT (:D {v: 3})"
+    query: "MATCH (d:D) RETURN -(count(d)) AS neg"
+    expect:
+      rows:
+        - [-3]
+
+  # ---------------------------------------------------------------------------
+  # Bivariate aggregates on empty result set (null finalize)
+  # ---------------------------------------------------------------------------
+
+  - name: covar_samp_empty
+    query: "MATCH (p:Ghost) RETURN COVAR_SAMP(p.y, p.x) AS cov"
+    expect:
+      rows:
+        - [null]
+
+  - name: corr_empty
+    query: "MATCH (p:Ghost) RETURN CORR(p.y, p.x) AS r"
+    expect:
+      rows:
+        - [null]
+
+  - name: regr_slope_empty
+    query: "MATCH (p:Ghost) RETURN REGR_SLOPE(p.y, p.x) AS slope"
+    expect:
+      rows:
+        - [null]
+
+  - name: regr_intercept_empty
+    query: "MATCH (p:Ghost) RETURN REGR_INTERCEPT(p.y, p.x) AS intercept"
+    expect:
+      rows:
+        - [null]
+
+  - name: regr_r2_empty
+    query: "MATCH (p:Ghost) RETURN REGR_R2(p.y, p.x) AS r2"
+    expect:
+      rows:
+        - [null]
+
+  - name: regr_sxx_syy_sxy_empty
+    query: "MATCH (p:Ghost) RETURN REGR_SXX(p.y, p.x) AS sxx, REGR_SYY(p.y, p.x) AS syy, REGR_SXY(p.y, p.x) AS sxy"
+    expect:
+      rows:
+        - [null, null, null]
+
+  - name: regr_avgx_avgy_empty
+    query: "MATCH (p:Ghost) RETURN REGR_AVGX(p.y, p.x) AS ax, REGR_AVGY(p.y, p.x) AS ay"
+    expect:
+      rows:
+        - [null, null]
+
+  - name: regr_count_empty
+    query: "MATCH (p:Ghost) RETURN REGR_COUNT(p.y, p.x) AS cnt"
+    expect:
+      rows:
+        - [0]
+
+  # ---------------------------------------------------------------------------
+  # Bivariate aggregates with single row (n=1)
+  # ---------------------------------------------------------------------------
+
+  - name: covar_samp_single_row_null
+    setup:
+      - "INSERT (:Point {x: 1.0, y: 2.0})"
+    query: "MATCH (p:Point) RETURN COVAR_SAMP(p.y, p.x) AS cov"
+    expect:
+      rows:
+        - [null]
+
+  - name: covar_pop_single_row_zero
+    setup:
+      - "INSERT (:Point {x: 1.0, y: 2.0})"
+    query: "MATCH (p:Point) RETURN COVAR_POP(p.y, p.x) AS cov"
+    expect:
+      rows:
+        - [0]
+      precision: 1e-10
+
+  # ---------------------------------------------------------------------------
+  # GROUP_CONCAT DISTINCT
+  # ---------------------------------------------------------------------------
+
+  - name: group_concat_distinct
+    setup:
+      - "INSERT (:City {name: 'Amsterdam'})"
+      - "INSERT (:City {name: 'Berlin'})"
+      - "INSERT (:City {name: 'Amsterdam'})"
+      - "INSERT (:City {name: 'Berlin'})"
+      - "INSERT (:City {name: 'Paris'})"
+    query: "MATCH (c:City) RETURN group_concat(DISTINCT c.name) AS names"
+    expect:
+      count: 1
+
+  - name: group_concat_distinct_with_separator
+    setup:
+      - "INSERT (:City {name: 'Amsterdam'})"
+      - "INSERT (:City {name: 'Berlin'})"
+      - "INSERT (:City {name: 'Amsterdam'})"
+    query: "MATCH (c:City) RETURN group_concat(DISTINCT c.name, '|') AS names"
+    expect:
+      count: 1
+
+  # ---------------------------------------------------------------------------
+  # COLLECT DISTINCT
+  # ---------------------------------------------------------------------------
+
+  - name: collect_distinct
+    setup:
+      - "INSERT (:City {name: 'Amsterdam'})"
+      - "INSERT (:City {name: 'Berlin'})"
+      - "INSERT (:City {name: 'Amsterdam'})"
+      - "INSERT (:City {name: 'Berlin'})"
+      - "INSERT (:City {name: 'Paris'})"
+    query: "MATCH (c:City) RETURN collect(DISTINCT c.name) AS names"
+    expect:
+      count: 1
+
+  # ---------------------------------------------------------------------------
+  # AVG DISTINCT
+  # ---------------------------------------------------------------------------
+
+  - name: avg_distinct
+    setup:
+      - "INSERT (:Val {v: 10})"
+      - "INSERT (:Val {v: 10})"
+      - "INSERT (:Val {v: 20})"
+      - "INSERT (:Val {v: 20})"
+      - "INSERT (:Val {v: 30})"
+    query: "MATCH (n:Val) RETURN avg(DISTINCT n.v) AS a"
+    expect:
+      rows:
+        - [20]
+
+  # ---------------------------------------------------------------------------
+  # Percentile interpolation
+  # ---------------------------------------------------------------------------
+
+  - name: percentile_cont_interpolation
+    setup:
+      - "INSERT (:Item {v: 10})"
+      - "INSERT (:Item {v: 20})"
+      - "INSERT (:Item {v: 30})"
+      - "INSERT (:Item {v: 40})"
+    query: "MATCH (i:Item) RETURN percentile_cont(i.v, 0.5) AS median"
+    expect:
+      rows:
+        - [25]
+
+  - name: percentile_cont_exact_boundary
+    setup:
+      - "INSERT (:Item {v: 10})"
+      - "INSERT (:Item {v: 20})"
+      - "INSERT (:Item {v: 30})"
+      - "INSERT (:Item {v: 40})"
+      - "INSERT (:Item {v: 50})"
+    query: "MATCH (i:Item) RETURN percentile_cont(i.v, 0.25) AS p25"
+    expect:
+      rows:
+        - [20]
+
+  # ---------------------------------------------------------------------------
+  # OPTIONAL MATCH with count aggregate
+  # ---------------------------------------------------------------------------
+
+  - name: optional_match_count_aggregate
+    setup:
+      - "INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})"
+      - "INSERT (:Person {name: 'Vincent'})"
+    query: |
+      MATCH (p:Person)
+      OPTIONAL MATCH (p)-[:KNOWS]->(f:Person)
+      RETURN p.name AS name, count(f) AS fc
+      ORDER BY name
+    expect:
+      ordered: true
+      rows:
+        - [Alix, 1]
+        - [Gus, 0]
+        - [Vincent, 0]
