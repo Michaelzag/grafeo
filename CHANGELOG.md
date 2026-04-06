@@ -37,6 +37,7 @@ Pre-RC API hardening: schema hierarchy, `#[non_exhaustive]` on public enums, que
 - **`delete_node_edges` self-loop double-delete**: self-loops (src == dst) appeared in both outgoing and incoming scans, causing `delete_edge` to be called twice. Now deduped via `HashSet`
 - **`delete_node_edges` partial visibility**: each edge deletion acquired and released the write lock independently, allowing concurrent readers to observe a partially detached node. Now holds a single write lock for the entire batch
 - **`cypher` feature missing `gql` dependency**: `cypher` feature failed to compile without `gql` because the cypher parser imports shared schema DDL types from `gql/ast.rs`. Now declares `gql` as a dependency ([#232](https://github.com/GrafeoDB/grafeo/issues/232), [#233](https://github.com/GrafeoDB/grafeo/pull/233) by [@Michaelzag](https://github.com/Michaelzag))
+- **Node.js bindings feature-gated compilation**: 17 cfg-gated methods inside the main `#[napi] impl` block caused "cannot find value `xxx_c_callback`" errors when features were disabled. Moved into separate per-feature `#[napi] impl` blocks
 
 ## [0.5.33] - 2026-04-05
 
