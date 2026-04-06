@@ -41,7 +41,7 @@ Issues = "https://github.com/GrafeoDB/grafeo/issues"
 
 [project.optional-dependencies]
 cli = [
-    "grafeo-cli>=0.5.34",
+    "grafeo-cli>=0.5.34,<0.6",
 ]
 dev = [
     "pytest>=9",
