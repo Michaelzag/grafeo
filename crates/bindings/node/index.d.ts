@@ -116,6 +116,14 @@ export declare class GrafeoDB {
    * The original database remains unchanged.
    */
   save(path: string): void
+  /**
+   * Converts the database to a read-only CompactStore for faster queries.
+   *
+   * Takes a snapshot of all nodes and edges, builds a columnar store with
+   * CSR adjacency, and switches to read-only mode. After this call, write
+   * operations will fail.
+   */
+  compact(): void
   /** Close the database. */
   close(): void
   /** Enable CDC for all future sessions. */

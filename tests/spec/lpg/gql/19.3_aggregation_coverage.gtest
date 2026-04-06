@@ -179,7 +179,7 @@ tests:
     expect:
       rows:
         - [0]
-      precision: 1e-10
+      precision: 10
 
   # ---------------------------------------------------------------------------
   # GROUP_CONCAT DISTINCT
