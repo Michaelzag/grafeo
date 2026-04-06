@@ -4,7 +4,11 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 
 ## [0.5.34] - Unreleased
 
-Pre-RC API hardening: `#[non_exhaustive]` on public enums, query engine correctness fixes, WAL race fix.
+Pre-RC API hardening: schema hierarchy, `#[non_exhaustive]` on public enums, query engine correctness fixes.
+
+### Added
+
+- **GQL schema hierarchy** (ISO/IEC 39075 Section 4.2.5): `CREATE SCHEMA` auto-creates a default graph partition, `SESSION SET SCHEMA` routes queries to it. Schemas provide full data isolation: nodes/edges in one schema are invisible from another. `DROP SCHEMA` auto-cleans the default graph, `SHOW GRAPHS` hides internal `__default__` partitions
 
 ### Changed
 

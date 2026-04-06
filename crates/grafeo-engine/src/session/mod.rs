@@ -26,6 +26,10 @@ use crate::database::QueryResult;
 use crate::query::cache::QueryCache;
 use crate::transaction::TransactionManager;
 
+/// Storage key suffix for the implicit default graph within a schema.
+/// Auto-created by `CREATE SCHEMA` and auto-dropped by `DROP SCHEMA`.
+const SCHEMA_DEFAULT_GRAPH: &str = "__default__";
+
 /// Parses a DDL default-value literal string into a [`Value`].
 ///
 /// Handles string literals (single- or double-quoted), integers, floats,
@@ -410,10 +414,14 @@ impl Session {
     fn active_graph_storage_key(&self) -> Option<String> {
         let graph = self.current_graph.lock().clone();
         let schema = self.current_schema.lock().clone();
-        match (schema, graph) {
-            (_, None) => None,
-            (_, Some(ref name)) if name.eq_ignore_ascii_case("default") => None,
-            (None, Some(name)) => Some(name),
+        match (&schema, &graph) {
+            (None, None) => None,
+            (Some(s), None) => Some(format!("{s}/{SCHEMA_DEFAULT_GRAPH}")),
+            (None, Some(name)) if name.eq_ignore_ascii_case("default") => None,
+            (Some(s), Some(name)) if name.eq_ignore_ascii_case("default") => {
+                Some(format!("{s}/{SCHEMA_DEFAULT_GRAPH}"))
+            }
+            (None, Some(name)) => Some(name.clone()),
             (Some(s), Some(g)) => Some(format!("{s}/{g}")),
         }
     }
@@ -1461,6 +1469,11 @@ impl Session {
             } => match self.catalog.register_schema_namespace(name.clone()) {
                 Ok(()) => {
                     wal_log!(self, WalRecord::CreateSchema { name: name.clone() });
+                    // Auto-create the schema's default graph partition so that
+                    // SESSION SET SCHEMA + queries work without an explicit graph.
+                    let default_key = format!("{name}/{SCHEMA_DEFAULT_GRAPH}");
+                    let _ = self.store.create_graph(&default_key);
+                    wal_log!(self, WalRecord::CreateNamedGraph { name: default_key });
                     Ok(QueryResult::status(format!("Created schema '{name}'")))
                 }
                 Err(e) if if_not_exists => {
@@ -1473,13 +1486,15 @@ impl Session {
                 ))),
             },
             SchemaStatement::DropSchema { name, if_exists } => {
-                // ISO/IEC 39075 Section 12.3: schema must be empty before dropping
+                // ISO/IEC 39075 Section 12.3: schema must be empty before dropping.
+                // The auto-created __default__ graph is exempt from the check.
                 let prefix = format!("{name}/");
+                let default_graph_key = format!("{name}/{SCHEMA_DEFAULT_GRAPH}");
                 let has_graphs = self
                     .store
                     .graph_names()
                     .iter()
-                    .any(|g| g.starts_with(&prefix));
+                    .any(|g| g.starts_with(&prefix) && *g != default_graph_key);
                 let has_types = self
                     .catalog
                     .all_node_type_names()
@@ -1504,6 +1519,15 @@ impl Session {
                 match self.catalog.drop_schema_namespace(&name) {
                     Ok(()) => {
                         wal_log!(self, WalRecord::DropSchema { name: name.clone() });
+                        // Drop the auto-created default graph partition
+                        if self.store.drop_graph(&default_graph_key) {
+                            wal_log!(
+                                self,
+                                WalRecord::DropNamedGraph {
+                                    name: default_graph_key,
+                                }
+                            );
+                        }
                         // If this session was using the dropped schema, reset it
                         let mut current = self.current_schema.lock();
                         if current
@@ -2145,6 +2169,7 @@ impl Session {
                 all_names
                     .into_iter()
                     .filter_map(|n| n.strip_prefix(&prefix).map(String::from))
+                    .filter(|n| n != SCHEMA_DEFAULT_GRAPH)
                     .collect()
             }
             None => all_names.into_iter().filter(|n| !n.contains('/')).collect(),

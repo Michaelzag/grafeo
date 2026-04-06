@@ -319,7 +319,7 @@ pub(super) fn load_snapshot_into_store(
             graph_store.sync_epoch(EpochId::new(snapshot.epoch));
         }
     }
-    restore_schema_from_snapshot(catalog, &snapshot.schema);
+    restore_schema_from_snapshot(store, catalog, &snapshot.schema);
 
     // Restore RDF triples
     #[cfg(feature = "rdf")]
@@ -374,7 +374,11 @@ fn populate_store_from_snapshot_ref(
 }
 
 /// Restores schema definitions from a snapshot into the catalog.
+///
+/// Also ensures each schema has its `__default__` graph partition, which
+/// may be missing in snapshots created before the schema hierarchy feature.
 fn restore_schema_from_snapshot(
+    store: &std::sync::Arc<grafeo_core::graph::lpg::LpgStore>,
     catalog: &std::sync::Arc<crate::catalog::Catalog>,
     schema: &SnapshotSchema,
 ) {
@@ -392,6 +396,9 @@ fn restore_schema_from_snapshot(
     }
     for name in &schema.schemas {
         let _ = catalog.register_schema_namespace(name.clone());
+        // Ensure the schema's default graph partition exists
+        let default_key = format!("{name}/__default__");
+        let _ = store.create_graph(&default_key);
     }
     for (graph_name, type_name) in &schema.graph_type_bindings {
         let _ = catalog.bind_graph_type(graph_name, type_name.clone());
@@ -978,7 +985,7 @@ impl super::GrafeoDB {
         }
 
         // Restore schema
-        restore_schema_from_snapshot(&db.catalog, &snapshot.schema);
+        restore_schema_from_snapshot(db.lpg_store(), &db.catalog, &snapshot.schema);
 
         // Restore indexes (must come after data population)
         restore_indexes_from_snapshot(&db, &snapshot.indexes);
@@ -1068,7 +1075,7 @@ impl super::GrafeoDB {
         }
 
         // Restore schema
-        restore_schema_from_snapshot(&self.catalog, &snapshot.schema);
+        restore_schema_from_snapshot(self.lpg_store(), &self.catalog, &snapshot.schema);
 
         // Restore indexes (must come after data population)
         restore_indexes_from_snapshot(self, &snapshot.indexes);
