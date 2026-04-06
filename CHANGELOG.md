@@ -26,6 +26,8 @@ Pre-RC API hardening: schema hierarchy, `#[non_exhaustive]` on public enums, que
 - **`references_any` completeness**: all `LogicalExpression` variants now handled, fixing false negatives in aggregate-vs-WHERE classification
 - **`CREATE SCHEMA` duplicate WAL record**: default graph partition WAL record now only logged when the graph is actually created, avoiding duplicates on repeated schema creation
 - **`BatchInsertSink` zero batch_size**: guard against zero batch size with `debug_assert` and defensive `max(1)` clamp
+- **`delete_node_edges` self-loop double-delete**: self-loops (src == dst) appeared in both outgoing and incoming scans, causing `delete_edge` to be called twice. Now deduped via `HashSet`
+- **`delete_node_edges` partial visibility**: each edge deletion acquired and released the write lock independently, allowing concurrent readers to observe a partially detached node. Now holds a single write lock for the entire batch
 
 ## [0.5.33] - 2026-04-05
 

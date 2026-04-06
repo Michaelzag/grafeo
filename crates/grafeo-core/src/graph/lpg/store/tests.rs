@@ -341,6 +341,86 @@ fn test_delete_node_edges() {
 }
 
 #[test]
+fn test_delete_node_edges_self_loop() {
+    let store = LpgStore::new().unwrap();
+
+    let a = store.create_node(&["Person"]);
+    let _e = store.create_edge(a, a, "SELF"); // self-loop
+
+    assert_eq!(store.edge_count(), 1);
+
+    // Self-loop appears in both outgoing and incoming scans.
+    // The fix deduplicates via HashSet, so only one delete happens.
+    store.delete_node_edges(a);
+
+    assert_eq!(store.edge_count(), 0);
+}
+
+#[test]
+fn test_delete_node_edges_self_loop_plus_others() {
+    let store = LpgStore::new().unwrap();
+
+    let a = store.create_node(&["Person"]);
+    let b = store.create_node(&["Person"]);
+    let c = store.create_node(&["Person"]);
+
+    store.create_edge(a, a, "SELF"); // self-loop on a
+    store.create_edge(a, b, "KNOWS"); // outgoing from a
+    store.create_edge(c, a, "KNOWS"); // incoming to a
+    store.create_edge(b, c, "KNOWS"); // unrelated
+
+    assert_eq!(store.edge_count(), 4);
+
+    store.delete_node_edges(a);
+
+    // Only the b->c edge should remain
+    assert_eq!(store.edge_count(), 1);
+}
+
+#[test]
+fn test_delete_node_edges_atomic_batch() {
+    use std::sync::Arc;
+
+    let store = Arc::new(LpgStore::new().unwrap());
+
+    let a = store.create_node(&["Person"]);
+    let b = store.create_node(&["Person"]);
+    let c = store.create_node(&["Person"]);
+    let d = store.create_node(&["Person"]);
+
+    store.create_edge(a, b, "KNOWS");
+    store.create_edge(a, c, "KNOWS");
+    store.create_edge(d, a, "KNOWS");
+
+    assert_eq!(store.edge_count(), 3);
+
+    // Spawn a reader thread that checks edge count.
+    // With batch locking, the reader should never see 1 or 2
+    // (partially deleted): it should see either 3 (before) or 0 (after).
+    let reader = Arc::clone(&store);
+    let handle = std::thread::spawn(move || {
+        let mut saw_partial = false;
+        for _ in 0..10_000 {
+            let count = reader.edge_count();
+            if count != 0 && count != 3 {
+                saw_partial = true;
+                break;
+            }
+        }
+        saw_partial
+    });
+
+    store.delete_node_edges(a);
+
+    let saw_partial = handle.join().unwrap();
+    assert!(
+        !saw_partial,
+        "concurrent reader observed partially deleted edges"
+    );
+    assert_eq!(store.edge_count(), 0);
+}
+
+#[test]
 fn test_neighbors_both_directions() {
     let store = LpgStore::new().unwrap();
 
