@@ -250,8 +250,9 @@ mod independence {
     }
 
     #[test]
-    fn data_routes_to_default_when_only_schema_set() {
-        // Setting schema alone (no graph) should still route to the default store
+    fn data_isolated_when_schema_set() {
+        // CREATE SCHEMA creates an isolated partition with its own default graph.
+        // Data inserted before the schema switch should be invisible from the new schema.
         let db = db();
         let session = db.session();
 
@@ -259,12 +260,38 @@ mod independence {
         session.execute("CREATE SCHEMA analytics").unwrap();
         session.execute("SESSION SET SCHEMA analytics").unwrap();
 
-        // With schema set but no graph, queries should hit the default store
+        // The analytics schema has its own empty default graph
+        let result = session.execute("MATCH (n:Person) RETURN n").unwrap();
+        assert_eq!(
+            result.row_count(),
+            0,
+            "Schema isolation: data in root schema should be invisible from analytics schema"
+        );
+
+        // Insert into analytics schema and verify it's visible there
+        session
+            .execute("INSERT (:Metric {name: 'pageviews'})")
+            .unwrap();
+        let result = session.execute("MATCH (m:Metric) RETURN m").unwrap();
+        assert_eq!(
+            result.row_count(),
+            1,
+            "Data inserted in analytics should be visible"
+        );
+
+        // Switch back: root schema should still have the Person, not the Metric
+        session.execute("SESSION RESET SCHEMA").unwrap();
         let result = session.execute("MATCH (n:Person) RETURN n").unwrap();
         assert_eq!(
             result.row_count(),
             1,
-            "With only schema set (no graph), default store should be used"
+            "Root schema should still have Person"
+        );
+        let result = session.execute("MATCH (m:Metric) RETURN m").unwrap();
+        assert_eq!(
+            result.row_count(),
+            0,
+            "Root schema should not see analytics Metric"
         );
     }
 }
