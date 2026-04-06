@@ -40,6 +40,9 @@ Repository = "https://github.com/GrafeoDB/grafeo"
 Issues = "https://github.com/GrafeoDB/grafeo/issues"
 
 [project.optional-dependencies]
+cli = [
+    "grafeo-cli>=0.5.34",
+]
 dev = [
     "pytest>=9",
     "pytest-asyncio>=1.3",
