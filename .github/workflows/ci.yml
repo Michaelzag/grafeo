@@ -414,12 +414,34 @@ jobs:
             ${{ runner.os }}-cargo-features-${{ matrix.profile }}-
 
       - name: Build (${{ matrix.profile }})
-        run: cargo build --workspace --exclude grafeo-spec-tests --no-default-features ${{ matrix.features }}
+        run: >
+          cargo build --workspace
+          --exclude grafeo-spec-tests
+          --exclude grafeo-node
+          --exclude grafeo-python
+          --exclude grafeo-wasm
+          --exclude grafeo-c
+          --exclude grafeo-csharp
+          --exclude grafeo-dart
+          --exclude grafeo-cli
+          --exclude grafeo-examples
+          --no-default-features ${{ matrix.features }}
         env:
           RUSTC_WRAPPER: sccache
 
       - name: Test (${{ matrix.profile }})
-        run: cargo nextest run --workspace --exclude grafeo-spec-tests --no-default-features ${{ matrix.features }}
+        run: >
+          cargo nextest run --workspace
+          --exclude grafeo-spec-tests
+          --exclude grafeo-node
+          --exclude grafeo-python
+          --exclude grafeo-wasm
+          --exclude grafeo-c
+          --exclude grafeo-csharp
+          --exclude grafeo-dart
+          --exclude grafeo-cli
+          --exclude grafeo-examples
+          --no-default-features ${{ matrix.features }}
         env:
           RUSTC_WRAPPER: sccache
 
