@@ -144,10 +144,6 @@ impl<'a> RingIterator<'a> {
     /// Seeks to the next position where the given component's term ID >= target_id.
     ///
     /// Returns true if such a position was found.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `bound_id` is confirmed `Some` but the wavelet tree select returns an unexpected state.
     pub fn seek_term(&mut self, component: u8, target_id: u32) -> bool {
         while self.pos < self.end {
             if let Some(current_id) = self.current_term_id(component)
@@ -158,7 +154,7 @@ impl<'a> RingIterator<'a> {
             // Advance to next position
             if self.iterate_all {
                 self.pos += 1;
-            } else if self.bound_id.is_some() {
+            } else if let Some(bound) = self.bound_id {
                 self.rank += 1;
                 if !self.has_next() {
                     return false;
@@ -168,12 +164,7 @@ impl<'a> RingIterator<'a> {
                     1 => self.ring.predicates_wt(),
                     _ => self.ring.objects_wt(),
                 };
-                if let Some(next_pos) = wt.select(
-                    self.bound_id
-                        .expect("bound_id confirmed Some by outer check")
-                        as u64,
-                    self.rank,
-                ) {
+                if let Some(next_pos) = wt.select(bound as u64, self.rank) {
                     self.pos = next_pos;
                 } else {
                     return false;
@@ -191,12 +182,11 @@ impl<'a> RingIterator<'a> {
     ///
     /// # Panics
     ///
-    /// Panics if `bound_id` is confirmed `Some` but the wavelet tree select returns an unexpected state.
     pub fn seek(&mut self, target: usize) {
         if self.iterate_all {
             // For iterate-all, just move position
             self.pos = target.min(self.end);
-        } else if self.bound_id.is_some() {
+        } else if let Some(bound) = self.bound_id {
             // For bound iterators, we need to find the next occurrence >= target
             while self.has_next() {
                 let wt = match self.component {
@@ -205,12 +195,7 @@ impl<'a> RingIterator<'a> {
                     _ => self.ring.objects_wt(),
                 };
 
-                if let Some(next_pos) = wt.select(
-                    self.bound_id
-                        .expect("bound_id confirmed Some by outer check")
-                        as u64,
-                    self.rank,
-                ) {
+                if let Some(next_pos) = wt.select(bound as u64, self.rank) {
                     if next_pos >= target {
                         self.pos = next_pos;
                         return;

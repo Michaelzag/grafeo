@@ -561,6 +561,7 @@ mod tests {
         assert!(storage.memory_usage() > 10 * 384 * 4);
     }
 
+    #[cfg(feature = "mmap")]
     #[test]
     fn test_mmap_storage_create_and_open() {
         let temp_dir = std::env::temp_dir();
@@ -600,6 +601,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(feature = "mmap")]
     #[test]
     fn test_mmap_storage_cache() {
         let temp_dir = std::env::temp_dir();
@@ -635,6 +637,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(feature = "mmap")]
     #[test]
     fn test_mmap_storage_remove() {
         let temp_dir = std::env::temp_dir();
@@ -659,6 +662,7 @@ mod tests {
         assert!(matches!(backend, StorageBackend::Ram));
     }
 
+    #[cfg(feature = "mmap")]
     #[test]
     fn test_mmap_storage_invalid_magic() {
         let temp_dir = std::env::temp_dir();
@@ -676,6 +680,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(feature = "mmap")]
     #[test]
     fn test_mmap_storage_clear_cache() {
         let temp_dir = std::env::temp_dir();
@@ -699,6 +704,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(feature = "mmap")]
     #[test]
     fn test_mmap_storage_file_size() {
         let temp_dir = std::env::temp_dir();
@@ -814,6 +820,7 @@ mod tests {
         assert!(storage.flush().is_ok());
     }
 
+    #[cfg(feature = "mmap")]
     #[test]
     fn test_mmap_storage_is_empty() {
         let temp_dir = std::env::temp_dir();
@@ -831,6 +838,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(feature = "mmap")]
     #[test]
     fn test_mmap_storage_memory_usage() {
         let temp_dir = std::env::temp_dir();
@@ -852,6 +860,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(feature = "mmap")]
     #[test]
     #[cfg(debug_assertions)]
     #[should_panic(expected = "Vector dimension mismatch")]

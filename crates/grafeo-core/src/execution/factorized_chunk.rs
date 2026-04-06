@@ -550,7 +550,8 @@ impl FactorizedChunk {
     ///
     /// # Panics
     ///
-    /// Panics if any column index in the deepest level is out of bounds.
+    /// Panics if the deepest level's internal column storage is inconsistent
+    /// (column count reports more columns than actually exist).
     #[must_use]
     pub fn filter_deepest_multi<F>(&self, predicate: F) -> Option<Self>
     where

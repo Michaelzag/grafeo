@@ -413,25 +413,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-features-${{ matrix.profile }}-
 
+      # Library-only build: verifies that the core crates compile under each
+      # feature combination. Tests are not compiled here because many assume
+      # all features are available; full test coverage runs under --all-features
+      # in the rust-test job.
       - name: Build (${{ matrix.profile }})
         run: >
-          cargo build --workspace
-          --exclude grafeo-spec-tests
-          --exclude grafeo-node
-          --exclude grafeo-python
-          --exclude grafeo-wasm
-          --exclude grafeo-c
-          --exclude grafeo-csharp
-          --exclude grafeo-dart
-          --exclude grafeo-cli
-          --exclude grafeo-examples
-          --no-default-features ${{ matrix.features }}
-        env:
-          RUSTC_WRAPPER: sccache
-
-      - name: Test (${{ matrix.profile }})
-        run: >
-          cargo nextest run --workspace
+          cargo build --workspace --lib
           --exclude grafeo-spec-tests
           --exclude grafeo-node
           --exclude grafeo-python

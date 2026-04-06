@@ -489,12 +489,10 @@ impl WalManager {
     pub fn log_files(&self) -> Result<Vec<PathBuf>> {
         let mut files = Vec::new();
 
-        if let Ok(entries) = fs::read_dir(&self.dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().is_some_and(|ext| ext == "log") {
-                    files.push(path);
-                }
+        for entry in fs::read_dir(&self.dir)?.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "log") {
+                files.push(path);
             }
         }
 

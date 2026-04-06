@@ -344,9 +344,14 @@ impl TypeSpecificCompressor {
 
     /// Decompresses u64 values.
     ///
+    /// For `CompressionCodec::None`, trailing bytes that do not form a complete
+    /// `u64` are silently dropped.
+    ///
     /// # Errors
     ///
-    /// Returns `Err` if the data is corrupt or the codec does not support integer decompression.
+    /// Returns `Err` if the compressed payload is malformed (e.g. invalid
+    /// delta-bitpacked or run-length header) or the codec does not support
+    /// integer decompression.
     pub fn decompress_integers(data: &CompressedData) -> io::Result<Vec<u64>> {
         match data.codec {
             CompressionCodec::None => {

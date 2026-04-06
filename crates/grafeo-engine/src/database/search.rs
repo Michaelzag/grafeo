@@ -1,6 +1,10 @@
 //! Vector, text, and hybrid search operations for GrafeoDB.
 
-#[cfg(any(feature = "text-index", feature = "hybrid-search"))]
+#[cfg(any(
+    feature = "vector-index",
+    feature = "text-index",
+    feature = "hybrid-search"
+))]
 use grafeo_common::types::NodeId;
 #[cfg(feature = "vector-index")]
 use grafeo_common::types::Value;
