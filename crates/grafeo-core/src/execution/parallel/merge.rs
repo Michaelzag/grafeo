@@ -4,7 +4,6 @@
 //! each worker produces partial results that must be merged into final output.
 
 use crate::execution::chunk::DataChunk;
-use crate::execution::operators::OperatorError;
 use crate::execution::vector::ValueVector;
 use grafeo_common::types::Value;
 use std::cmp::Ordering;
@@ -316,28 +315,13 @@ fn compare_values(a: &Value, b: &Value) -> Ordering {
 /// Merges multiple sorted runs into a single sorted output.
 ///
 /// Uses a min-heap for efficient k-way merge.
-///
-/// # Errors
-///
-/// Returns `Err` if the merge encounters an operator error.
-///
-/// # Panics
-///
-/// Panics if a single-element `runs` vector is unexpectedly empty (invariant violation).
-pub fn merge_sorted_runs(
-    runs: Vec<Vec<Vec<Value>>>,
-    keys: &[SortKey],
-) -> Result<Vec<Vec<Value>>, OperatorError> {
+pub fn merge_sorted_runs(runs: Vec<Vec<Vec<Value>>>, keys: &[SortKey]) -> Vec<Vec<Value>> {
     if runs.is_empty() {
-        return Ok(Vec::new());
+        return Vec::new();
     }
 
     if runs.len() == 1 {
-        // Invariant: runs.len() == 1 guarantees exactly one element
-        return Ok(runs
-            .into_iter()
-            .next()
-            .expect("runs has exactly one element: checked on previous line"));
+        return runs.into_iter().next().unwrap_or_default();
     }
 
     // Count total rows
@@ -376,20 +360,13 @@ pub fn merge_sorted_runs(
         }
     }
 
-    Ok(result)
+    result
 }
 
-/// Converts sorted rows to DataChunks.
-///
-/// # Errors
-///
-/// Returns `Err` if chunk construction fails.
-pub fn rows_to_chunks(
-    rows: Vec<Vec<Value>>,
-    chunk_size: usize,
-) -> Result<Vec<DataChunk>, OperatorError> {
+/// Converts sorted rows to `DataChunk`s.
+pub fn rows_to_chunks(rows: Vec<Vec<Value>>, chunk_size: usize) -> Vec<DataChunk> {
     if rows.is_empty() {
-        return Ok(Vec::new());
+        return Vec::new();
     }
 
     let num_columns = rows[0].len();
@@ -409,23 +386,19 @@ pub fn rows_to_chunks(
         chunks.push(DataChunk::new(columns));
     }
 
-    Ok(chunks)
+    chunks
 }
 
-/// Merges multiple sorted DataChunk streams into a single sorted stream.
-///
-/// # Errors
-///
-/// Returns `Err` if the merge or chunk conversion fails.
+/// Merges multiple sorted `DataChunk` streams into a single sorted stream.
 pub fn merge_sorted_chunks(
     runs: Vec<Vec<DataChunk>>,
     keys: &[SortKey],
     chunk_size: usize,
-) -> Result<Vec<DataChunk>, OperatorError> {
+) -> Vec<DataChunk> {
     // Convert chunks to row format for merging
     let row_runs: Vec<Vec<Vec<Value>>> = runs.into_iter().map(chunks_to_rows).collect();
 
-    let merged_rows = merge_sorted_runs(row_runs, keys)?;
+    let merged_rows = merge_sorted_runs(row_runs, keys);
     rows_to_chunks(merged_rows, chunk_size)
 }
 
@@ -457,13 +430,7 @@ pub fn concat_parallel_results(results: Vec<Vec<DataChunk>>) -> Vec<DataChunk> {
 }
 
 /// Merges parallel DISTINCT results by deduplication.
-///
-/// # Errors
-///
-/// Returns `Err` if chunk construction fails during deduplication.
-pub fn merge_distinct_results(
-    results: Vec<Vec<DataChunk>>,
-) -> Result<Vec<DataChunk>, OperatorError> {
+pub fn merge_distinct_results(results: Vec<Vec<DataChunk>>) -> Vec<DataChunk> {
     use std::collections::HashSet;
 
     // Simple row-based deduplication using hash
@@ -538,7 +505,7 @@ mod tests {
     #[test]
     fn test_merge_sorted_runs_empty() {
         let runs: Vec<Vec<Vec<Value>>> = Vec::new();
-        let result = merge_sorted_runs(runs, &[]).unwrap();
+        let result = merge_sorted_runs(runs, &[]);
         assert!(result.is_empty());
     }
 
@@ -551,7 +518,7 @@ mod tests {
         ]];
         let keys = vec![SortKey::ascending(0)];
 
-        let result = merge_sorted_runs(runs, &keys).unwrap();
+        let result = merge_sorted_runs(runs, &keys);
         assert_eq!(result.len(), 3);
     }
 
@@ -579,7 +546,7 @@ mod tests {
         ];
         let keys = vec![SortKey::ascending(0)];
 
-        let result = merge_sorted_runs(runs, &keys).unwrap();
+        let result = merge_sorted_runs(runs, &keys);
         assert_eq!(result.len(), 9);
 
         // Verify sorted order
@@ -604,7 +571,7 @@ mod tests {
         ];
         let keys = vec![SortKey::descending(0)];
 
-        let result = merge_sorted_runs(runs, &keys).unwrap();
+        let result = merge_sorted_runs(runs, &keys);
         assert_eq!(result.len(), 6);
 
         // Verify descending order
@@ -616,7 +583,7 @@ mod tests {
     #[test]
     fn test_rows_to_chunks() {
         let rows = (0..10).map(|i| vec![Value::Int64(i)]).collect();
-        let chunks = rows_to_chunks(rows, 3).unwrap();
+        let chunks = rows_to_chunks(rows, 3);
 
         assert_eq!(chunks.len(), 4); // 10 rows / 3 = 4 chunks
         assert_eq!(chunks[0].len(), 3);
@@ -640,7 +607,7 @@ mod tests {
         ])]);
 
         let results = vec![vec![chunk1], vec![chunk2]];
-        let merged = merge_distinct_results(results).unwrap();
+        let merged = merge_distinct_results(results);
 
         let total_rows: usize = merged.iter().map(DataChunk::len).sum();
         assert_eq!(total_rows, 4); // 1, 2, 3, 4 (no duplicates)

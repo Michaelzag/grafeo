@@ -42,7 +42,7 @@ impl RelTable {
     ///
     /// # Panics
     ///
-    /// Panics if `bwd` is `Some` but its CSR has no edge data populated.
+    /// Panics if `bwd` is a non-empty CSR that has no edge data populated.
     #[must_use]
     pub fn new(
         schema: EdgeSchema,
