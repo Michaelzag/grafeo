@@ -90,6 +90,7 @@ Thank you to everyone who has contributed to Grafeo!
 - **CorvusYe** ([@CorvusYe](https://github.com/CorvusYe)): Dart bindings ([#138](https://github.com/GrafeoDB/grafeo/pull/138)), single-file `.grafeo` format feature request ([#139](https://github.com/GrafeoDB/grafeo/issues/139))
 - **temporaryfix** ([@temporaryfix](https://github.com/temporaryfix)): CompactStore columnar read-optimized store, RFC ([#199](https://github.com/GrafeoDB/grafeo/issues/199)), implementation ([#204](https://github.com/GrafeoDB/grafeo/pull/204))
 - **Imaclean74** ([@Imaclean74](https://github.com/Imaclean74)): CompactStore multi-label-pair edge type fix ([#225](https://github.com/GrafeoDB/grafeo/pull/225))
+- **Michaelzag** ([@Michaelzag](https://github.com/Michaelzag)): `cypher` feature `gql` dependency fix ([#233](https://github.com/GrafeoDB/grafeo/pull/233)), schema type extraction proposal ([#234](https://github.com/GrafeoDB/grafeo/issues/234))
 
 ## Recognition
 
