@@ -2569,6 +2569,64 @@ impl PyGrafeoDB {
     fn current_schema(&self) -> Option<String> {
         self.inner.read().current_schema()
     }
+
+    // -----------------------------------------------------------------
+    // Named graph management
+    // -----------------------------------------------------------------
+
+    /// Creates a named graph. Returns ``True`` if created, ``False`` if it
+    /// already exists.
+    ///
+    /// Example:
+    ///     db.create_graph("social")
+    ///     db.set_graph("social")
+    ///     db.execute("INSERT (:Person {name: 'Alix'})")
+    fn create_graph(&self, name: &str) -> PyResult<bool> {
+        Ok(self
+            .inner
+            .read()
+            .create_graph(name)
+            .map_err(PyGrafeoError::from)?)
+    }
+
+    /// Drops a named graph. Returns ``True`` if dropped, ``False`` if it did
+    /// not exist.
+    fn drop_graph(&self, name: &str) -> bool {
+        self.inner.read().drop_graph(name)
+    }
+
+    /// Returns a list of all named graph names.
+    fn list_graphs(&self) -> Vec<String> {
+        self.inner.read().list_graphs()
+    }
+
+    /// Sets the current graph for subsequent ``execute()`` calls.
+    ///
+    /// Equivalent to running ``USE GRAPH <name>`` but persists across calls.
+    /// Use ``reset_graph()`` to clear it.
+    ///
+    /// Example:
+    ///     db.set_graph("social")
+    ///     result = db.execute("MATCH (n) RETURN n")  # queries 'social' graph
+    fn set_graph(&self, name: String) {
+        self.inner.read().set_current_graph(Some(&name));
+    }
+
+    /// Clears the current graph context.
+    ///
+    /// Subsequent ``execute()`` calls will use the default graph.
+    fn reset_graph(&self) {
+        self.inner.read().set_current_graph(None);
+    }
+
+    /// Returns the current graph name, or ``None`` if no graph is set.
+    ///
+    /// Example:
+    ///     db.set_graph("social")
+    ///     assert db.current_graph() == "social"
+    fn current_graph(&self) -> Option<String> {
+        self.inner.read().current_graph()
+    }
 }
 
 /// Groups multiple operations into an atomic unit.
