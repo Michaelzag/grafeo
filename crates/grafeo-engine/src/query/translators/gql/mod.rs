@@ -1011,14 +1011,8 @@ impl GqlTranslator {
     fn eval_as_count_expr(expr: &ast::Expression) -> Result<CountExpr> {
         match expr {
             ast::Expression::Literal(ast::Literal::Integer(i)) => {
-                if *i >= 0 {
-                    Ok(CountExpr::Literal(*i as usize))
-                } else {
-                    Err(Error::Query(QueryError::new(
-                        QueryErrorKind::Semantic,
-                        "Expected non-negative integer for SKIP/LIMIT",
-                    )))
-                }
+                // Clamp negative values to 0 (LIMIT -1 returns empty, not an error)
+                Ok(CountExpr::Literal((*i).max(0) as usize))
             }
             ast::Expression::Parameter(name) => Ok(CountExpr::Parameter(name.clone())),
             _ => Err(Error::Query(QueryError::new(

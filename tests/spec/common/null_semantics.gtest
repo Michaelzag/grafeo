@@ -376,3 +376,50 @@ tests:
     query: "MATCH (s:Sale) RETURN s.region AS region, sum(s.amount) AS total ORDER BY region"
     expect:
       count: 2
+
+  # ---------------------------------------------------------------------------
+  # NULL in inline property patterns (MATCH and MERGE)
+  # ---------------------------------------------------------------------------
+
+  - name: match_null_property_pattern_matches_absent
+    setup:
+      - "INSERT (:Rec {id: 'r1', b: 'x'})"
+    query: "MATCH (n:Rec {id: null, b: 'x'}) RETURN n.b AS b"
+    expect:
+      empty: true
+    note: "id exists and is 'r1', not null, so no match"
+
+  - name: match_null_property_pattern_matches_null_value
+    setup:
+      - "INSERT (:Rec {id: null, b: 'x'})"
+    query: "MATCH (n:Rec {id: null, b: 'x'}) RETURN n.b AS b"
+    expect:
+      rows:
+        - [x]
+
+  - name: match_null_property_pattern_matches_missing_key
+    setup:
+      - "INSERT (:Rec {b: 'x'})"
+    query: "MATCH (n:Rec {id: null, b: 'x'}) RETURN n.b AS b"
+    expect:
+      rows:
+        - [x]
+
+  - name: merge_with_null_key_creates_then_matches
+    statements:
+      - "MERGE (n:Composite {a: null, b: 'x'}) SET n.c = 1"
+      - "MERGE (n:Composite {a: null, b: 'x'}) SET n.c = 2"
+      - "MATCH (n:Composite) RETURN n.b AS b, n.c AS c"
+    expect:
+      rows:
+        - [x, 2]
+
+  - name: merge_null_key_does_not_match_non_null
+    statements:
+      - "INSERT (:MergeNull {a: 'real', b: 'y'})"
+      - "MERGE (n:MergeNull {a: null, b: 'y'}) SET n.c = 99"
+      - "MATCH (n:MergeNull) RETURN n.a AS a, n.b AS b, n.c AS c ORDER BY a"
+    expect:
+      rows:
+        - [null, y, 99]
+        - [real, y, null]

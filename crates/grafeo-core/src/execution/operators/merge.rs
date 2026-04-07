@@ -140,9 +140,13 @@ impl MergeOperator {
                 }
 
                 let has_all_props = resolved_match_props.iter().all(|(key, expected_value)| {
-                    node.properties
-                        .get(&PropertyKey::new(key.as_str()))
-                        .is_some_and(|v| v == expected_value)
+                    let prop = node.properties.get(&PropertyKey::new(key.as_str()));
+                    if expected_value.is_null() {
+                        // Null in a MERGE pattern matches both absent and explicitly null properties
+                        prop.map_or(true, |v| v.is_null())
+                    } else {
+                        prop.is_some_and(|v| v == expected_value)
+                    }
                 });
 
                 if has_all_props {

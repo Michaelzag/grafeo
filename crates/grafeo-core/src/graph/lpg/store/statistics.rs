@@ -38,10 +38,10 @@ impl LpgStore {
         stats.total_edges = self.live_edge_count.load(Ordering::Relaxed).max(0) as u64;
 
         // Compute per-label statistics from label_index (each is O(1) via .len())
-        let id_to_label = self.id_to_label.read();
+        let registry = self.label_registry.read();
         let label_index = self.label_index.read();
 
-        for (label_id, label_name) in id_to_label.iter().enumerate() {
+        for (label_id, label_name) in registry.names().iter().enumerate() {
             let node_count = label_index.get(label_id).map_or(0, |set| set.len() as u64);
 
             if node_count > 0 {

@@ -1470,9 +1470,34 @@ impl Operator for SetPropertyOperator {
                                     }
                                 }
                             }
-                            // Set each map entry
+                            // Set each map entry (null values remove the property)
                             for (key, val) in map.iter() {
-                                if self.is_edge {
+                                if val.is_null() {
+                                    // Null in SET += removes the property (Cypher/GQL semantics)
+                                    if self.is_edge {
+                                        if let Some(tid) = tx_id {
+                                            self.store.remove_edge_property_versioned(
+                                                EdgeId(entity_id),
+                                                key.as_str(),
+                                                tid,
+                                            );
+                                        } else {
+                                            self.store.remove_edge_property(
+                                                EdgeId(entity_id),
+                                                key.as_str(),
+                                            );
+                                        }
+                                    } else if let Some(tid) = tx_id {
+                                        self.store.remove_node_property_versioned(
+                                            NodeId(entity_id),
+                                            key.as_str(),
+                                            tid,
+                                        );
+                                    } else {
+                                        self.store
+                                            .remove_node_property(NodeId(entity_id), key.as_str());
+                                    }
+                                } else if self.is_edge {
                                     if let Some(tid) = tx_id {
                                         self.store.set_edge_property_versioned(
                                             EdgeId(entity_id),

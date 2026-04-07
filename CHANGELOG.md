@@ -2,42 +2,51 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
-## [0.5.34] - Unreleased
+## [0.5.34] - 2026-04-07
 
-Pre-RC API hardening: schema hierarchy, `#[non_exhaustive]` on public enums, query engine correctness fixes.
+Pre-RC hardening: query engine fixes from external integration testing, format stability, feature matrix CI.
 
 ### Added
 
-- **GQL schema hierarchy** (ISO/IEC 39075 Section 4.2.5): `CREATE SCHEMA` auto-creates a default graph partition, `SESSION SET SCHEMA` routes queries to it. Schemas provide full data isolation: nodes/edges in one schema are invisible from another. `DROP SCHEMA` auto-cleans the default graph, `SHOW GRAPHS` hides internal `__default__` partitions
-- **Streaming RDF triple sink**: `TripleSink` trait decouples parsing from storage. `BatchInsertSink` streams triples into the store in configurable batches, keeping memory bounded for large files. `CountSink` enables dry-run validation
-- **Streaming Turtle/N-Triples load**: `load_turtle_streaming()`, `load_turtle_reader()`, `load_ntriples_streaming()` insert incrementally without replacing existing data
-- **`TurtleParser::parse_into()`**: sink-based Turtle parsing, emitting triples as they are parsed instead of collecting all into memory
-- **Golden fixture tests**: snapshot v4 backward-read, round-trip, and version stability checks
-- **Deterministic snapshot export**: nodes, edges, labels, and properties sorted by ID/name for byte-for-byte reproducible exports
-- **`.grafeo` file format golden fixture**: backward-read tests for magic bytes, dual-header layout, CRC-32 validation, and snapshot payload
-- **WAL frame golden fixture**: backward-read tests for frame structure, 9 representative record variants, CRC integrity, and byte-equality
-- **Per-release fixture archive**: `fixtures/archive/` directories for preserving old format fixtures across version bumps
-- **Feature matrix CI**: per-profile test jobs (gql-only, gql+vector, gql+rdf, embedded, browser) to catch per-feature cfg bugs
-- **Serialization benchmarks**: snapshot export/import throughput and `Value` bincode encoding/decoding
+- **GQL schema hierarchy** (ISO/IEC 39075 Section 4.2.5): `CREATE SCHEMA`/`DROP SCHEMA`, `SESSION SET SCHEMA`, full data isolation between schemas
+- **Streaming RDF triple sink**: `TripleSink` trait with `BatchInsertSink` (bounded memory) and `CountSink` (dry-run)
+- **Streaming Turtle/N-Triples load**: `load_turtle_streaming()`, `load_ntriples_streaming()` insert incrementally
+- **Golden fixture tests**: snapshot v4, `.grafeo` file format, and WAL frame backward-read + byte-equality checks
+- **Deterministic snapshot export**: nodes/edges/labels/properties sorted by ID/name for reproducible exports
+- **Feature matrix CI**: per-profile build+test jobs (gql-only, gql+vector, gql+rdf, embedded, browser)
+- **Serialization benchmarks**: snapshot export/import and `Value` bincode round-trip
 
 ### Changed
 
-- **`#[non_exhaustive]` on 13 public enums**: `GraphModel`, `AccessMode`, `StorageFormat`, `DurabilityMode`, `IndexType`, `ChangeKind`, `DatabaseMode`, `SchemaInfo`, `DumpFormat`, `QueryLanguage`, `IsolationLevel`, `EmbeddingModelConfig`, `LogicalType`. Future variants can be added without breaking semver
-- **`missing_errors_doc` and `missing_panics_doc` lints enabled**: all ~233 public functions now document their error conditions and panic scenarios. Lints promoted from `allow` to `warn`
-- **MVCC types hidden from public API**: `VersionChain` and `VersionInfo` re-exports marked `#[doc(hidden)]`
+- **`LabelRegistry` combined lock**: merged `label_to_id` + `id_to_label` into one `RwLock<LabelRegistry>`, reducing write-path lock acquisitions
+- **`#[non_exhaustive]` on 13 public enums**: future variants can be added without breaking semver
+- **`missing_errors_doc`/`missing_panics_doc` lints enabled**: public functions now document error/panic conditions
+- **MVCC types hidden**: `VersionChain`/`VersionInfo` re-exports marked `#[doc(hidden)]`
 
 ### Fixed
 
-- **WAL sync counter race**: snapshot record count inside the lock, `fetch_sub` after sync instead of `store(0)`, preserving concurrent increments
-- **Multi-aggregate extraction**: `sum(a) + count(b)` now correctly extracts all aggregates instead of only the first
-- **Mixed `WITH ... WHERE`/HAVING**: AND conjuncts are split so only aggregate-referencing parts become HAVING, the rest stay as a post-aggregate filter
-- **`references_any` completeness**: all `LogicalExpression` variants now handled, fixing false negatives in aggregate-vs-WHERE classification
-- **`CREATE SCHEMA` duplicate WAL record**: default graph partition WAL record now only logged when the graph is actually created, avoiding duplicates on repeated schema creation
-- **`BatchInsertSink` zero batch_size**: guard against zero batch size with `debug_assert` and defensive `max(1)` clamp
-- **`delete_node_edges` self-loop double-delete**: self-loops (src == dst) appeared in both outgoing and incoming scans, causing `delete_edge` to be called twice. Now deduped via `HashSet`
-- **`delete_node_edges` partial visibility**: each edge deletion acquired and released the write lock independently, allowing concurrent readers to observe a partially detached node. Now holds a single write lock for the entire batch
-- **`cypher` feature missing `gql` dependency**: `cypher` feature failed to compile without `gql` because the cypher parser imports shared schema DDL types from `gql/ast.rs`. Now declares `gql` as a dependency ([#232](https://github.com/GrafeoDB/grafeo/issues/232), [#233](https://github.com/GrafeoDB/grafeo/pull/233) by [@Michaelzag](https://github.com/Michaelzag))
-- **Node.js bindings feature-gated compilation**: 17 cfg-gated methods inside the main `#[napi] impl` block caused "cannot find value `xxx_c_callback`" errors when features were disabled. Moved into separate per-feature `#[napi] impl` blocks
+- **WAL sync counter race**: `fetch_sub` after sync instead of `store(0)`, preserving concurrent increments
+- **Multi-aggregate extraction**: `sum(a) + count(b)` now extracts all aggregates
+- **Mixed `WITH ... WHERE`/HAVING**: non-aggregate conjuncts stay as WHERE, aggregate parts become HAVING
+- **`references_any` completeness**: all `LogicalExpression` variants handled
+- **`CREATE SCHEMA` duplicate WAL record**: only logged when graph is actually created
+- **`BatchInsertSink` zero batch_size**: defensive `max(1)` clamp
+- **`delete_node_edges` self-loop**: deduped via `HashSet`, batch edge lock, batch adjacency lock
+- **`cypher` feature needing `gql` dependency** ([#232](https://github.com/GrafeoDB/grafeo/issues/232), [#233](https://github.com/GrafeoDB/grafeo/pull/233) by [@Michaelzag](https://github.com/Michaelzag))
+- **Node.js napi cfg-gated methods**: moved methods into per-feature `#[napi] impl` blocks
+- **`BitPackedInts::from_bytes`**: `bits_per_value > 64` now returns `Err` instead of panicking
+- **WAL `log_files`**: directory read errors now propagated instead of swallowed
+- **Per-feature compilation**: missing cfg gates across `vector-index`, `rdf`, `mmap`, `regex`
+- **Algorithm unreachable panics**: `expect("node in index")` replaced with `enumerate`/`let-else` in functions
+- **Null property pattern matching**: `MATCH (n {key: null})` now matches nodes where the property is absent or explicitly null (MERGE and MATCH)
+- **MERGE null key matching**: `MERGE (n:T {a: null, b: 'x'})` correctly finds existing nodes with absent/null `a`
+- **SET += {key: null} removes property**: `SET n += {price: null}` now removes the property instead of keeping it as null
+- **Negative LIMIT clamped to 0**: `LIMIT -1` returns empty result instead of raising a syntax error (GQL and Cypher)
+- **i64 MIN literal parsing**: `-9223372036854775808` now parses correctly by folding `-<integer>` at parse time (GQL and Cypher)
+- **NaN/Inf float literals**: `NaN`, `Inf`, `Infinity` recognized as IEEE 754 special float values (GQL and Cypher)
+- **`nodes(p)` resolves to property maps**: `nodes(path)` now returns node maps with properties instead of raw Int64 IDs, enabling `[n IN nodes(p) | n.name]`
+- **Cyclic VLP pattern matching**: `MATCH p=(s)-[:R*]->(s)` now filters expanded targets to match the source node via `id()` equality
+- **VLP default depth raised**: unbounded `[*]` now expands up to `min_hops + 100` (was `+10`)
 
 ## [0.5.33] - 2026-04-05
 
@@ -47,7 +56,7 @@ GraphChallenge benchmark suite, RDF-to-LPG bridge, and a large round of query en
 
 - **GraphChallenge algorithms** (DARPA/MIT IEEE HPEC 2026): k-truss decomposition, parallel triangle counting, subgraph isomorphism (VF2), stochastic block partition, partition quality metrics (Rand index, NMI, precision, recall)
 - **TSV/MMIO bulk import**: `import_tsv()`, `import_mmio()`, `import_tsv_rdf()` for fast graph loading bypassing per-edge transaction overhead
-- **`RdfGraphStoreAdapter`**: bridges `RdfStore` to `GraphStore`, giving RDF graphs access to all 25+ graph algorithms
+- **`RdfGraphStoreAdapter`**: bridges `RdfStore` to `GraphStore`, giving RDF graphs access to all graph algorithms
 - **grafeo-cli PyPI publish workflow** ([#222](https://github.com/GrafeoDB/grafeo/pull/222))
 
 ### Fixed

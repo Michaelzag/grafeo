@@ -227,7 +227,7 @@ impl LpgStore {
         if text_indexes.is_empty() {
             return;
         }
-        let id_to_label = self.id_to_label.read();
+        let registry = self.label_registry.read();
         let node_labels = self.node_labels.read();
         #[cfg(not(feature = "temporal"))]
         let label_set = node_labels.get(&id);
@@ -235,7 +235,7 @@ impl LpgStore {
         let label_set = node_labels.get(&id).and_then(|log| log.latest());
         if let Some(label_ids) = label_set {
             for &label_id in label_ids {
-                if let Some(label_name) = id_to_label.get(label_id as usize) {
+                if let Some(label_name) = registry.get_name(label_id) {
                     let index_key = format!("{label_name}:{key}");
                     if let Some(index) = text_indexes.get(&index_key) {
                         let mut idx = index.write();
@@ -257,7 +257,7 @@ impl LpgStore {
         if text_indexes.is_empty() {
             return;
         }
-        let id_to_label = self.id_to_label.read();
+        let registry = self.label_registry.read();
         let node_labels = self.node_labels.read();
         #[cfg(not(feature = "temporal"))]
         let label_set = node_labels.get(&id);
@@ -265,7 +265,7 @@ impl LpgStore {
         let label_set = node_labels.get(&id).and_then(|log| log.latest());
         if let Some(label_ids) = label_set {
             for &label_id in label_ids {
-                if let Some(label_name) = id_to_label.get(label_id as usize) {
+                if let Some(label_name) = registry.get_name(label_id) {
                     let index_key = format!("{label_name}:{key}");
                     if let Some(index) = text_indexes.get(&index_key) {
                         index.write().remove(id);

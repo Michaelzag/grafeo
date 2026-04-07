@@ -49,7 +49,7 @@ impl super::Planner {
                 1
             };
             let max_hops = if is_variable_length {
-                expand.max_hops.unwrap_or(expand.min_hops + 10)
+                expand.max_hops.unwrap_or(expand.min_hops + 100)
             } else {
                 1
             };

@@ -117,6 +117,30 @@ tests:
     expect:
       count: 5
 
+  - name: cyclic_vlp_same_source_and_target_variable
+    # (s)-[:R*1..4]->(s) must only return paths that end back at s.
+    # In a 2-hop cycle (Alix->Gus->Alix), lengths 2 and 4 are cycles.
+    # Without cycle detection the expand overwrites s, returning all reachable nodes.
+    setup:
+      - "INSERT (a:Cyc {name: 'Alix'})-[:R]->(b:Cyc {name: 'Gus'})-[:R]->(a)"
+    variants:
+      gql: "MATCH p = (s:Cyc {name: 'Alix'})-[:R*1..4]->(s) RETURN length(p) AS len ORDER BY len"
+      cypher: "MATCH p = (s:Cyc {name: 'Alix'})-[:R*1..4]->(s) RETURN length(p) AS len ORDER BY len"
+    expect:
+      rows:
+        - [2]
+        - [4]
+
+  - name: cyclic_vlp_no_cycle_returns_empty
+    # When no cycle exists, the same-variable pattern must return nothing.
+    setup:
+      - "INSERT (:Lin {name: 'Alix'})-[:R]->(:Lin {name: 'Gus'})"
+    variants:
+      gql: "MATCH p = (s:Lin {name: 'Alix'})-[:R*1..4]->(s) RETURN length(p) AS len"
+      cypher: "MATCH p = (s:Lin {name: 'Alix'})-[:R*1..4]->(s) RETURN length(p) AS len"
+    expect:
+      empty: true
+
   # ---------------------------------------------------------------------------
   # MERGE with NULL node reference
   # ---------------------------------------------------------------------------
