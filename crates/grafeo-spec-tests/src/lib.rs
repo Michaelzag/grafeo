@@ -22,6 +22,10 @@ fn repo_root() -> PathBuf {
 }
 
 /// Load a dataset .setup file into the database.
+///
+/// # Panics
+///
+/// Panics if the file at `relative_path` cannot be read or if any query in the file fails to execute.
 pub fn load_dataset(db: &GrafeoDB, relative_path: &str) {
     let path = repo_root().join(relative_path);
     let content = fs::read_to_string(&path)
@@ -43,6 +47,10 @@ pub fn execute_query(db: &GrafeoDB, language: &str, query: &str) {
 }
 
 /// Execute a query with model-aware dispatch, panicking on failure.
+///
+/// # Panics
+///
+/// Panics if `execute_query_result` returns an error for the given query and language.
 pub fn execute_query_with_model(db: &GrafeoDB, language: &str, model: &str, query: &str) {
     execute_query_result(db, language, model, query).unwrap_or_else(|e| {
         panic!("Query failed: {query}\nLanguage: {language}\nModel: {model}\nError: {e}")
@@ -50,6 +58,14 @@ pub fn execute_query_with_model(db: &GrafeoDB, language: &str, model: &str, quer
 }
 
 /// Execute a query using the (language, model) dispatch key, returning the Result.
+///
+/// # Errors
+///
+/// Returns `Err` if the underlying database executor fails (parse error, execution error, etc.).
+///
+/// # Panics
+///
+/// Panics if `language` is not a supported language identifier.
 pub fn execute_query_result(
     db: &GrafeoDB,
     language: &str,
@@ -81,6 +97,10 @@ pub fn execute_query_result(
 ///
 /// Delegates to `GrafeoDB::execute_language` which routes the query to the
 /// correct language executor and substitutes parameters before planning.
+///
+/// # Errors
+///
+/// Returns `Err` if the query fails to parse, plan, or execute.
 pub fn execute_query_result_with_params(
     db: &GrafeoDB,
     language: &str,
@@ -160,6 +180,10 @@ pub fn value_to_string(value: &Value) -> String {
 }
 
 /// Assert rows match after sorting both sides.
+///
+/// # Panics
+///
+/// Panics if row counts differ, column counts differ within any row, or any cell value does not match.
 pub fn assert_rows_sorted(result: &QueryResult, expected: &[Vec<String>]) {
     let mut actual = result_to_strings(result);
     let mut expected = expected.to_vec();
@@ -194,6 +218,10 @@ pub fn assert_rows_sorted(result: &QueryResult, expected: &[Vec<String>]) {
 }
 
 /// Assert rows match in exact order.
+///
+/// # Panics
+///
+/// Panics if row counts differ, column counts differ within any row, or any cell value does not match.
 pub fn assert_rows_ordered(result: &QueryResult, expected: &[Vec<String>]) {
     let actual = result_to_strings(result);
 
@@ -223,6 +251,10 @@ pub fn assert_rows_ordered(result: &QueryResult, expected: &[Vec<String>]) {
 }
 
 /// Assert that result column names match expected names exactly.
+///
+/// # Panics
+///
+/// Panics if the result column names do not match the `expected` slice.
 pub fn assert_columns(result: &QueryResult, expected: &[&str]) {
     let actual: Vec<&str> = result.columns.iter().map(|s| s.as_str()).collect();
     assert_eq!(
@@ -235,6 +267,10 @@ pub fn assert_columns(result: &QueryResult, expected: &[&str]) {
 ///
 /// Cells that parse as `f64` on both sides are compared within `10^(-precision)`.
 /// All other cells use exact string comparison.
+///
+/// # Panics
+///
+/// Panics if row counts differ, column counts differ, or any cell value falls outside the tolerance.
 pub fn assert_rows_with_precision(result: &QueryResult, expected: &[Vec<String>], precision: u32) {
     let actual = result_to_strings(result);
     let tolerance = 10f64.powi(-(precision as i32));
@@ -272,6 +308,10 @@ pub fn assert_rows_with_precision(result: &QueryResult, expected: &[Vec<String>]
 }
 
 /// Assert result hash matches (MD5 of sorted, pipe-delimited rows).
+///
+/// # Panics
+///
+/// Panics if the computed MD5 hash of the sorted, pipe-delimited rows does not match `expected_hash`.
 pub fn assert_hash(result: &QueryResult, expected_hash: &str) {
     use md5::{Digest, Md5};
 

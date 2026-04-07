@@ -120,30 +120,37 @@ struct SnapshotEdge {
 /// With `temporal`: stores full property version history.
 /// Without: wraps each current value as a single-entry version list at epoch 0.
 fn collect_snapshot_nodes(store: &grafeo_core::graph::lpg::LpgStore) -> Vec<SnapshotNode> {
-    store
+    let mut nodes: Vec<SnapshotNode> = store
         .all_nodes()
         .map(|n| {
             #[cfg(feature = "temporal")]
-            let properties = store
+            let mut properties: Vec<(String, Vec<(EpochId, Value)>)> = store
                 .node_property_history(n.id)
                 .into_iter()
                 .map(|(k, entries)| (k.to_string(), entries))
                 .collect();
 
             #[cfg(not(feature = "temporal"))]
-            let properties = n
+            let mut properties: Vec<(String, Vec<(EpochId, Value)>)> = n
                 .properties
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), vec![(EpochId::new(0), v)]))
                 .collect();
 
+            properties.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+            let mut labels: Vec<String> = n.labels.iter().map(|l| l.to_string()).collect();
+            labels.sort();
+
             SnapshotNode {
                 id: n.id,
-                labels: n.labels.iter().map(|l| l.to_string()).collect(),
+                labels,
                 properties,
             }
         })
-        .collect()
+        .collect();
+    nodes.sort_by_key(|n| n.id);
+    nodes
 }
 
 /// Collects all edges from a store into snapshot format.
@@ -151,22 +158,24 @@ fn collect_snapshot_nodes(store: &grafeo_core::graph::lpg::LpgStore) -> Vec<Snap
 /// With `temporal`: stores full property version history.
 /// Without: wraps each current value as a single-entry version list at epoch 0.
 fn collect_snapshot_edges(store: &grafeo_core::graph::lpg::LpgStore) -> Vec<SnapshotEdge> {
-    store
+    let mut edges: Vec<SnapshotEdge> = store
         .all_edges()
         .map(|e| {
             #[cfg(feature = "temporal")]
-            let properties = store
+            let mut properties: Vec<(String, Vec<(EpochId, Value)>)> = store
                 .edge_property_history(e.id)
                 .into_iter()
                 .map(|(k, entries)| (k.to_string(), entries))
                 .collect();
 
             #[cfg(not(feature = "temporal"))]
-            let properties = e
+            let mut properties: Vec<(String, Vec<(EpochId, Value)>)> = e
                 .properties
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), vec![(EpochId::new(0), v)]))
                 .collect();
+
+            properties.sort_by(|(a, _), (b, _)| a.cmp(b));
 
             SnapshotEdge {
                 id: e.id,
@@ -176,7 +185,9 @@ fn collect_snapshot_edges(store: &grafeo_core::graph::lpg::LpgStore) -> Vec<Snap
                 properties,
             }
         })
-        .collect()
+        .collect();
+    edges.sort_by_key(|e| e.id);
+    edges
 }
 
 /// Populates a store from snapshot node/edge data.

@@ -170,6 +170,10 @@ struct TarjanState {
 /// # Returns
 ///
 /// A map from node ID to SCC ID.
+///
+/// # Panics
+///
+/// Panics if the internal DFS state is inconsistent (should not happen with a valid `GraphStore`).
 pub fn strongly_connected_components(store: &dyn GraphStore) -> FxHashMap<NodeId, u64> {
     let node_ids = store.node_ids();
 

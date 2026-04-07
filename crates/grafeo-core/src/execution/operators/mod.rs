@@ -122,7 +122,9 @@ use super::factorized_chunk::FactorizedChunk;
 pub trait WriteTracker: Send + Sync {
     /// Records that a node was written (created, deleted, or modified).
     ///
-    /// Returns an error if a write-write conflict is detected (first-writer-wins).
+    /// # Errors
+    ///
+    /// Returns `Err` if a write-write conflict is detected (first-writer-wins).
     fn record_node_write(
         &self,
         transaction_id: TransactionId,
@@ -131,7 +133,9 @@ pub trait WriteTracker: Send + Sync {
 
     /// Records that an edge was written (created, deleted, or modified).
     ///
-    /// Returns an error if a write-write conflict is detected (first-writer-wins).
+    /// # Errors
+    ///
+    /// Returns `Err` if a write-write conflict is detected (first-writer-wins).
     fn record_edge_write(
         &self,
         transaction_id: TransactionId,
@@ -279,6 +283,10 @@ pub enum OperatorError {
 /// returns a batch of rows (a DataChunk) or an error.
 pub trait Operator: Send + Sync {
     /// Pulls the next batch of data. Returns `None` when exhausted.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the operator encounters a runtime error.
     fn next(&mut self) -> OperatorResult;
 
     /// Resets to initial state so you can iterate again.

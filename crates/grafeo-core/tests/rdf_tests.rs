@@ -91,7 +91,7 @@ mod statistics_tests {
     }
 }
 
-#[cfg(feature = "rdf")]
+#[cfg(all(feature = "rdf", feature = "parallel"))]
 mod parallel_tests {
     use grafeo_common::types::Value;
     use grafeo_core::execution::parallel::{Morsel, ParallelSource, ParallelTripleScanSource};

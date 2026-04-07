@@ -74,6 +74,11 @@ impl PhysicalPlan {
 // ---------------------------------------------------------------------------
 
 /// Converts a logical binary operator to a filter binary operator.
+///
+/// # Errors
+///
+/// Currently infallible for all `BinaryOp` variants, but returns `Result`
+/// for forward compatibility.
 pub fn convert_binary_op(op: BinaryOp) -> Result<BinaryFilterOp> {
     match op {
         BinaryOp::Eq => Ok(BinaryFilterOp::Eq),
@@ -102,6 +107,11 @@ pub fn convert_binary_op(op: BinaryOp) -> Result<BinaryFilterOp> {
 }
 
 /// Converts a logical unary operator to a filter unary operator.
+///
+/// # Errors
+///
+/// Currently infallible for all `UnaryOp` variants, but returns `Result`
+/// for forward compatibility.
 pub fn convert_unary_op(op: UnaryOp) -> Result<UnaryFilterOp> {
     match op {
         UnaryOp::Not => Ok(UnaryFilterOp::Not),
@@ -147,6 +157,11 @@ pub fn convert_aggregate_function(func: LogicalAggregateFunction) -> PhysicalAgg
 /// Converts a logical expression to a filter expression.
 ///
 /// This is a standalone function used by both LPG and RDF planners.
+///
+/// # Errors
+///
+/// Returns an error if the expression contains an unsupported operator or
+/// function that cannot be translated to a filter expression.
 pub fn convert_filter_expression(expr: &LogicalExpression) -> Result<FilterExpression> {
     match expr {
         LogicalExpression::Literal(v) => Ok(FilterExpression::Literal(v.clone())),

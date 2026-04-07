@@ -235,6 +235,10 @@ pub fn pagerank(
 ///
 /// Betweenness centrality score for each node.
 ///
+/// # Panics
+///
+/// Panics if internal BFS state is inconsistent (should not happen with a valid `GraphStore`).
+///
 /// # Complexity
 ///
 /// O(V × E) for unweighted graphs
@@ -350,6 +354,10 @@ pub fn betweenness_centrality(store: &dyn GraphStore, normalized: bool) -> FxHas
 /// # Returns
 ///
 /// Closeness centrality score for each node.
+///
+/// # Panics
+///
+/// Panics if internal BFS state is inconsistent (should not happen with a valid `GraphStore`).
 ///
 /// # Complexity
 ///

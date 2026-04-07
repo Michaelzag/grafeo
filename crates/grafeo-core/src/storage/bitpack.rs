@@ -227,6 +227,10 @@ impl BitPackedInts {
     }
 
     /// Deserializes from bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the byte slice is too short or contains invalid data.
     pub fn from_bytes(bytes: &[u8]) -> io::Result<Self> {
         if bytes.len() < 5 {
             return Err(io::Error::new(
@@ -236,6 +240,12 @@ impl BitPackedInts {
         }
 
         let bits_per_value = bytes[0];
+        if bits_per_value > 64 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("BitPackedInts bits_per_value {bits_per_value} exceeds 64"),
+            ));
+        }
         let count = u32::from_le_bytes(
             bytes[1..5]
                 .try_into()
@@ -382,6 +392,10 @@ impl DeltaBitPacked {
     }
 
     /// Deserializes from bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the byte slice is too short or contains invalid data.
     pub fn from_bytes(bytes: &[u8]) -> io::Result<Self> {
         if bytes.len() < 8 {
             return Err(io::Error::new(

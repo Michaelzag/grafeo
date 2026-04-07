@@ -355,6 +355,10 @@ impl<V: Clone + Send + Sync + 'static> PartitionedState<V> {
     /// # Errors
     ///
     /// Returns an error if loading from disk fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the key was just inserted but cannot be found (invariant violation).
     pub fn get_or_insert_with<F>(&mut self, key: Vec<Value>, default: F) -> std::io::Result<&mut V>
     where
         F: FnOnce() -> V,

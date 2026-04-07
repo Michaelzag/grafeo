@@ -124,8 +124,7 @@ pub fn max_flow(
     let mut capacity: Vec<FxHashMap<usize, f64>> = vec![FxHashMap::default(); n];
     let mut edge_map: FxHashMap<(usize, usize), EdgeId> = FxHashMap::default();
 
-    for &node in &nodes {
-        let i = *node_to_idx.get(&node).expect("node in index");
+    for (i, &node) in nodes.iter().enumerate() {
         for (neighbor, edge_id) in store.edges_from(node, Direction::Outgoing) {
             if let Some(&j) = node_to_idx.get(&neighbor) {
                 let cap = extract_capacity(store, edge_id, capacity_property);
@@ -291,8 +290,7 @@ pub fn min_cost_max_flow(
     let mut capacity: Vec<FxHashMap<usize, f64>> = vec![FxHashMap::default(); n];
     let mut cost: Vec<FxHashMap<usize, f64>> = vec![FxHashMap::default(); n];
 
-    for &node in &nodes {
-        let i = *node_to_idx.get(&node).expect("node in index");
+    for (i, &node) in nodes.iter().enumerate() {
         for (neighbor, edge_id) in store.edges_from(node, Direction::Outgoing) {
             if let Some(&j) = node_to_idx.get(&neighbor) {
                 let cap = extract_capacity(store, edge_id, capacity_property);

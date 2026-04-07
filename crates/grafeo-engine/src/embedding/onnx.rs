@@ -45,6 +45,10 @@ impl OnnxEmbeddingModel {
     /// For preset models, the ONNX model and tokenizer are automatically downloaded
     /// on first use and cached locally. See [`EmbeddingModelConfig`](super::EmbeddingModelConfig)
     /// for available presets.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the model fails to download, load, or initialize.
     #[cfg(feature = "embed")]
     pub fn from_config(config: super::EmbeddingModelConfig) -> Result<Self> {
         Self::from_config_with_options(config, super::EmbeddingOptions::default())
@@ -53,6 +57,10 @@ impl OnnxEmbeddingModel {
     /// Loads a pre-configured embedding model with custom options.
     ///
     /// See [`EmbeddingOptions`](super::EmbeddingOptions) for batch size and thread configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the ONNX session or tokenizer fails to initialize.
     #[cfg(feature = "embed")]
     pub fn from_config_with_options(
         config: super::EmbeddingModelConfig,

@@ -205,6 +205,10 @@ pub trait GraphAlgorithm: Send + Sync {
     fn parameters(&self) -> &[ParameterDef];
 
     /// Executes the algorithm on the given graph store.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the algorithm fails (e.g., invalid parameters or graph state).
     fn execute(&self, store: &dyn GraphStore, params: &Parameters) -> Result<AlgorithmResult>;
 }
 
@@ -222,6 +226,10 @@ pub trait ParallelGraphAlgorithm: GraphAlgorithm {
     }
 
     /// Executes the algorithm with explicit parallelism control.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the algorithm fails (e.g., invalid parameters or graph state).
     fn execute_parallel(
         &self,
         store: &dyn GraphStore,

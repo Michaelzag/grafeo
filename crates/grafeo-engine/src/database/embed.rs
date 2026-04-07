@@ -25,6 +25,10 @@ impl super::GrafeoDB {
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the model fails to download or load.
     #[cfg(feature = "embed")]
     pub fn load_embedding_model(
         &self,
@@ -40,6 +44,10 @@ impl super::GrafeoDB {
     ///
     /// See [`EmbeddingOptions`](crate::embedding::EmbeddingOptions) for
     /// batch size and thread configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the model fails to download, load, or initialize.
     #[cfg(feature = "embed")]
     pub fn load_embedding_model_with_options(
         &self,

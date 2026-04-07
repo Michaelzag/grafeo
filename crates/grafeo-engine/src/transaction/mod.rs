@@ -93,6 +93,7 @@ mod prepared;
 pub use manager::{
     EntityId, IsolationLevel, TransactionInfo, TransactionManager, TransactionState,
 };
+#[doc(hidden)]
 pub use mvcc::{VersionChain, VersionInfo};
 pub use prepared::{CommitInfo, PreparedCommit};
 pub use write_tracker::TransactionWriteTracker;

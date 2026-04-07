@@ -34,6 +34,10 @@ use super::traits::{ComponentResultBuilder, impl_algorithm};
 ///
 /// A map from node ID to community (label) ID.
 ///
+/// # Panics
+///
+/// Panics if the internal label map is inconsistent (should not happen with a valid `GraphStore`).
+///
 /// # Complexity
 ///
 /// O(iterations × E)
@@ -155,6 +159,11 @@ pub struct LouvainResult {
 ///
 /// Community assignments and modularity score.
 ///
+/// # Panics
+///
+/// Panics if the internal community-to-index mapping is inconsistent
+/// (internal invariant).
+///
 /// # Complexity
 ///
 /// O(V log V) on average for sparse graphs
@@ -181,8 +190,7 @@ pub fn louvain(store: &dyn GraphStore, resolution: f64) -> LouvainResult {
     let mut weights: Vec<FxHashMap<usize, f64>> = vec![FxHashMap::default(); n];
     let mut total_weight = 0.0;
 
-    for &node in &nodes {
-        let i = *node_to_idx.get(&node).expect("node in index");
+    for (i, &node) in nodes.iter().enumerate() {
         for (neighbor, _edge_id) in store.edges_from(node, Direction::Outgoing) {
             if let Some(&j) = node_to_idx.get(&neighbor) {
                 // For undirected: add weight to both directions

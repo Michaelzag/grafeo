@@ -449,6 +449,10 @@ impl FactorizedChunk {
     /// # Returns
     ///
     /// A new FactorizedChunk with filtered values, or None if all rows are filtered out.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `column_idx` refers to a non-existent column in the deepest level.
     #[must_use]
     pub fn filter_deepest<F>(&self, column_idx: usize, predicate: F) -> Option<Self>
     where
@@ -543,6 +547,11 @@ impl FactorizedChunk {
     /// # Arguments
     ///
     /// * `predicate` - Function that takes a slice of values (one per column) and returns true to keep
+    ///
+    /// # Panics
+    ///
+    /// Panics if the deepest level's internal column storage is inconsistent
+    /// (column count reports more columns than actually exist).
     #[must_use]
     pub fn filter_deepest_multi<F>(&self, predicate: F) -> Option<Self>
     where

@@ -73,6 +73,10 @@ pub struct ProjectOperator {
 
 impl ProjectOperator {
     /// Creates a new project operator.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `projections` and `output_types` have different lengths.
     pub fn new(
         child: Box<dyn Operator>,
         projections: Vec<ProjectExpr>,
@@ -91,6 +95,10 @@ impl ProjectOperator {
     }
 
     /// Creates a new project operator with store access for property lookups.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `projections` and `output_types` have different lengths.
     pub fn with_store(
         child: Box<dyn Operator>,
         projections: Vec<ProjectExpr>,

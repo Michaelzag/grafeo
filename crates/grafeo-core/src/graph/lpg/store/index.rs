@@ -4,7 +4,7 @@ use super::LpgStore;
 use dashmap::DashMap;
 use grafeo_common::types::{HashableValue, NodeId, PropertyKey, Value};
 use grafeo_common::utils::hash::FxHashSet;
-#[cfg(any(feature = "vector-index", feature = "text-index"))]
+#[cfg(feature = "text-index")]
 use parking_lot::RwLock;
 #[cfg(any(feature = "vector-index", feature = "text-index"))]
 use std::sync::Arc;

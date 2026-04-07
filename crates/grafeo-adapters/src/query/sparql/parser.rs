@@ -48,6 +48,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses the entire query.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the input contains invalid or unexpected SPARQL syntax.
     pub fn parse(&mut self) -> Result<Query> {
         let base = self.parse_base()?;
         let prefixes = self.parse_prefixes()?;

@@ -261,6 +261,10 @@ impl Arena {
     ///
     /// Returns `AllocError::InsufficientSpace` if the primary chunk does not
     /// have enough room. Increase the chunk size for your use case.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the arena has no chunks (should never happen in normal use).
     #[cfg(feature = "tiered-storage")]
     pub fn alloc_value_with_offset<T>(&self, value: T) -> Result<(u32, &mut T), AllocError> {
         let size = std::mem::size_of::<T>();
@@ -291,6 +295,10 @@ impl Arena {
     /// - The offset must have been returned by a previous `alloc_value_with_offset` call
     /// - The type T must match what was stored at that offset
     /// - The arena must not have been dropped
+    ///
+    /// # Panics
+    ///
+    /// Panics if the arena has no chunks (should never happen in normal use).
     #[cfg(feature = "tiered-storage")]
     pub unsafe fn read_at<T>(&self, offset: u32) -> &T {
         let chunks = self.chunks.read();
@@ -329,6 +337,10 @@ impl Arena {
     /// - The type T must match what was stored at that offset
     /// - The arena must not have been dropped
     /// - No other references to this value may exist
+    ///
+    /// # Panics
+    ///
+    /// Panics if the arena has no chunks (should never happen in normal use).
     #[cfg(feature = "tiered-storage")]
     pub unsafe fn read_at_mut<T>(&self, offset: u32) -> &mut T {
         let chunks = self.chunks.read();
@@ -548,6 +560,10 @@ impl ArenaAllocator {
     /// # Errors
     ///
     /// Returns `AllocError` if allocation fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the current epoch has no arena (should never happen in normal use).
     pub fn alloc(&self, size: usize, align: usize) -> Result<NonNull<u8>, AllocError> {
         let epoch = self.current_epoch();
         let arenas = self.arenas.read();

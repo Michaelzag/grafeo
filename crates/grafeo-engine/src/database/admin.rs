@@ -403,6 +403,10 @@ impl super::GrafeoDB {
     }
 
     /// Returns change events for an entity since the given epoch.
+    ///
+    /// # Errors
+    ///
+    /// Currently infallible, but returns `Result` for forward compatibility.
     #[cfg(feature = "cdc")]
     pub fn history_since(
         &self,
@@ -413,6 +417,10 @@ impl super::GrafeoDB {
     }
 
     /// Returns all change events across all entities in an epoch range.
+    ///
+    /// # Errors
+    ///
+    /// Currently infallible, but returns `Result` for forward compatibility.
     #[cfg(feature = "cdc")]
     pub fn changes_between(
         &self,

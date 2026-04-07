@@ -181,6 +181,10 @@ impl BitVector {
     }
 
     /// Converts back to a `Vec<bool>`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internal index is out of bounds (invariant violation).
     #[must_use]
     pub fn to_bools(&self) -> Vec<bool> {
         (0..self.len)
@@ -189,16 +193,28 @@ impl BitVector {
     }
 
     /// Returns an iterator over the bits.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internal index is out of bounds (invariant violation).
     pub fn iter(&self) -> impl Iterator<Item = bool> + '_ {
         (0..self.len).map(move |i| self.get(i).expect("index within len"))
     }
 
     /// Returns an iterator over indices where bits are true.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internal index is out of bounds (invariant violation).
     pub fn ones_iter(&self) -> impl Iterator<Item = usize> + '_ {
         (0..self.len).filter(move |&i| self.get(i).expect("index within len"))
     }
 
     /// Returns an iterator over indices where bits are false.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internal index is out of bounds (invariant violation).
     pub fn zeros_iter(&self) -> impl Iterator<Item = usize> + '_ {
         (0..self.len).filter(move |&i| !self.get(i).expect("index within len"))
     }
@@ -304,6 +320,10 @@ impl BitVector {
     }
 
     /// Deserializes from bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the byte slice is too short or contains invalid data.
     pub fn from_bytes(bytes: &[u8]) -> io::Result<Self> {
         if bytes.len() < 4 {
             return Err(io::Error::new(

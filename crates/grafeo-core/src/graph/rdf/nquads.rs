@@ -39,6 +39,10 @@ pub fn write_nquads<W: Write>(writer: &mut W, store: &RdfStore) -> io::Result<()
 /// # Errors
 ///
 /// Returns an I/O error if serialization fails.
+///
+/// # Panics
+///
+/// Panics if the N-Quads output is not valid UTF-8 (should not occur with well-formed data).
 pub fn to_nquads_string(store: &RdfStore) -> io::Result<String> {
     let mut buf = Vec::new();
     write_nquads(&mut buf, store)?;

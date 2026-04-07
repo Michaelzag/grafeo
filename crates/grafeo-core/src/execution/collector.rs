@@ -73,6 +73,10 @@ pub trait PartitionCollector: Send {
     /// Processes a batch of data.
     ///
     /// Called repeatedly with chunks from this partition.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the chunk cannot be processed (e.g., type mismatch).
     fn collect(&mut self, chunk: &DataChunk) -> Result<(), OperatorError>;
 
     /// Finalizes and returns the result for this partition.

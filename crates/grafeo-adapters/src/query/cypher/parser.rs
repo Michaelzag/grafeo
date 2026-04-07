@@ -35,6 +35,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses the query into a statement.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the input contains invalid or unexpected Cypher syntax.
     pub fn parse(&mut self) -> Result<Statement> {
         // Handle EXPLAIN/PROFILE prefix: wraps the entire following statement
         if self.current.kind == TokenKind::Identifier

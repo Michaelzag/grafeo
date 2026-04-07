@@ -152,6 +152,10 @@ pub struct Pooled<'a, T> {
 
 impl<T> Pooled<'_, T> {
     /// Takes ownership of the inner value, preventing it from being returned to the pool.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the value has already been taken from this `Pooled` handle.
     pub fn take(mut self) -> T {
         self.value.take().expect("Value already taken")
     }

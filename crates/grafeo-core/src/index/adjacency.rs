@@ -596,6 +596,24 @@ impl ChunkedAdjacency {
         }
     }
 
+    /// Marks multiple edges as deleted under a single write lock.
+    ///
+    /// This is used by `delete_node_edges` to ensure concurrent readers of
+    /// adjacency never observe a partially detached node.
+    pub fn batch_mark_deleted(&self, edges: &[(NodeId, EdgeId)]) {
+        let mut lists = self.lists.write();
+        let mut count = 0usize;
+        for &(src, edge_id) in edges {
+            if let Some(list) = lists.get_mut(&src) {
+                list.mark_deleted(edge_id);
+                count += 1;
+            }
+        }
+        if count > 0 {
+            self.deleted_count.fetch_add(count, Ordering::Relaxed);
+        }
+    }
+
     /// Restores a previously deleted edge (removes it from the deleted set).
     ///
     /// Used during transaction rollback to undo a soft-delete.

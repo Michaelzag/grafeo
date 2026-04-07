@@ -46,6 +46,10 @@ pub trait Source: Send + Sync {
     /// Produce the next chunk of data.
     ///
     /// Returns `Ok(Some(chunk))` if data is available, `Ok(None)` if exhausted.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the source fails to produce data.
     fn next_chunk(&mut self, chunk_size: usize) -> Result<Option<DataChunk>, OperatorError>;
 
     /// Reset the source to its initial state.
@@ -62,9 +66,17 @@ pub trait Sink: Send + Sync {
     /// Consume a chunk of data.
     ///
     /// Returns `Ok(true)` to continue, `Ok(false)` to signal early termination.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the sink fails to process the chunk.
     fn consume(&mut self, chunk: DataChunk) -> Result<bool, OperatorError>;
 
     /// Called when all input has been processed.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if finalization fails.
     fn finalize(&mut self) -> Result<(), OperatorError>;
 
     /// Name of this sink for debugging.
@@ -80,11 +92,19 @@ pub trait PushOperator: Send + Sync {
     /// Process an incoming chunk and push results to the sink.
     ///
     /// Returns `Ok(true)` to continue processing, `Ok(false)` for early termination.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the operator or sink fails during processing.
     fn push(&mut self, chunk: DataChunk, sink: &mut dyn Sink) -> Result<bool, OperatorError>;
 
     /// Called when all input has been processed.
     ///
     /// Pipeline breakers (Sort, Aggregate, etc.) emit their results here.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if finalization or downstream sink consumption fails.
     fn finalize(&mut self, sink: &mut dyn Sink) -> Result<(), OperatorError>;
 
     /// Hint for preferred chunk size.
@@ -134,6 +154,10 @@ impl Pipeline {
     }
 
     /// Execute the pipeline.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if any source, operator, or sink fails during execution.
     pub fn execute(&mut self) -> Result<(), OperatorError> {
         let chunk_size = self.compute_chunk_size();
 
@@ -282,6 +306,10 @@ impl ChunkCollector {
     }
 
     /// Merge all chunks into a single chunk.
+    ///
+    /// # Panics
+    ///
+    /// Panics if internal invariants are violated (single-element vec is unexpectedly empty).
     pub fn into_single_chunk(self) -> DataChunk {
         if self.chunks.is_empty() {
             return DataChunk::empty();

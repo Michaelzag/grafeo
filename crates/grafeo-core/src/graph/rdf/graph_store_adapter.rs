@@ -97,6 +97,10 @@ impl RdfGraphStoreAdapter {
     ///
     /// Useful when you already hold the triples and want to avoid re-acquiring
     /// the lock on `RdfStore`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a triple's predicate is not an IRI.
     pub fn from_triples(triples: &[Arc<Triple>]) -> Self {
         let mut term_to_node: FxHashMap<Term, NodeId> = FxHashMap::default();
         let mut node_to_term: Vec<Term> = Vec::new();

@@ -160,6 +160,10 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
 ///
 /// Returns `None` if the input is `None`. Returns an error string if the
 /// input is not a JSON object.
+///
+/// # Errors
+///
+/// Returns `Err` if `params` is `Some` but the contained value is not a JSON object.
 pub fn json_params_to_map(
     params: Option<&serde_json::Value>,
 ) -> Result<Option<std::collections::HashMap<String, Value>>, String> {

@@ -217,6 +217,10 @@ impl FactorizedExpandOperator {
     ///
     /// This is the main method for factorized execution. For compatibility
     /// with the regular `Operator` trait, use `next()` which flattens the result.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the input operator or graph traversal fails.
     pub fn next_factorized(&mut self) -> FactorizedResult {
         if self.exhausted {
             return Ok(None);
@@ -313,6 +317,10 @@ impl FactorizedExpandChain {
     /// Adds an expansion step to the chain.
     ///
     /// Returns `self` for chaining.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the source operator or graph traversal fails.
     pub fn expand(
         mut self,
         source_column: usize,
@@ -680,6 +688,10 @@ impl LazyFactorizedChainOperator {
     /// # Returns
     ///
     /// The factorized chunk, or None if exhausted or no results.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the underlying chain execution fails.
     pub fn next_factorized(&mut self) -> FactorizedResult {
         if self.executed {
             return Ok(self.factorized_result.take());

@@ -234,6 +234,10 @@ impl ScalarQuantizer {
     }
 
     /// Creates a quantizer with explicit ranges (useful for testing).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `min` and `max` have different lengths.
     #[must_use]
     pub fn with_ranges(min: Vec<f32>, max: Vec<f32>) -> Self {
         let dimensions = min.len();
@@ -692,6 +696,11 @@ impl ProductQuantizer {
     }
 
     /// Creates a product quantizer with explicit centroids (for testing/loading).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `num_subvectors` is zero (division by zero), or if `centroids.len()`
+    /// does not equal `num_subvectors * num_centroids * (dimensions / num_subvectors)`.
     #[must_use]
     pub fn with_centroids(
         num_subvectors: usize,
@@ -892,6 +901,10 @@ impl ProductQuantizer {
     }
 
     /// Returns the centroid vectors for a specific subvector partition.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `partition` is greater than or equal to `num_subvectors`.
     #[must_use]
     pub fn get_partition_centroids(&self, partition: usize) -> Vec<&[f32]> {
         assert!(partition < self.num_subvectors);

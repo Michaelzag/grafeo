@@ -66,6 +66,10 @@ impl WaveletTree {
     /// Creates a new wavelet tree from a sequence of symbols.
     ///
     /// The symbols are internally remapped to a compact alphabet [0, sigma).
+    ///
+    /// # Panics
+    ///
+    /// Panics if a symbol in the sequence is not found in the symbol-to-code mapping (invariant violation).
     #[must_use]
     pub fn new(sequence: &[u64]) -> Self {
         if sequence.is_empty() {

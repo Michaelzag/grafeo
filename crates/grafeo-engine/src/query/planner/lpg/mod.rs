@@ -290,6 +290,11 @@ impl Planner {
     }
 
     /// Plans a logical plan into a physical operator.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the logical plan contains unsupported operators
+    /// or invalid expressions.
     pub fn plan(&self, logical_plan: &LogicalPlan) -> Result<PhysicalPlan> {
         let _span = grafeo_debug_span!("grafeo::query::plan");
         let (operator, columns) = self.plan_operator(&logical_plan.root)?;
@@ -305,6 +310,11 @@ impl Planner {
     /// collect row counts and timing. Returns the physical plan together with
     /// the collected [`ProfileEntry`](crate::query::profile::ProfileEntry)
     /// items in post-order (children before parents).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the logical plan contains unsupported operators
+    /// or invalid expressions.
     pub fn plan_profiled(
         &self,
         logical_plan: &LogicalPlan,
@@ -329,6 +339,11 @@ impl Planner {
     }
 
     /// Plans a logical plan with adaptive execution support.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the logical plan contains unsupported operators
+    /// or invalid expressions.
     pub fn plan_adaptive(&self, logical_plan: &LogicalPlan) -> Result<PhysicalPlan> {
         let (operator, columns) = self.plan_operator(&logical_plan.root)?;
 

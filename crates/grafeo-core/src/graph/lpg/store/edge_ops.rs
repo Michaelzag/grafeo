@@ -714,6 +714,10 @@ impl LpgStore {
     /// Creates multiple edges in batch, significantly faster than calling
     /// `create_edge()` in a loop.
     /// (Tiered storage version)
+    ///
+    /// # Panics
+    ///
+    /// Panics if the arena for the current epoch cannot be created.
     #[cfg(feature = "tiered-storage")]
     pub fn batch_create_edges(&self, edges: &[(NodeId, NodeId, &str)]) -> Vec<EdgeId> {
         if edges.is_empty() {

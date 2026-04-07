@@ -36,6 +36,10 @@ impl WalRecovery {
     /// Reads checkpoint metadata if it exists.
     ///
     /// Returns `None` if no checkpoint metadata is found.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the metadata file cannot be read or deserialized.
     pub fn read_checkpoint_metadata(&self) -> Result<Option<CheckpointMetadata>> {
         let metadata_path = self.dir.join(CHECKPOINT_METADATA_FILE);
 

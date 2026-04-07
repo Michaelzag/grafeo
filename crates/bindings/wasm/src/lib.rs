@@ -39,6 +39,10 @@ pub struct Database {
 #[wasm_bindgen]
 impl Database {
     /// Creates a new in-memory database.
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if the database fails to initialise.
     #[wasm_bindgen(constructor)]
     pub fn new() -> Result<Database, JsError> {
         utils::set_panic_hook();
@@ -55,6 +59,10 @@ impl Database {
     /// const results = db.execute("MATCH (p:Person) RETURN p.name, p.age");
     /// // [{name: "Alix", age: 30}, {name: "Gus", age: 25}]
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if the query fails to parse or execute.
     pub fn execute(&self, query: &str) -> Result<JsValue, JsError> {
         let result = self
             .inner
@@ -71,6 +79,10 @@ impl Database {
     /// Executes a GQL query and returns raw columns, rows, and metadata.
     ///
     /// Returns `{ columns: string[], rows: any[][], executionTimeMs?: number }`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if the query fails to parse or execute.
     #[wasm_bindgen(js_name = "executeRaw")]
     pub fn execute_raw(&self, query: &str) -> Result<JsValue, JsError> {
         let result = self
@@ -141,6 +153,10 @@ impl Database {
     ///   "cypher"
     /// );
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if the language is unsupported or the query fails to parse or execute.
     #[wasm_bindgen(js_name = "executeWithLanguage")]
     pub fn execute_with_language(&self, query: &str, language: &str) -> Result<JsValue, JsError> {
         self.execute_language_impl(query, language, None)
@@ -155,6 +171,10 @@ impl Database {
     /// const bytes = db.exportSnapshot();
     /// // Store in IndexedDB, download as file, etc.
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if snapshot serialisation fails.
     #[wasm_bindgen(js_name = "exportSnapshot")]
     pub fn export_snapshot(&self) -> Result<Vec<u8>, JsError> {
         self.inner
@@ -169,6 +189,10 @@ impl Database {
     /// ```js
     /// const db = Database.importSnapshot(bytes);
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if `data` is not a valid snapshot or deserialisation fails.
     #[wasm_bindgen(js_name = "importSnapshot")]
     pub fn import_snapshot(data: &[u8]) -> Result<Database, JsError> {
         utils::set_panic_hook();
@@ -184,6 +208,10 @@ impl Database {
     /// const schema = db.schema();
     /// // { lpg: { labels: [...], edgeTypes: [...], propertyKeys: [...] } }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if the schema info cannot be serialised to a JS value.
     pub fn schema(&self) -> Result<JsValue, JsError> {
         let info = self.inner.schema();
         serde_wasm_bindgen::to_value(&info).map_err(|e| JsError::new(&e.to_string()))
@@ -196,6 +224,10 @@ impl Database {
     /// ```js
     /// db.createTextIndex("Article", "content");
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if the text index cannot be created (e.g., invalid label or property).
     #[cfg(feature = "text-index")]
     #[wasm_bindgen(js_name = "createTextIndex")]
     pub fn create_text_index(&self, label: &str, property: &str) -> Result<(), JsError> {
@@ -216,6 +248,10 @@ impl Database {
     /// Rebuilds a text index by re-scanning all matching nodes.
     ///
     /// Use after bulk imports to refresh the index.
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if no text index exists for the given label and property, or if rebuilding fails.
     #[cfg(feature = "text-index")]
     #[wasm_bindgen(js_name = "rebuildTextIndex")]
     pub fn rebuild_text_index(&self, label: &str, property: &str) -> Result<(), JsError> {
@@ -233,6 +269,10 @@ impl Database {
     /// const results = db.textSearch("Article", "content", "graph database", 10);
     /// // [{id: 42, score: 2.5}, {id: 17, score: 1.8}]
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if no text index exists for the label/property pair, or if the search fails.
     #[cfg(feature = "text-index")]
     #[wasm_bindgen(js_name = "textSearch")]
     pub fn text_search(
@@ -273,6 +313,10 @@ impl Database {
     /// ```js
     /// const results = db.hybridSearch("Article", "content", "embedding", "graph databases", 10);
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if the required text or vector indexes are missing, or if the search fails.
     #[cfg(feature = "hybrid-search")]
     #[wasm_bindgen(js_name = "hybridSearch")]
     pub fn hybrid_search(
@@ -328,6 +372,10 @@ impl Database {
     ///   efConstruction: 128,    // build beam width
     /// });
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if `options` cannot be deserialised or the vector index cannot be created.
     #[cfg(feature = "vector-index")]
     #[wasm_bindgen(js_name = "createVectorIndex")]
     pub fn create_vector_index(
@@ -368,6 +416,10 @@ impl Database {
     ///
     /// Use after bulk imports to refresh the index. Preserves existing
     /// configuration (dimensions, metric, M, ef_construction).
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if no vector index exists for the given label and property, or if rebuilding fails.
     #[cfg(feature = "vector-index")]
     #[wasm_bindgen(js_name = "rebuildVectorIndex")]
     pub fn rebuild_vector_index(&self, label: &str, property: &str) -> Result<(), JsError> {
@@ -386,6 +438,10 @@ impl Database {
     ///   new Float32Array([1.0, 0.0, 0.0]), 10, { ef: 200 });
     /// // [{id: 42, distance: 0.12}, {id: 17, distance: 0.34}]
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if `options` cannot be deserialised, no vector index exists, or the search fails.
     #[cfg(feature = "vector-index")]
     #[wasm_bindgen(js_name = "vectorSearch")]
     pub fn vector_search(
@@ -427,6 +483,10 @@ impl Database {
     ///   new Float32Array([1.0, 0.0, 0.0]), 5, { fetchK: 20, lambda: 0.7 });
     /// // [{id, distance}]
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if `options` cannot be deserialised, no vector index exists, or the search fails.
     #[cfg(feature = "vector-index")]
     #[wasm_bindgen(js_name = "mmrSearch")]
     pub fn mmr_search(
@@ -478,6 +538,10 @@ impl Database {
     ///   { name: "Alix" }
     /// );
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if `params` is not a valid object, or if the query fails to parse or execute.
     #[wasm_bindgen(js_name = "executeWithParams")]
     pub fn execute_with_params(&self, query: &str, params: JsValue) -> Result<JsValue, JsError> {
         self.execute_language_impl(query, "gql", Some(params))
@@ -494,6 +558,10 @@ impl Database {
     ///   { name: "Alix" }
     /// );
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if `params` is invalid, the language is unsupported, or the query fails.
     #[wasm_bindgen(js_name = "executeWithLanguageAndParams")]
     pub fn execute_with_language_and_params(
         &self,
@@ -511,6 +579,10 @@ impl Database {
     /// ```js
     /// const results = db.executeCypher("MATCH (p:Person) RETURN p.name");
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if the Cypher query fails to parse or execute.
     #[cfg(feature = "cypher")]
     #[wasm_bindgen(js_name = "executeCypher")]
     pub fn execute_cypher(&self, query: &str) -> Result<JsValue, JsError> {
@@ -524,6 +596,10 @@ impl Database {
     /// ```js
     /// const results = db.executeGremlin("g.V().hasLabel('Person').values('name')");
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if the Gremlin query fails to parse or execute.
     #[cfg(feature = "gremlin")]
     #[wasm_bindgen(js_name = "executeGremlin")]
     pub fn execute_gremlin(&self, query: &str) -> Result<JsValue, JsError> {
@@ -537,6 +613,10 @@ impl Database {
     /// ```js
     /// const results = db.executeGraphql("{ Person { name age } }");
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if the GraphQL query fails to parse or execute.
     #[cfg(feature = "graphql")]
     #[wasm_bindgen(js_name = "executeGraphql")]
     pub fn execute_graphql(&self, query: &str) -> Result<JsValue, JsError> {
@@ -550,6 +630,10 @@ impl Database {
     /// ```js
     /// const results = db.executeSparql("SELECT ?name WHERE { ?p a :Person ; :name ?name }");
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if the SPARQL query fails to parse or execute.
     #[cfg(feature = "sparql")]
     #[wasm_bindgen(js_name = "executeSparql")]
     pub fn execute_sparql(&self, query: &str) -> Result<JsValue, JsError> {
@@ -563,6 +647,10 @@ impl Database {
     /// ```js
     /// const results = db.executeSql("SELECT * FROM GRAPH_TABLE (...)");
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if the SQL/PGQ query fails to parse or execute.
     #[cfg(feature = "sql-pgq")]
     #[wasm_bindgen(js_name = "executeSql")]
     pub fn execute_sql(&self, query: &str) -> Result<JsValue, JsError> {
@@ -577,6 +665,10 @@ impl Database {
     /// const raw = db.executeRawWithLanguage("MATCH (p:Person) RETURN p.name", "cypher");
     /// // { columns: ["p.name"], rows: [["Alix"], ["Gus"]], executionTimeMs: 0.5 }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if the language is unsupported or the query fails to parse or execute.
     #[wasm_bindgen(js_name = "executeRawWithLanguage")]
     pub fn execute_raw_with_language(
         &self,
@@ -641,6 +733,10 @@ impl Database {
     /// });
     /// // { nodes: 2, edges: 1 }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if `data` cannot be deserialised or if an edge references an out-of-bounds node index.
     #[wasm_bindgen(js_name = "importLpg")]
     pub fn import_lpg(&self, data: JsValue) -> Result<JsValue, JsError> {
         let import: LpgImport = serde_wasm_bindgen::from_value(data)
@@ -738,6 +834,10 @@ impl Database {
     /// ```
     ///
     /// Requires the `rdf` feature flag.
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if `data` cannot be deserialised as an RDF import payload.
     #[cfg(feature = "rdf")]
     #[wasm_bindgen(js_name = "importRdf")]
     pub fn import_rdf(&self, data: JsValue) -> Result<JsValue, JsError> {
@@ -791,6 +891,10 @@ impl Database {
     /// console.log(`Store: ${usage.store.total_bytes} bytes`);
     /// console.log(`Indexes: ${usage.indexes.total_bytes} bytes`);
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if the memory usage data cannot be serialised to a JS value.
     #[wasm_bindgen(js_name = "memoryUsage")]
     pub fn memory_usage(&self) -> Result<JsValue, JsError> {
         let usage = self.inner.memory_usage();
@@ -798,6 +902,10 @@ impl Database {
     }
 
     /// Returns high-level database information (counts, mode, features).
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if the info data cannot be serialised to a JS value.
     pub fn info(&self) -> Result<JsValue, JsError> {
         let info = self.inner.info();
         serde_wasm_bindgen::to_value(&info).map_err(|e| JsError::new(&e.to_string()))
@@ -809,6 +917,10 @@ impl Database {
     /// CSR adjacency, and switches to read-only mode. After this call, write
     /// operations will fail. Gives ~60x memory reduction and 100x+ traversal
     /// speedup for read-only workloads.
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if compaction fails (e.g., the database is already in compact mode).
     #[cfg(feature = "compact-store")]
     pub fn compact(&mut self) -> Result<(), JsError> {
         self.inner
@@ -850,6 +962,14 @@ impl Database {
     ///   { mode: "edges", edgeType: "KNOWS", source: "from", target: "to" }
     /// );
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `JsError` if:
+    /// - `options` cannot be deserialised or has an invalid `mode`.
+    /// - `rows` is not an array of objects.
+    /// - A required column (`label`, `edgeType`, `source`, `target`) is missing.
+    /// - A source/target value is not a valid non-negative integer.
     #[wasm_bindgen(js_name = "importRows")]
     pub fn import_rows(&self, rows: JsValue, options: JsValue) -> Result<u32, JsError> {
         let opts: ImportRowsOptions = serde_wasm_bindgen::from_value(options)

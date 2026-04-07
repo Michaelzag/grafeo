@@ -49,6 +49,10 @@ impl super::GrafeoDB {
     /// # Returns
     ///
     /// `(node_count, edge_count)` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be opened or contains malformed lines.
     pub fn import_tsv(
         &self,
         path: impl AsRef<Path>,
@@ -69,6 +73,10 @@ impl super::GrafeoDB {
     ///
     /// Same format as [`import_tsv`](Self::import_tsv) but reads from a string
     /// instead of a file. Useful for tests and embedded data.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the data contains malformed lines.
     pub fn import_tsv_str(
         &self,
         data: &str,
@@ -100,6 +108,10 @@ impl super::GrafeoDB {
     /// # Returns
     ///
     /// `(node_count, edge_count)` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be opened or has an invalid MMIO header or data.
     pub fn import_mmio(&self, path: impl AsRef<Path>, edge_type: &str) -> Result<(usize, usize)> {
         let path = path.as_ref();
         let file = std::fs::File::open(path)
@@ -174,6 +186,10 @@ impl super::GrafeoDB {
     /// # Returns
     ///
     /// `(node_count, edge_count)` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be opened or contains malformed lines.
     #[cfg(feature = "rdf")]
     pub fn import_tsv_rdf(
         &self,

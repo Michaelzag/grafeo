@@ -8,16 +8,20 @@
 //! Three layers of protection:
 //! 1. **Backward-read**: load committed bytes, assert correct data
 //! 2. **Round-trip**: import golden -> export -> re-import, verify no data loss
-//! 3. **Byte-length**: export from identical graph, assert same byte count
+//! 3. **Byte-equality**: export from identical graph, assert exact byte match
 //!
 //! ## When these tests fail
 //!
 //! - **Accidental breakage** (no `SNAPSHOT_VERSION` bump): fix the regression.
-//! - **Intentional format change** (version bumped): regenerate the fixture:
-//!   ```
-//!   cargo test --all-features -p grafeo-engine --test golden_format -- regenerate_snapshot_fixture --ignored
-//!   ```
-//!   Then commit the new fixture and update the version constant below.
+//! - **Intentional format change** (version bumped):
+//!   1. Archive the old fixture: `cp fixtures/snapshot_v4.bin fixtures/archive/`
+//!   2. Regenerate:
+//!      ```
+//!      cargo test --all-features -p grafeo-engine --test golden_format -- regenerate_snapshot_fixture --ignored
+//!      ```
+//!   3. Rename the new fixture to match the new version (e.g. `snapshot_v5.bin`)
+//!   4. Update `EXPECTED_SNAPSHOT_VERSION` and `golden_bytes()` below
+//!   5. Commit both the archived and new fixture files
 
 mod generate_fixture;
 
@@ -185,15 +189,14 @@ fn golden_round_trip_preserves_data() {
 }
 
 // ---------------------------------------------------------------------------
-// Byte-length stability: catch unintentional format bloat or shrinkage
+// Byte-equality stability: deterministic export enables exact comparison
 // ---------------------------------------------------------------------------
 
 #[test]
-fn golden_byte_length_stable() {
-    // Re-create the same graph and check the export length matches. This is
-    // weaker than full byte equality (which requires deterministic export
-    // ordering, a future improvement) but still catches struct layout changes
-    // that add/remove fields or alter encoding sizes.
+fn golden_byte_equality() {
+    // Re-create the same graph and check the export is byte-for-byte identical.
+    // Export ordering is deterministic (nodes/edges sorted by ID, properties by
+    // key, labels alphabetically), so any difference means the format drifted.
     let db = generate_fixture::build_fixture_db();
     let fresh_bytes = db.export_snapshot().unwrap();
     let golden = golden_bytes();
@@ -204,5 +207,11 @@ fn golden_byte_length_stable() {
         "snapshot byte length changed: golden={}, fresh={}, format may have drifted",
         golden.len(),
         fresh_bytes.len(),
+    );
+
+    assert_eq!(
+        fresh_bytes.as_slice(),
+        golden,
+        "snapshot bytes differ despite same graph data, export may not be deterministic",
     );
 }

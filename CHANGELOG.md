@@ -13,10 +13,18 @@ Pre-RC API hardening: schema hierarchy, `#[non_exhaustive]` on public enums, que
 - **Streaming Turtle/N-Triples load**: `load_turtle_streaming()`, `load_turtle_reader()`, `load_ntriples_streaming()` insert incrementally without replacing existing data
 - **`TurtleParser::parse_into()`**: sink-based Turtle parsing, emitting triples as they are parsed instead of collecting all into memory
 - **Golden fixture tests**: snapshot v4 backward-read, round-trip, and version stability checks
+- **Deterministic snapshot export**: nodes, edges, labels, and properties sorted by ID/name for byte-for-byte reproducible exports
+- **`.grafeo` file format golden fixture**: backward-read tests for magic bytes, dual-header layout, CRC-32 validation, and snapshot payload
+- **WAL frame golden fixture**: backward-read tests for frame structure, 9 representative record variants, CRC integrity, and byte-equality
+- **Per-release fixture archive**: `fixtures/archive/` directories for preserving old format fixtures across version bumps
+- **Feature matrix CI**: per-profile test jobs (gql-only, gql+vector, gql+rdf, embedded, browser) to catch per-feature cfg bugs
+- **Serialization benchmarks**: snapshot export/import throughput and `Value` bincode encoding/decoding
 
 ### Changed
 
 - **`#[non_exhaustive]` on 13 public enums**: `GraphModel`, `AccessMode`, `StorageFormat`, `DurabilityMode`, `IndexType`, `ChangeKind`, `DatabaseMode`, `SchemaInfo`, `DumpFormat`, `QueryLanguage`, `IsolationLevel`, `EmbeddingModelConfig`, `LogicalType`. Future variants can be added without breaking semver
+- **`missing_errors_doc` and `missing_panics_doc` lints enabled**: all ~233 public functions now document their error conditions and panic scenarios. Lints promoted from `allow` to `warn`
+- **MVCC types hidden from public API**: `VersionChain` and `VersionInfo` re-exports marked `#[doc(hidden)]`
 
 ### Fixed
 
@@ -26,6 +34,10 @@ Pre-RC API hardening: schema hierarchy, `#[non_exhaustive]` on public enums, que
 - **`references_any` completeness**: all `LogicalExpression` variants now handled, fixing false negatives in aggregate-vs-WHERE classification
 - **`CREATE SCHEMA` duplicate WAL record**: default graph partition WAL record now only logged when the graph is actually created, avoiding duplicates on repeated schema creation
 - **`BatchInsertSink` zero batch_size**: guard against zero batch size with `debug_assert` and defensive `max(1)` clamp
+- **`delete_node_edges` self-loop double-delete**: self-loops (src == dst) appeared in both outgoing and incoming scans, causing `delete_edge` to be called twice. Now deduped via `HashSet`
+- **`delete_node_edges` partial visibility**: each edge deletion acquired and released the write lock independently, allowing concurrent readers to observe a partially detached node. Now holds a single write lock for the entire batch
+- **`cypher` feature missing `gql` dependency**: `cypher` feature failed to compile without `gql` because the cypher parser imports shared schema DDL types from `gql/ast.rs`. Now declares `gql` as a dependency ([#232](https://github.com/GrafeoDB/grafeo/issues/232), [#233](https://github.com/GrafeoDB/grafeo/pull/233) by [@Michaelzag](https://github.com/Michaelzag))
+- **Node.js bindings feature-gated compilation**: 17 cfg-gated methods inside the main `#[napi] impl` block caused "cannot find value `xxx_c_callback`" errors when features were disabled. Moved into separate per-feature `#[napi] impl` blocks
 
 ## [0.5.33] - 2026-04-05
 

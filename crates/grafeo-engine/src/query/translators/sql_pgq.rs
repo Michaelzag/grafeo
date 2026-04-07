@@ -20,6 +20,10 @@ use grafeo_common::types::Value;
 use grafeo_common::utils::error::{Error, QueryError, QueryErrorKind, Result};
 
 /// Translates a SQL/PGQ query string to a logical plan.
+///
+/// # Errors
+///
+/// Returns an error if parsing fails or the AST contains unsupported constructs.
 pub fn translate(query: &str) -> Result<LogicalPlan> {
     let statement = sql_pgq::parse(query)?;
     let translator = SqlPgqTranslator::new();

@@ -222,6 +222,11 @@ impl Catalog {
     /// Adds a uniqueness constraint.
     ///
     /// Returns an error if schema is not enabled or constraint already exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CatalogError::SchemaNotEnabled` if schema is disabled, or a
+    /// schema-specific error if the operation fails (e.g. duplicate constraint).
     pub fn add_unique_constraint(
         &self,
         label: LabelId,
@@ -236,6 +241,11 @@ impl Catalog {
     /// Adds a required property constraint (NOT NULL).
     ///
     /// Returns an error if schema is not enabled or constraint already exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CatalogError::SchemaNotEnabled` if schema is disabled, or a
+    /// schema-specific error if the operation fails (e.g. duplicate constraint).
     pub fn add_required_property(
         &self,
         label: LabelId,
@@ -272,6 +282,11 @@ impl Catalog {
     }
 
     /// Registers a node type definition.
+    ///
+    /// # Errors
+    ///
+    /// * `CatalogError::SchemaNotEnabled` if schema is disabled.
+    /// * `CatalogError::TypeAlreadyExists` if a type with the same name exists.
     pub fn register_node_type(&self, def: NodeTypeDefinition) -> Result<(), CatalogError> {
         match &self.schema {
             Some(schema) => schema.register_node_type(def),
@@ -287,6 +302,11 @@ impl Catalog {
     }
 
     /// Drops a node type definition.
+    ///
+    /// # Errors
+    ///
+    /// * `CatalogError::SchemaNotEnabled` if schema is disabled.
+    /// * `CatalogError::TypeNotFound` if the type does not exist.
     pub fn drop_node_type(&self, name: &str) -> Result<(), CatalogError> {
         match &self.schema {
             Some(schema) => schema.drop_node_type(name),
@@ -327,6 +347,11 @@ impl Catalog {
     }
 
     /// Registers an edge type definition.
+    ///
+    /// # Errors
+    ///
+    /// * `CatalogError::SchemaNotEnabled` if schema is disabled.
+    /// * `CatalogError::TypeAlreadyExists` if an edge type with the same name exists.
     pub fn register_edge_type_def(&self, def: EdgeTypeDefinition) -> Result<(), CatalogError> {
         match &self.schema {
             Some(schema) => schema.register_edge_type(def),
@@ -342,6 +367,11 @@ impl Catalog {
     }
 
     /// Drops an edge type definition.
+    ///
+    /// # Errors
+    ///
+    /// * `CatalogError::SchemaNotEnabled` if schema is disabled.
+    /// * `CatalogError::TypeNotFound` if the edge type does not exist.
     pub fn drop_edge_type_def(&self, name: &str) -> Result<(), CatalogError> {
         match &self.schema {
             Some(schema) => schema.drop_edge_type(name),
@@ -356,6 +386,11 @@ impl Catalog {
     }
 
     /// Registers a graph type definition.
+    ///
+    /// # Errors
+    ///
+    /// * `CatalogError::SchemaNotEnabled` if schema is disabled.
+    /// * `CatalogError::TypeAlreadyExists` if a graph type with the same name exists.
     pub fn register_graph_type(&self, def: GraphTypeDefinition) -> Result<(), CatalogError> {
         match &self.schema {
             Some(schema) => schema.register_graph_type(def),
@@ -364,6 +399,11 @@ impl Catalog {
     }
 
     /// Drops a graph type definition.
+    ///
+    /// # Errors
+    ///
+    /// * `CatalogError::SchemaNotEnabled` if schema is disabled.
+    /// * `CatalogError::TypeNotFound` if the graph type does not exist.
     pub fn drop_graph_type(&self, name: &str) -> Result<(), CatalogError> {
         match &self.schema {
             Some(schema) => schema.drop_graph_type(name),
@@ -387,6 +427,11 @@ impl Catalog {
     }
 
     /// Registers a schema namespace.
+    ///
+    /// # Errors
+    ///
+    /// * `CatalogError::SchemaNotEnabled` if schema is disabled.
+    /// * `CatalogError::SchemaAlreadyExists` if the namespace already exists.
     pub fn register_schema_namespace(&self, name: String) -> Result<(), CatalogError> {
         match &self.schema {
             Some(schema) => schema.register_schema(name),
@@ -395,6 +440,11 @@ impl Catalog {
     }
 
     /// Drops a schema namespace.
+    ///
+    /// # Errors
+    ///
+    /// * `CatalogError::SchemaNotEnabled` if schema is disabled.
+    /// * `CatalogError::SchemaNotFound` if the namespace does not exist.
     pub fn drop_schema_namespace(&self, name: &str) -> Result<(), CatalogError> {
         match &self.schema {
             Some(schema) => schema.drop_schema(name),
@@ -418,6 +468,10 @@ impl Catalog {
     }
 
     /// Adds a constraint to an existing node type, creating a minimal type if needed.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CatalogError::SchemaNotEnabled` if schema is disabled.
     pub fn add_constraint_to_type(
         &self,
         label: &str,
@@ -430,6 +484,12 @@ impl Catalog {
     }
 
     /// Adds a property to a node type.
+    ///
+    /// # Errors
+    ///
+    /// * `CatalogError::SchemaNotEnabled` if schema is disabled.
+    /// * `CatalogError::TypeNotFound` if the node type does not exist.
+    /// * `CatalogError::TypeAlreadyExists` if the property already exists on the type.
     pub fn alter_node_type_add_property(
         &self,
         type_name: &str,
@@ -442,6 +502,11 @@ impl Catalog {
     }
 
     /// Drops a property from a node type.
+    ///
+    /// # Errors
+    ///
+    /// * `CatalogError::SchemaNotEnabled` if schema is disabled.
+    /// * `CatalogError::TypeNotFound` if the node type or property does not exist.
     pub fn alter_node_type_drop_property(
         &self,
         type_name: &str,
@@ -454,6 +519,12 @@ impl Catalog {
     }
 
     /// Adds a property to an edge type.
+    ///
+    /// # Errors
+    ///
+    /// * `CatalogError::SchemaNotEnabled` if schema is disabled.
+    /// * `CatalogError::TypeNotFound` if the edge type does not exist.
+    /// * `CatalogError::TypeAlreadyExists` if the property already exists on the type.
     pub fn alter_edge_type_add_property(
         &self,
         type_name: &str,
@@ -466,6 +537,11 @@ impl Catalog {
     }
 
     /// Drops a property from an edge type.
+    ///
+    /// # Errors
+    ///
+    /// * `CatalogError::SchemaNotEnabled` if schema is disabled.
+    /// * `CatalogError::TypeNotFound` if the edge type or property does not exist.
     pub fn alter_edge_type_drop_property(
         &self,
         type_name: &str,
@@ -478,6 +554,11 @@ impl Catalog {
     }
 
     /// Adds a node type to a graph type.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CatalogError::SchemaNotEnabled` if schema is disabled, or
+    /// `CatalogError::TypeNotFound` if the graph type does not exist.
     pub fn alter_graph_type_add_node_type(
         &self,
         graph_type_name: &str,
@@ -490,6 +571,11 @@ impl Catalog {
     }
 
     /// Drops a node type from a graph type.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CatalogError::SchemaNotEnabled` if schema is disabled, or
+    /// `CatalogError::TypeNotFound` if the graph type does not exist.
     pub fn alter_graph_type_drop_node_type(
         &self,
         graph_type_name: &str,
@@ -502,6 +588,11 @@ impl Catalog {
     }
 
     /// Adds an edge type to a graph type.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CatalogError::SchemaNotEnabled` if schema is disabled, or
+    /// `CatalogError::TypeNotFound` if the graph type does not exist.
     pub fn alter_graph_type_add_edge_type(
         &self,
         graph_type_name: &str,
@@ -514,6 +605,11 @@ impl Catalog {
     }
 
     /// Drops an edge type from a graph type.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CatalogError::SchemaNotEnabled` if schema is disabled, or
+    /// `CatalogError::TypeNotFound` if the graph type does not exist.
     pub fn alter_graph_type_drop_edge_type(
         &self,
         graph_type_name: &str,
@@ -526,6 +622,11 @@ impl Catalog {
     }
 
     /// Binds a graph instance to a graph type.
+    ///
+    /// # Errors
+    ///
+    /// * `CatalogError::SchemaNotEnabled` if schema is disabled.
+    /// * `CatalogError::TypeNotFound` if the graph type does not exist.
     pub fn bind_graph_type(
         &self,
         graph_name: &str,
@@ -558,6 +659,11 @@ impl Catalog {
     }
 
     /// Registers a stored procedure.
+    ///
+    /// # Errors
+    ///
+    /// * `CatalogError::SchemaNotEnabled` if schema is disabled.
+    /// * `CatalogError::TypeAlreadyExists` if a procedure with the same name exists.
     pub fn register_procedure(&self, def: ProcedureDefinition) -> Result<(), CatalogError> {
         match &self.schema {
             Some(schema) => schema.register_procedure(def),
@@ -566,6 +672,10 @@ impl Catalog {
     }
 
     /// Replaces or creates a stored procedure.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CatalogError::SchemaNotEnabled` if schema is disabled.
     pub fn replace_procedure(&self, def: ProcedureDefinition) -> Result<(), CatalogError> {
         match &self.schema {
             Some(schema) => {
@@ -577,6 +687,11 @@ impl Catalog {
     }
 
     /// Drops a stored procedure.
+    ///
+    /// # Errors
+    ///
+    /// * `CatalogError::SchemaNotEnabled` if schema is disabled.
+    /// * `CatalogError::TypeNotFound` if the procedure does not exist.
     pub fn drop_procedure(&self, name: &str) -> Result<(), CatalogError> {
         match &self.schema {
             Some(schema) => schema.drop_procedure(name),
@@ -1189,6 +1304,10 @@ impl SchemaCatalog {
     // --- Node type operations ---
 
     /// Registers a new node type definition.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CatalogError::TypeAlreadyExists` if a type with the same name exists.
     pub fn register_node_type(&self, def: NodeTypeDefinition) -> Result<(), CatalogError> {
         let mut types = self.node_types.write();
         if types.contains_key(&def.name) {
@@ -1204,6 +1323,10 @@ impl SchemaCatalog {
     }
 
     /// Drops a node type definition by name.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CatalogError::TypeNotFound` if no type with the given name exists.
     pub fn drop_node_type(&self, name: &str) -> Result<(), CatalogError> {
         let mut types = self.node_types.write();
         if types.remove(name).is_none() {
@@ -1291,6 +1414,10 @@ impl SchemaCatalog {
     // --- Edge type operations ---
 
     /// Registers a new edge type definition.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CatalogError::TypeAlreadyExists` if an edge type with the same name exists.
     pub fn register_edge_type(&self, def: EdgeTypeDefinition) -> Result<(), CatalogError> {
         let mut types = self.edge_types.write();
         if types.contains_key(&def.name) {
@@ -1306,6 +1433,10 @@ impl SchemaCatalog {
     }
 
     /// Drops an edge type definition by name.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CatalogError::TypeNotFound` if no edge type with the given name exists.
     pub fn drop_edge_type(&self, name: &str) -> Result<(), CatalogError> {
         let mut types = self.edge_types.write();
         if types.remove(name).is_none() {
@@ -1335,6 +1466,10 @@ impl SchemaCatalog {
     // --- Graph type operations ---
 
     /// Registers a new graph type definition.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CatalogError::TypeAlreadyExists` if a graph type with the same name exists.
     pub fn register_graph_type(&self, def: GraphTypeDefinition) -> Result<(), CatalogError> {
         let mut types = self.graph_types.write();
         if types.contains_key(&def.name) {
@@ -1345,6 +1480,10 @@ impl SchemaCatalog {
     }
 
     /// Drops a graph type definition by name.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CatalogError::TypeNotFound` if no graph type with the given name exists.
     pub fn drop_graph_type(&self, name: &str) -> Result<(), CatalogError> {
         let mut types = self.graph_types.write();
         if types.remove(name).is_none() {
@@ -1374,6 +1513,10 @@ impl SchemaCatalog {
     // --- Schema namespace operations ---
 
     /// Registers a schema namespace.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CatalogError::SchemaAlreadyExists` if the namespace already exists.
     pub fn register_schema(&self, name: String) -> Result<(), CatalogError> {
         let mut schemas = self.schemas.write();
         if schemas.contains(&name) {
@@ -1384,6 +1527,10 @@ impl SchemaCatalog {
     }
 
     /// Drops a schema namespace.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CatalogError::SchemaNotFound` if the namespace does not exist.
     pub fn drop_schema(&self, name: &str) -> Result<(), CatalogError> {
         let mut schemas = self.schemas.write();
         if let Some(pos) = schemas.iter().position(|s| s == name) {
@@ -1412,6 +1559,10 @@ impl SchemaCatalog {
     // --- ALTER operations ---
 
     /// Adds a constraint to an existing node type, creating a minimal type if needed.
+    ///
+    /// # Errors
+    ///
+    /// Currently infallible, but returns `Result` for forward compatibility.
     pub fn add_constraint_to_type(
         &self,
         label: &str,
@@ -1436,6 +1587,11 @@ impl SchemaCatalog {
     }
 
     /// Adds a property to an existing node type.
+    ///
+    /// # Errors
+    ///
+    /// * `CatalogError::TypeNotFound` if the node type does not exist.
+    /// * `CatalogError::TypeAlreadyExists` if the property already exists on the type.
     pub fn alter_node_type_add_property(
         &self,
         type_name: &str,
@@ -1456,6 +1612,10 @@ impl SchemaCatalog {
     }
 
     /// Drops a property from an existing node type.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CatalogError::TypeNotFound` if the node type or property does not exist.
     pub fn alter_node_type_drop_property(
         &self,
         type_name: &str,
@@ -1477,6 +1637,11 @@ impl SchemaCatalog {
     }
 
     /// Adds a property to an existing edge type.
+    ///
+    /// # Errors
+    ///
+    /// * `CatalogError::TypeNotFound` if the edge type does not exist.
+    /// * `CatalogError::TypeAlreadyExists` if the property already exists on the type.
     pub fn alter_edge_type_add_property(
         &self,
         type_name: &str,
@@ -1497,6 +1662,10 @@ impl SchemaCatalog {
     }
 
     /// Drops a property from an existing edge type.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CatalogError::TypeNotFound` if the edge type or property does not exist.
     pub fn alter_edge_type_drop_property(
         &self,
         type_name: &str,
@@ -1518,6 +1687,10 @@ impl SchemaCatalog {
     }
 
     /// Adds a node type to a graph type.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CatalogError::TypeNotFound` if the graph type does not exist.
     pub fn alter_graph_type_add_node_type(
         &self,
         graph_type_name: &str,
@@ -1534,6 +1707,10 @@ impl SchemaCatalog {
     }
 
     /// Drops a node type from a graph type.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CatalogError::TypeNotFound` if the graph type does not exist.
     pub fn alter_graph_type_drop_node_type(
         &self,
         graph_type_name: &str,
@@ -1548,6 +1725,10 @@ impl SchemaCatalog {
     }
 
     /// Adds an edge type to a graph type.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CatalogError::TypeNotFound` if the graph type does not exist.
     pub fn alter_graph_type_add_edge_type(
         &self,
         graph_type_name: &str,
@@ -1564,6 +1745,10 @@ impl SchemaCatalog {
     }
 
     /// Drops an edge type from a graph type.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CatalogError::TypeNotFound` if the graph type does not exist.
     pub fn alter_graph_type_drop_edge_type(
         &self,
         graph_type_name: &str,
@@ -1580,6 +1765,10 @@ impl SchemaCatalog {
     // --- Procedure operations ---
 
     /// Registers a stored procedure.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CatalogError::TypeAlreadyExists` if a procedure with the same name exists.
     pub fn register_procedure(&self, def: ProcedureDefinition) -> Result<(), CatalogError> {
         let mut procs = self.procedures.write();
         if procs.contains_key(&def.name) {
@@ -1595,6 +1784,10 @@ impl SchemaCatalog {
     }
 
     /// Drops a stored procedure.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CatalogError::TypeNotFound` if no procedure with the given name exists.
     pub fn drop_procedure(&self, name: &str) -> Result<(), CatalogError> {
         let mut procs = self.procedures.write();
         if procs.remove(name).is_none() {

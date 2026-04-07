@@ -371,6 +371,10 @@ impl WalManager {
     /// Reads checkpoint metadata from disk.
     ///
     /// Returns `None` if no checkpoint metadata exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the metadata file cannot be read or deserialized.
     pub fn read_checkpoint_metadata(&self) -> Result<Option<CheckpointMetadata>> {
         let metadata_path = self.dir.join(CHECKPOINT_METADATA_FILE);
 
@@ -478,15 +482,17 @@ impl WalManager {
     }
 
     /// Returns all WAL log file paths in sequence order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the WAL directory cannot be read.
     pub fn log_files(&self) -> Result<Vec<PathBuf>> {
         let mut files = Vec::new();
 
-        if let Ok(entries) = fs::read_dir(&self.dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().is_some_and(|ext| ext == "log") {
-                    files.push(path);
-                }
+        for entry in fs::read_dir(&self.dir)?.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "log") {
+                files.push(path);
             }
         }
 

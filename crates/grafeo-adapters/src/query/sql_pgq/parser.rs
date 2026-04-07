@@ -36,6 +36,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses the query into a statement.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the input contains invalid or unexpected SQL/PGQ syntax.
     pub fn parse(&mut self) -> Result<Statement> {
         let stmt = match self.current.kind {
             TokenKind::Create => self.parse_create_statement()?,

@@ -342,6 +342,10 @@ impl Operator for FactorizedAggregateOperator {
 /// factorized data for factorized aggregation.
 pub trait FactorizedOperator {
     /// Returns the next chunk as factorized data.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the underlying operator fails during execution.
     fn next_factorized(&mut self) -> FactorizedResult;
 }
 

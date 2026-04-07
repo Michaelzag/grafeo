@@ -43,6 +43,10 @@ mod inner {
     /// this compiles to nothing.
     ///
     /// Uses thread-local state so concurrent tests don't interfere.
+    ///
+    /// # Panics
+    ///
+    /// Panics (intentionally) when crash injection is enabled and the counter reaches zero.
     #[inline]
     pub fn maybe_crash(point: &'static str) {
         CRASH_ENABLED.with(|enabled| {

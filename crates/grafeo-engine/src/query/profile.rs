@@ -55,6 +55,10 @@ impl ProfileEntry {
 ///
 /// The entries must be in **post-order** (children before parents),
 /// matching the order in which `plan_operator()` processes operators.
+///
+/// # Panics
+///
+/// Panics if the iterator yields fewer entries than there are logical operators.
 pub fn build_profile_tree(
     logical: &LogicalOperator,
     entries: &mut impl Iterator<Item = ProfileEntry>,

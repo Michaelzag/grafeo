@@ -40,6 +40,10 @@ pub trait EmbeddingModel: Send + Sync {
     /// Generates embeddings for a batch of texts.
     ///
     /// Returns one vector per input text, each with [`EmbeddingModel::dimensions()`] elements.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if tokenization or inference fails.
     fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>>;
 
     /// Returns the dimensionality of the embedding vectors.

@@ -196,6 +196,10 @@ impl ParallelPipeline {
     }
 
     /// Executes the pipeline and returns results.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if any worker thread encounters an operator error.
     pub fn execute(&self) -> Result<ParallelPipelineResult, OperatorError> {
         let morsel_size = self.config.effective_morsel_size();
         let morsels = self.source.generate_morsels(morsel_size, 0);

@@ -152,6 +152,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses the input into a statement.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the input contains invalid or unexpected GQL syntax.
     pub fn parse(&mut self) -> Result<Statement> {
         // Handle EXPLAIN/PROFILE prefix: wraps the entire following statement
         if self.is_identifier() && self.get_identifier_name().eq_ignore_ascii_case("EXPLAIN") {

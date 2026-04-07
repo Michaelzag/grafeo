@@ -24,6 +24,10 @@ pub trait ConstraintValidator: Send + Sync {
     /// Validates a single property value for a node with the given labels.
     ///
     /// Checks type compatibility and NOT NULL constraints.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the value type is incompatible or a NOT NULL constraint is violated.
     fn validate_node_property(
         &self,
         labels: &[String],
@@ -34,6 +38,10 @@ pub trait ConstraintValidator: Send + Sync {
     /// Validates that all required properties are present after creating a node.
     ///
     /// Checks NOT NULL constraints for properties that were not explicitly set.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if a required (NOT NULL) property is missing.
     fn validate_node_complete(
         &self,
         labels: &[String],
@@ -42,7 +50,9 @@ pub trait ConstraintValidator: Send + Sync {
 
     /// Checks UNIQUE constraint for a node property value.
     ///
-    /// Returns an error if a node with the same label already has this value.
+    /// # Errors
+    ///
+    /// Returns `Err` if a node with the same label already has this value.
     fn check_unique_node_property(
         &self,
         labels: &[String],
@@ -51,6 +61,10 @@ pub trait ConstraintValidator: Send + Sync {
     ) -> Result<(), OperatorError>;
 
     /// Validates a single property value for an edge of the given type.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the value type is incompatible with the edge schema.
     fn validate_edge_property(
         &self,
         edge_type: &str,
@@ -59,6 +73,10 @@ pub trait ConstraintValidator: Send + Sync {
     ) -> Result<(), OperatorError>;
 
     /// Validates that all required properties are present after creating an edge.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if a required property is missing from the edge.
     fn validate_edge_complete(
         &self,
         edge_type: &str,
@@ -66,18 +84,30 @@ pub trait ConstraintValidator: Send + Sync {
     ) -> Result<(), OperatorError>;
 
     /// Validates that the node labels are allowed by the bound graph type.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if any label is not defined in the graph type.
     fn validate_node_labels_allowed(&self, labels: &[String]) -> Result<(), OperatorError> {
         let _ = labels;
         Ok(())
     }
 
     /// Validates that the edge type is allowed by the bound graph type.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the edge type is not defined in the graph type.
     fn validate_edge_type_allowed(&self, edge_type: &str) -> Result<(), OperatorError> {
         let _ = edge_type;
         Ok(())
     }
 
     /// Validates that edge endpoints have the correct node type labels.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the source or target node labels do not match the edge type definition.
     fn validate_edge_endpoints(
         &self,
         edge_type: &str,

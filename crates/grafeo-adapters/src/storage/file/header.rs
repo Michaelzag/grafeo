@@ -16,6 +16,10 @@ use super::format::{DATA_OFFSET, DB_HEADER_SIZE, DbHeader, FILE_HEADER_SIZE, Fil
 // ---------------------------------------------------------------------------
 
 /// Writes a [`FileHeader`] at offset 0, padded to [`FILE_HEADER_SIZE`] bytes.
+///
+/// # Errors
+///
+/// Returns an error if serialization fails or the I/O write fails.
 pub fn write_file_header(file: &mut File, header: &FileHeader) -> Result<()> {
     let encoded = bincode::serde::encode_to_vec(header, bincode::config::standard())
         .map_err(|e| Error::Serialization(e.to_string()))?;
@@ -34,6 +38,10 @@ pub fn write_file_header(file: &mut File, header: &FileHeader) -> Result<()> {
 }
 
 /// Reads and deserializes the [`FileHeader`] from offset 0.
+///
+/// # Errors
+///
+/// Returns an error if the I/O read or deserialization fails.
 pub fn read_file_header(file: &mut File) -> Result<FileHeader> {
     let mut buf = vec![0u8; FILE_HEADER_SIZE as usize];
     file.seek(SeekFrom::Start(0))?;
@@ -46,6 +54,10 @@ pub fn read_file_header(file: &mut File) -> Result<FileHeader> {
 }
 
 /// Validates the file header: checks magic bytes and format version.
+///
+/// # Errors
+///
+/// Returns an error if the magic bytes are invalid or the format version is unsupported.
 pub fn validate_file_header(header: &FileHeader) -> Result<()> {
     if header.magic != MAGIC {
         return Err(Error::Internal(format!(
@@ -74,6 +86,10 @@ fn db_header_offset(slot: u8) -> u64 {
 
 /// Writes a [`DbHeader`] to the given slot (0 or 1), padded to
 /// [`DB_HEADER_SIZE`] bytes.
+///
+/// # Errors
+///
+/// Returns an error if serialization fails or the I/O write fails.
 pub fn write_db_header(file: &mut File, slot: u8, header: &DbHeader) -> Result<()> {
     debug_assert!(slot < 2, "db header slot must be 0 or 1");
 
@@ -108,6 +124,10 @@ fn read_db_header(file: &mut File, slot: u8) -> Result<DbHeader> {
 }
 
 /// Reads both database headers from slots 0 and 1.
+///
+/// # Errors
+///
+/// Returns an error if the I/O read or deserialization of either slot fails.
 pub fn read_db_headers(file: &mut File) -> Result<(DbHeader, DbHeader)> {
     let h0 = read_db_header(file, 0)?;
     let h1 = read_db_header(file, 1)?;

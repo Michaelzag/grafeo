@@ -513,6 +513,10 @@ impl GrafeoDB {
     /// }
     /// ```
     ///
+    /// # Errors
+    ///
+    /// Returns an error if config validation fails.
+    ///
     /// [`GraphStoreMut`]: grafeo_core::graph::GraphStoreMut
     pub fn with_store(store: Arc<dyn GraphStoreMut>, config: Config) -> Result<Self> {
         config
@@ -586,6 +590,10 @@ impl GrafeoDB {
     ///     Ok(())
     /// }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if config validation fails.
     ///
     /// [`GraphStore`]: grafeo_core::graph::GraphStore
     pub fn with_read_store(store: Arc<dyn GraphStore>, config: Config) -> Result<Self> {
@@ -1767,6 +1775,10 @@ impl std::fmt::Display for QueryResult {
 /// Used by [`QueryResult::scalar()`] to extract typed values.
 pub trait FromValue: Sized {
     /// Attempts the conversion, returning an error on type mismatch.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::TypeMismatch` if the value is not the expected type.
     fn from_value(value: &grafeo_common::types::Value) -> Result<Self>;
 }
 

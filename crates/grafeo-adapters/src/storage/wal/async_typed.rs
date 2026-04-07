@@ -161,6 +161,10 @@ impl<R: WalEntry> AsyncTypedWal<R> {
     }
 
     /// Returns all WAL log file paths in sequence order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the WAL directory cannot be read.
     pub async fn log_files(&self) -> Result<Vec<PathBuf>> {
         self.manager.log_files().await
     }

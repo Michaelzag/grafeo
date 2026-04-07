@@ -27,6 +27,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses the document.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the input contains invalid or unexpected GraphQL syntax.
     pub fn parse(&mut self) -> Result<Document> {
         self.parse_document()
     }

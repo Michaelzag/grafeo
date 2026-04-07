@@ -180,11 +180,19 @@ impl<R: WalEntry> TypedWal<R> {
     }
 
     /// Returns all WAL log file paths in sequence order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the WAL directory cannot be read.
     pub fn log_files(&self) -> Result<Vec<PathBuf>> {
         self.manager.log_files()
     }
 
     /// Reads checkpoint metadata from disk.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the metadata file cannot be read or deserialized.
     pub fn read_checkpoint_metadata(&self) -> Result<Option<CheckpointMetadata>> {
         self.manager.read_checkpoint_metadata()
     }

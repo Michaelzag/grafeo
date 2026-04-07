@@ -32,6 +32,10 @@ use super::traits::{GraphAlgorithm, impl_algorithm};
 ///
 /// Set of node IDs that are articulation points.
 ///
+/// # Panics
+///
+/// Panics if the DFS stack is inconsistent (internal invariant).
+///
 /// # Complexity
 ///
 /// O(V + E)
@@ -53,8 +57,7 @@ pub fn articulation_points(store: &dyn GraphStore) -> FxHashSet<NodeId> {
 
     // Build undirected adjacency list
     let mut adj: Vec<FxHashSet<usize>> = vec![FxHashSet::default(); n];
-    for &node in &nodes {
-        let i = *node_to_idx.get(&node).expect("node in index");
+    for (i, &node) in nodes.iter().enumerate() {
         for (neighbor, _) in store.edges_from(node, Direction::Outgoing) {
             if let Some(&j) = node_to_idx.get(&neighbor) {
                 adj[i].insert(j);
@@ -146,6 +149,10 @@ pub fn articulation_points(store: &dyn GraphStore) -> FxHashSet<NodeId> {
 ///
 /// List of bridges as (source, target) pairs.
 ///
+/// # Panics
+///
+/// Panics if the DFS stack is inconsistent (internal invariant).
+///
 /// # Complexity
 ///
 /// O(V + E)
@@ -167,8 +174,7 @@ pub fn bridges(store: &dyn GraphStore) -> Vec<(NodeId, NodeId)> {
 
     // Build undirected adjacency list
     let mut adj: Vec<FxHashSet<usize>> = vec![FxHashSet::default(); n];
-    for &node in &nodes {
-        let i = *node_to_idx.get(&node).expect("node in index");
+    for (i, &node) in nodes.iter().enumerate() {
         for (neighbor, _) in store.edges_from(node, Direction::Outgoing) {
             if let Some(&j) = node_to_idx.get(&neighbor) {
                 adj[i].insert(j);
@@ -278,6 +284,10 @@ impl KCoreResult {
 ///
 /// Core numbers for all nodes and the maximum core number.
 ///
+/// # Panics
+///
+/// Panics if the internal degree-bucket state is inconsistent (internal invariant).
+///
 /// # Complexity
 ///
 /// O(V + E)
@@ -302,8 +312,7 @@ pub fn kcore_decomposition(store: &dyn GraphStore) -> KCoreResult {
 
     // Build undirected adjacency list and compute degrees
     let mut adj: Vec<FxHashSet<usize>> = vec![FxHashSet::default(); n];
-    for &node in &nodes {
-        let i = *node_to_idx.get(&node).expect("node in index");
+    for (i, &node) in nodes.iter().enumerate() {
         for (neighbor, _) in store.edges_from(node, Direction::Outgoing) {
             if let Some(&j) = node_to_idx.get(&neighbor) {
                 adj[i].insert(j);

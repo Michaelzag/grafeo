@@ -38,6 +38,11 @@ pub enum CypherTranslationResult {
 }
 
 /// Translates a Cypher query string to a logical plan.
+///
+/// # Errors
+///
+/// Returns an error if parsing fails or the query is a schema command
+/// that cannot be represented as a logical plan.
 pub fn translate(query: &str) -> Result<LogicalPlan> {
     match translate_full(query)? {
         CypherTranslationResult::Plan(plan) => Ok(plan),
@@ -49,6 +54,10 @@ pub fn translate(query: &str) -> Result<LogicalPlan> {
 }
 
 /// Translates a Cypher query, returning either a plan or a schema command.
+///
+/// # Errors
+///
+/// Returns an error if parsing fails or the AST contains unsupported constructs.
 pub fn translate_full(query: &str) -> Result<CypherTranslationResult> {
     let statement = cypher::parse(query)?;
     let translator = CypherTranslator::new();

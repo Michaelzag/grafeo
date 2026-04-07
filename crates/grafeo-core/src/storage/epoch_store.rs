@@ -231,6 +231,10 @@ impl CompressedEpochBlock {
     /// - The compressed block
     /// - Node index entries (for creating `ColdVersionRef`)
     /// - Edge index entries (for creating `ColdVersionRef`)
+    ///
+    /// # Panics
+    ///
+    /// Panics if `NodeRecord` or `EdgeRecord` serialization fails (should not occur with valid records).
     #[must_use]
     pub fn from_records(
         epoch: EpochId,

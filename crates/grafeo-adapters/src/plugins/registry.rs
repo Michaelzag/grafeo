@@ -24,6 +24,10 @@ impl PluginRegistry {
     }
 
     /// Registers a plugin.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the plugin's `on_load` callback fails.
     pub fn register_plugin(&self, plugin: Arc<dyn Plugin>) -> Result<()> {
         plugin.on_load()?;
         self.plugins
@@ -33,6 +37,10 @@ impl PluginRegistry {
     }
 
     /// Unregisters a plugin.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the plugin's `on_unload` callback fails.
     pub fn unregister_plugin(&self, name: &str) -> Result<()> {
         if let Some(plugin) = self.plugins.write().remove(name) {
             plugin.on_unload()?;

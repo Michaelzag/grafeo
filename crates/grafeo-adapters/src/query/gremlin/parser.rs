@@ -28,6 +28,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses the query into a statement.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the input contains invalid or unexpected Gremlin syntax.
     pub fn parse(&mut self) -> Result<Statement> {
         self.parse_statement()
     }

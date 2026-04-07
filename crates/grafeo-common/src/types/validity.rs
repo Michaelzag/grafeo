@@ -62,6 +62,11 @@ impl ValidityTs {
     /// Decodes entity ID and timestamp from a 16-byte versioned key.
     ///
     /// Returns `(entity_id, ValidityTs)`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the byte slices cannot be converted to fixed-size arrays
+    /// (cannot happen for a `&[u8; 16]` input).
     #[must_use]
     pub fn from_versioned_key(key: &[u8; 16]) -> (u64, Self) {
         let entity_id = u64::from_be_bytes(

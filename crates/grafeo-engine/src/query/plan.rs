@@ -22,6 +22,10 @@ impl CountExpr {
     /// Returns the resolved count, or panics if still a parameter reference.
     ///
     /// Call this only after parameter substitution has run.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the expression is an unresolved `Parameter` reference.
     pub fn value(&self) -> usize {
         match self {
             Self::Literal(n) => *n,
@@ -30,6 +34,10 @@ impl CountExpr {
     }
 
     /// Returns the resolved count, or an error if still a parameter reference.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error string if the expression is an unresolved `Parameter`.
     pub fn try_value(&self) -> Result<usize, String> {
         match self {
             Self::Literal(n) => Ok(*n),

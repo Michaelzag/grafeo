@@ -72,6 +72,10 @@ impl Histogram {
     /// # Arguments
     /// * `sorted_values` - Values sorted in ascending order.
     /// * `num_buckets` - Target number of buckets.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a non-empty bucket slice has no first or last element (invariant violation).
     pub fn build(sorted_values: &[Value], num_buckets: usize) -> Self {
         if sorted_values.is_empty() {
             return Self::new(Vec::new());

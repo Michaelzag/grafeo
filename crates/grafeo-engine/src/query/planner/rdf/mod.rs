@@ -220,6 +220,11 @@ impl RdfPlanner {
     /// Plans a logical plan with profiling: each physical operator is wrapped
     /// in [`ProfiledOperator`](grafeo_core::execution::ProfiledOperator) to
     /// collect row counts and timing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the logical plan contains unsupported SPARQL operators
+    /// or invalid expressions.
     pub fn plan_profiled(
         &self,
         logical_plan: &LogicalPlan,

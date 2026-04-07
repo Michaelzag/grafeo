@@ -3715,6 +3715,7 @@ mod tests {
         assert_eq!(result.row_count(), 3);
     }
 
+    #[cfg(any(feature = "regex", feature = "regex-lite"))]
     #[test]
     fn test_regex_operator() {
         use crate::graph::lpg::LpgStore;
@@ -5846,8 +5847,9 @@ mod tests {
         assert_eq!(result, Some(Value::String("Alix".into())));
     }
 
-    // === LIKE operator tests ===
+    // === LIKE operator tests (require regex for pattern conversion) ===
 
+    #[cfg(any(feature = "regex", feature = "regex-lite"))]
     #[test]
     fn test_eval_like_wildcard() {
         // 'hello world' LIKE 'hello%'
@@ -5883,6 +5885,7 @@ mod tests {
         assert_eq!(result, Some(Value::Bool(false)));
     }
 
+    #[cfg(any(feature = "regex", feature = "regex-lite"))]
     #[test]
     fn test_eval_like_single_char() {
         // 'cat' LIKE 'c_t'
@@ -5902,6 +5905,7 @@ mod tests {
         assert_eq!(result, Some(Value::Bool(false)));
     }
 
+    #[cfg(any(feature = "regex", feature = "regex-lite"))]
     #[test]
     fn test_eval_like_null() {
         // NULL LIKE '%' -> NULL

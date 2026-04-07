@@ -1131,6 +1131,10 @@ impl AdaptivePipelineExecutor {
     /// Executes and collects all results into DataChunks.
     ///
     /// This is a simpler interface that handles chunk collection internally.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if any operator in the pipeline fails during execution.
     pub fn execute_collecting(
         mut self,
     ) -> Result<(Vec<DataChunk>, AdaptiveSummary), OperatorError> {
@@ -1186,6 +1190,10 @@ impl AdaptivePipelineExecutor {
 /// # Returns
 ///
 /// A tuple of (collected DataChunks, adaptive summary if tracking was enabled).
+///
+/// # Errors
+///
+/// Returns `Err` if any operator in the pipeline fails during execution.
 pub fn execute_adaptive(
     operator: Box<dyn Operator>,
     context: Option<AdaptiveContext>,

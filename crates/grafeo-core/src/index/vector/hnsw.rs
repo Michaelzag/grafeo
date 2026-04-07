@@ -369,6 +369,10 @@ impl HnswIndex {
     /// Searches with a custom ef (beam width) parameter.
     ///
     /// Higher ef values give better recall at the cost of latency.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `query.len()` does not match the configured `dimensions`.
     #[must_use]
     pub fn search_with_ef(
         &self,
@@ -451,6 +455,10 @@ impl HnswIndex {
     /// give better recall at the cost of latency.
     ///
     /// Returns an empty vector if the allowlist is empty.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `query.len()` does not match the configured `dimensions`.
     #[must_use]
     pub fn search_with_ef_and_filter(
         &self,

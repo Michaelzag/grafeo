@@ -39,6 +39,10 @@ pub struct RelTable {
 
 impl RelTable {
     /// Creates a new relationship table.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `bwd` is a non-empty CSR that has no edge data populated.
     #[must_use]
     pub fn new(
         schema: EdgeSchema,

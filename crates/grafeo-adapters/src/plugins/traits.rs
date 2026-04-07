@@ -12,11 +12,19 @@ pub trait Plugin: Send + Sync {
     fn version(&self) -> &str;
 
     /// Called when the plugin is loaded.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the plugin fails to initialize.
     fn on_load(&self) -> Result<()> {
         Ok(())
     }
 
     /// Called when the plugin is unloaded.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the plugin fails to clean up.
     fn on_unload(&self) -> Result<()> {
         Ok(())
     }
@@ -34,6 +42,10 @@ pub trait Algorithm: Send + Sync {
     fn parameters(&self) -> &[ParameterDef];
 
     /// Executes the algorithm.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the algorithm fails (e.g., invalid parameters).
     fn execute(&self, params: &Parameters) -> Result<AlgorithmResult>;
 }
 

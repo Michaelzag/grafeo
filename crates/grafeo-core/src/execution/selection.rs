@@ -14,6 +14,10 @@ impl SelectionVector {
     pub const MAX_CAPACITY: usize = u16::MAX as usize;
 
     /// Creates a new selection vector selecting all rows up to count.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `count` exceeds `SelectionVector::MAX_CAPACITY` (65535).
     #[must_use]
     pub fn new_all(count: usize) -> Self {
         assert!(count <= Self::MAX_CAPACITY);
@@ -72,6 +76,10 @@ impl SelectionVector {
     }
 
     /// Pushes a new index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` exceeds `SelectionVector::MAX_CAPACITY` (65535).
     pub fn push(&mut self, index: usize) {
         assert!(index <= Self::MAX_CAPACITY);
         self.indices.push(index as u16);

@@ -207,6 +207,10 @@ impl RunLengthEncoding {
     }
 
     /// Deserializes run-length encoding from bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the byte slice is too short or contains invalid run data.
     pub fn from_bytes(bytes: &[u8]) -> io::Result<Self> {
         let mut cursor = io::Cursor::new(bytes);
 
@@ -338,6 +342,10 @@ impl SignedRunLengthEncoding {
     }
 
     /// Deserializes from bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the byte slice is too short or contains invalid run data.
     pub fn from_bytes(bytes: &[u8]) -> io::Result<Self> {
         Ok(Self {
             inner: RunLengthEncoding::from_bytes(bytes)?,

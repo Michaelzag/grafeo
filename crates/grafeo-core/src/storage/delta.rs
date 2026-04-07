@@ -212,6 +212,10 @@ impl DeltaEncoding {
     }
 
     /// Deserializes a delta encoding from bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the byte slice is too short or contains invalid data.
     pub fn from_bytes(bytes: &[u8]) -> io::Result<Self> {
         if bytes.len() < 12 {
             return Err(io::Error::new(

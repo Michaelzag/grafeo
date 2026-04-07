@@ -674,6 +674,10 @@ pub(crate) fn explain_result(plan: &LogicalPlan) -> QueryResult {
 }
 
 /// Substitutes parameters in a logical plan with their values.
+///
+/// # Errors
+///
+/// Returns an error if a referenced parameter is not found in `params`.
 pub fn substitute_params(plan: &mut LogicalPlan, params: &QueryParams) -> Result<()> {
     substitute_in_operator(&mut plan.root, params)
 }

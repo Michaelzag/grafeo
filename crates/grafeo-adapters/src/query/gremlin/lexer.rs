@@ -267,6 +267,10 @@ impl<'a> Lexer<'a> {
     }
 
     /// Returns the next token.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal character iterator is inconsistent after a peek-confirmed advance.
     pub fn next_token(&mut self) -> Token {
         self.skip_whitespace();
 

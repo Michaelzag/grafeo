@@ -361,6 +361,10 @@ pub fn clustering_coefficient(store: &dyn GraphStore) -> ClusteringCoefficientRe
 ///
 /// Complete clustering coefficient result.
 ///
+/// # Panics
+///
+/// Panics if the internal neighbor map is missing an expected node entry.
+///
 /// # Complexity
 ///
 /// O(V * d^2 / threads) where d is the average degree

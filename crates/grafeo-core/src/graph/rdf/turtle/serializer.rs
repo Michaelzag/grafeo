@@ -122,6 +122,10 @@ impl TurtleSerializer {
     /// # Errors
     ///
     /// Returns an I/O error if serialization fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the Turtle output is not valid UTF-8 (should not occur with well-formed data).
     pub fn to_string(&self, triples: &[Arc<Triple>]) -> io::Result<String> {
         let mut buf = Vec::new();
         self.write(&mut buf, triples)?;
