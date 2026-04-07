@@ -77,13 +77,13 @@ impl LpgStore {
     fn build_node(&self, id: NodeId) -> Node {
         let mut node = Node::new(id);
 
-        let id_to_label = self.id_to_label.read();
+        let registry = self.label_registry.read();
         let node_labels = self.node_labels.read();
 
         #[cfg(not(feature = "temporal"))]
         if let Some(label_ids) = node_labels.get(&id) {
             for &label_id in label_ids {
-                if let Some(label) = id_to_label.get(label_id as usize) {
+                if let Some(label) = registry.get_name(label_id) {
                     node.labels.push(label.clone());
                 }
             }
@@ -94,7 +94,7 @@ impl LpgStore {
             && let Some(label_ids) = log.latest()
         {
             for &label_id in label_ids {
-                if let Some(label) = id_to_label.get(label_id as usize) {
+                if let Some(label) = registry.get_name(label_id) {
                     node.labels.push(label.clone());
                 }
             }
@@ -112,13 +112,13 @@ impl LpgStore {
     fn build_node_at(&self, id: NodeId, epoch: EpochId) -> Node {
         let mut node = Node::new(id);
 
-        let id_to_label = self.id_to_label.read();
+        let registry = self.label_registry.read();
         let node_labels = self.node_labels.read();
         if let Some(log) = node_labels.get(&id)
             && let Some(label_ids) = log.at(epoch)
         {
             for &label_id in label_ids {
-                if let Some(label) = id_to_label.get(label_id as usize) {
+                if let Some(label) = registry.get_name(label_id) {
                     node.labels.push(label.clone());
                 }
             }
@@ -630,7 +630,7 @@ impl LpgStore {
             chain.mark_deleted(epoch, transaction_id);
 
             // Capture labels for undo log
-            let id_to_label = self.id_to_label.read();
+            let registry = self.label_registry.read();
             let node_labels_map = self.node_labels.read();
 
             #[cfg(not(feature = "temporal"))]
@@ -639,7 +639,7 @@ impl LpgStore {
                 .map(|label_ids| {
                     label_ids
                         .iter()
-                        .filter_map(|&lid| id_to_label.get(lid as usize).map(|s| s.to_string()))
+                        .filter_map(|&lid| registry.get_name(lid).map(|s| s.to_string()))
                         .collect()
                 })
                 .unwrap_or_default();
@@ -651,12 +651,12 @@ impl LpgStore {
                 .map(|label_ids| {
                     label_ids
                         .iter()
-                        .filter_map(|&lid| id_to_label.get(lid as usize).map(|s| s.to_string()))
+                        .filter_map(|&lid| registry.get_name(lid).map(|s| s.to_string()))
                         .collect()
                 })
                 .unwrap_or_default();
 
-            drop(id_to_label);
+            drop(registry);
             drop(node_labels_map);
 
             // Capture properties for undo log
@@ -736,7 +736,7 @@ impl LpgStore {
             index.mark_deleted(epoch, transaction_id);
 
             // Capture labels for undo log
-            let id_to_label = self.id_to_label.read();
+            let registry = self.label_registry.read();
             let node_labels_map = self.node_labels.read();
 
             #[cfg(not(feature = "temporal"))]
@@ -745,7 +745,7 @@ impl LpgStore {
                 .map(|label_ids| {
                     label_ids
                         .iter()
-                        .filter_map(|&lid| id_to_label.get(lid as usize).map(|s| s.to_string()))
+                        .filter_map(|&lid| registry.get_name(lid).map(|s| s.to_string()))
                         .collect()
                 })
                 .unwrap_or_default();
@@ -757,12 +757,12 @@ impl LpgStore {
                 .map(|label_ids| {
                     label_ids
                         .iter()
-                        .filter_map(|&lid| id_to_label.get(lid as usize).map(|s| s.to_string()))
+                        .filter_map(|&lid| registry.get_name(lid).map(|s| s.to_string()))
                         .collect()
                 })
                 .unwrap_or_default();
 
-            drop(id_to_label);
+            drop(registry);
             drop(node_labels_map);
 
             // Capture properties for undo log

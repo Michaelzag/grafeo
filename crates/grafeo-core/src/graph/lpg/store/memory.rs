@@ -243,22 +243,14 @@ impl LpgStore {
     }
 
     fn string_pool_memory(&self) -> StringPoolMemory {
-        let labels_to_id = self.label_to_id.read();
-        let id_to_label = self.id_to_label.read();
+        let label_reg = self.label_registry.read();
         let edge_type_to_id = self.edge_type_to_id.read();
         let id_to_edge_type = self.id_to_edge_type.read();
 
-        let label_count = id_to_label.len();
+        let label_count = label_reg.len();
         let edge_type_count = id_to_edge_type.len();
 
-        // label_to_id: FxHashMap<ArcStr, u32>
-        let label_map_bytes = labels_to_id.capacity()
-            * (size_of::<arcstr::ArcStr>() + size_of::<u32>() + 1)
-            + labels_to_id.keys().map(|s| s.len()).sum::<usize>();
-        // id_to_label: Vec<ArcStr>
-        let label_vec_bytes = id_to_label.capacity() * size_of::<arcstr::ArcStr>()
-            + id_to_label.iter().map(|s| s.len()).sum::<usize>();
-        let label_registry_bytes = label_map_bytes + label_vec_bytes;
+        let label_registry_bytes = label_reg.heap_bytes();
 
         // Same for edge types
         let et_map_bytes = edge_type_to_id.capacity()

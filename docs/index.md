@@ -35,7 +35,7 @@ hide:
 
     ---
 
-    Fastest graph database tested on the [LDBC Social Network Benchmark](ecosystem/graph-bench.md), both embedded and as a server, with a lower memory footprint than other in-memory databases. Built in Rust with vectorized execution, adaptive chunking and SIMD-optimized operations.
+    Fastest graph database in our [graph-bench](ecosystem/graph-bench.md) suite (includes [LDBC-inspired](https://ldbcouncil.org/benchmarks/snb/) workloads), both embedded and as a server, with a lower memory footprint than other in-memory databases. Built in Rust with vectorized execution, adaptive chunking and SIMD-optimized operations.
 
 -   :material-database-search:{ .lg .middle } **Multi-Language Queries**
 
@@ -291,7 +291,7 @@ Choose the query language that fits the project:
     ```yaml
     # pubspec.yaml
     dependencies:
-      grafeo: ^0.5.21
+      grafeo: ^0.5.34
     ```
 
 === "WASM"

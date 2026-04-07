@@ -189,6 +189,74 @@ impl Default for LpgStoreConfig {
     }
 }
 
+/// Bidirectional label name/ID registry.
+///
+/// Combines the name-to-ID and ID-to-name mappings behind a single lock,
+/// reducing lock acquisitions on both the read path (`build_node`) and the
+/// write path (`get_or_create_label_id`).
+pub(super) struct LabelRegistry {
+    /// Label name to numeric ID.
+    name_to_id: FxHashMap<ArcStr, u32>,
+    /// Numeric ID to label name (index = ID).
+    id_to_name: Vec<ArcStr>,
+}
+
+impl LabelRegistry {
+    fn new() -> Self {
+        Self {
+            name_to_id: FxHashMap::default(),
+            id_to_name: Vec::new(),
+        }
+    }
+
+    /// Looks up an existing label ID by name.
+    pub(super) fn get_id(&self, name: &str) -> Option<u32> {
+        self.name_to_id.get(name).copied()
+    }
+
+    /// Returns the label name for a given ID.
+    pub(super) fn get_name(&self, id: u32) -> Option<&ArcStr> {
+        self.id_to_name.get(id as usize)
+    }
+
+    /// Returns or creates a label ID for the given name.
+    pub(super) fn get_or_create(&mut self, name: &str) -> u32 {
+        if let Some(&id) = self.name_to_id.get(name) {
+            return id;
+        }
+        let id = self.id_to_name.len() as u32;
+        let label: ArcStr = name.into();
+        self.name_to_id.insert(label.clone(), id);
+        self.id_to_name.push(label);
+        id
+    }
+
+    /// Returns the total number of distinct labels.
+    pub(super) fn len(&self) -> usize {
+        self.id_to_name.len()
+    }
+
+    /// Returns the ID-to-name slice for iteration.
+    pub(super) fn names(&self) -> &[ArcStr] {
+        &self.id_to_name
+    }
+
+    /// Clears all label mappings.
+    pub(super) fn clear(&mut self) {
+        self.name_to_id.clear();
+        self.id_to_name.clear();
+    }
+
+    /// Estimates heap memory usage in bytes.
+    pub(super) fn heap_bytes(&self) -> usize {
+        let map_bytes = self.name_to_id.capacity()
+            * (std::mem::size_of::<ArcStr>() + std::mem::size_of::<u32>());
+        let vec_bytes = self.id_to_name.capacity() * std::mem::size_of::<ArcStr>();
+        let string_bytes: usize = self.id_to_name.iter().map(|s| s.len()).sum();
+        map_bytes + vec_bytes + string_bytes
+    }
+}
+
 /// The core in-memory graph storage.
 ///
 /// Everything lives here: nodes, edges, properties, adjacency indexes, and
@@ -222,28 +290,27 @@ impl Default for LpgStoreConfig {
 /// `LpgStore` contains multiple `RwLock` fields that must be acquired in a
 /// consistent order to prevent deadlocks. Always acquire locks in this order:
 ///
-/// ## Level 1 - Entity Storage (mutually exclusive via feature flag)
+/// ## Level 1: Entity Storage (mutually exclusive via feature flag)
 /// 1. `nodes` / `node_versions`
 /// 2. `edges` / `edge_versions`
 ///
-/// ## Level 2 - Catalogs (acquire as pairs when writing)
-/// 3. `label_to_id` + `id_to_label`
+/// ## Level 2: Catalogs
+/// 3. `label_registry`
 /// 4. `edge_type_to_id` + `id_to_edge_type`
 ///
-/// ## Level 3 - Indexes
+/// ## Level 3: Indexes
 /// 5. `label_index`
 /// 6. `node_labels`
 /// 7. `property_indexes`
 ///
-/// ## Level 4 - Statistics
+/// ## Level 4: Statistics
 /// 8. `statistics`
 ///
-/// ## Level 5 - Nested Locks (internal to other structs)
+/// ## Level 5: Nested Locks (internal to other structs)
 /// 9. `PropertyStorage::columns` (via `node_properties`/`edge_properties`)
 /// 10. `ChunkedAdjacency::lists` (via `forward_adj`/`backward_adj`)
 ///
 /// ## Rules
-/// - Catalog pairs must be acquired together when writing.
 /// - Never hold entity locks while acquiring catalog locks in a different scope.
 /// - Statistics lock is always last.
 /// - Read locks are generally safe, but avoid read-to-write upgrades.
@@ -299,13 +366,9 @@ pub struct LpgStore {
     /// Property storage for edges.
     pub(super) edge_properties: PropertyStorage<EdgeId>,
 
-    /// Label name to ID mapping.
-    /// Lock order: 3 (acquire with id_to_label)
-    pub(super) label_to_id: RwLock<FxHashMap<ArcStr, u32>>,
-
-    /// Label ID to name mapping.
-    /// Lock order: 3 (acquire with label_to_id)
-    pub(super) id_to_label: RwLock<Vec<ArcStr>>,
+    /// Bidirectional label name/ID registry.
+    /// Lock order: 3
+    pub(super) label_registry: RwLock<LabelRegistry>,
 
     /// Edge type name to ID mapping.
     /// Lock order: 4 (acquire with id_to_edge_type)
@@ -442,8 +505,7 @@ impl LpgStore {
             epoch_store: Arc::new(EpochStore::new()),
             node_properties: PropertyStorage::new(),
             edge_properties: PropertyStorage::new(),
-            label_to_id: RwLock::new(FxHashMap::default()),
-            id_to_label: RwLock::new(Vec::new()),
+            label_registry: RwLock::new(LabelRegistry::new()),
             edge_type_to_id: RwLock::new(FxHashMap::default()),
             id_to_edge_type: RwLock::new(Vec::new()),
             forward_adj: ChunkedAdjacency::new(),
@@ -509,11 +571,8 @@ impl LpgStore {
             // Arena allocator chunks are leaked; epochs are cleared via epoch_store.
         }
 
-        // Level 2: Catalogs (acquire as pairs)
-        {
-            self.label_to_id.write().clear();
-            self.id_to_label.write().clear();
-        }
+        // Level 2: Catalogs
+        self.label_registry.write().clear();
         {
             self.edge_type_to_id.write().clear();
             self.id_to_edge_type.write().clear();
@@ -655,28 +714,10 @@ impl LpgStore {
     // === Internal Helpers ===
 
     pub(super) fn get_or_create_label_id(&self, label: &str) -> u32 {
-        {
-            let label_to_id = self.label_to_id.read();
-            if let Some(&id) = label_to_id.get(label) {
-                return id;
-            }
-        }
-
-        let mut label_to_id = self.label_to_id.write();
-        let mut id_to_label = self.id_to_label.write();
-
-        // Double-check after acquiring write lock
-        if let Some(&id) = label_to_id.get(label) {
+        if let Some(id) = self.label_registry.read().get_id(label) {
             return id;
         }
-
-        let id = id_to_label.len() as u32;
-
-        let label: ArcStr = label.into();
-        label_to_id.insert(label.clone(), id);
-        id_to_label.push(label);
-
-        id
+        self.label_registry.write().get_or_create(label)
     }
 
     pub(super) fn get_or_create_edge_type_id(&self, edge_type: &str) -> u32 {

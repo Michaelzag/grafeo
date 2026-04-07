@@ -376,3 +376,110 @@ tests:
     query: "MATCH (s:Sale) RETURN s.region AS region, sum(s.amount) AS total ORDER BY region"
     expect:
       count: 2
+
+  # ---------------------------------------------------------------------------
+  # NULL in inline property patterns (MATCH and MERGE)
+  # ---------------------------------------------------------------------------
+
+  - name: match_null_property_pattern_matches_absent
+    setup:
+      - "INSERT (:Rec {id: 'r1', b: 'x'})"
+    query: "MATCH (n:Rec {id: null, b: 'x'}) RETURN n.b AS b"
+    expect:
+      empty: true
+    note: "id exists and is 'r1', not null, so no match"
+
+  - name: match_null_property_pattern_matches_null_value
+    setup:
+      - "INSERT (:Rec {id: null, b: 'x'})"
+    query: "MATCH (n:Rec {id: null, b: 'x'}) RETURN n.b AS b"
+    expect:
+      rows:
+        - [x]
+
+  - name: match_null_property_pattern_matches_missing_key
+    setup:
+      - "INSERT (:Rec {b: 'x'})"
+    query: "MATCH (n:Rec {id: null, b: 'x'}) RETURN n.b AS b"
+    expect:
+      rows:
+        - [x]
+
+  - name: merge_with_null_key_creates_then_matches
+    statements:
+      - "MERGE (n:Composite {a: null, b: 'x'}) SET n.c = 1"
+      - "MERGE (n:Composite {a: null, b: 'x'}) SET n.c = 2"
+      - "MATCH (n:Composite) RETURN n.b AS b, n.c AS c"
+    expect:
+      rows:
+        - [x, 2]
+
+  - name: merge_null_key_does_not_match_non_null
+    statements:
+      - "INSERT (:MergeNull {a: 'real', b: 'y'})"
+      - "MERGE (n:MergeNull {a: null, b: 'y'}) SET n.c = 99"
+      - "MATCH (n:MergeNull) RETURN n.a AS a, n.b AS b, n.c AS c ORDER BY a"
+    expect:
+      rows:
+        - [null, y, 99]
+        - [real, y, null]
+
+  # ---------------------------------------------------------------------------
+  # SET += {key: null} removes property
+  # ---------------------------------------------------------------------------
+
+  - name: set_plus_equals_null_removes_node_property
+    # SET n += {key: null} must remove the property, not store null
+    statements:
+      - "INSERT (:SetNull {name: 'Alix', price: 42})"
+      - "MATCH (n:SetNull) SET n += {price: null}"
+      - "MATCH (n:SetNull) RETURN n.name AS name, n.price AS price"
+    expect:
+      rows:
+        - [Alix, null]
+
+  - name: set_plus_equals_null_preserves_other_properties
+    # Only the null-valued key is removed; others from the map are set normally
+    statements:
+      - "INSERT (:SetMix {a: 1, b: 2, c: 3})"
+      - "MATCH (n:SetMix) SET n += {b: null, c: 99, d: 'new'}"
+      - "MATCH (n:SetMix) RETURN n.a AS a, n.b AS b, n.c AS c, n.d AS d"
+    expect:
+      rows:
+        - [1, null, 99, new]
+
+  - name: set_plus_equals_null_removes_edge_property
+    statements:
+      - "INSERT (:EP {name: 'a'})-[:R {weight: 5, tag: 'x'}]->(:EP {name: 'b'})"
+      - "MATCH (:EP)-[r:R]->(:EP) SET r += {weight: null}"
+      - "MATCH (:EP)-[r:R]->(:EP) RETURN r.weight AS w, r.tag AS t"
+    expect:
+      rows:
+        - [null, x]
+
+  - name: set_plus_equals_all_null_clears_all
+    # Map with all null values removes all listed properties
+    statements:
+      - "INSERT (:ClearAll {x: 1, y: 2})"
+      - "MATCH (n:ClearAll) SET n += {x: null, y: null}"
+      - "MATCH (n:ClearAll) RETURN n.x AS x, n.y AS y"
+    expect:
+      rows:
+        - [null, null]
+
+  - name: negative_limit_returns_empty
+    setup:
+      - "INSERT (:LimTest {v: 1})"
+      - "INSERT (:LimTest {v: 2})"
+    query: "MATCH (n:LimTest) RETURN n.v AS v LIMIT -1"
+    expect:
+      empty: true
+
+  - name: negative_limit_returns_empty_cypher
+    setup:
+      - "INSERT (:LimTest2 {v: 1})"
+      - "INSERT (:LimTest2 {v: 2})"
+    variants:
+      cypher: "MATCH (n:LimTest2) RETURN n.v AS v LIMIT -1"
+    expect:
+      empty: true

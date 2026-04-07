@@ -120,4 +120,10 @@ SPARQL is enabled by default in Grafeo:
 
     String, numeric and date/time functions.
 
+-   **[Loading RDF Data](loading.md)**
+
+    ---
+
+    Turtle, N-Triples, N-Quads import and streaming load.
+
 </div>

@@ -171,9 +171,9 @@ impl LpgStore {
 
         // Get label ID
         let label_id = {
-            let label_ids = self.label_to_id.read();
-            match label_ids.get(label) {
-                Some(&id) => id,
+            let reg = self.label_registry.read();
+            match reg.get_id(label) {
+                Some(id) => id,
                 None => return false, // Label doesn't exist
             }
         };
@@ -257,9 +257,9 @@ impl LpgStore {
 
         // Get label ID
         let label_id = {
-            let label_ids = self.label_to_id.read();
-            match label_ids.get(label) {
-                Some(&id) => id,
+            let reg = self.label_registry.read();
+            match reg.get_id(label) {
+                Some(id) => id,
                 None => return false,
             }
         };
@@ -313,8 +313,8 @@ impl LpgStore {
     /// concurrent modifications won't affect the returned vector. Results are
     /// sorted by NodeId for deterministic iteration order.
     pub fn nodes_by_label(&self, label: &str) -> Vec<NodeId> {
-        let label_to_id = self.label_to_id.read();
-        if let Some(&label_id) = label_to_id.get(label) {
+        let reg = self.label_registry.read();
+        if let Some(label_id) = reg.get_id(label) {
             let index = self.label_index.read();
             if let Some(set) = index.get(label_id as usize) {
                 let mut ids: Vec<NodeId> = set.keys().copied().collect();
@@ -328,7 +328,7 @@ impl LpgStore {
     /// Returns the number of distinct labels in the store.
     #[must_use]
     pub fn label_count(&self) -> usize {
-        self.id_to_label.read().len()
+        self.label_registry.read().len()
     }
 
     /// Returns the number of distinct property keys in the store.
@@ -352,8 +352,9 @@ impl LpgStore {
 
     /// Returns all label names in the database.
     pub fn all_labels(&self) -> Vec<String> {
-        self.id_to_label
+        self.label_registry
             .read()
+            .names()
             .iter()
             .map(|s| s.to_string())
             .collect()
@@ -496,9 +497,9 @@ impl LpgStore {
         transaction_id: TransactionId,
     ) -> bool {
         let label_id = {
-            let label_ids = self.label_to_id.read();
-            match label_ids.get(label) {
-                Some(&id) => id,
+            let reg = self.label_registry.read();
+            match reg.get_id(label) {
+                Some(id) => id,
                 None => return false,
             }
         };

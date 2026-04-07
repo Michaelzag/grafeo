@@ -43,42 +43,10 @@ export declare class GrafeoDB {
   beginTransaction(isolationLevel?: string | undefined | null): Transaction
   /** Create a vector similarity index on a node property. */
   createVectorIndex(label: string, property: string, dimensions?: number | undefined | null, metric?: string | undefined | null, m?: number | undefined | null, efConstruction?: number | undefined | null): Promise<void>
-  /**
-   * Drop a vector index for the given label and property.
-   * Returns true if the index existed and was removed.
-   */
-  dropVectorIndex(label: string, property: string): Promise<boolean>
-  /**
-   * Rebuild a vector index by rescanning all matching nodes.
-   * Preserves the original index configuration.
-   */
-  rebuildVectorIndex(label: string, property: string): Promise<void>
   /** Search for the k nearest neighbors of a query vector. */
   vectorSearch(label: string, property: string, query: Array<number>, k: number, ef?: number | undefined | null, filters?: Record<string, any> | undefined | null): Promise<Array<Array<number>>>
   /** Bulk-insert nodes with vector properties. */
   batchCreateNodes(label: string, property: string, vectors: Array<Array<number>>): Promise<Array<number>>
-  /** Batch search for nearest neighbors of multiple query vectors. */
-  batchVectorSearch(label: string, property: string, queries: Array<Array<number>>, k: number, ef?: number | undefined | null, filters?: Record<string, any> | undefined | null): Promise<Array<Array<Array<number>>>>
-  /** Search for diverse nearest neighbors using Maximal Marginal Relevance (MMR). */
-  mmrSearch(label: string, property: string, query: Array<number>, k: number, fetchK?: number | undefined | null, lambdaMult?: number | undefined | null, ef?: number | undefined | null, filters?: Record<string, any> | undefined | null): Promise<Array<Array<number>>>
-  /** Create a BM25 text index on a node property for full-text search. */
-  createTextIndex(label: string, property: string): Promise<void>
-  /** Drop a text index for the given label and property. */
-  dropTextIndex(label: string, property: string): Promise<boolean>
-  /** Rebuild a text index by rescanning all matching nodes. */
-  rebuildTextIndex(label: string, property: string): Promise<void>
-  /**
-   * Search a text index using BM25 scoring.
-   *
-   * Returns an array of [nodeId, score] pairs sorted by descending relevance.
-   */
-  textSearch(label: string, property: string, query: string, k: number): Promise<Array<Array<number>>>
-  /**
-   * Perform hybrid search combining text (BM25) and vector similarity.
-   *
-   * Returns an array of [nodeId, score] pairs.
-   */
-  hybridSearch(label: string, textProperty: string, vectorProperty: string, queryText: string, k: number, queryVector?: Array<number> | undefined | null, fusion?: string | undefined | null, weights?: Array<number> | undefined | null): Promise<Array<Array<number>>>
   /** Remove a property from a node. Returns true if the property existed. */
   removeNodeProperty(id: number, key: string): boolean
   /** Remove a property from an edge. Returns true if the property existed. */
@@ -116,30 +84,8 @@ export declare class GrafeoDB {
    * The original database remains unchanged.
    */
   save(path: string): void
-  /**
-   * Converts the database to a read-only CompactStore for faster queries.
-   *
-   * Takes a snapshot of all nodes and edges, builds a columnar store with
-   * CSR adjacency, and switches to read-only mode. After this call, write
-   * operations will fail.
-   */
-  compact(): void
   /** Close the database. */
   close(): void
-  /** Enable CDC for all future sessions. */
-  enableCdc(): void
-  /** Disable CDC for all future sessions. */
-  disableCdc(): void
-  /** Returns whether CDC is currently enabled for new sessions. */
-  get isCdcEnabled(): boolean
-  /** Returns the full change history for a node. */
-  nodeHistory(nodeId: number): Promise<Array<any>>
-  /** Returns the full change history for an edge. */
-  edgeHistory(edgeId: number): Promise<Array<any>>
-  /** Returns change events for a node since a given epoch. */
-  nodeHistorySince(nodeId: number, sinceEpoch: number): Promise<Array<any>>
-  /** Returns all change events across entities in an epoch range. */
-  changesBetween(startEpoch: number, endEpoch: number): Promise<Array<any>>
   /**
    * Sets the current schema for subsequent `execute()` calls.
    *
@@ -155,6 +101,60 @@ export declare class GrafeoDB {
   resetSchema(): void
   /** Returns the current schema name, or `null` if no schema is set. */
   currentSchema(): string | null
+  /**
+   * Drop a vector index for the given label and property.
+   * Returns true if the index existed and was removed.
+   */
+  dropVectorIndex(label: string, property: string): Promise<boolean>
+  /**
+   * Rebuild a vector index by rescanning all matching nodes.
+   * Preserves the original index configuration.
+   */
+  rebuildVectorIndex(label: string, property: string): Promise<void>
+  /** Batch search for nearest neighbors of multiple query vectors. */
+  batchVectorSearch(label: string, property: string, queries: Array<Array<number>>, k: number, ef?: number | undefined | null, filters?: Record<string, any> | undefined | null): Promise<Array<Array<Array<number>>>>
+  /** Search for diverse nearest neighbors using Maximal Marginal Relevance (MMR). */
+  mmrSearch(label: string, property: string, query: Array<number>, k: number, fetchK?: number | undefined | null, lambdaMult?: number | undefined | null, ef?: number | undefined | null, filters?: Record<string, any> | undefined | null): Promise<Array<Array<number>>>
+  /** Create a BM25 text index on a node property for full-text search. */
+  createTextIndex(label: string, property: string): Promise<void>
+  /** Drop a text index for the given label and property. */
+  dropTextIndex(label: string, property: string): Promise<boolean>
+  /** Rebuild a text index by rescanning all matching nodes. */
+  rebuildTextIndex(label: string, property: string): Promise<void>
+  /**
+   * Search a text index using BM25 scoring.
+   *
+   * Returns an array of [nodeId, score] pairs sorted by descending relevance.
+   */
+  textSearch(label: string, property: string, query: string, k: number): Promise<Array<Array<number>>>
+  /**
+   * Perform hybrid search combining text (BM25) and vector similarity.
+   *
+   * Returns an array of [nodeId, score] pairs.
+   */
+  hybridSearch(label: string, textProperty: string, vectorProperty: string, queryText: string, k: number, queryVector?: Array<number> | undefined | null, fusion?: string | undefined | null, weights?: Array<number> | undefined | null): Promise<Array<Array<number>>>
+  /**
+   * Converts the database to a read-only CompactStore for faster queries.
+   *
+   * Takes a snapshot of all nodes and edges, builds a columnar store with
+   * CSR adjacency, and switches to read-only mode. After this call, write
+   * operations will fail.
+   */
+  compact(): void
+  /** Enable CDC for all future sessions. */
+  enableCdc(): void
+  /** Disable CDC for all future sessions. */
+  disableCdc(): void
+  /** Returns whether CDC is currently enabled for new sessions. */
+  get isCdcEnabled(): boolean
+  /** Returns the full change history for a node. */
+  nodeHistory(nodeId: number): Promise<Array<any>>
+  /** Returns the full change history for an edge. */
+  edgeHistory(edgeId: number): Promise<Array<any>>
+  /** Returns change events for a node since a given epoch. */
+  nodeHistorySince(nodeId: number, sinceEpoch: number): Promise<Array<any>>
+  /** Returns all change events across entities in an epoch range. */
+  changesBetween(startEpoch: number, endEpoch: number): Promise<Array<any>>
   /** Execute a Cypher query. */
   executeCypher(query: string, params?: any | undefined | null): Promise<QueryResult>
   /** Execute a SQL/PGQ query (SQL:2023 GRAPH_TABLE). */

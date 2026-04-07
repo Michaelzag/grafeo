@@ -212,9 +212,12 @@ Overall storage reduction: **40-60%** compared to uncompressed.
 
 ---
 
-## LDBC Benchmark Comparisons
+## Benchmark Comparisons (LDBC-Inspired)
 
-Results from the [LDBC Social Network Benchmark](https://ldbcouncil.org/benchmarks/snb/) (SF0.1) run via [graph-bench](graph-bench.md). Methodology: 3 warmup runs, 10 measured runs, median reported.
+Results from [graph-bench](graph-bench.md) (SF0.1), which includes workloads inspired by the [LDBC Social Network Benchmark](https://ldbcouncil.org/benchmarks/snb/). Methodology: 3 warmup runs, 10 measured runs, median reported.
+
+!!! warning "Not Official LDBC Results"
+    These are **not official LDBC Benchmark results**. The benchmarks have not been audited by the LDBC Council, use synthetic datasets (not the official LDBC Datagen), and run at reduced scale factors. See the [LDBC disclaimer](https://github.com/GrafeoDB/graph-bench#ldbc-disclaimer) for full details. LDBC specifications are used under [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
 ### Embedded (in-process)
 

@@ -560,6 +560,11 @@ impl CypherTranslator {
     }
 
     /// Builds a predicate expression for property filters like {name: 'Alix', city: 'NYC'}.
+    ///
+    /// When a pattern property is null (e.g., `{key: null}`), we emit `IS NULL`
+    /// instead of equality, because `null = null` is `null` (falsy) in
+    /// three-valued logic but a null property pattern should match absent or
+    /// null-valued properties.
     fn build_property_predicate(
         &self,
         variable: &str,
@@ -573,11 +578,18 @@ impl CypherTranslator {
                     property: prop_name.clone(),
                 };
                 let right = self.translate_expression(prop_value)?;
-                Ok(LogicalExpression::Binary {
-                    left: Box::new(left),
-                    op: BinaryOp::Eq,
-                    right: Box::new(right),
-                })
+                if matches!(right, LogicalExpression::Literal(Value::Null)) {
+                    Ok(LogicalExpression::Unary {
+                        op: UnaryOp::IsNull,
+                        operand: Box::new(left),
+                    })
+                } else {
+                    Ok(LogicalExpression::Binary {
+                        left: Box::new(left),
+                        op: BinaryOp::Eq,
+                        right: Box::new(right),
+                    })
+                }
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -775,9 +787,18 @@ impl CypherTranslator {
             (1, Some(1))
         };
 
+        // Detect cycle pattern: (s)-[*]->(s) where source == target variable.
+        // The expand must use a temporary target, then filter for equality.
+        let is_cycle = to_variable == from_variable;
+        let expand_target = if is_cycle {
+            self.next_anon_var()
+        } else {
+            to_variable.clone()
+        };
+
         let expand = LogicalOperator::Expand(ExpandOp {
             from_variable,
-            to_variable: to_variable.clone(),
+            to_variable: expand_target.clone(),
             edge_variable,
             direction,
             edge_types,
@@ -787,6 +808,28 @@ impl CypherTranslator {
             path_alias,
             path_mode: PathMode::Walk,
         });
+
+        // For cycle patterns, enforce that expanded target == original source
+        let expand = if is_cycle {
+            wrap_filter(
+                expand,
+                LogicalExpression::Binary {
+                    left: Box::new(LogicalExpression::FunctionCall {
+                        name: "id".into(),
+                        args: vec![LogicalExpression::Variable(expand_target)],
+                        distinct: false,
+                    }),
+                    op: BinaryOp::Eq,
+                    right: Box::new(LogicalExpression::FunctionCall {
+                        name: "id".into(),
+                        args: vec![LogicalExpression::Variable(to_variable.clone())],
+                        distinct: false,
+                    }),
+                },
+            )
+        } else {
+            expand
+        };
 
         let mut result = if let Some(label) = target_label {
             wrap_filter(
@@ -2365,14 +2408,8 @@ impl CypherTranslator {
     fn eval_as_count_expr(&self, expr: &ast::Expression) -> Result<CountExpr> {
         match expr {
             ast::Expression::Literal(ast::Literal::Integer(i)) => {
-                if *i >= 0 {
-                    Ok(CountExpr::Literal(*i as usize))
-                } else {
-                    Err(Error::Query(QueryError::new(
-                        QueryErrorKind::Semantic,
-                        "Expected non-negative integer for SKIP/LIMIT",
-                    )))
-                }
+                // Clamp negative values to 0 (LIMIT -1 returns empty, not an error)
+                Ok(CountExpr::Literal((*i).max(0) as usize))
             }
             ast::Expression::Parameter(name) => Ok(CountExpr::Parameter(name.clone())),
             _ => Err(Error::Query(QueryError::new(

@@ -3366,6 +3366,22 @@ impl<'a> Parser<'a> {
         match self.current.kind {
             TokenKind::Minus => {
                 self.advance();
+                // Fold -<integer> at parse time to handle i64::MIN correctly
+                // (9223372036854775808 overflows i64 as positive but "-9223372036854775808" parses fine)
+                if self.current.kind == TokenKind::Integer {
+                    let text = &self.current.text;
+                    if let Ok(val) = format!("-{text}").parse::<i64>() {
+                        self.advance();
+                        return Ok(Expression::Literal(Literal::Integer(val)));
+                    }
+                }
+                if self.current.kind == TokenKind::Float {
+                    let text = &self.current.text;
+                    if let Ok(val) = format!("-{text}").parse::<f64>() {
+                        self.advance();
+                        return Ok(Expression::Literal(Literal::Float(val)));
+                    }
+                }
                 let operand = self.parse_unary_expression()?;
                 Ok(Expression::Unary {
                     op: UnaryOp::Neg,
@@ -3565,6 +3581,18 @@ impl<'a> Parser<'a> {
             }
             _ if self.is_identifier() => {
                 let name = self.get_identifier_name();
+
+                // IEEE 754 special float literals (only when not a function call)
+                if name.eq_ignore_ascii_case("NaN") && self.peek_kind() != TokenKind::LParen {
+                    self.advance();
+                    return Ok(Expression::Literal(Literal::Float(f64::NAN)));
+                }
+                if (name.eq_ignore_ascii_case("Inf") || name.eq_ignore_ascii_case("Infinity"))
+                    && self.peek_kind() != TokenKind::LParen
+                {
+                    self.advance();
+                    return Ok(Expression::Literal(Literal::Float(f64::INFINITY)));
+                }
 
                 // SESSION_USER: ISO GQL system value expression
                 if name.eq_ignore_ascii_case("SESSION_USER") {

@@ -247,6 +247,7 @@ nav:
       - Aggregations: user-guide/sparql/aggregations.md
       - Property Paths: user-guide/sparql/paths.md
       - Built-in Functions: user-guide/sparql/functions.md
+      - Loading RDF Data: user-guide/sparql/loading.md
     - SQL/PGQ Query Language:
       - user-guide/sql-pgq/index.md
     - Vector Search:

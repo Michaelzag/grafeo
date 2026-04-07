@@ -111,7 +111,6 @@ tests:
         - [39.99, 1299.99]
 
   - name: min_price_gremlin
-    skip: "Gremlin min on float properties"
     variants:
       gremlin: "g.V().hasLabel('Product').values('price').min()"
     expect:
@@ -119,7 +118,6 @@ tests:
         - [39.99]
 
   - name: max_price_gremlin
-    skip: "Gremlin max on float properties"
     variants:
       gremlin: "g.V().hasLabel('Product').values('price').max()"
     expect:

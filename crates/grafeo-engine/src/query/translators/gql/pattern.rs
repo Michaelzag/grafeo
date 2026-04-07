@@ -460,6 +460,11 @@ impl GqlTranslator {
     }
 
     /// Builds a predicate expression for property filters like {name: 'Alix', age: 30}.
+    ///
+    /// When a pattern property is null (e.g., `{key: null}`), we emit `IS NULL`
+    /// instead of equality, because `null = null` is `null` (falsy) in
+    /// three-valued logic but a null property pattern should match absent or
+    /// null-valued properties.
     pub(super) fn build_property_predicate(
         &self,
         variable: &str,
@@ -473,11 +478,18 @@ impl GqlTranslator {
                     property: prop_name.clone(),
                 };
                 let right = self.translate_expression(prop_value)?;
-                Ok(LogicalExpression::Binary {
-                    left: Box::new(left),
-                    op: BinaryOp::Eq,
-                    right: Box::new(right),
-                })
+                if matches!(right, LogicalExpression::Literal(Value::Null)) {
+                    Ok(LogicalExpression::Unary {
+                        op: UnaryOp::IsNull,
+                        operand: Box::new(left),
+                    })
+                } else {
+                    Ok(LogicalExpression::Binary {
+                        left: Box::new(left),
+                        op: BinaryOp::Eq,
+                        right: Box::new(right),
+                    })
+                }
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -590,9 +602,18 @@ impl GqlTranslator {
                 None
             };
 
+            // Detect cycle pattern: (s)-[*]->(s) where source == target variable.
+            // The expand must use a temporary target, then filter for equality.
+            let is_cycle = target_var == current_source;
+            let expand_target = if is_cycle {
+                format!("_cycle_{}", rand_id())
+            } else {
+                target_var.clone()
+            };
+
             plan = LogicalOperator::Expand(ExpandOp {
                 from_variable: current_source,
-                to_variable: target_var.clone(),
+                to_variable: expand_target.clone(),
                 edge_variable: edge_var,
                 direction,
                 edge_types,
@@ -602,6 +623,26 @@ impl GqlTranslator {
                 path_alias: expand_path_alias,
                 path_mode,
             });
+
+            // For cycle patterns, enforce that expanded target == original source
+            if is_cycle {
+                plan = wrap_filter(
+                    plan,
+                    LogicalExpression::Binary {
+                        left: Box::new(LogicalExpression::FunctionCall {
+                            name: "id".into(),
+                            args: vec![LogicalExpression::Variable(expand_target.clone())],
+                            distinct: false,
+                        }),
+                        op: BinaryOp::Eq,
+                        right: Box::new(LogicalExpression::FunctionCall {
+                            name: "id".into(),
+                            args: vec![LogicalExpression::Variable(target_var.clone())],
+                            distinct: false,
+                        }),
+                    },
+                );
+            }
 
             // Add filter for edge properties
             if !edge.properties.is_empty()

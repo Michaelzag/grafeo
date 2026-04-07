@@ -1303,6 +1303,21 @@ impl<'a> Parser<'a> {
         match self.current.kind {
             TokenKind::Minus => {
                 self.advance();
+                // Fold -<integer> at parse time to handle i64::MIN correctly
+                if self.current.kind == TokenKind::Integer {
+                    let text = &self.current.text;
+                    if let Ok(val) = format!("-{text}").parse::<i64>() {
+                        self.advance();
+                        return Ok(Expression::Literal(Literal::Integer(val)));
+                    }
+                }
+                if self.current.kind == TokenKind::Float {
+                    let text = &self.current.text;
+                    if let Ok(val) = format!("-{text}").parse::<f64>() {
+                        self.advance();
+                        return Ok(Expression::Literal(Literal::Float(val)));
+                    }
+                }
                 let operand = self.parse_unary_expression()?;
                 Ok(Expression::Unary {
                     op: UnaryOp::Neg,
@@ -1456,6 +1471,17 @@ impl<'a> Parser<'a> {
             _ if self.can_be_identifier() => {
                 let name = self.get_identifier_text();
                 let lower = name.to_lowercase();
+
+                // IEEE 754 special float literals (only when not a function call)
+                if lower == "nan" && self.peek_kind() != TokenKind::LParen {
+                    self.advance();
+                    return Ok(Expression::Literal(Literal::Float(f64::NAN)));
+                }
+                if (lower == "inf" || lower == "infinity") && self.peek_kind() != TokenKind::LParen
+                {
+                    self.advance();
+                    return Ok(Expression::Literal(Literal::Float(f64::INFINITY)));
+                }
 
                 // Check for list predicate functions: all, any, none, single
                 if matches!(lower.as_str(), "all" | "any" | "none" | "single")
