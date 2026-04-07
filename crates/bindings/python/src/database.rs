@@ -1634,7 +1634,30 @@ impl PyGrafeoDB {
     /// ```
     #[pyo3(signature = (isolation_level=None))]
     fn begin_transaction(&self, isolation_level: Option<&str>) -> PyResult<PyTransaction> {
-        PyTransaction::new(self.inner.clone(), isolation_level)
+        PyTransaction::new(self.inner.clone(), isolation_level, None)
+    }
+
+    /// Begin a transaction with an explicit CDC override.
+    ///
+    /// When ``cdc_enabled`` is ``True``, mutations in this transaction are
+    /// tracked regardless of the database default. ``False`` disables tracking
+    /// for this transaction only.
+    ///
+    /// Example:
+    /// ```python
+    /// with db.begin_transaction_with_cdc(True) as tx:
+    ///     tx.execute("INSERT (:Person {name: 'Alix'})")
+    ///     tx.commit()
+    /// # This transaction's changes appear in node_history()
+    /// ```
+    #[cfg(feature = "cdc")]
+    #[pyo3(signature = (cdc_enabled, isolation_level=None))]
+    fn begin_transaction_with_cdc(
+        &self,
+        cdc_enabled: bool,
+        isolation_level: Option<&str>,
+    ) -> PyResult<PyTransaction> {
+        PyTransaction::new(self.inner.clone(), isolation_level, Some(cdc_enabled))
     }
 
     /// Get database statistics.
@@ -2631,8 +2654,12 @@ impl PyTransaction {
         ))
     }
 
-    /// Create a new transaction with an optional isolation level.
-    fn new(db: Arc<RwLock<GrafeoDB>>, isolation_level: Option<&str>) -> PyResult<Self> {
+    /// Create a new transaction with an optional isolation level and CDC override.
+    fn new(
+        db: Arc<RwLock<GrafeoDB>>,
+        isolation_level: Option<&str>,
+        #[allow(unused_variables)] cdc_override: Option<bool>,
+    ) -> PyResult<Self> {
         // Parse isolation level string
         let (level, level_name) = match isolation_level {
             Some("read_committed") => (
@@ -2652,10 +2679,20 @@ impl PyTransaction {
             }
         };
 
-        // Create session from db, but drop the read guard before moving db
+        // Create session from db, using CDC override when available
         let mut session = {
             let db_guard = db.read();
-            db_guard.session()
+            #[cfg(feature = "cdc")]
+            {
+                match cdc_override {
+                    Some(cdc) => db_guard.session_with_cdc(cdc),
+                    None => db_guard.session(),
+                }
+            }
+            #[cfg(not(feature = "cdc"))]
+            {
+                db_guard.session()
+            }
         };
 
         // Begin the transaction with the specified isolation level
