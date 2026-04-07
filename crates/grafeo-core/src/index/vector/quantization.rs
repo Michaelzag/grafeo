@@ -699,7 +699,8 @@ impl ProductQuantizer {
     ///
     /// # Panics
     ///
-    /// Panics if `centroids.len()` does not equal `num_subvectors * num_centroids * (dimensions / num_subvectors)`.
+    /// Panics if `num_subvectors` is zero (division by zero), or if `centroids.len()`
+    /// does not equal `num_subvectors * num_centroids * (dimensions / num_subvectors)`.
     #[must_use]
     pub fn with_centroids(
         num_subvectors: usize,

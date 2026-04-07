@@ -877,13 +877,20 @@ impl LpgStore {
                 .collect();
         }
 
-        // Cleanup outside the edges lock: adjacency, properties, counters
-        for &(edge_id, src, dst, type_id) in &deleted {
-            self.forward_adj.mark_deleted(src, edge_id);
-            if let Some(ref backward) = self.backward_adj {
-                backward.mark_deleted(dst, edge_id);
-            }
+        // Batch-update adjacency under a single write lock so concurrent
+        // readers of neighbors()/edges_from() never see a partially detached node.
+        let fwd_batch: Vec<(NodeId, EdgeId)> =
+            deleted.iter().map(|&(eid, src, _, _)| (src, eid)).collect();
+        self.forward_adj.batch_mark_deleted(&fwd_batch);
 
+        if let Some(ref backward) = self.backward_adj {
+            let bwd_batch: Vec<(NodeId, EdgeId)> =
+                deleted.iter().map(|&(eid, _, dst, _)| (dst, eid)).collect();
+            backward.batch_mark_deleted(&bwd_batch);
+        }
+
+        // Properties and counters (no atomicity requirement with adjacency)
+        for &(edge_id, _, _, type_id) in &deleted {
             #[cfg(not(feature = "temporal"))]
             self.edge_properties.remove_all(edge_id);
             #[cfg(feature = "temporal")]
@@ -956,13 +963,20 @@ impl LpgStore {
                 .collect();
         }
 
-        // Cleanup outside the versions lock: adjacency, properties, counters
-        for &(edge_id, src, dst, type_id) in &deleted {
-            self.forward_adj.mark_deleted(src, edge_id);
-            if let Some(ref backward) = self.backward_adj {
-                backward.mark_deleted(dst, edge_id);
-            }
+        // Batch-update adjacency under a single write lock so concurrent
+        // readers of neighbors()/edges_from() never see a partially detached node.
+        let fwd_batch: Vec<(NodeId, EdgeId)> =
+            deleted.iter().map(|&(eid, src, _, _)| (src, eid)).collect();
+        self.forward_adj.batch_mark_deleted(&fwd_batch);
 
+        if let Some(ref backward) = self.backward_adj {
+            let bwd_batch: Vec<(NodeId, EdgeId)> =
+                deleted.iter().map(|&(eid, _, dst, _)| (dst, eid)).collect();
+            backward.batch_mark_deleted(&bwd_batch);
+        }
+
+        // Properties and counters (no atomicity requirement with adjacency)
+        for &(edge_id, _, _, type_id) in &deleted {
             #[cfg(not(feature = "temporal"))]
             self.edge_properties.remove_all(edge_id);
             #[cfg(feature = "temporal")]

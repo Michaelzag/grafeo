@@ -225,7 +225,8 @@ impl Catalog {
     ///
     /// # Errors
     ///
-    /// Returns `CatalogError::SchemaNotEnabled` if schema constraints are disabled.
+    /// Returns `CatalogError::SchemaNotEnabled` if schema is disabled, or a
+    /// schema-specific error if the operation fails (e.g. duplicate constraint).
     pub fn add_unique_constraint(
         &self,
         label: LabelId,
@@ -243,7 +244,8 @@ impl Catalog {
     ///
     /// # Errors
     ///
-    /// Returns `CatalogError::SchemaNotEnabled` if schema constraints are disabled.
+    /// Returns `CatalogError::SchemaNotEnabled` if schema is disabled, or a
+    /// schema-specific error if the operation fails (e.g. duplicate constraint).
     pub fn add_required_property(
         &self,
         label: LabelId,
