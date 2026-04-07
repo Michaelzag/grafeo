@@ -3582,12 +3582,14 @@ impl<'a> Parser<'a> {
             _ if self.is_identifier() => {
                 let name = self.get_identifier_name();
 
-                // IEEE 754 special float literals
-                if name.eq_ignore_ascii_case("NaN") {
+                // IEEE 754 special float literals (only when not a function call)
+                if name.eq_ignore_ascii_case("NaN") && self.peek_kind() != TokenKind::LParen {
                     self.advance();
                     return Ok(Expression::Literal(Literal::Float(f64::NAN)));
                 }
-                if name.eq_ignore_ascii_case("Inf") || name.eq_ignore_ascii_case("Infinity") {
+                if (name.eq_ignore_ascii_case("Inf") || name.eq_ignore_ascii_case("Infinity"))
+                    && self.peek_kind() != TokenKind::LParen
+                {
                     self.advance();
                     return Ok(Expression::Literal(Literal::Float(f64::INFINITY)));
                 }

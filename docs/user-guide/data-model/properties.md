@@ -26,6 +26,8 @@ Properties are key-value pairs stored on nodes and edges. Grafeo supports a rich
 | `Duration` | `'P1Y2M3D'` | ISO 8601 duration (months, days, nanoseconds) |
 | `DateTime` | `'2024-01-15T10:30:00Z'` | Date and time (microsecond precision) |
 | `Null` | `null` | Absence of value |
+| `GCounter` | `{"$gcounter": {...}}` | Grow-only CRDT counter |
+| `ONCounter` | `{"$pncounter": {...}}` | Positive-negative CRDT counter |
 
 ## Using Properties
 
@@ -226,3 +228,42 @@ LIMIT 10
 | `euclidean_distance(a, b)`  | L2 distance                                        |
 | `dot_product(a, b)`         | Inner product                                      |
 | `manhattan_distance(a, b)`  | L1 distance                                        |
+
+## CRDT Counters
+
+Grafeo supports two conflict-free replicated counter types for distributed
+counting without coordination. These are first-class property values, stored
+and queried like any other type.
+
+### GCounter (grow-only)
+
+A grow-only counter backed by per-replica tallies. Each replica increments its
+own slot; the logical value is the sum of all slots. Merge takes the per-replica
+maximum, making it commutative and idempotent.
+
+In bindings the value is returned as a structured object:
+
+```json
+{
+  "$gcounter": { "replica-a": 5, "replica-b": 3 },
+  "$value": 8
+}
+```
+
+`$value` is the computed total (sum of all replica slots).
+
+### ONCounter (positive-negative)
+
+Two grow-only maps track increments and decrements independently. The logical
+value is `sum(pos) - sum(neg)`. Merge applies per-replica max to each map.
+
+```json
+{
+  "$pncounter": { "pos": { "replica-a": 10 }, "neg": { "replica-a": 3 } },
+  "$value": 7
+}
+```
+
+Both counter types survive snapshot export/import and JSON round-trips without
+loss. In aggregation contexts (GROUP BY, ORDER BY) they hash and compare by
+their logical value.

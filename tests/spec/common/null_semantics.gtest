@@ -423,3 +423,57 @@ tests:
       rows:
         - [null, y, 99]
         - [real, y, null]
+
+  # ---------------------------------------------------------------------------
+  # SET += {key: null} removes property
+  # ---------------------------------------------------------------------------
+
+  - name: set_plus_equals_null_removes_node_property
+    # SET n += {key: null} must remove the property, not store null
+    statements:
+      - "INSERT (:SetNull {name: 'Alix', price: 42})"
+      - "MATCH (n:SetNull) SET n += {price: null}"
+      - "MATCH (n:SetNull) RETURN n.name AS name, n.price AS price"
+    expect:
+      rows:
+        - [Alix, null]
+
+  - name: set_plus_equals_null_preserves_other_properties
+    # Only the null-valued key is removed; others from the map are set normally
+    statements:
+      - "INSERT (:SetMix {a: 1, b: 2, c: 3})"
+      - "MATCH (n:SetMix) SET n += {b: null, c: 99, d: 'new'}"
+      - "MATCH (n:SetMix) RETURN n.a AS a, n.b AS b, n.c AS c, n.d AS d"
+    expect:
+      rows:
+        - [1, null, 99, new]
+
+  - name: set_plus_equals_null_removes_edge_property
+    statements:
+      - "INSERT (:EP {name: 'a'})-[:R {weight: 5, tag: 'x'}]->(:EP {name: 'b'})"
+      - "MATCH (:EP)-[r:R]->(:EP) SET r += {weight: null}"
+      - "MATCH (:EP)-[r:R]->(:EP) RETURN r.weight AS w, r.tag AS t"
+    expect:
+      rows:
+        - [null, x]
+
+  - name: set_plus_equals_all_null_clears_all
+    # Map with all null values removes all listed properties
+    statements:
+      - "INSERT (:ClearAll {x: 1, y: 2})"
+      - "MATCH (n:ClearAll) SET n += {x: null, y: null}"
+      - "MATCH (n:ClearAll) RETURN n.x AS x, n.y AS y"
+    expect:
+      rows:
+        - [null, null]
+
+  - name: negative_limit_returns_empty
+    query: "MATCH (n) RETURN n LIMIT -1"
+    expect:
+      empty: true
+
+  - name: negative_limit_returns_empty_cypher
+    variants:
+      cypher: "MATCH (n) RETURN n LIMIT -1"
+    expect:
+      empty: true

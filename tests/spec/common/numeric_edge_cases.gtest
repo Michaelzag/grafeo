@@ -26,7 +26,6 @@ tests:
         - [9223372036854775807]
 
   - name: min_int64
-    skip: "min int64 literal overflows parser"
     setup:
       - "INSERT (:N {v: -9223372036854775808})"
     query: "MATCH (n:N) RETURN n.v AS val"
@@ -34,21 +33,36 @@ tests:
       rows:
         - [-9223372036854775808]
 
+  - name: min_int64_cypher
+    setup:
+      - "INSERT (:N {v: -9223372036854775808})"
+    variants:
+      cypher: "MATCH (n:N) RETURN n.v AS val"
+    expect:
+      rows:
+        - [-9223372036854775808]
+
+  - name: min_int64_as_literal_expression
+    query: "RETURN -9223372036854775808 AS val"
+    expect:
+      rows:
+        - [-9223372036854775808]
+
   - name: int64_overflow_addition
-    skip: "overflow wraps instead of error"
     setup:
       - "INSERT (:N {v: 9223372036854775807})"
     query: "MATCH (n:N) RETURN n.v + 1 AS val"
     expect:
-      error: "overflow"
+      rows:
+        - [null]
 
   - name: int64_underflow_subtraction
-    skip: "underflow wraps instead of error"
     setup:
       - "INSERT (:N {v: -9223372036854775808})"
     query: "MATCH (n:N) RETURN n.v - 1 AS val"
     expect:
-      error: "overflow"
+      rows:
+        - [null]
 
   # ---------------------------------------------------------------------------
   # Float precision
@@ -134,6 +148,44 @@ tests:
   # ---------------------------------------------------------------------------
   # NaN
   # ---------------------------------------------------------------------------
+
+  - name: nan_literal_keyword
+    query: "RETURN NaN AS val"
+    expect:
+      rows:
+        - [NaN]
+
+  - name: nan_literal_keyword_cypher
+    variants:
+      cypher: "RETURN NaN AS val"
+    expect:
+      rows:
+        - [NaN]
+
+  - name: inf_literal_keyword
+    query: "RETURN Inf AS val"
+    expect:
+      rows:
+        - [Infinity]
+
+  - name: infinity_literal_keyword
+    query: "RETURN Infinity AS val"
+    expect:
+      rows:
+        - [Infinity]
+
+  - name: negative_infinity_literal
+    query: "RETURN -Inf AS val"
+    expect:
+      rows:
+        - [-Infinity]
+
+  - name: inf_literal_keyword_cypher
+    variants:
+      cypher: "RETURN Inf AS val"
+    expect:
+      rows:
+        - [Infinity]
 
   - name: nan_from_zero_div_zero
     setup:

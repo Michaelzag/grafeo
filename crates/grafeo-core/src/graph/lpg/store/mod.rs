@@ -189,59 +189,6 @@ impl Default for LpgStoreConfig {
     }
 }
 
-/// The core in-memory graph storage.
-///
-/// Everything lives here: nodes, edges, properties, adjacency indexes, and
-/// version chains for MVCC. Concurrent reads never block each other.
-///
-/// Most users should go through `GrafeoDB` (from the `grafeo_engine` crate) which
-/// adds transaction management and query execution. Use `LpgStore` directly
-/// when you need raw performance for algorithm implementations.
-///
-/// # Example
-///
-/// ```
-/// use grafeo_core::graph::lpg::LpgStore;
-/// use grafeo_core::graph::Direction;
-///
-/// let store = LpgStore::new().expect("arena allocation");
-///
-/// // Create a small social network
-/// let alix = store.create_node(&["Person"]);
-/// let gus = store.create_node(&["Person"]);
-/// store.create_edge(alix, gus, "KNOWS");
-///
-/// // Traverse outgoing edges
-/// for neighbor in store.neighbors(alix, Direction::Outgoing) {
-///     println!("Alix knows node {:?}", neighbor);
-/// }
-/// ```
-///
-/// # Lock Ordering
-///
-/// `LpgStore` contains multiple `RwLock` fields that must be acquired in a
-/// consistent order to prevent deadlocks. Always acquire locks in this order:
-///
-/// ## Level 1 - Entity Storage (mutually exclusive via feature flag)
-/// 1. `nodes` / `node_versions`
-/// 2. `edges` / `edge_versions`
-///
-/// ## Level 2 - Catalogs (acquire as pairs when writing)
-/// 3. `label_to_id` + `id_to_label`
-/// 4. `edge_type_to_id` + `id_to_edge_type`
-///
-/// ## Level 3 - Indexes
-/// 5. `label_index`
-/// 6. `node_labels`
-/// 7. `property_indexes`
-///
-/// ## Level 4 - Statistics
-/// 8. `statistics`
-///
-/// ## Level 5 - Nested Locks (internal to other structs)
-/// 9. `PropertyStorage::columns` (via `node_properties`/`edge_properties`)
-/// 10. `ChunkedAdjacency::lists` (via `forward_adj`/`backward_adj`)
-///
 /// Bidirectional label name/ID registry.
 ///
 /// Combines the name-to-ID and ID-to-name mappings behind a single lock,
@@ -310,12 +257,58 @@ impl LabelRegistry {
     }
 }
 
-/// In-memory Labeled Property Graph store with MVCC.
+/// The core in-memory graph storage.
 ///
-/// ## Lock ordering
+/// Everything lives here: nodes, edges, properties, adjacency indexes, and
+/// version chains for MVCC. Concurrent reads never block each other.
 ///
-/// See field-level comments for lock order levels. Always acquire locks
-/// in ascending order to prevent deadlocks.
+/// Most users should go through `GrafeoDB` (from the `grafeo_engine` crate) which
+/// adds transaction management and query execution. Use `LpgStore` directly
+/// when you need raw performance for algorithm implementations.
+///
+/// # Example
+///
+/// ```
+/// use grafeo_core::graph::lpg::LpgStore;
+/// use grafeo_core::graph::Direction;
+///
+/// let store = LpgStore::new().expect("arena allocation");
+///
+/// // Create a small social network
+/// let alix = store.create_node(&["Person"]);
+/// let gus = store.create_node(&["Person"]);
+/// store.create_edge(alix, gus, "KNOWS");
+///
+/// // Traverse outgoing edges
+/// for neighbor in store.neighbors(alix, Direction::Outgoing) {
+///     println!("Alix knows node {:?}", neighbor);
+/// }
+/// ```
+///
+/// # Lock Ordering
+///
+/// `LpgStore` contains multiple `RwLock` fields that must be acquired in a
+/// consistent order to prevent deadlocks. Always acquire locks in this order:
+///
+/// ## Level 1: Entity Storage (mutually exclusive via feature flag)
+/// 1. `nodes` / `node_versions`
+/// 2. `edges` / `edge_versions`
+///
+/// ## Level 2: Catalogs
+/// 3. `label_registry`
+/// 4. `edge_type_to_id` + `id_to_edge_type`
+///
+/// ## Level 3: Indexes
+/// 5. `label_index`
+/// 6. `node_labels`
+/// 7. `property_indexes`
+///
+/// ## Level 4: Statistics
+/// 8. `statistics`
+///
+/// ## Level 5: Nested Locks (internal to other structs)
+/// 9. `PropertyStorage::columns` (via `node_properties`/`edge_properties`)
+/// 10. `ChunkedAdjacency::lists` (via `forward_adj`/`backward_adj`)
 ///
 /// ## Rules
 /// - Never hold entity locks while acquiring catalog locks in a different scope.

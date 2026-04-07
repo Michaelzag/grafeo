@@ -217,6 +217,15 @@ tests:
     expect:
       count: 1
 
+  - name: nodes_of_path_property_access
+    # nodes(p) must return property maps, enabling [n IN nodes(p) | n.name]
+    setup:
+      - "INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})"
+    query: "MATCH p = (:Person {name: 'Alix'})-[:KNOWS]->(:Person) RETURN [n IN nodes(p) | n.name] AS names"
+    expect:
+      rows:
+        - ["[Alix, Gus]"]
+
   - name: edges_of_path
     setup:
       - "INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})"

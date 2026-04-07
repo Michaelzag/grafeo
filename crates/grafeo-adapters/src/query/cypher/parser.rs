@@ -1472,12 +1472,13 @@ impl<'a> Parser<'a> {
                 let name = self.get_identifier_text();
                 let lower = name.to_lowercase();
 
-                // IEEE 754 special float literals
-                if lower == "nan" {
+                // IEEE 754 special float literals (only when not a function call)
+                if lower == "nan" && self.peek_kind() != TokenKind::LParen {
                     self.advance();
                     return Ok(Expression::Literal(Literal::Float(f64::NAN)));
                 }
-                if lower == "inf" || lower == "infinity" {
+                if (lower == "inf" || lower == "infinity") && self.peek_kind() != TokenKind::LParen
+                {
                     self.advance();
                     return Ok(Expression::Literal(Literal::Float(f64::INFINITY)));
                 }
