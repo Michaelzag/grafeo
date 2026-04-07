@@ -400,6 +400,12 @@ Full documentation is available at [grafeo.dev](https://grafeo.dev).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
 
+## Sponsors
+
+Thank you to the people and organizations supporting Grafeo's development:
+
+- [**Thibaut Mélen**](https://github.com/ThibautMelen) from [Supernovae](https://github.com/supernovae-st)
+
 ## Acknowledgments
 
 Grafeo's execution engine draws inspiration from:
