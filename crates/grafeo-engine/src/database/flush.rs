@@ -66,12 +66,10 @@ pub(super) fn flush(
                     result.push((section.section_type(), section.serialize()?));
                 }
             }
-            // If nothing is dirty on a periodic checkpoint, still write all sections
-            // to ensure the container has a complete state for crash recovery.
+            // If nothing is dirty on a periodic checkpoint, skip the write entirely.
+            // Previous sections remain intact in the container.
             if result.is_empty() {
-                for section in sections {
-                    result.push((section.section_type(), section.serialize()?));
-                }
+                return Ok(());
             }
             result
         }
@@ -108,7 +106,7 @@ pub(super) fn flush(
 
     maybe_crash("flush:after_write");
 
-    // Truncate WAL (all data is now in the container)
+    // Sync WAL to disk (all data is now in the container)
     #[cfg(feature = "wal")]
     if let Some(wal) = wal {
         wal.sync()?;

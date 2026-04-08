@@ -33,6 +33,7 @@ mod query;
 #[cfg(feature = "rdf")]
 mod rdf_ops;
 mod search;
+pub(crate) mod section_consumer;
 #[cfg(feature = "wal")]
 pub(crate) mod wal_store;
 
@@ -484,7 +485,7 @@ impl GrafeoDB {
         #[cfg(feature = "cdc")]
         let cdc_enabled_val = config.cdc_enabled;
 
-        Ok(Self {
+        let db = Self {
             config,
             store: Some(store),
             catalog,
@@ -514,7 +515,12 @@ impl GrafeoDB {
             current_graph: RwLock::new(None),
             current_schema: RwLock::new(None),
             read_only: is_read_only,
-        })
+        };
+
+        // Register storage sections as memory consumers for pressure tracking
+        db.register_section_consumers();
+
+        Ok(db)
     }
 
     /// Creates a database backed by a custom [`GraphStoreMut`] implementation.
@@ -1599,7 +1605,7 @@ impl GrafeoDB {
             if let Some(ref wal) = self.wal {
                 wal.sync()?;
             }
-            self.checkpoint_to_file(fm)?;
+            self.checkpoint_to_file(fm, flush::FlushReason::Checkpoint)?;
 
             // Release WAL file handles before removing sidecar directory.
             // On Windows, open handles prevent directory deletion.
@@ -1657,6 +1663,56 @@ impl GrafeoDB {
         Ok(())
     }
 
+    /// Registers storage sections as [`MemoryConsumer`]s with the BufferManager.
+    ///
+    /// Each section reports its memory usage to the buffer manager, enabling
+    /// accurate pressure tracking. Called once after database construction.
+    fn register_section_consumers(&self) {
+        let Some(ref store) = self.store else {
+            return;
+        };
+
+        // LPG store: always present
+        let lpg = grafeo_core::graph::lpg::LpgStoreSection::new(Arc::clone(store));
+        self.buffer_manager
+            .register_consumer(Arc::new(section_consumer::SectionConsumer::new(Arc::new(
+                lpg,
+            ))));
+
+        // RDF store: only when data exists
+        #[cfg(feature = "rdf")]
+        if !self.rdf_store.is_empty() || self.rdf_store.graph_count() > 0 {
+            let rdf = grafeo_core::graph::rdf::RdfStoreSection::new(Arc::clone(&self.rdf_store));
+            self.buffer_manager.register_consumer(Arc::new(
+                section_consumer::SectionConsumer::new(Arc::new(rdf)),
+            ));
+        }
+
+        // Vector indexes
+        #[cfg(feature = "vector-index")]
+        {
+            let indexes = store.vector_index_entries();
+            if !indexes.is_empty() {
+                let vector = grafeo_core::index::vector::VectorStoreSection::new(indexes);
+                self.buffer_manager.register_consumer(Arc::new(
+                    section_consumer::SectionConsumer::new(Arc::new(vector)),
+                ));
+            }
+        }
+
+        // Text indexes
+        #[cfg(feature = "text-index")]
+        {
+            let indexes = store.text_index_entries();
+            if !indexes.is_empty() {
+                let text = grafeo_core::index::text::TextIndexSection::new(indexes);
+                self.buffer_manager.register_consumer(Arc::new(
+                    section_consumer::SectionConsumer::new(Arc::new(text)),
+                ));
+            }
+        }
+    }
+
     /// Builds section objects for the current database state.
     #[cfg(feature = "grafeo-file")]
     fn build_sections(&self) -> Vec<Box<dyn grafeo_common::storage::Section>> {
@@ -1708,7 +1764,7 @@ impl GrafeoDB {
     /// the sidecar (e.g. `close()`) should call `fm.remove_sidecar_wal()`
     /// separately after this returns.
     #[cfg(feature = "grafeo-file")]
-    fn checkpoint_to_file(&self, fm: &GrafeoFileManager) -> Result<()> {
+    fn checkpoint_to_file(&self, fm: &GrafeoFileManager, reason: flush::FlushReason) -> Result<()> {
         let sections = self.build_sections();
         let section_refs: Vec<&dyn grafeo_common::storage::Section> =
             sections.iter().map(|s| s.as_ref()).collect();
@@ -1718,7 +1774,7 @@ impl GrafeoDB {
             fm,
             &section_refs,
             &context,
-            flush::FlushReason::Checkpoint,
+            reason,
             #[cfg(feature = "wal")]
             self.wal.as_deref(),
         )?;

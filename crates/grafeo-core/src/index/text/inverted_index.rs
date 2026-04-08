@@ -253,6 +253,11 @@ impl InvertedIndex {
         (postings, doc_lengths, self.total_length)
     }
 
+    /// Override the BM25 configuration parameters.
+    pub fn set_config(&mut self, config: BM25Config) {
+        self.config = config;
+    }
+
     /// Restore the index from a snapshot. Replaces all current data.
     pub fn restore(
         &mut self,

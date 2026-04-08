@@ -16,4 +16,10 @@
 
 pub mod directory;
 
+#[cfg(feature = "wal")]
+pub mod mmap;
+
 pub use directory::SectionDirectory;
+
+#[cfg(feature = "wal")]
+pub use mmap::MmapSection;

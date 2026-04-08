@@ -120,13 +120,9 @@ impl Section for VectorStoreSection {
             })?;
 
         // Restore topology into existing indexes (matched by key)
-        for idx_snap in &snapshot.indexes {
-            if let Some((_, index)) = self.indexes.iter().find(|(k, _)| k == &idx_snap.key) {
-                index.restore_topology(
-                    idx_snap.entry_point,
-                    idx_snap.max_level,
-                    idx_snap.nodes.clone(),
-                );
+        for idx_snap in snapshot.indexes {
+            if let Some((_, index)) = self.indexes.iter().find(|(k, _)| *k == idx_snap.key) {
+                index.restore_topology(idx_snap.entry_point, idx_snap.max_level, idx_snap.nodes);
             }
         }
 

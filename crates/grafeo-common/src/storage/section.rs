@@ -197,6 +197,48 @@ pub trait Section: Send + Sync {
     fn memory_usage(&self) -> usize;
 }
 
+// ── Tier Override ───────────────────────────────────────────────────
+
+/// Controls whether a section stays in RAM, on disk, or is auto-managed.
+///
+/// The default (`Auto`) lets the [`BufferManager`](crate::memory::buffer::BufferManager)
+/// decide based on memory pressure. Power users can pin a section to a
+/// specific tier for predictable performance.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TierOverride {
+    /// Memory-first, spill to disk when budget exceeded (default).
+    #[default]
+    Auto,
+    /// Always keep in RAM. Fail with error if insufficient memory.
+    ForceRam,
+    /// Always use disk (mmap). Minimal RAM footprint.
+    ForceDisk,
+}
+
+/// Per-section memory configuration.
+///
+/// Allows power users to cap individual sections or pin them to a tier.
+/// Most users leave this at default (all sections auto-managed within the
+/// global memory budget).
+#[derive(Debug, Clone)]
+pub struct SectionMemoryConfig {
+    /// Hard cap on this section's RAM usage (bytes).
+    /// `None` means the section participates in the global budget with no
+    /// per-section cap. The BufferManager decides when to spill.
+    pub max_ram: Option<usize>,
+    /// Storage tier override.
+    pub tier: TierOverride,
+}
+
+impl Default for SectionMemoryConfig {
+    fn default() -> Self {
+        Self {
+            max_ram: None,
+            tier: TierOverride::Auto,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

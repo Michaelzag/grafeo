@@ -6,4 +6,6 @@
 
 pub mod section;
 
-pub use section::{Section, SectionDirectoryEntry, SectionFlags, SectionType};
+pub use section::{
+    Section, SectionDirectoryEntry, SectionFlags, SectionMemoryConfig, SectionType, TierOverride,
+};

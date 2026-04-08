@@ -247,27 +247,15 @@ impl PyQueryResult {
     #[cfg(feature = "arrow-export")]
     #[pyo3(signature = ())]
     fn to_arrow_ipc(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        let col_types = vec![grafeo_common::LogicalType::Any; self.columns.len()];
-        let batch = grafeo_engine::database::arrow::query_result_to_record_batch(
-            &self.columns,
-            &col_types,
-            &self.rows,
-        )
-        .map_err(|e| {
-            pyo3::exceptions::PyRuntimeError::new_err(format!("Arrow export failed: {e}"))
-        })?;
-        let ipc_bytes = grafeo_engine::database::arrow::record_batch_to_ipc_stream(&batch)
-            .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!("Arrow IPC failed: {e}"))
-            })?;
+        let ipc_bytes = self.to_ipc_bytes()?;
         Ok(pyo3::types::PyBytes::new(py, &ipc_bytes).into())
     }
 
     /// Convert to a PyArrow Table.
     ///
-    /// Requires pyarrow to be installed (`uv add pyarrow`). Returns a zero-copy
-    /// Arrow Table that can be used directly with DuckDB, Polars, pandas, or
-    /// any other Arrow-compatible tool.
+    /// Requires pyarrow to be installed (`uv add pyarrow`). Returns an Arrow
+    /// Table that can be used directly with DuckDB, Polars, pandas, or any
+    /// other Arrow-compatible tool.
     ///
     /// Example:
     /// ```python
@@ -286,20 +274,7 @@ impl PyQueryResult {
         })?;
         let ipc_mod = pa.getattr("ipc")?;
 
-        let col_types = vec![grafeo_common::LogicalType::Any; self.columns.len()];
-        let batch = grafeo_engine::database::arrow::query_result_to_record_batch(
-            &self.columns,
-            &col_types,
-            &self.rows,
-        )
-        .map_err(|e| {
-            pyo3::exceptions::PyRuntimeError::new_err(format!("Arrow export failed: {e}"))
-        })?;
-        let ipc_bytes = grafeo_engine::database::arrow::record_batch_to_ipc_stream(&batch)
-            .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!("Arrow IPC failed: {e}"))
-            })?;
-
+        let ipc_bytes = self.to_ipc_bytes()?;
         let py_bytes = pyo3::types::PyBytes::new(py, &ipc_bytes);
         let reader = ipc_mod.call_method1("open_stream", (py_bytes,))?;
         let table = reader.call_method0("read_all")?;
@@ -366,6 +341,23 @@ impl PyQueryResult {
             execution_time_ms,
             rows_scanned,
         }
+    }
+
+    /// Serializes the query result to Arrow IPC stream bytes.
+    #[cfg(feature = "arrow-export")]
+    fn to_ipc_bytes(&self) -> PyResult<Vec<u8>> {
+        let col_types = vec![grafeo_common::LogicalType::Any; self.columns.len()];
+        let batch = grafeo_engine::database::arrow::query_result_to_record_batch(
+            &self.columns,
+            &col_types,
+            &self.rows,
+        )
+        .map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!("Arrow export failed: {e}"))
+        })?;
+        grafeo_engine::database::arrow::record_batch_to_ipc_stream(&batch).map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!("Arrow IPC failed: {e}"))
+        })
     }
 
     /// Creates an empty result (used internally).

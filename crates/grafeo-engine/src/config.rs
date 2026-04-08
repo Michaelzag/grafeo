@@ -243,6 +243,23 @@ pub struct Config {
     /// Default: `false` (CDC is opt-in to avoid overhead on the mutation
     /// hot path).
     pub cdc_enabled: bool,
+
+    /// Per-section memory configuration.
+    ///
+    /// Maps `SectionType` to `SectionMemoryConfig` for sections that need
+    /// custom budgets or tier pinning. Sections not listed here use the
+    /// global `memory_limit` budget with automatic management.
+    pub section_configs: hashbrown::HashMap<
+        grafeo_common::storage::SectionType,
+        grafeo_common::storage::SectionMemoryConfig,
+    >,
+
+    /// Interval between automatic checkpoints.
+    ///
+    /// When set, the engine periodically flushes dirty sections to the
+    /// `.grafeo` container and truncates the WAL. `None` means checkpoints
+    /// only happen on explicit `wal_checkpoint()` or database close.
+    pub checkpoint_interval: Option<Duration>,
 }
 
 /// Configuration for adaptive query execution.
@@ -333,6 +350,8 @@ impl Default for Config {
             gc_interval: 100,
             access_mode: AccessMode::default(),
             cdc_enabled: false,
+            section_configs: hashbrown::HashMap::new(),
+            checkpoint_interval: None,
         }
     }
 }
@@ -502,6 +521,43 @@ impl Config {
     #[must_use]
     pub fn with_cdc(mut self) -> Self {
         self.cdc_enabled = true;
+        self
+    }
+
+    /// Sets memory configuration for a specific section type.
+    ///
+    /// Use this to cap a section's RAM usage or pin it to a storage tier.
+    /// Sections without explicit config use the global `memory_limit` budget.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use grafeo_engine::Config;
+    /// use grafeo_common::storage::{SectionType, SectionMemoryConfig, TierOverride};
+    ///
+    /// let config = Config::in_memory()
+    ///     .with_section_config(SectionType::VectorStore, SectionMemoryConfig {
+    ///         max_ram: Some(500 * 1024 * 1024), // 500 MB cap
+    ///         tier: TierOverride::Auto,
+    ///     });
+    /// ```
+    #[must_use]
+    pub fn with_section_config(
+        mut self,
+        section_type: grafeo_common::storage::SectionType,
+        config: grafeo_common::storage::SectionMemoryConfig,
+    ) -> Self {
+        self.section_configs.insert(section_type, config);
+        self
+    }
+
+    /// Sets the automatic checkpoint interval.
+    ///
+    /// When set, the engine periodically flushes dirty sections to disk.
+    /// Typical values: 30-300 seconds.
+    #[must_use]
+    pub fn with_checkpoint_interval(mut self, interval: Duration) -> Self {
+        self.checkpoint_interval = Some(interval);
         self
     }
 

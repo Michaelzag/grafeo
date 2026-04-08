@@ -79,7 +79,7 @@ impl GrafeoDB {
                     "no file manager configured for snapshot write".to_string(),
                 ));
             };
-            db.checkpoint_to_file(fm)
+            db.checkpoint_to_file(fm, super::flush::FlushReason::Checkpoint)
         })
         .await
         .map_err(|e| Error::Internal(format!("async snapshot task failed: {e}")))?

@@ -114,6 +114,10 @@ impl Section for TextIndexSection {
         for idx_snap in snapshot.indexes {
             if let Some((_, index_lock)) = self.indexes.iter().find(|(k, _)| *k == idx_snap.key) {
                 let mut index = index_lock.write();
+                index.set_config(super::BM25Config {
+                    k1: idx_snap.k1,
+                    b: idx_snap.b,
+                });
                 index.restore(
                     idx_snap.postings,
                     idx_snap.doc_lengths,

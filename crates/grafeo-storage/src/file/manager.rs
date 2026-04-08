@@ -568,6 +568,76 @@ impl GrafeoFileManager {
         Ok(data)
     }
 
+    /// Memory-maps a single section for zero-copy read access.
+    ///
+    /// The section's CRC-32 is verified against the mmap'd bytes before
+    /// returning, which also warms the OS page cache. Only sections with
+    /// `flags.mmap_able = true` can be mapped (index sections).
+    ///
+    /// The returned [`MmapSection`](crate::container::MmapSection) is
+    /// independent of the file mutex: multiple mmaps can coexist, and the
+    /// file manager can continue writing while mmaps are held.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The section is not mmap-able (data section)
+    /// - The mmap system call fails
+    /// - The CRC-32 checksum does not match (corrupt data)
+    #[allow(unsafe_code)]
+    pub fn mmap_section(
+        &self,
+        entry: &grafeo_common::storage::SectionDirectoryEntry,
+    ) -> Result<crate::container::MmapSection> {
+        if !entry.flags.mmap_able {
+            return Err(Error::Internal(format!(
+                "section {:?} is not mmap-able (data sections must be deserialized)",
+                entry.section_type
+            )));
+        }
+
+        if entry.length == 0 {
+            return Err(Error::Internal(format!(
+                "section {:?} has zero length, cannot mmap",
+                entry.section_type
+            )));
+        }
+
+        let file = self.file.lock();
+
+        // SAFETY: We hold an exclusive lock on the `.grafeo` file, preventing
+        // concurrent modification by other processes. The mapping is read-only.
+        // The section region [offset .. offset+length] was written by
+        // write_sections() and its CRC is verified below before the mmap
+        // is exposed to callers.
+        let mmap = unsafe {
+            memmap2::MmapOptions::new()
+                .offset(entry.offset)
+                .len(entry.length as usize)
+                .map(&*file)
+        }
+        .map_err(Error::Io)?;
+
+        drop(file);
+
+        // Verify CRC on the mmap'd bytes. This reads through the mapping,
+        // which triggers page faults and warms the OS page cache: a free
+        // prefetch disguised as an integrity check.
+        let actual_crc = crc32fast::hash(&mmap);
+        if actual_crc != entry.checksum {
+            return Err(Error::Internal(format!(
+                "section {:?} CRC mismatch: expected {:#010X}, got {actual_crc:#010X}",
+                entry.section_type, entry.checksum
+            )));
+        }
+
+        Ok(crate::container::MmapSection::new(
+            mmap,
+            entry.section_type,
+            entry.checksum,
+        ))
+    }
+
     /// Releases the file lock and syncs.
     ///
     /// # Errors
@@ -891,5 +961,200 @@ mod tests {
 
         assert_eq!(ro1.read_snapshot().unwrap(), b"coexist data");
         assert_eq!(ro2.read_snapshot().unwrap(), b"coexist data");
+    }
+
+    // ── Mmap section tests ─────────────────────────────────────────
+
+    #[test]
+    fn mmap_section_roundtrip() {
+        use grafeo_common::storage::SectionType;
+
+        let dir = test_dir();
+        let path = dir.path().join("mmap.grafeo");
+
+        let manager = GrafeoFileManager::create(&path).unwrap();
+
+        // Write two sections: one data (LPG), one index (VectorStore)
+        let lpg_data = b"lpg node data here";
+        let vector_data = vec![0x42u8; 8192]; // 8 KiB of vector embeddings
+
+        manager
+            .write_sections(
+                &[
+                    (SectionType::LpgStore, lpg_data.as_slice()),
+                    (SectionType::VectorStore, &vector_data),
+                ],
+                1,
+                1,
+                10,
+                5,
+            )
+            .unwrap();
+
+        // Read the directory to get entries
+        let section_dir = manager.read_section_directory().unwrap().unwrap();
+
+        // Mmap the VectorStore section (mmap-able)
+        let vector_entry = section_dir.find(SectionType::VectorStore).unwrap();
+        let mmap = manager.mmap_section(vector_entry).unwrap();
+
+        assert_eq!(mmap.section_type(), SectionType::VectorStore);
+        assert_eq!(mmap.len(), vector_data.len());
+        assert_eq!(mmap.as_bytes(), &vector_data);
+        assert!(!mmap.is_empty());
+    }
+
+    #[test]
+    fn mmap_rejects_data_sections() {
+        use grafeo_common::storage::SectionType;
+
+        let dir = test_dir();
+        let path = dir.path().join("mmap_reject.grafeo");
+
+        let manager = GrafeoFileManager::create(&path).unwrap();
+        manager
+            .write_sections(&[(SectionType::LpgStore, b"data")], 1, 1, 1, 0)
+            .unwrap();
+
+        let section_dir = manager.read_section_directory().unwrap().unwrap();
+        let lpg_entry = section_dir.find(SectionType::LpgStore).unwrap();
+
+        let result = manager.mmap_section(lpg_entry);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not mmap-able"));
+    }
+
+    #[test]
+    fn mmap_detects_corruption() {
+        use grafeo_common::storage::SectionType;
+        use std::io::Write as IoWrite;
+
+        let dir = test_dir();
+        let path = dir.path().join("mmap_corrupt.grafeo");
+
+        let manager = GrafeoFileManager::create(&path).unwrap();
+        let vector_data = vec![0xAB; 4096];
+        manager
+            .write_sections(&[(SectionType::VectorStore, &vector_data)], 1, 1, 0, 0)
+            .unwrap();
+
+        let section_dir = manager.read_section_directory().unwrap().unwrap();
+        let entry = section_dir.find(SectionType::VectorStore).unwrap().clone();
+
+        // Corrupt the section data by writing directly to the file
+        drop(manager);
+        {
+            let mut file = OpenOptions::new().write(true).open(&path).unwrap();
+            file.seek(SeekFrom::Start(entry.offset)).unwrap();
+            file.write_all(b"CORRUPTED!").unwrap();
+        }
+
+        let manager = GrafeoFileManager::open(&path).unwrap();
+        let result = manager.mmap_section(&entry);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("CRC mismatch"));
+    }
+
+    #[test]
+    fn mmap_multiple_sections_coexist() {
+        use grafeo_common::storage::SectionType;
+
+        let dir = test_dir();
+        let path = dir.path().join("mmap_multi.grafeo");
+
+        let manager = GrafeoFileManager::create(&path).unwrap();
+
+        let vector_data = vec![0x11; 4096];
+        let text_data = vec![0x22; 2048];
+
+        manager
+            .write_sections(
+                &[
+                    (SectionType::VectorStore, &vector_data),
+                    (SectionType::TextIndex, &text_data),
+                ],
+                1,
+                1,
+                0,
+                0,
+            )
+            .unwrap();
+
+        let section_dir = manager.read_section_directory().unwrap().unwrap();
+
+        // Mmap both index sections simultaneously
+        let vec_entry = section_dir.find(SectionType::VectorStore).unwrap();
+        let text_entry = section_dir.find(SectionType::TextIndex).unwrap();
+
+        let vec_mmap = manager.mmap_section(vec_entry).unwrap();
+        let text_mmap = manager.mmap_section(text_entry).unwrap();
+
+        // Both are valid and independent
+        assert_eq!(vec_mmap.as_bytes(), &vector_data);
+        assert_eq!(text_mmap.as_bytes(), &text_data);
+        assert_eq!(vec_mmap.section_type(), SectionType::VectorStore);
+        assert_eq!(text_mmap.section_type(), SectionType::TextIndex);
+    }
+
+    #[test]
+    fn mmap_drop_then_checkpoint_lifecycle() {
+        use grafeo_common::storage::SectionType;
+
+        let dir = test_dir();
+        let path = dir.path().join("mmap_lifecycle.grafeo");
+
+        let manager = GrafeoFileManager::create(&path).unwrap();
+
+        // Checkpoint 1: write vector section
+        let vector_v1 = vec![0x11; 4096];
+        manager
+            .write_sections(&[(SectionType::VectorStore, &vector_v1)], 1, 1, 0, 0)
+            .unwrap();
+
+        // Mmap the section, read it
+        let section_dir = manager.read_section_directory().unwrap().unwrap();
+        let entry = section_dir.find(SectionType::VectorStore).unwrap();
+        let mmap = manager.mmap_section(entry).unwrap();
+        assert_eq!(mmap.as_bytes(), &vector_v1);
+
+        // Drop the mmap before next checkpoint.
+        // On Windows, writes fail if mmaps are still active (error 1224).
+        // On all platforms, the intended lifecycle is: drop mmaps, checkpoint,
+        // re-mmap. This keeps the flow simple and cross-platform.
+        drop(mmap);
+
+        // Checkpoint 2: write updated vector section
+        let vector_v2 = vec![0x22; 8192];
+        manager
+            .write_sections(&[(SectionType::VectorStore, &vector_v2)], 2, 2, 0, 0)
+            .unwrap();
+
+        // Re-mmap the new section
+        let section_dir = manager.read_section_directory().unwrap().unwrap();
+        let entry = section_dir.find(SectionType::VectorStore).unwrap();
+        let mmap = manager.mmap_section(entry).unwrap();
+        assert_eq!(mmap.as_bytes(), &vector_v2);
+        assert_eq!(mmap.len(), 8192);
+    }
+
+    #[test]
+    fn mmap_section_debug_format() {
+        use grafeo_common::storage::SectionType;
+
+        let dir = test_dir();
+        let path = dir.path().join("mmap_debug.grafeo");
+
+        let manager = GrafeoFileManager::create(&path).unwrap();
+        manager
+            .write_sections(&[(SectionType::VectorStore, &[1, 2, 3, 4])], 1, 1, 0, 0)
+            .unwrap();
+
+        let section_dir = manager.read_section_directory().unwrap().unwrap();
+        let entry = section_dir.find(SectionType::VectorStore).unwrap();
+        let mmap = manager.mmap_section(entry).unwrap();
+
+        let debug = format!("{mmap:?}");
+        assert!(debug.contains("MmapSection"));
+        assert!(debug.contains("VectorStore"));
     }
 }
