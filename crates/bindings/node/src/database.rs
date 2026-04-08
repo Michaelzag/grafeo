@@ -499,8 +499,11 @@ impl JsGrafeoDB {
     /// Equivalent to running `SESSION SET SCHEMA <name>` but persists across
     /// calls. Use `resetSchema()` to clear it.
     #[napi(js_name = "setSchema")]
-    pub fn set_schema(&self, name: String) {
-        self.inner.read().set_current_schema(Some(&name));
+    pub fn set_schema(&self, name: String) -> napi::Result<()> {
+        self.inner
+            .read()
+            .set_current_schema(Some(&name))
+            .map_err(|e| napi::Error::from_reason(e.to_string()))
     }
 
     /// Clears the current schema context.
@@ -508,7 +511,7 @@ impl JsGrafeoDB {
     /// Subsequent `execute()` calls will use the default (no-schema) namespace.
     #[napi(js_name = "resetSchema")]
     pub fn reset_schema(&self) {
-        self.inner.read().set_current_schema(None);
+        let _ = self.inner.read().set_current_schema(None);
     }
 
     /// Returns the current schema name, or `null` if no schema is set.
