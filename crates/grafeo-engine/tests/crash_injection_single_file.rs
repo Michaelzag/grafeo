@@ -9,8 +9,8 @@
 
 use std::panic::AssertUnwindSafe;
 
+use grafeo_common::testing::crash::{CrashResult, with_crash_at};
 use grafeo_common::types::Value;
-use grafeo_core::testing::crash::{CrashResult, with_crash_at};
 use grafeo_engine::{Config, GrafeoDB};
 
 /// Helper: extract sorted string values from column 0 of query result rows.

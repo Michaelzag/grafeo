@@ -12,15 +12,20 @@
 //! - `admin` - Stats, introspection, diagnostics, CDC
 
 mod admin;
+#[cfg(feature = "arrow-export")]
+pub mod arrow;
 #[cfg(feature = "async-storage")]
 mod async_ops;
 #[cfg(feature = "async-storage")]
 pub(crate) mod async_wal_store;
+pub(crate) mod catalog_section;
 #[cfg(feature = "cdc")]
 pub(crate) mod cdc_store;
 mod crud;
 #[cfg(feature = "embed")]
 mod embed;
+#[cfg(feature = "grafeo-file")]
+pub(crate) mod flush;
 mod import;
 mod index;
 mod persistence;
@@ -39,18 +44,18 @@ use std::sync::atomic::AtomicUsize;
 
 use parking_lot::RwLock;
 
-#[cfg(feature = "grafeo-file")]
-use grafeo_adapters::storage::file::GrafeoFileManager;
-#[cfg(feature = "wal")]
-use grafeo_adapters::storage::wal::{
-    DurabilityMode as WalDurabilityMode, LpgWal, WalConfig, WalRecord, WalRecovery,
-};
 use grafeo_common::memory::buffer::{BufferManager, BufferManagerConfig};
 use grafeo_common::utils::error::{Error, QueryError, QueryErrorKind, Result};
 use grafeo_core::graph::lpg::LpgStore;
 #[cfg(feature = "rdf")]
 use grafeo_core::graph::rdf::RdfStore;
 use grafeo_core::graph::{GraphStore, GraphStoreMut};
+#[cfg(feature = "grafeo-file")]
+use grafeo_storage::file::GrafeoFileManager;
+#[cfg(feature = "wal")]
+use grafeo_storage::wal::{
+    DurabilityMode as WalDurabilityMode, LpgWal, WalConfig, WalRecord, WalRecovery,
+};
 
 use crate::catalog::Catalog;
 use crate::config::Config;
@@ -301,15 +306,27 @@ impl GrafeoDB {
             if let Some(ref db_path) = config.path {
                 if db_path.exists() && db_path.is_file() {
                     let fm = GrafeoFileManager::open_read_only(db_path)?;
-                    let snapshot_data = fm.read_snapshot()?;
-                    if !snapshot_data.is_empty() {
-                        Self::apply_snapshot_data(
+                    // Try v2 section-based format first
+                    if fm.read_section_directory()?.is_some() {
+                        Self::load_from_sections(
+                            &fm,
                             &store,
                             &catalog,
                             #[cfg(feature = "rdf")]
                             &rdf_store,
-                            &snapshot_data,
                         )?;
+                    } else {
+                        // Fall back to v1 blob format
+                        let snapshot_data = fm.read_snapshot()?;
+                        if !snapshot_data.is_empty() {
+                            Self::apply_snapshot_data(
+                                &store,
+                                &catalog,
+                                #[cfg(feature = "rdf")]
+                                &rdf_store,
+                                &snapshot_data,
+                            )?;
+                        }
                     }
                     Some(Arc::new(fm))
                 } else {
@@ -341,16 +358,26 @@ impl GrafeoDB {
                     )));
                 };
 
-                // Load snapshot data from the file
-                let snapshot_data = fm.read_snapshot()?;
-                if !snapshot_data.is_empty() {
-                    Self::apply_snapshot_data(
+                // Load data: try v2 section-based format, fall back to v1 blob
+                if fm.read_section_directory()?.is_some() {
+                    Self::load_from_sections(
+                        &fm,
                         &store,
                         &catalog,
                         #[cfg(feature = "rdf")]
                         &rdf_store,
-                        &snapshot_data,
                     )?;
+                } else {
+                    let snapshot_data = fm.read_snapshot()?;
+                    if !snapshot_data.is_empty() {
+                        Self::apply_snapshot_data(
+                            &store,
+                            &catalog,
+                            #[cfg(feature = "rdf")]
+                            &rdf_store,
+                            &snapshot_data,
+                        )?;
+                    }
                 }
 
                 // Recover sidecar WAL if WAL is enabled and a sidecar exists
@@ -1004,8 +1031,7 @@ impl GrafeoDB {
                     if let Ok(mut f) = std::fs::File::open(path) {
                         use std::io::Read;
                         let mut magic = [0u8; 4];
-                        if f.read_exact(&mut magic).is_ok()
-                            && magic == grafeo_adapters::storage::file::MAGIC
+                        if f.read_exact(&mut magic).is_ok() && magic == grafeo_storage::file::MAGIC
                         {
                             return true;
                         }
@@ -1023,6 +1049,8 @@ impl GrafeoDB {
     }
 
     /// Applies snapshot data (from a `.grafeo` file) to restore the store and catalog.
+    ///
+    /// Supports both v1 (monolithic blob) and v2 (section-based) formats.
     #[cfg(feature = "grafeo-file")]
     fn apply_snapshot_data(
         store: &Arc<LpgStore>,
@@ -1030,6 +1058,7 @@ impl GrafeoDB {
         #[cfg(feature = "rdf")] rdf_store: &Arc<RdfStore>,
         data: &[u8],
     ) -> Result<()> {
+        // v1 blob format: pass through to legacy loader
         persistence::load_snapshot_into_store(
             store,
             catalog,
@@ -1037,6 +1066,54 @@ impl GrafeoDB {
             rdf_store,
             data,
         )
+    }
+
+    /// Loads from a section-based `.grafeo` file (v2 format).
+    ///
+    /// Reads the section directory, then deserializes each section independently.
+    #[cfg(feature = "grafeo-file")]
+    fn load_from_sections(
+        fm: &GrafeoFileManager,
+        store: &Arc<LpgStore>,
+        catalog: &Arc<crate::catalog::Catalog>,
+        #[cfg(feature = "rdf")] rdf_store: &Arc<RdfStore>,
+    ) -> Result<()> {
+        use grafeo_common::storage::{Section, SectionType};
+
+        let dir = fm.read_section_directory()?.ok_or_else(|| {
+            grafeo_common::utils::error::Error::Internal(
+                "expected v2 section directory but found none".to_string(),
+            )
+        })?;
+
+        // Load catalog section first (schema defs needed before data)
+        if let Some(entry) = dir.find(SectionType::Catalog) {
+            let data = fm.read_section_data(entry)?;
+            let tm = Arc::new(crate::transaction::TransactionManager::new());
+            let mut section = catalog_section::CatalogSection::new(
+                Arc::clone(catalog),
+                Arc::clone(store),
+                move || tm.current_epoch().as_u64(),
+            );
+            section.deserialize(&data)?;
+        }
+
+        // Load LPG store
+        if let Some(entry) = dir.find(SectionType::LpgStore) {
+            let data = fm.read_section_data(entry)?;
+            let mut section = grafeo_core::graph::lpg::LpgStoreSection::new(Arc::clone(store));
+            section.deserialize(&data)?;
+        }
+
+        // Load RDF store
+        #[cfg(feature = "rdf")]
+        if let Some(entry) = dir.find(SectionType::RdfStore) {
+            let data = fm.read_section_data(entry)?;
+            let mut section = grafeo_core::graph::rdf::RdfStoreSection::new(Arc::clone(rdf_store));
+            section.deserialize(&data)?;
+        }
+
+        Ok(())
     }
 
     // =========================================================================
@@ -1510,7 +1587,7 @@ impl GrafeoDB {
             }
 
             {
-                use grafeo_core::testing::crash::maybe_crash;
+                use grafeo_common::testing::crash::maybe_crash;
                 maybe_crash("close:before_remove_sidecar_wal");
             }
             fm.remove_sidecar_wal()?;
@@ -1558,36 +1635,51 @@ impl GrafeoDB {
         Ok(())
     }
 
-    /// Writes the current database snapshot to the `.grafeo` file.
+    /// Builds section objects for the current database state.
+    #[cfg(feature = "grafeo-file")]
+    fn build_sections(&self) -> Vec<Box<dyn grafeo_common::storage::Section>> {
+        let store = Arc::clone(self.store.as_ref().expect("store must exist for flush"));
+
+        let lpg = grafeo_core::graph::lpg::LpgStoreSection::new(Arc::clone(&store));
+
+        let catalog =
+            catalog_section::CatalogSection::new(Arc::clone(&self.catalog), Arc::clone(&store), {
+                let tm = Arc::clone(&self.transaction_manager);
+                move || tm.current_epoch().as_u64()
+            });
+
+        let mut sections: Vec<Box<dyn grafeo_common::storage::Section>> =
+            vec![Box::new(catalog), Box::new(lpg)];
+
+        #[cfg(feature = "rdf")]
+        if !self.rdf_store.is_empty() || self.rdf_store.graph_count() > 0 {
+            let rdf = grafeo_core::graph::rdf::RdfStoreSection::new(Arc::clone(&self.rdf_store));
+            sections.push(Box::new(rdf));
+        }
+
+        sections
+    }
+
+    /// Writes the current database state to the `.grafeo` file using the unified flush.
     ///
     /// Does NOT remove the sidecar WAL: callers that want to clean up
     /// the sidecar (e.g. `close()`) should call `fm.remove_sidecar_wal()`
     /// separately after this returns.
     #[cfg(feature = "grafeo-file")]
     fn checkpoint_to_file(&self, fm: &GrafeoFileManager) -> Result<()> {
-        use grafeo_core::testing::crash::maybe_crash;
+        let sections = self.build_sections();
+        let section_refs: Vec<&dyn grafeo_common::storage::Section> =
+            sections.iter().map(|s| s.as_ref()).collect();
+        let context = flush::build_context(self.lpg_store(), &self.transaction_manager);
 
-        maybe_crash("checkpoint_to_file:before_export");
-        let snapshot_data = self.export_snapshot()?;
-        maybe_crash("checkpoint_to_file:after_export");
-
-        let epoch = self.lpg_store().current_epoch();
-        let transaction_id = self
-            .transaction_manager
-            .last_assigned_transaction_id()
-            .map_or(0, |t| t.0);
-        let node_count = self.lpg_store().node_count() as u64;
-        let edge_count = self.lpg_store().edge_count() as u64;
-
-        fm.write_snapshot(
-            &snapshot_data,
-            epoch.0,
-            transaction_id,
-            node_count,
-            edge_count,
+        flush::flush(
+            fm,
+            &section_refs,
+            &context,
+            flush::FlushReason::Checkpoint,
+            #[cfg(feature = "wal")]
+            self.wal.as_deref(),
         )?;
-
-        maybe_crash("checkpoint_to_file:after_write_snapshot");
         Ok(())
     }
 
@@ -1798,6 +1890,43 @@ impl QueryResult {
     /// Returns an iterator over the rows.
     pub fn iter(&self) -> impl Iterator<Item = &Vec<grafeo_common::types::Value>> {
         self.rows.iter()
+    }
+
+    /// Converts this query result to an Arrow [`RecordBatch`](arrow_array::RecordBatch).
+    ///
+    /// Each column in the result becomes an Arrow array. Type mapping:
+    /// - `Int64` / `Float64` / `Bool` / `String` / `Bytes`: direct Arrow equivalents
+    /// - `Timestamp` / `ZonedDatetime`: `Timestamp(Microsecond, UTC)`
+    /// - `Date`: `Date32`, `Time`: `Time64(Nanosecond)`
+    /// - `Vector`: `FixedSizeList(Float32, dim)`
+    /// - `Duration` / `List` / `Map` / `Path`: serialized as `Utf8`
+    ///
+    /// Heterogeneous columns (mixed types) fall back to `Utf8`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ArrowExportError`](arrow::ArrowExportError) if Arrow array construction fails.
+    #[cfg(feature = "arrow-export")]
+    pub fn to_record_batch(
+        &self,
+    ) -> std::result::Result<arrow_array::RecordBatch, arrow::ArrowExportError> {
+        arrow::query_result_to_record_batch(&self.columns, &self.column_types, &self.rows)
+    }
+
+    /// Serializes this query result as Arrow IPC stream bytes.
+    ///
+    /// The returned bytes can be read by any Arrow implementation:
+    /// - Python: `pyarrow.ipc.open_stream(buf).read_all()`
+    /// - Polars: `pl.read_ipc(buf)`
+    /// - Node.js: `apache-arrow` `RecordBatchStreamReader`
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ArrowExportError`](arrow::ArrowExportError) on conversion or serialization failure.
+    #[cfg(feature = "arrow-export")]
+    pub fn to_arrow_ipc(&self) -> std::result::Result<Vec<u8>, arrow::ArrowExportError> {
+        let batch = self.to_record_batch()?;
+        arrow::record_batch_to_ipc_stream(&batch)
     }
 }
 

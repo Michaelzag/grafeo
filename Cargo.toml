@@ -5,6 +5,7 @@ members = [
     "crates/grafeo-common",
     "crates/grafeo-core",
     "crates/grafeo-adapters",
+    "crates/grafeo-storage",
     "crates/grafeo-engine",
     "crates/grafeo-cli",
     "crates/bindings/python",
@@ -30,6 +31,7 @@ description = "A high-performance, embeddable graph database with support for LP
 grafeo-common = { path = "crates/grafeo-common", version = "0.5.35" }
 grafeo-core = { path = "crates/grafeo-core", version = "0.5.35", default-features = false }
 grafeo-adapters = { path = "crates/grafeo-adapters", version = "0.5.35", default-features = false }
+grafeo-storage = { path = "crates/grafeo-storage", version = "0.5.35", default-features = false }
 grafeo-engine = { path = "crates/grafeo-engine", version = "0.5.35", default-features = false }
 grafeo = { path = "crates/grafeo", version = "0.5.35" }
 grafeo-bindings-common = { path = "crates/bindings/common", version = "0.5.35", default-features = false }
@@ -67,6 +69,11 @@ sha2 = "0.11"
 # Serialization
 serde = { version = "1.0", features = ["derive", "rc"] }
 bincode = { version = "2.0", features = ["serde"] }
+
+# Arrow (optional, for zero-copy data export)
+arrow-schema = "58"
+arrow-array = "58"
+arrow-ipc = "58"
 
 # Python bindings
 pyo3 = "0.27"

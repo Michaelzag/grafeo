@@ -15,9 +15,11 @@
 mod edge;
 mod node;
 mod property;
+pub mod section;
 mod store;
 
 pub use edge::{Edge, EdgeFlags, EdgeRecord};
 pub use node::{Node, NodeFlags, NodeRecord};
 pub use property::{CompareOp, PropertyStorage};
+pub use section::LpgStoreSection;
 pub use store::{LpgStore, PropertyUndoEntry};

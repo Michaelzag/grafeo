@@ -130,7 +130,7 @@ pub struct Session {
     transaction_start_edge_count: AtomicUsize,
     /// WAL for logging schema changes.
     #[cfg(feature = "wal")]
-    wal: Option<Arc<grafeo_adapters::storage::wal::LpgWal>>,
+    wal: Option<Arc<grafeo_storage::wal::LpgWal>>,
     /// Shared WAL graph context tracker for named graph awareness.
     #[cfg(feature = "wal")]
     wal_graph_context: Option<Arc<parking_lot::Mutex<Option<String>>>>,
@@ -252,7 +252,7 @@ impl Session {
     #[cfg(feature = "wal")]
     pub(crate) fn set_wal(
         &mut self,
-        wal: Arc<grafeo_adapters::storage::wal::LpgWal>,
+        wal: Arc<grafeo_storage::wal::LpgWal>,
         wal_graph_context: Arc<parking_lot::Mutex<Option<String>>>,
     ) {
         // Wrap the graph store so query-engine mutations are WAL-logged
@@ -702,11 +702,9 @@ impl Session {
                 }
                 if created {
                     #[cfg(feature = "wal")]
-                    self.log_schema_wal(
-                        &grafeo_adapters::storage::wal::WalRecord::CreateNamedGraph {
-                            name: storage_key.clone(),
-                        },
-                    );
+                    self.log_schema_wal(&grafeo_storage::wal::WalRecord::CreateNamedGraph {
+                        name: storage_key.clone(),
+                    });
                 }
 
                 // AS COPY OF: copy data from source graph
@@ -757,11 +755,9 @@ impl Session {
                 }
                 if dropped {
                     #[cfg(feature = "wal")]
-                    self.log_schema_wal(
-                        &grafeo_adapters::storage::wal::WalRecord::DropNamedGraph {
-                            name: storage_key.clone(),
-                        },
-                    );
+                    self.log_schema_wal(&grafeo_storage::wal::WalRecord::DropNamedGraph {
+                        name: storage_key.clone(),
+                    });
                     // If this session was using the dropped graph, reset to default
                     let mut current = self.current_graph.lock();
                     if current
@@ -899,7 +895,7 @@ impl Session {
 
     /// Logs a WAL record for a schema change (no-op if WAL is not enabled).
     #[cfg(feature = "wal")]
-    fn log_schema_wal(&self, record: &grafeo_adapters::storage::wal::WalRecord) {
+    fn log_schema_wal(&self, record: &grafeo_storage::wal::WalRecord) {
         if let Some(ref wal) = self.wal
             && let Err(e) = wal.log(record)
         {
@@ -917,9 +913,9 @@ impl Session {
             EdgeTypeDefinition, NodeTypeDefinition, PropertyDataType, TypedProperty,
         };
         use grafeo_adapters::query::gql::ast::SchemaStatement;
-        #[cfg(feature = "wal")]
-        use grafeo_adapters::storage::wal::WalRecord;
         use grafeo_common::utils::error::{Error, QueryError, QueryErrorKind};
+        #[cfg(feature = "wal")]
+        use grafeo_storage::wal::WalRecord;
 
         /// Logs a WAL record for schema changes. Compiles to nothing without `wal`.
         macro_rules! wal_log {

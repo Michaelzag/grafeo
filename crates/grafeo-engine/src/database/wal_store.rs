@@ -6,13 +6,13 @@
 
 use std::sync::Arc;
 
-use grafeo_adapters::storage::wal::{LpgWal, WalRecord};
 use grafeo_common::grafeo_warn;
 use grafeo_common::types::{EdgeId, EpochId, NodeId, PropertyKey, TransactionId, Value};
 use grafeo_common::utils::hash::FxHashMap;
 use grafeo_core::graph::lpg::{CompareOp, Edge, LpgStore, Node};
 use grafeo_core::graph::{Direction, GraphStore, GraphStoreMut};
 use grafeo_core::statistics::Statistics;
+use grafeo_storage::wal::{LpgWal, WalRecord};
 
 use arcstr::ArcStr;
 
@@ -525,7 +525,7 @@ impl GraphStoreMut for WalGraphStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use grafeo_adapters::storage::wal::TypedWal;
+    use grafeo_storage::wal::TypedWal;
 
     fn setup() -> (WalGraphStore, Arc<LpgWal>) {
         let dir = tempfile::tempdir().unwrap();

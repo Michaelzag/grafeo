@@ -358,10 +358,21 @@ impl super::GrafeoDB {
             wal.sync()?;
         }
 
-        // For single-file format: flush snapshot to .grafeo file
+        // Flush all sections to .grafeo file (explicit checkpoint)
         #[cfg(feature = "grafeo-file")]
         if let Some(ref fm) = self.file_manager {
-            self.checkpoint_to_file(fm)?;
+            let sections = self.build_sections();
+            let section_refs: Vec<&dyn grafeo_common::storage::Section> =
+                sections.iter().map(|s| s.as_ref()).collect();
+            let context = super::flush::build_context(self.lpg_store(), &self.transaction_manager);
+            super::flush::flush(
+                fm,
+                &section_refs,
+                &context,
+                super::flush::FlushReason::Explicit,
+                #[cfg(feature = "wal")]
+                self.wal.as_deref(),
+            )?;
         }
 
         Ok(())

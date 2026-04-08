@@ -20,12 +20,10 @@
 //! | String (low cardinality) | Dictionary | 2-50x |
 //! | Bool | BitVector | 8x |
 
-use crate::index::zone_map::ZoneMapEntry;
-use crate::storage::CompressionCodec;
+use crate::codec::CompressionCodec;
 #[cfg(not(feature = "temporal"))]
-use crate::storage::{
-    CompressedData, DictionaryBuilder, DictionaryEncoding, TypeSpecificCompressor,
-};
+use crate::codec::{CompressedData, DictionaryBuilder, DictionaryEncoding, TypeSpecificCompressor};
+use crate::index::zone_map::ZoneMapEntry;
 #[cfg(not(feature = "temporal"))]
 use arcstr::ArcStr;
 #[cfg(feature = "temporal")]
@@ -1114,7 +1112,7 @@ impl<Id: EntityId> PropertyColumn<Id> {
                     // Convert back to signed using zigzag decoding
                     let signed: Vec<i64> = values
                         .iter()
-                        .map(|&v| crate::storage::zigzag_decode(v))
+                        .map(|&v| crate::codec::zigzag_decode(v))
                         .collect();
 
                     for (i, id_u64) in index_to_id.iter().enumerate() {

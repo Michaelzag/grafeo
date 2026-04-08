@@ -1,5 +1,6 @@
 //! Testing utilities for Grafeo internals.
 //!
-//! These modules are feature-gated and compile to no-ops in production builds.
+//! Re-exports from `grafeo-common::testing` for backward compatibility.
+//! New code should import from `grafeo_common::testing` directly.
 
-pub mod crash;
+pub use grafeo_common::testing::crash;

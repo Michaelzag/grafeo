@@ -16,8 +16,8 @@ use super::node_table::NodeTable;
 use super::rel_table::RelTable;
 use super::schema::{ColumnDef, ColumnType, EdgeSchema, TableSchema};
 use super::zone_map::ZoneMap;
+use crate::codec::{BitPackedInts, BitVector, DictionaryBuilder};
 use crate::statistics::{EdgeTypeStatistics, LabelStatistics, Statistics};
-use crate::storage::{BitPackedInts, BitVector, DictionaryBuilder};
 
 // ---------------------------------------------------------------------------
 // Error type

@@ -12,7 +12,7 @@ use hashbrown::HashSet;
 use crate::config::Config;
 
 #[cfg(feature = "wal")]
-use grafeo_adapters::storage::wal::WalRecord;
+use grafeo_storage::wal::WalRecord;
 
 use crate::catalog::{
     EdgeTypeDefinition, GraphTypeDefinition, NodeTypeDefinition, ProcedureDefinition,
@@ -708,7 +708,7 @@ impl super::GrafeoDB {
     /// Saves the database to a single `.grafeo` file.
     #[cfg(feature = "grafeo-file")]
     fn save_as_grafeo_file(&self, path: &Path) -> Result<()> {
-        use grafeo_adapters::storage::file::GrafeoFileManager;
+        use grafeo_storage::file::GrafeoFileManager;
 
         let snapshot_data = self.export_snapshot()?;
         let epoch = self.lpg_store().current_epoch();

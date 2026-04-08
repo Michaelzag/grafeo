@@ -5,8 +5,8 @@
 //! compared to hash-based triple indexing.
 
 use super::permutation::SuccinctPermutation;
+use crate::codec::succinct::WaveletTree;
 use crate::graph::rdf::{Term, Triple, TriplePattern};
-use crate::storage::succinct::WaveletTree;
 use hashbrown::HashMap;
 use std::sync::Arc;
 

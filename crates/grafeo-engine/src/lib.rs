@@ -29,6 +29,7 @@ pub mod config;
 pub mod database;
 #[cfg(feature = "embed")]
 pub mod embedding;
+pub mod export;
 pub mod memory_usage;
 #[cfg(feature = "metrics")]
 pub mod metrics;

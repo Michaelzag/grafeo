@@ -29,7 +29,7 @@ serde.workspace = true
 serde_json = { version = "1", optional = true }
 byteorder.workspace = true
 bytes.workspace = true
-bincode = { workspace = true, optional = true }
+bincode.workspace = true
 
 # Data import (optional)
 parquet = { version = "58", optional = true, default-features = false }
@@ -63,7 +63,7 @@ parallel = ["rayon", "crossbeam"]  # Morsel-driven parallelism (rayon, crossbeam
 spill = ["tokio"]                  # Disk spilling for out-of-core execution
 mmap = []                          # File-backed vector storage (MmapStorage)
 rdf = []  # Enable RDF graph model
-tiered-storage = ["grafeo-common/tiered-storage", "bincode"]  # Enable tiered hot/cold storage
+tiered-storage = ["grafeo-common/tiered-storage"]  # Enable tiered hot/cold storage
 temporal = ["grafeo-common/temporal"]  # Enable append-only versioned properties
 succinct-indexes = []  # Enable succinct data structures (rank/select bitvectors, Elias-Fano, wavelet trees)
 compact-store = []  # CompactStore — columnar graph for read-only workloads
@@ -80,7 +80,7 @@ parquet-import = ["parquet"]  # Apache Parquet file import (LOAD DATA ... FORMAT
 ai = ["vector-index", "text-index", "hybrid-search"]  # All AI/RAG search features
 
 # Testing utilities (zero overhead when disabled)
-testing-crash-injection = []  # Deterministic crash injection for recovery testing
+testing-crash-injection = ["grafeo-common/testing-crash-injection"]  # Deterministic crash injection for recovery testing
 
 [lints]
 workspace = true

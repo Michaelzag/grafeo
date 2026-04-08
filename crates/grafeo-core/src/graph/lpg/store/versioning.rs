@@ -419,7 +419,7 @@ impl LpgStore {
     #[doc(hidden)]
     #[cfg(feature = "tiered-storage")]
     #[must_use]
-    pub fn epoch_store(&self) -> &crate::storage::EpochStore {
+    pub fn epoch_store(&self) -> &crate::codec::EpochStore {
         &self.epoch_store
     }
 

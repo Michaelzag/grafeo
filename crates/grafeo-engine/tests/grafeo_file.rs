@@ -139,7 +139,9 @@ fn wal_checkpoint_writes_to_file() {
     // Verify the file manager has a non-empty header
     let fm = db.file_manager().expect("should have file manager");
     let header = fm.active_header();
-    assert!(header.snapshot_length > 0);
+    // v2 format uses section directory (snapshot_length = 0),
+    // v1 used snapshot_length > 0. Either is valid.
+    assert!(header.iteration > 0, "checkpoint should have been written");
     assert_eq!(header.node_count, 1);
     assert_eq!(header.edge_count, 0);
 

@@ -9,7 +9,7 @@
 //! - **Concurrent reads** - RwLock allows many simultaneous traversals
 //! - **Compression** - cold chunks can be compressed using DeltaBitPacked
 
-use crate::storage::{BitPackedInts, DeltaBitPacked};
+use crate::codec::{BitPackedInts, DeltaBitPacked};
 use grafeo_common::types::{EdgeId, NodeId};
 use grafeo_common::utils::hash::{FxHashMap, FxHashSet};
 use parking_lot::RwLock;

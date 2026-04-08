@@ -49,9 +49,10 @@ regex = ["grafeo-engine/regex"]  # Full regex (default for non-WASM)
 regex-lite = ["grafeo-engine/regex-lite"]  # Lightweight regex (for WASM)
 metrics = ["grafeo-engine/metrics"]  # Lock-free query, transaction, and session metrics
 tracing = ["grafeo-engine/tracing"]  # Observability spans and events
+arrow-export = ["grafeo-engine/arrow-export"]  # Arrow IPC zero-copy export
 
 # Named profiles (ecosystem-aligned)
-embedded = ["gql", "ai", "algos", "parallel", "regex", "grafeo-file"]  # Python libs, MCP, in-process (default)
+embedded = ["gql", "ai", "algos", "parallel", "regex", "grafeo-file", "arrow-export"]  # Python libs, MCP, in-process (default)
 browser = ["gql", "regex-lite"]  # WASM / grafeo-web
 server = ["embedded", "languages", "storage", "rdf", "cdc", "async-storage", "tracing"]  # grafeo-server
 full = ["server"]  # Everything (except embed)

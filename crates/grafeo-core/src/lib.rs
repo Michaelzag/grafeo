@@ -14,20 +14,20 @@
 //! - [`index`] - Fast lookups: hash, B-tree, adjacency lists, tries
 //! - [`execution`] - Query execution: data chunks, vectors, operators
 //! - [`statistics`] - Cardinality estimates for the query optimizer
-//! - [`storage`] - Compression: dictionary encoding, bit-packing, delta encoding
+//! - [`codec`] - Compression: dictionary encoding, bit-packing, delta encoding
 
 #![deny(unsafe_code)]
 
 pub mod cache;
+pub mod codec;
 pub mod execution;
 pub mod graph;
 pub mod index;
 pub mod statistics;
-pub mod storage;
 pub mod testing;
 
 // Re-export the types you'll use most often
+pub use codec::{DictionaryBuilder, DictionaryEncoding};
 pub use graph::lpg::{Edge, LpgStore, Node};
 pub use index::adjacency::ChunkedAdjacency;
 pub use statistics::{ColumnStatistics, Histogram, LabelStatistics, Statistics};
-pub use storage::{DictionaryBuilder, DictionaryEncoding};

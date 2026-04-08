@@ -218,6 +218,12 @@ pub enum DumpFormat {
     Turtle,
     /// JSON Lines format.
     Json,
+    /// Arrow IPC stream format (zero-copy interop with DuckDB, Polars, pandas).
+    Arrow,
+    /// GEXF 1.3 format (Gephi, Gephi Lite, NetworkX).
+    Gexf,
+    /// GraphML format (Gephi, Cytoscape, yEd, igraph).
+    GraphMl,
 }
 
 impl Default for DumpFormat {
@@ -232,6 +238,9 @@ impl std::fmt::Display for DumpFormat {
             DumpFormat::Parquet => write!(f, "parquet"),
             DumpFormat::Turtle => write!(f, "turtle"),
             DumpFormat::Json => write!(f, "json"),
+            DumpFormat::Arrow => write!(f, "arrow"),
+            DumpFormat::Gexf => write!(f, "gexf"),
+            DumpFormat::GraphMl => write!(f, "graphml"),
         }
     }
 }
@@ -244,6 +253,9 @@ impl std::str::FromStr for DumpFormat {
             "parquet" => Ok(DumpFormat::Parquet),
             "turtle" | "ttl" => Ok(DumpFormat::Turtle),
             "json" | "jsonl" => Ok(DumpFormat::Json),
+            "arrow" | "arrow-ipc" | "ipc" => Ok(DumpFormat::Arrow),
+            "gexf" => Ok(DumpFormat::Gexf),
+            "graphml" => Ok(DumpFormat::GraphMl),
             _ => Err(format!("Unknown dump format: {}", s)),
         }
     }
@@ -354,6 +366,9 @@ mod tests {
         assert_eq!(DumpFormat::Parquet.to_string(), "parquet");
         assert_eq!(DumpFormat::Turtle.to_string(), "turtle");
         assert_eq!(DumpFormat::Json.to_string(), "json");
+        assert_eq!(DumpFormat::Arrow.to_string(), "arrow");
+        assert_eq!(DumpFormat::Gexf.to_string(), "gexf");
+        assert_eq!(DumpFormat::GraphMl.to_string(), "graphml");
     }
 
     #[test]
@@ -366,6 +381,17 @@ mod tests {
         assert_eq!("ttl".parse::<DumpFormat>().unwrap(), DumpFormat::Turtle);
         assert_eq!("json".parse::<DumpFormat>().unwrap(), DumpFormat::Json);
         assert_eq!("jsonl".parse::<DumpFormat>().unwrap(), DumpFormat::Json);
+        assert_eq!("arrow".parse::<DumpFormat>().unwrap(), DumpFormat::Arrow);
+        assert_eq!(
+            "arrow-ipc".parse::<DumpFormat>().unwrap(),
+            DumpFormat::Arrow
+        );
+        assert_eq!("ipc".parse::<DumpFormat>().unwrap(), DumpFormat::Arrow);
+        assert_eq!("gexf".parse::<DumpFormat>().unwrap(), DumpFormat::Gexf);
+        assert_eq!(
+            "graphml".parse::<DumpFormat>().unwrap(),
+            DumpFormat::GraphMl
+        );
         assert_eq!(
             "PARQUET".parse::<DumpFormat>().unwrap(),
             DumpFormat::Parquet
@@ -381,7 +407,14 @@ mod tests {
 
     #[test]
     fn test_dump_format_serde_roundtrip() {
-        for format in [DumpFormat::Parquet, DumpFormat::Turtle, DumpFormat::Json] {
+        for format in [
+            DumpFormat::Parquet,
+            DumpFormat::Turtle,
+            DumpFormat::Json,
+            DumpFormat::Arrow,
+            DumpFormat::Gexf,
+            DumpFormat::GraphMl,
+        ] {
             let json = serde_json::to_string(&format).unwrap();
             let parsed: DumpFormat = serde_json::from_str(&json).unwrap();
             assert_eq!(parsed, format);

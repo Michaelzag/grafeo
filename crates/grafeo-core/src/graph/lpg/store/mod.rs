@@ -46,7 +46,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use crate::index::vector::HnswIndex;
 
 #[cfg(feature = "tiered-storage")]
-use crate::storage::EpochStore;
+use crate::codec::EpochStore;
 use grafeo_common::memory::arena::AllocError;
 #[cfg(feature = "tiered-storage")]
 use grafeo_common::memory::arena::ArenaAllocator;

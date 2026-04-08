@@ -8,6 +8,19 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 
 - **Python named graph management**: `create_graph()`, `drop_graph()`, `list_graphs()`, `set_graph()`/`reset_graph()`/`current_graph()`, `set_schema()`/`reset_schema()`/`current_schema()` ([#241](https://github.com/GrafeoDB/grafeo/issues/241), [#243](https://github.com/GrafeoDB/grafeo/pull/243) by [@Michaelzag](https://github.com/Michaelzag))
 - **Python per-transaction CDC override**: `begin_transaction_with_cdc(True|False)` to enable or suppress change tracking per transaction ([#242](https://github.com/GrafeoDB/grafeo/issues/242), [#244](https://github.com/GrafeoDB/grafeo/pull/244) by [@Michaelzag](https://github.com/Michaelzag))
+- **Arrow IPC export** (`arrow-export` feature): zero-copy data export from query results to Arrow IPC format, enabling interop with DuckDB, Polars, pandas, and DataFusion. Python `result.to_arrow()` / `result.to_arrow_ipc()`, Node.js `result.toArrowIPC()`, CLI `--export-format arrow`
+- **GEXF + GraphML export**: graph interchange formats for Gephi, Gephi Lite, Cytoscape, NetworkX, yEd, and igraph. CLI `--export-format gexf|graphml` with streaming XML serialization and full property type mapping
+- **Section-based container format**: `.grafeo` files now use a section directory with independently addressable, checksummed sections (Catalog, LPG Store, RDF Store) instead of a monolithic blob. Checkpoint writes only dirty sections, recovery loads sections in parallel. Forward-compatible: unknown optional sections are safely skipped by older versions.
+- **`grafeo-storage` crate**: new crate for persistence I/O (WAL, container format, crash safety), extracted from `grafeo-adapters`. Depends only on `grafeo-common`, enabling clean crate boundaries: `grafeo-core` and `grafeo-storage` are siblings with no mutual dependency.
+- **Unified flush model**: checkpoint, explicit `CHECKPOINT`, and future memory-pressure eviction share one code path (`FlushReason::Checkpoint | Explicit | MemoryPressure`)
+- **Performance regression benchmarks**: 11 targeted Criterion benchmarks covering multi-hop traversal, repeated execution overhead, and edge-type filtering regressions. Per-benchmark threshold config (`bench-thresholds.toml`) with category-aware CI comparison.
+- **Memory benchmarks**: 5 benchmarks tracking absolute memory usage (empty DB, 1K/10K graphs, post-query, vector index) with JSON snapshot output for CI bounds checking.
+- **Section trait** (`grafeo_common::storage::Section`): trait contract for section serializers, with `SectionType` enum, `SectionDirectoryEntry`, and `SectionFlags` for forward compatibility.
+
+### Changed
+
+- **Crate restructure**: storage backends (WAL, `.grafeo` format) moved from `grafeo-adapters` to new `grafeo-storage` crate. `grafeo-adapters` is now parser-only. `grafeo-core/src/storage/` renamed to `grafeo-core/src/codec/` (compression codecs, not I/O).
+- **CI benchmark job**: now runs all 6 bench files (added `serialization_bench`, `regression_bench`, `memory_bench`), uses per-benchmark thresholds from `bench-thresholds.toml`, adds `benchmark-main` job for baseline persistence on push to main.
 
 ### Fixed
 

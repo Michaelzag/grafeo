@@ -21,6 +21,8 @@ pub mod collections;
 pub mod fmt;
 pub mod memory;
 pub mod mvcc;
+pub mod storage;
+pub mod testing;
 pub mod tracing_macros;
 pub mod types;
 pub mod utils;

@@ -138,10 +138,10 @@ impl GrafeoDB {
 #[cfg(feature = "wal")]
 pub(super) fn replay_rdf_wal_record(
     rdf_store: &Arc<RdfStore>,
-    record: &grafeo_adapters::storage::wal::WalRecord,
+    record: &grafeo_storage::wal::WalRecord,
 ) {
-    use grafeo_adapters::storage::wal::WalRecord;
     use grafeo_core::graph::rdf::Term;
+    use grafeo_storage::wal::WalRecord;
 
     match record {
         WalRecord::InsertRdfTriple {
