@@ -1,8 +1,8 @@
 //! Async storage backend trait for pluggable persistence.
 //!
 //! [`AsyncStorageBackend`] covers the I/O layer (WAL writes, snapshots, sync)
-//! while the query engine uses the sync [`GraphStore`](grafeo_core::graph::GraphStore)
-//! trait for in-memory access. This separation keeps CPU-bound query execution
+//! while the query engine uses the sync `GraphStore` trait (in `grafeo-core`)
+//! for in-memory access. This separation keeps CPU-bound query execution
 //! free of async overhead while allowing I/O-bound persistence to use tokio.
 //!
 //! # Built-in Implementations
@@ -79,7 +79,7 @@ pub struct SnapshotMetadata {
 ///
 /// This trait covers the persistence layer (WAL batches, snapshots, sync),
 /// **not** the query execution layer. Query operators use the sync
-/// [`GraphStore`](grafeo_core::graph::GraphStore) trait for in-memory access.
+/// `GraphStore` trait (in `grafeo-core`) for in-memory access.
 ///
 /// All methods return `Pin<Box<dyn Future<...>>>` for object safety, enabling
 /// `Arc<dyn AsyncStorageBackend>` usage without the `async_trait` crate.

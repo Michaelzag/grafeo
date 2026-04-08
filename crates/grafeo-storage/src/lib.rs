@@ -9,7 +9,7 @@
 //! ## Modules
 //!
 //! - [`wal`] - Write-ahead log for durability
-//! - [`file`] - Single-file `.grafeo` format with crash-safe dual headers
+//! - [`mod@file`] - Single-file `.grafeo` format with crash-safe dual headers
 
 #![deny(unsafe_code)]
 

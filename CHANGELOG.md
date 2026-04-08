@@ -16,21 +16,26 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 - **Performance regression benchmarks**: 11 targeted Criterion benchmarks covering multi-hop traversal, repeated execution overhead, and edge-type filtering regressions. Per-benchmark threshold config (`bench-thresholds.toml`) with category-aware CI comparison.
 - **Memory benchmarks**: 5 benchmarks tracking absolute memory usage (empty DB, 1K/10K graphs, post-query, vector index) with JSON snapshot output for CI bounds checking.
 - **Section trait** (`grafeo_common::storage::Section`): trait contract for section serializers, with `SectionType` enum, `SectionDirectoryEntry`, and `SectionFlags` for forward compatibility.
+- **Vector Store section serializer**: persists HNSW topology (entry point, layers, neighbor lists) to the container, eliminating O(N log N) index rebuild on database open.
+- **Text Index section serializer**: persists BM25 postings, document lengths, and term dictionaries, eliminating full-text index rebuild from LPG properties on open.
+- **Per-section memory config**: `SectionMemoryConfig` with `max_ram` caps and `TierOverride` (Auto/ForceRam/ForceDisk) per section type, configurable via `Config::with_section_config()`.
+- **Mmap for index sections**: `GrafeoFileManager::mmap_section()` provides zero-copy read access to container sections via `memmap2`. CRC-verified on creation, cross-platform lifecycle (drop before checkpoint).
+- **BufferManager section consumers**: storage sections register as `MemoryConsumer`s with the buffer manager, enabling accurate memory pressure tracking and per-region usage reporting. Dynamic consumers for vector and text indexes use `Weak<LpgStore>` to avoid stale references.
+- **Periodic checkpoint timer**: background thread flushes dirty sections at `Config::checkpoint_interval`, bounding WAL size and limiting data loss to one interval on crash. Stops promptly (<100 ms) on database close.
+- **Container format specification**: `docs/architecture/storage/container-format.md` documents the `.grafeo` file layout, section directory, checkpoint flow, mmap lifecycle, and recovery procedure.
 
 ### Changed
 
 - **Crate restructure**: storage backends (WAL, `.grafeo` format) moved from `grafeo-adapters` to new `grafeo-storage` crate. `grafeo-adapters` is now parser-only. `grafeo-core/src/storage/` renamed to `grafeo-core/src/codec/` (compression codecs, not I/O).
+- **Removed tokio from grafeo-core**: async spill files moved to `grafeo-engine/src/execution/spill/`, keeping `grafeo-core` free of I/O runtime dependencies.
 - **CI benchmark job**: now runs all 6 bench files (added `serialization_bench`, `regression_bench`, `memory_bench`), uses per-benchmark thresholds from `bench-thresholds.toml`, adds `benchmark-main` job for baseline persistence on push to main.
+- **CI**: moved Python CLI wheel build from `pypi.yml` to `release.yml`
 
 ### Fixed
 
 - **Graph/schema context validation**: `set_current_graph()` and `set_current_schema()` now reject nonexistent targets across all bindings; `drop_graph()` auto-clears the active context ([#245](https://github.com/GrafeoDB/grafeo/issues/245), [#246](https://github.com/GrafeoDB/grafeo/pull/246) by [@Michaelzag](https://github.com/Michaelzag))
 - **C binding `grafeo_reset_schema`**: propagates errors instead of silently discarding them
 - **WASM `setSchema` error type**: returns a proper JS `Error` object instead of a plain string
-
-### Changed
-
-- **CI**: moved Python CLI wheel build from `pypi.yml` to `release.yml`
 
 ## [0.5.34] - 2026-04-07
 

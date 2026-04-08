@@ -575,8 +575,12 @@ impl GrafeoFileManager {
     /// `flags.mmap_able = true` can be mapped (index sections).
     ///
     /// The returned [`MmapSection`](crate::container::MmapSection) is
-    /// independent of the file mutex: multiple mmaps can coexist, and the
-    /// file manager can continue writing while mmaps are held.
+    /// independent of the file mutex: multiple mmaps can coexist. However,
+    /// all `MmapSection` handles **must be dropped before writing** (via
+    /// `write_sections()` or `write_snapshot()`). On Windows the OS rejects
+    /// writes to a file with active mappings; on Linux/macOS stale mappings
+    /// would read outdated data. See [`MmapSection`](crate::container::MmapSection)
+    /// for the full lifecycle.
     ///
     /// # Errors
     ///

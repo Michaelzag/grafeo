@@ -5,7 +5,7 @@
 //! section memory. This enables accurate `memory_usage()` reporting and
 //! lays the groundwork for automatic spilling when tiered storage is added.
 
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use grafeo_common::memory::buffer::{MemoryConsumer, MemoryRegion, SpillError, priorities};
 use grafeo_common::storage::Section;
@@ -98,6 +98,121 @@ impl MemoryConsumer for SectionConsumer {
         // 3. Mmap the section via GrafeoFileManager::mmap_section()
         // 4. Switch section to mmap-backed read mode
         // 5. Drop in-memory data, return freed bytes
+        Err(SpillError::NotSupported)
+    }
+}
+
+/// Dynamic memory consumer for vector indexes.
+///
+/// Unlike [`SectionConsumer`] (which wraps a snapshot of `Arc<HnswIndex>` refs),
+/// this consumer holds a `Weak<LpgStore>` and re-queries the live index map
+/// on each `memory_usage()` call. This ensures:
+/// - Dropped indexes are not kept alive by a stale strong `Arc`
+/// - Newly created indexes are automatically included in memory tracking
+#[cfg(feature = "vector-index")]
+pub struct VectorIndexConsumer {
+    store: Weak<grafeo_core::graph::lpg::LpgStore>,
+}
+
+#[cfg(feature = "vector-index")]
+impl VectorIndexConsumer {
+    /// Creates a consumer that dynamically queries the store for current vector indexes.
+    pub fn new(store: &Arc<grafeo_core::graph::lpg::LpgStore>) -> Self {
+        Self {
+            store: Arc::downgrade(store),
+        }
+    }
+}
+
+#[cfg(feature = "vector-index")]
+impl MemoryConsumer for VectorIndexConsumer {
+    fn name(&self) -> &str {
+        "section:VectorStore"
+    }
+
+    fn memory_usage(&self) -> usize {
+        self.store.upgrade().map_or(0, |store| {
+            store
+                .vector_index_entries()
+                .iter()
+                .map(|(_, idx)| idx.heap_memory_bytes())
+                .sum()
+        })
+    }
+
+    fn eviction_priority(&self) -> u8 {
+        priorities::INDEX_BUFFERS
+    }
+
+    fn region(&self) -> MemoryRegion {
+        MemoryRegion::IndexBuffers
+    }
+
+    fn evict(&self, _target_bytes: usize) -> usize {
+        0
+    }
+
+    fn can_spill(&self) -> bool {
+        true
+    }
+
+    fn spill(&self, _target_bytes: usize) -> Result<usize, SpillError> {
+        Err(SpillError::NotSupported)
+    }
+}
+
+/// Dynamic memory consumer for text indexes.
+///
+/// Same rationale as [`VectorIndexConsumer`]: avoids holding stale `Arc` refs
+/// to indexes that may have been dropped, and automatically picks up new ones.
+#[cfg(feature = "text-index")]
+pub struct TextIndexConsumer {
+    store: Weak<grafeo_core::graph::lpg::LpgStore>,
+}
+
+#[cfg(feature = "text-index")]
+impl TextIndexConsumer {
+    /// Creates a consumer that dynamically queries the store for current text indexes.
+    pub fn new(store: &Arc<grafeo_core::graph::lpg::LpgStore>) -> Self {
+        Self {
+            store: Arc::downgrade(store),
+        }
+    }
+}
+
+#[cfg(feature = "text-index")]
+impl MemoryConsumer for TextIndexConsumer {
+    fn name(&self) -> &str {
+        "section:TextIndex"
+    }
+
+    fn memory_usage(&self) -> usize {
+        self.store.upgrade().map_or(0, |store| {
+            store
+                .text_index_entries()
+                .iter()
+                .map(|(_, idx)| idx.read().heap_memory_bytes())
+                .sum()
+        })
+    }
+
+    fn eviction_priority(&self) -> u8 {
+        priorities::INDEX_BUFFERS
+    }
+
+    fn region(&self) -> MemoryRegion {
+        MemoryRegion::IndexBuffers
+    }
+
+    fn evict(&self, _target_bytes: usize) -> usize {
+        0
+    }
+
+    fn can_spill(&self) -> bool {
+        true
+    }
+
+    fn spill(&self, _target_bytes: usize) -> Result<usize, SpillError> {
         Err(SpillError::NotSupported)
     }
 }

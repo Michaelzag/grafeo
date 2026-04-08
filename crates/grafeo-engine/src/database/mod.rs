@@ -21,6 +21,8 @@ pub(crate) mod async_wal_store;
 pub(crate) mod catalog_section;
 #[cfg(feature = "cdc")]
 pub(crate) mod cdc_store;
+#[cfg(feature = "grafeo-file")]
+mod checkpoint_timer;
 mod crud;
 #[cfg(feature = "embed")]
 mod embed;
@@ -127,6 +129,10 @@ pub struct GrafeoDB {
     /// Single-file database manager (when using `.grafeo` format).
     #[cfg(feature = "grafeo-file")]
     pub(super) file_manager: Option<Arc<GrafeoFileManager>>,
+    /// Periodic checkpoint timer (when `checkpoint_interval` is configured).
+    /// Wrapped in Mutex because `close()` takes `&self` but needs to stop the timer.
+    #[cfg(feature = "grafeo-file")]
+    checkpoint_timer: parking_lot::Mutex<Option<checkpoint_timer::CheckpointTimer>>,
     /// External read-only graph store (when using with_store() or with_read_store()).
     /// When set, sessions route queries through this store instead of the built-in LpgStore.
     pub(super) external_read_store: Option<Arc<dyn GraphStore>>,
@@ -485,6 +491,23 @@ impl GrafeoDB {
         #[cfg(feature = "cdc")]
         let cdc_enabled_val = config.cdc_enabled;
 
+        // Clone Arcs for the checkpoint timer before moving originals into the struct.
+        // The timer captures its own references and runs in a background thread.
+        #[cfg(feature = "grafeo-file")]
+        let checkpoint_interval = config.checkpoint_interval;
+        #[cfg(feature = "grafeo-file")]
+        let timer_store = Arc::clone(&store);
+        #[cfg(feature = "grafeo-file")]
+        let timer_catalog = Arc::clone(&catalog);
+        #[cfg(feature = "grafeo-file")]
+        let timer_tm = Arc::clone(&transaction_manager);
+        #[cfg(feature = "grafeo-file")]
+        #[cfg(feature = "rdf")]
+        let timer_rdf = Arc::clone(&rdf_store);
+        #[cfg(feature = "grafeo-file")]
+        #[cfg(feature = "wal")]
+        let timer_wal = wal.clone();
+
         let db = Self {
             config,
             store: Some(store),
@@ -508,6 +531,8 @@ impl GrafeoDB {
             embedding_models: RwLock::new(hashbrown::HashMap::new()),
             #[cfg(feature = "grafeo-file")]
             file_manager,
+            #[cfg(feature = "grafeo-file")]
+            checkpoint_timer: parking_lot::Mutex::new(None),
             external_read_store: None,
             external_write_store: None,
             #[cfg(feature = "metrics")]
@@ -519,6 +544,24 @@ impl GrafeoDB {
 
         // Register storage sections as memory consumers for pressure tracking
         db.register_section_consumers();
+
+        // Start periodic checkpoint timer if configured
+        #[cfg(feature = "grafeo-file")]
+        if let (Some(interval), Some(fm)) = (checkpoint_interval, &db.file_manager)
+            && !is_read_only
+        {
+            *db.checkpoint_timer.lock() = Some(checkpoint_timer::CheckpointTimer::start(
+                interval,
+                Arc::clone(fm),
+                timer_store,
+                timer_catalog,
+                timer_tm,
+                #[cfg(feature = "rdf")]
+                timer_rdf,
+                #[cfg(feature = "wal")]
+                timer_wal,
+            ));
+        }
 
         Ok(db)
     }
@@ -595,6 +638,8 @@ impl GrafeoDB {
             embedding_models: RwLock::new(hashbrown::HashMap::new()),
             #[cfg(feature = "grafeo-file")]
             file_manager: None,
+            #[cfg(feature = "grafeo-file")]
+            checkpoint_timer: parking_lot::Mutex::new(None),
             external_read_store: Some(Arc::clone(&store) as Arc<dyn GraphStore>),
             external_write_store: Some(store),
             #[cfg(feature = "metrics")]
@@ -673,6 +718,8 @@ impl GrafeoDB {
             embedding_models: RwLock::new(hashbrown::HashMap::new()),
             #[cfg(feature = "grafeo-file")]
             file_manager: None,
+            #[cfg(feature = "grafeo-file")]
+            checkpoint_timer: parking_lot::Mutex::new(None),
             external_read_store: Some(store),
             external_write_store: None,
             #[cfg(feature = "metrics")]
@@ -1590,6 +1637,13 @@ impl GrafeoDB {
             return Ok(());
         }
 
+        // Stop the periodic checkpoint timer before the final checkpoint.
+        // This ensures no concurrent checkpoint races with our close() flush.
+        #[cfg(feature = "grafeo-file")]
+        if let Some(mut timer) = self.checkpoint_timer.lock().take() {
+            timer.stop();
+        }
+
         // For single-file format: checkpoint to .grafeo file, then clean up sidecar WAL.
         // We must do this BEFORE the WAL close path because checkpoint_to_file
         // removes the sidecar WAL directory.
@@ -1688,29 +1742,16 @@ impl GrafeoDB {
             ));
         }
 
-        // Vector indexes
+        // Vector indexes: dynamic consumer that re-queries the store on each
+        // memory_usage() call, so dropped indexes are freed and new ones tracked.
         #[cfg(feature = "vector-index")]
-        {
-            let indexes = store.vector_index_entries();
-            if !indexes.is_empty() {
-                let vector = grafeo_core::index::vector::VectorStoreSection::new(indexes);
-                self.buffer_manager.register_consumer(Arc::new(
-                    section_consumer::SectionConsumer::new(Arc::new(vector)),
-                ));
-            }
-        }
+        self.buffer_manager
+            .register_consumer(Arc::new(section_consumer::VectorIndexConsumer::new(store)));
 
-        // Text indexes
+        // Text indexes: same dynamic approach as vector indexes.
         #[cfg(feature = "text-index")]
-        {
-            let indexes = store.text_index_entries();
-            if !indexes.is_empty() {
-                let text = grafeo_core::index::text::TextIndexSection::new(indexes);
-                self.buffer_manager.register_consumer(Arc::new(
-                    section_consumer::SectionConsumer::new(Arc::new(text)),
-                ));
-            }
-        }
+        self.buffer_manager
+            .register_consumer(Arc::new(section_consumer::TextIndexConsumer::new(store)));
     }
 
     /// Builds section objects for the current database state.
