@@ -529,6 +529,80 @@ fn db_current_graph_api() {
 }
 
 #[test]
+fn set_current_graph_rejects_nonexistent() {
+    let db = db();
+    let err = db.set_current_graph(Some("nope")).unwrap_err();
+    assert!(
+        err.to_string().contains("does not exist"),
+        "expected 'does not exist' error, got: {err}"
+    );
+    // context should remain unchanged
+    assert_eq!(db.current_graph(), None);
+}
+
+#[test]
+fn set_current_graph_allows_default() {
+    let db = db();
+    // "default" is always valid even without creating it
+    db.set_current_graph(Some("default")).unwrap();
+    // setting None clears it
+    db.set_current_graph(None).unwrap();
+    assert_eq!(db.current_graph(), None);
+}
+
+#[test]
+fn drop_graph_resets_active_context() {
+    let db = db();
+    db.execute("CREATE GRAPH ephemeral").unwrap();
+    db.set_current_graph(Some("ephemeral")).unwrap();
+    assert_eq!(db.current_graph(), Some("ephemeral".to_string()));
+
+    db.drop_graph("ephemeral");
+    assert_eq!(
+        db.current_graph(),
+        None,
+        "current_graph should reset after dropping the active graph"
+    );
+}
+
+#[test]
+fn drop_graph_preserves_context_for_other_graph() {
+    let db = db();
+    db.execute("CREATE GRAPH keep").unwrap();
+    db.execute("CREATE GRAPH other").unwrap();
+    db.set_current_graph(Some("keep")).unwrap();
+
+    db.drop_graph("other");
+    assert_eq!(
+        db.current_graph(),
+        Some("keep".to_string()),
+        "dropping a different graph should not touch current_graph"
+    );
+}
+
+#[test]
+fn set_current_schema_rejects_nonexistent() {
+    let db = db();
+    let err = db.set_current_schema(Some("fake")).unwrap_err();
+    assert!(
+        err.to_string().contains("does not exist"),
+        "expected 'does not exist' error, got: {err}"
+    );
+    assert_eq!(db.current_schema(), None);
+}
+
+#[test]
+fn set_current_schema_accepts_valid() {
+    let db = db();
+    db.execute("CREATE SCHEMA reporting").unwrap();
+    db.set_current_schema(Some("reporting")).unwrap();
+    assert_eq!(db.current_schema(), Some("reporting".to_string()));
+
+    db.set_current_schema(None).unwrap();
+    assert_eq!(db.current_schema(), None);
+}
+
+#[test]
 fn db_execute_two_named_graphs_independent() {
     let db = db();
     db.execute("CREATE GRAPH alpha").unwrap();
