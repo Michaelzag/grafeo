@@ -46,7 +46,7 @@ use grafeo_adapters::storage::wal::{
     DurabilityMode as WalDurabilityMode, LpgWal, WalConfig, WalRecord, WalRecovery,
 };
 use grafeo_common::memory::buffer::{BufferManager, BufferManagerConfig};
-use grafeo_common::utils::error::Result;
+use grafeo_common::utils::error::{Error, QueryError, QueryErrorKind, Result};
 use grafeo_core::graph::lpg::LpgStore;
 #[cfg(feature = "rdf")]
 use grafeo_core::graph::rdf::RdfStore;
@@ -1207,8 +1207,22 @@ impl GrafeoDB {
     ///
     /// This is equivalent to running `USE GRAPH <name>` but without creating a session.
     /// Pass `None` to reset to the default graph.
-    pub fn set_current_graph(&self, name: Option<&str>) {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the named graph does not exist.
+    pub fn set_current_graph(&self, name: Option<&str>) -> Result<()> {
+        if let Some(name) = name
+            && !name.eq_ignore_ascii_case("default")
+            && self.lpg_store().graph(name).is_none()
+        {
+            return Err(Error::Query(QueryError::new(
+                QueryErrorKind::Semantic,
+                format!("Graph '{name}' does not exist"),
+            )));
+        }
         *self.current_graph.write() = name.map(ToString::to_string);
+        Ok(())
     }
 
     /// Returns the current schema name, if any.
@@ -1224,8 +1238,21 @@ impl GrafeoDB {
     ///
     /// This is equivalent to running `SESSION SET SCHEMA <name>` but without creating
     /// a session. Pass `None` to clear the schema context.
-    pub fn set_current_schema(&self, name: Option<&str>) {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the named schema does not exist.
+    pub fn set_current_schema(&self, name: Option<&str>) -> Result<()> {
+        if let Some(name) = name
+            && !self.catalog.schema_exists(name)
+        {
+            return Err(Error::Query(QueryError::new(
+                QueryErrorKind::Semantic,
+                format!("Schema '{name}' does not exist"),
+            )));
+        }
         *self.current_schema.write() = name.map(ToString::to_string);
+        Ok(())
     }
 
     /// Returns the adaptive execution configuration.
@@ -1340,8 +1367,21 @@ impl GrafeoDB {
     }
 
     /// Drops a named graph. Returns `true` if dropped, `false` if it did not exist.
+    ///
+    /// If the dropped graph was the active graph context, the context is reset
+    /// to the default graph.
     pub fn drop_graph(&self, name: &str) -> bool {
-        self.lpg_store().drop_graph(name)
+        let dropped = self.lpg_store().drop_graph(name);
+        if dropped {
+            let mut current = self.current_graph.write();
+            if current
+                .as_deref()
+                .is_some_and(|g| g.eq_ignore_ascii_case(name))
+            {
+                *current = None;
+            }
+        }
+        dropped
     }
 
     /// Returns all named graph names.
