@@ -703,7 +703,10 @@ pub extern "C" fn grafeo_set_schema(db: *mut GrafeoDatabase, name: *const c_char
         set_last_error("Invalid UTF-8 in schema name");
         return GrafeoStatus::ErrorInvalidUtf8;
     };
-    db.inner.read().set_current_schema(Some(name_str));
+    if let Err(e) = db.inner.read().set_current_schema(Some(name_str)) {
+        set_last_error(&e.to_string());
+        return GrafeoStatus::ErrorQuery;
+    }
     GrafeoStatus::Ok
 }
 
@@ -721,7 +724,7 @@ pub extern "C" fn grafeo_reset_schema(db: *mut GrafeoDatabase) -> GrafeoStatus {
     }
     // SAFETY: Caller guarantees valid pointer.
     let db = unsafe { &*db };
-    db.inner.read().set_current_schema(None);
+    let _ = db.inner.read().set_current_schema(None);
     GrafeoStatus::Ok
 }
 

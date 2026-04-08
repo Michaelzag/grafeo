@@ -1049,13 +1049,19 @@ impl Database {
     /// Equivalent to `SESSION SET SCHEMA name` but persists across calls.
     /// Call `resetSchema()` to clear it.
     ///
+    /// # Errors
+    ///
+    /// Returns an error if the schema does not exist.
+    ///
     /// ```js
     /// db.setSchema("reporting");
     /// const types = db.execute("SHOW GRAPH TYPES"); // only sees 'reporting' types
     /// ```
     #[wasm_bindgen(js_name = "setSchema")]
-    pub fn set_schema(&self, name: &str) {
-        self.inner.set_current_schema(Some(name));
+    pub fn set_schema(&self, name: &str) -> Result<(), JsValue> {
+        self.inner
+            .set_current_schema(Some(name))
+            .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// Clears the current schema context.
@@ -1063,7 +1069,7 @@ impl Database {
     /// Subsequent `execute()` calls will use the default (no-schema) namespace.
     #[wasm_bindgen(js_name = "resetSchema")]
     pub fn reset_schema(&self) {
-        self.inner.set_current_schema(None);
+        let _ = self.inner.set_current_schema(None);
     }
 
     /// Returns the current schema name, or `undefined` if no schema is set.

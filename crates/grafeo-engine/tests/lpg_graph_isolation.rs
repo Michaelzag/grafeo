@@ -521,10 +521,10 @@ fn db_current_graph_api() {
     db.execute("USE GRAPH mydb").unwrap();
     assert_eq!(db.current_graph(), Some("mydb".to_string()));
 
-    db.set_current_graph(None);
+    db.set_current_graph(None).unwrap();
     assert_eq!(db.current_graph(), None);
 
-    db.set_current_graph(Some("mydb"));
+    db.set_current_graph(Some("mydb")).unwrap();
     assert_eq!(db.current_graph(), Some("mydb".to_string()));
 }
 

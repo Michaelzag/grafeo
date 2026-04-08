@@ -2550,15 +2550,19 @@ impl PyGrafeoDB {
     /// Example:
     ///     db.set_schema("reporting")
     ///     result = db.execute("SHOW GRAPH TYPES")  # only sees types in 'reporting'
-    fn set_schema(&self, name: String) {
-        self.inner.read().set_current_schema(Some(&name));
+    fn set_schema(&self, name: String) -> PyResult<()> {
+        self.inner
+            .read()
+            .set_current_schema(Some(&name))
+            .map_err(PyGrafeoError::from)?;
+        Ok(())
     }
 
     /// Clears the current schema context.
     ///
     /// Subsequent `execute()` calls will use the default (no-schema) namespace.
     fn reset_schema(&self) {
-        self.inner.read().set_current_schema(None);
+        let _ = self.inner.read().set_current_schema(None);
     }
 
     /// Returns the current schema name, or `None` if no schema is set.
