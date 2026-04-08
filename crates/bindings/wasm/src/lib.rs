@@ -1061,7 +1061,7 @@ impl Database {
     pub fn set_schema(&self, name: &str) -> Result<(), JsValue> {
         self.inner
             .set_current_schema(Some(name))
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+            .map_err(|e| JsError::new(&e.to_string()).into())
     }
 
     /// Clears the current schema context.

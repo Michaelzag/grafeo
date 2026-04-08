@@ -60,11 +60,8 @@ class TestCDC:
         history = db.node_history(node_id)
         assert len(history) >= 1
 
-    def test_transaction_with_cdc_disabled(self):
+    def test_transaction_with_cdc_disabled(self, db):
         """Per-transaction CDC override suppresses tracking when disabled."""
-        if not GRAFEO_AVAILABLE:
-            pytest.skip("grafeo not installed")
-        db = GrafeoDB(cdc=True)
         # Insert with CDC explicitly disabled for this transaction
         with db.begin_transaction_with_cdc(False) as tx:
             tx.execute("INSERT (:Person {name: 'Vincent'})")

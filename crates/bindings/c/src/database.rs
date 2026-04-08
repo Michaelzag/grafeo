@@ -724,7 +724,10 @@ pub extern "C" fn grafeo_reset_schema(db: *mut GrafeoDatabase) -> GrafeoStatus {
     }
     // SAFETY: Caller guarantees valid pointer.
     let db = unsafe { &*db };
-    let _ = db.inner.read().set_current_schema(None);
+    if let Err(e) = db.inner.read().set_current_schema(None) {
+        set_last_error(&e.to_string());
+        return GrafeoStatus::ErrorQuery;
+    }
     GrafeoStatus::Ok
 }
 
