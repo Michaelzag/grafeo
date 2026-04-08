@@ -189,6 +189,41 @@ impl HnswIndex {
         self.nodes.read().is_empty()
     }
 
+    /// Snapshot the topology for serialization.
+    ///
+    /// Returns (entry_point, max_level, node_neighbors) where node_neighbors
+    /// is a vec of (NodeId, neighbor_layers).
+    #[must_use]
+    pub fn snapshot_topology(&self) -> (Option<NodeId>, usize, Vec<(NodeId, Vec<Vec<NodeId>>)>) {
+        let nodes = self.nodes.read();
+        let entry_point = *self.entry_point.read();
+        let max_level = *self.max_level.read();
+
+        let mut node_data: Vec<(NodeId, Vec<Vec<NodeId>>)> = nodes
+            .iter()
+            .map(|(id, node)| (*id, node.neighbors.clone()))
+            .collect();
+        node_data.sort_by_key(|(id, _)| *id);
+
+        (entry_point, max_level, node_data)
+    }
+
+    /// Restore topology from a snapshot. Replaces all current data.
+    pub fn restore_topology(
+        &self,
+        entry_point: Option<NodeId>,
+        max_level: usize,
+        node_data: Vec<(NodeId, Vec<Vec<NodeId>>)>,
+    ) {
+        let mut nodes = self.nodes.write();
+        nodes.clear();
+        for (id, neighbors) in node_data {
+            nodes.insert(id, HnswNode { neighbors });
+        }
+        *self.entry_point.write() = entry_point;
+        *self.max_level.write() = max_level;
+    }
+
     /// Returns estimated heap memory in bytes for the HNSW topology.
     #[must_use]
     pub fn heap_memory_bytes(&self) -> usize {

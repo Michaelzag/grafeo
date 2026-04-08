@@ -39,9 +39,6 @@ parking_lot.workspace = true
 crossbeam = { workspace = true, optional = true }
 rayon = { workspace = true, optional = true }
 
-# Async (optional - used by spill module)
-tokio = { workspace = true, optional = true }
-
 # Regex (use regex-lite for smaller WASM builds)
 regex = { workspace = true, optional = true }
 regex-lite = { workspace = true, optional = true }
@@ -60,7 +57,7 @@ tempfile.workspace = true
 [features]
 default = ["parallel", "spill", "mmap", "regex"]
 parallel = ["rayon", "crossbeam"]  # Morsel-driven parallelism (rayon, crossbeam work-stealing)
-spill = ["tokio"]                  # Disk spilling for out-of-core execution
+spill = []                         # Disk spilling for out-of-core execution (sync only, async in grafeo-engine)
 mmap = []                          # File-backed vector storage (MmapStorage)
 rdf = []  # Enable RDF graph model
 tiered-storage = ["grafeo-common/tiered-storage"]  # Enable tiered hot/cold storage

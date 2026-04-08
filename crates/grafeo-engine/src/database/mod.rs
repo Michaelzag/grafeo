@@ -1113,6 +1113,28 @@ impl GrafeoDB {
             section.deserialize(&data)?;
         }
 
+        // Restore HNSW topology (if vector indexes exist in both catalog and section)
+        #[cfg(feature = "vector-index")]
+        if let Some(entry) = dir.find(SectionType::VectorStore) {
+            let data = fm.read_section_data(entry)?;
+            let indexes = store.vector_index_entries();
+            if !indexes.is_empty() {
+                let mut section = grafeo_core::index::vector::VectorStoreSection::new(indexes);
+                section.deserialize(&data)?;
+            }
+        }
+
+        // Restore BM25 postings (if text indexes exist in both catalog and section)
+        #[cfg(feature = "text-index")]
+        if let Some(entry) = dir.find(SectionType::TextIndex) {
+            let data = fm.read_section_data(entry)?;
+            let indexes = store.text_index_entries();
+            if !indexes.is_empty() {
+                let mut section = grafeo_core::index::text::TextIndexSection::new(indexes);
+                section.deserialize(&data)?;
+            }
+        }
+
         Ok(())
     }
 
@@ -1655,6 +1677,26 @@ impl GrafeoDB {
         if !self.rdf_store.is_empty() || self.rdf_store.graph_count() > 0 {
             let rdf = grafeo_core::graph::rdf::RdfStoreSection::new(Arc::clone(&self.rdf_store));
             sections.push(Box::new(rdf));
+        }
+
+        // Vector indexes: persist HNSW topology to avoid rebuild on load
+        #[cfg(feature = "vector-index")]
+        {
+            let indexes = store.vector_index_entries();
+            if !indexes.is_empty() {
+                let vector = grafeo_core::index::vector::VectorStoreSection::new(indexes);
+                sections.push(Box::new(vector));
+            }
+        }
+
+        // Text indexes: persist BM25 postings to avoid rebuild on load
+        #[cfg(feature = "text-index")]
+        {
+            let indexes = store.text_index_entries();
+            if !indexes.is_empty() {
+                let text = grafeo_core::index::text::TextIndexSection::new(indexes);
+                sections.push(Box::new(text));
+            }
         }
 
         sections
