@@ -352,8 +352,9 @@ describe('previously undeclared methods', () => {
     db.close()
   })
 
-  it('should set and get schema', () => {
+  it('should set and get schema', async () => {
     const db = GrafeoDB.create()
+    await db.execute('CREATE SCHEMA test')
     db.setSchema('test')
     expect(db.currentSchema()).toBe('test')
     db.resetSchema()
