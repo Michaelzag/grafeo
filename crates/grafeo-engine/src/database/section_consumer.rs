@@ -221,9 +221,10 @@ impl VectorIndexConsumer {
         // Create spill directory if needed
         std::fs::create_dir_all(spill_dir).map_err(|e| SpillError::IoError(e.to_string()))?;
 
-        // Sanitize key for filename ("Label:property" -> "Label--property")
-        // Uses "--" as separator to preserve label case and underscores in names.
-        let safe_key = key.replace(':', "--");
+        // Sanitize key for filename ("Label:property" -> "Label%3Aproperty")
+        // Percent-encodes ':' to preserve label case, underscores, and avoid
+        // ambiguity with any separator character.
+        let safe_key = key.replace('%', "%25").replace(':', "%3A");
         let spill_file = spill_dir.join(format!("vectors_{safe_key}.bin"));
 
         // Create MmapStorage and write all vectors
@@ -309,8 +310,11 @@ impl MemoryConsumer for VectorIndexConsumer {
             match self.spill_index(&store, key, dimensions) {
                 Ok(freed) => total_freed += freed,
                 Err(e) => {
+                    // Log but continue: earlier indexes may have already been
+                    // drained and persisted. Returning Err would discard the
+                    // freed bytes from those, leaving BufferManager with
+                    // incorrect pressure tracking.
                     eprintln!("failed to spill vector index {key}: {e}");
-                    return Err(e);
                 }
             }
         }

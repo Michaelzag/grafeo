@@ -964,13 +964,13 @@ impl<Id: EntityId> PropertyColumn<Id> {
     /// metadata are preserved).
     pub fn evict_values(&mut self) -> (usize, usize) {
         let count = self.values.len();
-        let estimated_bytes = self.estimated_heap_bytes();
+        let freed_bytes = self.heap_memory_bytes();
         self.values.clear();
         self.values.shrink_to_fit();
         self.compressed = None;
         self.compressed_count = 0;
         self.spilled = true;
-        (count, estimated_bytes)
+        (count, freed_bytes)
     }
 
     /// Drains all values from this column, returning them for export.
@@ -992,8 +992,11 @@ impl<Id: EntityId> PropertyColumn<Id> {
     /// the correct values (from `MmapStorage::export_all()` or similar).
     pub fn restore_values(&mut self, values: impl Iterator<Item = (Id, Value)>) {
         self.spilled = false;
+        // Insert directly into the map without calling set(), which would
+        // re-increment zone map counters (row_count, null_count) on top of
+        // the already-preserved zone map from before eviction.
         for (id, value) in values {
-            self.set(id, value);
+            self.values.insert(id, value);
         }
     }
 

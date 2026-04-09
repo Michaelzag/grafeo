@@ -1904,31 +1904,22 @@ impl GrafeoDB {
                 None => continue,
             };
 
-            // Match pattern: vectors_{Label}--{property}.bin
+            // Match pattern: vectors_{key}.bin where key is percent-encoded
             if !file_name.starts_with("vectors_") || !file_name.ends_with(".bin") {
                 continue;
             }
 
-            // Extract key: "vectors_Label--embedding.bin" -> "Label:embedding"
+            // Extract and decode key: "vectors_Label%3Aembedding.bin" -> "Label:embedding"
             let key_part = &file_name["vectors_".len()..file_name.len() - ".bin".len()];
 
-            // Reconstruct "Label:property" from "Label--property"
-            let key = if let Some(pos) = key_part.find("--") {
-                let label = &key_part[..pos];
-                let property = &key_part[pos + 2..];
-                format!("{label}:{property}")
-            } else if let Some(pos) = key_part.find('_') {
-                // Legacy fallback: "label_property" format from before 0.5.35
-                let label = &key_part[..pos];
-                let property = &key_part[pos + 1..];
-                let mut label_cap = label.to_string();
-                if let Some(first) = label_cap.get_mut(..1) {
-                    first.make_ascii_uppercase();
-                }
-                format!("{label_cap}:{property}")
-            } else {
+            // Percent-decode: %3A -> ':', %25 -> '%'
+            let key = key_part.replace("%3A", ":").replace("%25", "%");
+
+            // Key must contain ':' (label:property format)
+            if !key.contains(':') {
+                // Legacy file with old encoding, skip (will be re-created on next spill)
                 continue;
-            };
+            }
 
             // Only restore if the corresponding vector index exists
             if store.get_vector_index_by_key(&key).is_none() {
