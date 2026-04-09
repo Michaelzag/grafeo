@@ -504,6 +504,18 @@ impl<Id: EntityId> PropertyStorage<Id> {
             .is_some_and(|col| col.is_spilled())
     }
 
+    /// Marks a column as spilled without draining its values.
+    ///
+    /// Used on startup when re-establishing spill state: the column may
+    /// already be empty (loaded from a checkpoint that serialized after spill).
+    #[cfg(not(feature = "temporal"))]
+    pub fn mark_column_spilled(&self, key: &PropertyKey) {
+        let mut columns = self.columns.write();
+        if let Some(column) = columns.get_mut(key) {
+            column.mark_spilled();
+        }
+    }
+
     /// Gets a column by key for bulk access.
     #[must_use]
     pub fn column(&self, key: &PropertyKey) -> Option<PropertyColumnRef<'_, Id>> {
@@ -925,6 +937,13 @@ impl<Id: EntityId> PropertyColumn<Id> {
     }
 
     // ── Spill / Reload ─────────────────────────────────────────────
+
+    /// Marks the column as spilled without clearing values.
+    ///
+    /// Used on startup when re-establishing spill state from persisted files.
+    pub fn mark_spilled(&mut self) {
+        self.spilled = true;
+    }
 
     /// Whether this column's values have been spilled to disk.
     ///

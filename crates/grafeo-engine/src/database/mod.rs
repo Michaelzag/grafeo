@@ -578,6 +578,12 @@ impl GrafeoDB {
             ));
         }
 
+        // Discover existing spill files from a previous session.
+        // If vectors were spilled before close, the spill files persist on disk
+        // and need to be re-mapped so search can read from them.
+        #[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
+        db.restore_spill_files();
+
         // If VectorStore is configured as ForceDisk, immediately spill embeddings.
         // This must happen after register_section_consumers() which creates the consumer.
         #[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
@@ -1790,6 +1796,96 @@ impl GrafeoDB {
         #[cfg(feature = "text-index")]
         self.buffer_manager
             .register_consumer(Arc::new(section_consumer::TextIndexConsumer::new(store)));
+    }
+
+    /// Discovers and re-opens spill files from a previous session.
+    ///
+    /// When the database was closed with spilled vector embeddings, the
+    /// `vectors_*.bin` files persist in the spill directory. This method
+    /// scans for them, opens each as `MmapStorage`, and registers them
+    /// in the `vector_spill_storages` map so search can read from them.
+    #[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
+    fn restore_spill_files(&mut self) {
+        use grafeo_core::index::vector::MmapStorage;
+
+        let spill_dir = match self.buffer_manager.config().spill_path {
+            Some(ref path) => path.clone(),
+            None => return,
+        };
+
+        if !spill_dir.exists() {
+            return;
+        }
+
+        let spill_map = match self.vector_spill_storages {
+            Some(ref map) => Arc::clone(map),
+            None => return,
+        };
+
+        let entries = match std::fs::read_dir(&spill_dir) {
+            Ok(entries) => entries,
+            Err(_) => return,
+        };
+
+        let store = match self.store {
+            Some(ref s) => s,
+            None => return,
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let file_name = match path.file_name().and_then(|n| n.to_str()) {
+                Some(name) => name.to_string(),
+                None => continue,
+            };
+
+            // Match pattern: vectors_{label}_{property}.bin
+            if !file_name.starts_with("vectors_") || !file_name.ends_with(".bin") {
+                continue;
+            }
+
+            // Extract key: "vectors_item_embedding.bin" -> "item_embedding"
+            let key_part = &file_name["vectors_".len()..file_name.len() - ".bin".len()];
+
+            // Reconstruct "label:property" from "label_property"
+            // Convention: first underscore separates label from property
+            let key = if let Some(pos) = key_part.find('_') {
+                let label = &key_part[..pos];
+                let property = &key_part[pos + 1..];
+                // Capitalize label to match original key format
+                let mut label_cap = label.to_string();
+                if let Some(first) = label_cap.get_mut(..1) {
+                    first.make_ascii_uppercase();
+                }
+                format!("{label_cap}:{property}")
+            } else {
+                continue;
+            };
+
+            // Only restore if the corresponding vector index exists
+            if store.get_vector_index_by_key(&key).is_none() {
+                // Stale spill file (index was dropped), clean it up
+                let _ = std::fs::remove_file(&path);
+                continue;
+            }
+
+            // Open the MmapStorage
+            match MmapStorage::open(&path) {
+                Ok(mmap_storage) => {
+                    // Mark the property column as spilled so get() returns None
+                    let property = key.split(':').nth(1).unwrap_or("");
+                    let prop_key = grafeo_common::types::PropertyKey::new(property);
+                    store.node_properties_mark_spilled(&prop_key);
+
+                    spill_map.write().insert(key, Arc::new(mmap_storage));
+                }
+                Err(e) => {
+                    eprintln!("failed to restore spill file {}: {e}", path.display());
+                    // Remove corrupt spill file
+                    let _ = std::fs::remove_file(&path);
+                }
+            }
+        }
     }
 
     /// Builds section objects for the current database state.

@@ -106,7 +106,7 @@ fn spill_with_no_vectors_is_noop() {
     feature = "grafeo-file",
     not(feature = "temporal")
 ))]
-#[ignore = "checkpoint + spill interaction needs further work (spilled columns serialize empty)"]
+#[ignore = "pre-existing: grafeo_file close/reopen persistence broken (not spill-specific)"]
 fn checkpoint_after_spill_preserves_non_vector_data() {
     let dir = tempfile::TempDir::new().unwrap();
     let db_path = dir.path().join("checkpoint_spill.grafeo");

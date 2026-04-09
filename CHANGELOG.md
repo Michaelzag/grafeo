@@ -23,6 +23,9 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 - **BufferManager section consumers**: storage sections register as `MemoryConsumer`s with the buffer manager, enabling accurate memory pressure tracking and per-region usage reporting. Dynamic consumers for vector and text indexes use `Weak<LpgStore>` to avoid stale references.
 - **Periodic checkpoint timer**: background thread flushes dirty sections at `Config::checkpoint_interval`, bounding WAL size and limiting data loss to one interval on crash. Stops promptly (<100 ms) on database close.
 - **Container format specification**: `docs/architecture/storage/container-format.md` documents the `.grafeo` file layout, section directory, checkpoint flow, mmap lifecycle, and recovery procedure.
+- **Vector embedding spill to disk**: when memory pressure is detected or `TierOverride::ForceDisk` is configured, vector property columns are drained to `MmapStorage` files, freeing heap memory. Search transparently reads spilled vectors from mmap via `SpillableVectorAccessor`, with fallback to property storage for post-spill inserts.
+- **BufferManager spill integration**: eviction cycle now calls `spill()` on consumers that support disk offloading after in-memory eviction is exhausted. `BufferManager::spill_all()` for explicit ForceDisk at startup.
+- **PropertyColumn eviction**: `drain_values()`, `evict_values()`, `restore_values()` on property columns with a `spilled` flag, enabling column-level memory management for large vector properties.
 
 ### Changed
 

@@ -976,4 +976,13 @@ impl LpgStore {
     pub fn is_node_column_spilled(&self, key: &PropertyKey) -> bool {
         self.node_properties.is_column_spilled(key)
     }
+
+    /// Marks a node property column as spilled without draining it.
+    ///
+    /// Used during startup to re-establish spill state for columns that
+    /// were already empty (serialized without values in the previous session).
+    #[cfg(not(feature = "temporal"))]
+    pub fn node_properties_mark_spilled(&self, key: &PropertyKey) {
+        self.node_properties.mark_column_spilled(key);
+    }
 }

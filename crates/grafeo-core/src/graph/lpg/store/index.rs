@@ -170,6 +170,13 @@ impl LpgStore {
             .collect()
     }
 
+    /// Looks up a vector index by its `"label:property"` key.
+    #[cfg(feature = "vector-index")]
+    #[must_use]
+    pub fn get_vector_index_by_key(&self, key: &str) -> Option<Arc<HnswIndex>> {
+        self.vector_indexes.read().get(key).cloned()
+    }
+
     /// Stores a text index for a label+property pair.
     #[cfg(feature = "text-index")]
     pub fn add_text_index(
