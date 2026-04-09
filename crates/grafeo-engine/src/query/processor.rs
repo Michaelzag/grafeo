@@ -12,6 +12,7 @@ use std::sync::Arc;
 use grafeo_common::grafeo_debug_span;
 use grafeo_common::types::{EpochId, TransactionId, Value};
 use grafeo_common::utils::error::{Error, Result};
+#[cfg(feature = "lpg")]
 use grafeo_core::graph::lpg::LpgStore;
 use grafeo_core::graph::{GraphStore, GraphStoreMut};
 

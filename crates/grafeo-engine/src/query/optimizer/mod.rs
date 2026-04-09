@@ -81,6 +81,7 @@ impl Optimizer {
     /// Pre-populates the cardinality estimator with per-label row counts and
     /// edge type fanout. Feeds per-edge-type degree stats, label cardinalities,
     /// and graph totals into the cost model for accurate estimation.
+    #[cfg(feature = "lpg")]
     #[must_use]
     pub fn from_store(store: &grafeo_core::graph::lpg::LpgStore) -> Self {
         store.ensure_statistics_fresh();

@@ -29,6 +29,8 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 
 ### Changed
 
+- **`rdf` feature renamed to `triple-store`**: the atom that enables the RDF triple store model is now `triple-store` across all crates, freeing `rdf` for the upcoming persona-based profile name. A deprecated alias `rdf = ["triple-store"]` is kept for one release. WASM retains `rdf` as the profile name (intentional).
+- **`lpg` feature flag**: LPG graph model is now an explicit feature (`lpg`) in grafeo-core, grafeo-engine, and grafeo-adapters, symmetric to `triple-store`. Included in all default and named profiles, so existing builds are unaffected. Enables future RDF-only builds without LPG compilation.
 - **Crate restructure**: storage backends (WAL, `.grafeo` format) moved from `grafeo-adapters` to new `grafeo-storage` crate. `grafeo-adapters` is now parser-only. `grafeo-core/src/storage/` renamed to `grafeo-core/src/codec/` (compression codecs, not I/O).
 - **Removed tokio from grafeo-core**: async spill files moved to `grafeo-engine/src/execution/spill/`, keeping `grafeo-core` free of I/O runtime dependencies.
 - **CI benchmark job**: now runs all 6 bench files (added `serialization_bench`, `regression_bench`, `memory_bench`), uses per-benchmark thresholds from `bench-thresholds.toml`, adds `benchmark-main` job for baseline persistence on push to main.

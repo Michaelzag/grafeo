@@ -442,6 +442,7 @@ impl Session {
         let key = self.active_graph_storage_key();
         match key {
             None => Arc::clone(&self.graph_store),
+            #[cfg(feature = "lpg")]
             Some(ref name) => match self.store.graph(name) {
                 Some(named_store) => {
                     #[cfg(feature = "wal")]
@@ -457,6 +458,8 @@ impl Session {
                 }
                 None => Arc::clone(&self.graph_store),
             },
+            #[cfg(not(feature = "lpg"))]
+            Some(_) => Arc::clone(&self.graph_store),
         }
     }
 
@@ -468,6 +471,7 @@ impl Session {
         let key = self.active_graph_storage_key();
         match key {
             None => self.graph_store_mut.as_ref().map(Arc::clone),
+            #[cfg(feature = "lpg")]
             Some(ref name) => match self.store.graph(name) {
                 Some(named_store) => {
                     let mut store: Arc<dyn GraphStoreMut> = named_store;
@@ -498,6 +502,8 @@ impl Session {
                 }
                 None => self.graph_store_mut.as_ref().map(Arc::clone),
             },
+            #[cfg(not(feature = "lpg"))]
+            Some(_) => self.graph_store_mut.as_ref().map(Arc::clone),
         }
     }
 
@@ -621,6 +627,7 @@ impl Session {
     /// Returns all versions of a node with their creation/deletion epochs.
     ///
     /// Properties and labels reflect the current state (not versioned per-epoch).
+    #[cfg(feature = "lpg")]
     #[must_use]
     pub fn get_node_history(&self, id: NodeId) -> Vec<(EpochId, Option<EpochId>, Node)> {
         self.active_lpg_store().get_node_history(id)
@@ -629,6 +636,7 @@ impl Session {
     /// Returns all versions of an edge with their creation/deletion epochs.
     ///
     /// Properties reflect the current state (not versioned per-epoch).
+    #[cfg(feature = "lpg")]
     #[must_use]
     pub fn get_edge_history(&self, id: EdgeId) -> Vec<(EpochId, Option<EpochId>, Edge)> {
         self.active_lpg_store().get_edge_history(id)
@@ -666,6 +674,7 @@ impl Session {
         }
 
         match cmd {
+            #[cfg(feature = "lpg")]
             SessionCommand::CreateGraph {
                 name,
                 if_not_exists,
@@ -751,6 +760,7 @@ impl Session {
 
                 Ok(QueryResult::empty())
             }
+            #[cfg(feature = "lpg")]
             SessionCommand::DropGraph { name, if_exists } => {
                 let storage_key = self.effective_graph_key(&name);
                 let dropped = self.store.drop_graph(&storage_key);
@@ -776,6 +786,7 @@ impl Session {
                 }
                 Ok(QueryResult::empty())
             }
+            #[cfg(feature = "lpg")]
             SessionCommand::UseGraph(name) => {
                 // Verify graph exists (resolve within current schema)
                 let effective_key = self.effective_graph_key(&name);
@@ -792,6 +803,7 @@ impl Session {
                 self.track_graph_touch();
                 Ok(QueryResult::empty())
             }
+            #[cfg(feature = "lpg")]
             SessionCommand::SessionSetGraph(name) => {
                 // ISO/IEC 39075 Section 7.1 GR2: set session graph (resolved within current schema)
                 let effective_key = self.effective_graph_key(&name);
@@ -911,7 +923,7 @@ impl Session {
     }
 
     /// Executes a schema DDL command, returning a status result.
-    #[cfg(feature = "gql")]
+    #[cfg(all(feature = "lpg", feature = "gql"))]
     fn execute_schema_command(
         &self,
         cmd: grafeo_adapters::query::gql::ast::SchemaStatement,
@@ -1842,7 +1854,7 @@ impl Session {
     }
 
     /// Creates a vector index on the store by scanning existing nodes.
-    #[cfg(all(feature = "gql", feature = "vector-index"))]
+    #[cfg(all(feature = "lpg", feature = "gql", feature = "vector-index"))]
     fn create_vector_index_on_store(
         store: &LpgStore,
         label: &str,
@@ -1902,7 +1914,7 @@ impl Session {
     }
 
     /// Stub for when vector-index feature is not enabled.
-    #[cfg(all(feature = "gql", not(feature = "vector-index")))]
+    #[cfg(all(feature = "lpg", feature = "gql", not(feature = "vector-index")))]
     fn create_vector_index_on_store(
         _store: &LpgStore,
         _label: &str,
@@ -1916,7 +1928,7 @@ impl Session {
     }
 
     /// Creates a text index on the store by scanning existing nodes.
-    #[cfg(all(feature = "gql", feature = "text-index"))]
+    #[cfg(all(feature = "lpg", feature = "gql", feature = "text-index"))]
     fn create_text_index_on_store(store: &LpgStore, label: &str, property: &str) -> Result<()> {
         use grafeo_common::types::{PropertyKey, Value};
         use grafeo_core::index::text::{BM25Config, InvertedIndex};
@@ -1936,7 +1948,7 @@ impl Session {
     }
 
     /// Stub for when text-index feature is not enabled.
-    #[cfg(all(feature = "gql", not(feature = "text-index")))]
+    #[cfg(all(feature = "lpg", feature = "gql", not(feature = "text-index")))]
     fn create_text_index_on_store(_store: &LpgStore, _label: &str, _property: &str) -> Result<()> {
         Err(grafeo_common::utils::error::Error::Internal(
             "Text index support requires the 'text-index' feature".to_string(),
@@ -2163,6 +2175,7 @@ impl Session {
     /// When a session schema is set, only graphs belonging to that schema are
     /// shown (their compound prefix is stripped). When no schema is set, graphs
     /// without a schema prefix are shown (the default schema).
+    #[cfg(feature = "lpg")]
     fn execute_show_graphs(&self) -> Result<QueryResult> {
         let schema = self.current_schema.lock().clone();
         let all_names = self.store.graph_names();
@@ -3266,6 +3279,7 @@ impl Session {
     }
 
     /// Core transaction begin logic, usable from both `&mut self` and `&self` paths.
+    #[cfg(feature = "lpg")]
     fn begin_transaction_inner(
         &self,
         read_only: bool,
@@ -3327,6 +3341,7 @@ impl Session {
     }
 
     /// Core commit logic, usable from both `&mut self` and `&self` paths.
+    #[cfg(feature = "lpg")]
     fn commit_inner(&self) -> Result<()> {
         let _span = grafeo_debug_span!("grafeo::tx::commit");
         // Nested transaction: release the auto-savepoint (changes are preserved).
@@ -3484,6 +3499,7 @@ impl Session {
     }
 
     /// Core rollback logic, usable from both `&mut self` and `&self` paths.
+    #[cfg(feature = "lpg")]
     fn rollback_inner(&self) -> Result<()> {
         let _span = grafeo_debug_span!("grafeo::tx::rollback");
         // Nested transaction: rollback to the auto-savepoint.
@@ -3555,6 +3571,7 @@ impl Session {
     /// # Errors
     ///
     /// Returns an error if no transaction is active.
+    #[cfg(feature = "lpg")]
     pub fn savepoint(&self, name: &str) -> Result<()> {
         let tx_id = self.current_transaction.lock().ok_or_else(|| {
             grafeo_common::utils::error::Error::Transaction(
@@ -3600,6 +3617,7 @@ impl Session {
     /// # Errors
     ///
     /// Returns an error if no transaction is active or the savepoint does not exist.
+    #[cfg(feature = "lpg")]
     pub fn rollback_to_savepoint(&self, name: &str) -> Result<()> {
         let transaction_id = self.current_transaction.lock().ok_or_else(|| {
             grafeo_common::utils::error::Error::Transaction(
@@ -3733,6 +3751,7 @@ impl Session {
     }
 
     /// Returns the store's current node count and the count at transaction start.
+    #[cfg(feature = "lpg")]
     #[must_use]
     pub(crate) fn node_count_delta(&self) -> (usize, usize) {
         (
@@ -3742,6 +3761,7 @@ impl Session {
     }
 
     /// Returns the store's current edge count and the count at transaction start.
+    #[cfg(feature = "lpg")]
     #[must_use]
     pub(crate) fn edge_count_delta(&self) -> (usize, usize) {
         (
@@ -4050,6 +4070,7 @@ impl Session {
     ///
     /// This is a low-level API for testing and direct manipulation.
     /// If a transaction is active, the node will be versioned with the transaction ID.
+    #[cfg(feature = "lpg")]
     pub fn create_node(&self, labels: &[&str]) -> NodeId {
         let (epoch, transaction_id) = self.get_transaction_context();
         self.active_lpg_store().create_node_versioned(
@@ -4062,6 +4083,7 @@ impl Session {
     /// Creates a node with properties.
     ///
     /// If a transaction is active, the node will be versioned with the transaction ID.
+    #[cfg(feature = "lpg")]
     pub fn create_node_with_props<'a>(
         &self,
         labels: &[&str],
@@ -4080,6 +4102,7 @@ impl Session {
     ///
     /// This is a low-level API for testing and direct manipulation.
     /// If a transaction is active, the edge will be versioned with the transaction ID.
+    #[cfg(feature = "lpg")]
     pub fn create_edge(
         &self,
         src: NodeId,
@@ -4097,6 +4120,7 @@ impl Session {
     }
 
     /// Creates an edge with properties within the active transaction context.
+    #[cfg(feature = "lpg")]
     pub fn create_edge_with_props<'a>(
         &self,
         src: NodeId,
@@ -4115,6 +4139,7 @@ impl Session {
     }
 
     /// Sets a node property within the active transaction context.
+    #[cfg(feature = "lpg")]
     pub fn set_node_property(&self, id: NodeId, key: &str, value: Value) {
         let (_, transaction_id) = self.get_transaction_context();
         if let Some(tid) = transaction_id {
@@ -4126,6 +4151,7 @@ impl Session {
     }
 
     /// Sets an edge property within the active transaction context.
+    #[cfg(feature = "lpg")]
     pub fn set_edge_property(&self, id: grafeo_common::types::EdgeId, key: &str, value: Value) {
         let (_, transaction_id) = self.get_transaction_context();
         if let Some(tid) = transaction_id {
@@ -4137,6 +4163,7 @@ impl Session {
     }
 
     /// Deletes a node within the active transaction context.
+    #[cfg(feature = "lpg")]
     pub fn delete_node(&self, id: NodeId) -> bool {
         let (epoch, transaction_id) = self.get_transaction_context();
         if let Some(tid) = transaction_id {
@@ -4148,6 +4175,7 @@ impl Session {
     }
 
     /// Deletes an edge within the active transaction context.
+    #[cfg(feature = "lpg")]
     pub fn delete_edge(&self, id: grafeo_common::types::EdgeId) -> bool {
         let (epoch, transaction_id) = self.get_transaction_context();
         if let Some(tid) = transaction_id {
@@ -4185,6 +4213,7 @@ impl Session {
     /// let node = session.get_node(node_id);
     /// assert!(node.is_some());
     /// ```
+    #[cfg(feature = "lpg")]
     #[must_use]
     pub fn get_node(&self, id: NodeId) -> Option<Node> {
         let (epoch, transaction_id) = self.get_transaction_context();
@@ -4230,6 +4259,7 @@ impl Session {
     ///
     /// - Time complexity: O(1) average case
     /// - No lock contention
+    #[cfg(feature = "lpg")]
     #[must_use]
     pub fn get_edge(&self, id: EdgeId) -> Option<Edge> {
         let (epoch, transaction_id) = self.get_transaction_context();
@@ -4265,6 +4295,7 @@ impl Session {
     /// assert_eq!(neighbors.len(), 1);
     /// assert_eq!(neighbors[0].0, gus);
     /// ```
+    #[cfg(feature = "lpg")]
     #[must_use]
     pub fn get_neighbors_outgoing(&self, node: NodeId) -> Vec<(NodeId, EdgeId)> {
         self.active_lpg_store()
@@ -4280,6 +4311,7 @@ impl Session {
     ///
     /// - Time complexity: O(degree) where degree is the number of incoming edges
     /// - Uses backward adjacency index for direct access
+    #[cfg(feature = "lpg")]
     #[must_use]
     pub fn get_neighbors_incoming(&self, node: NodeId) -> Vec<(NodeId, EdgeId)> {
         self.active_lpg_store()
@@ -4298,6 +4330,7 @@ impl Session {
     /// # let alix = session.create_node(&["Person"]);
     /// let neighbors = session.get_neighbors_outgoing_by_type(alix, "KNOWS");
     /// ```
+    #[cfg(feature = "lpg")]
     #[must_use]
     pub fn get_neighbors_outgoing_by_type(
         &self,
@@ -4333,6 +4366,7 @@ impl Session {
     /// Gets the degree (number of edges) of a node.
     ///
     /// Returns (outgoing_degree, incoming_degree).
+    #[cfg(feature = "lpg")]
     #[must_use]
     pub fn get_degree(&self, node: NodeId) -> (usize, usize) {
         let active = self.active_lpg_store();
@@ -4350,6 +4384,7 @@ impl Session {
     ///
     /// - Time complexity: O(n) where n is the number of IDs
     /// - Better cache utilization than individual lookups
+    #[cfg(feature = "lpg")]
     #[must_use]
     pub fn get_nodes_batch(&self, ids: &[NodeId]) -> Vec<Option<Node>> {
         let (epoch, transaction_id) = self.get_transaction_context();
