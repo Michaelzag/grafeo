@@ -39,6 +39,9 @@ hybrid-search = ["grafeo-engine/hybrid-search"]
 cdc = ["grafeo-engine/cdc"]
 embed = ["grafeo-engine/embed"]  # Opt-in ONNX embedding generation (~17MB)
 
+# Graph model features
+lpg = ["grafeo-engine/lpg"]  # LPG (labeled property graph) model
+
 # Convenience groups
 languages = ["gql", "cypher", "sparql", "gremlin", "graphql", "sql-pgq"]  # All query languages
 ai = ["vector-index", "text-index", "hybrid-search", "cdc"]  # All AI/RAG features
@@ -53,8 +56,8 @@ tracing = ["grafeo-engine/tracing"]  # Observability spans and events
 arrow-export = ["grafeo-engine/arrow-export"]  # Arrow IPC zero-copy export
 
 # Named profiles (ecosystem-aligned)
-embedded = ["gql", "ai", "algos", "parallel", "regex", "grafeo-file", "arrow-export"]  # Python libs, MCP, in-process (default)
-browser = ["gql", "regex-lite"]  # WASM / grafeo-web
+embedded = ["lpg", "gql", "ai", "algos", "parallel", "regex", "grafeo-file", "arrow-export"]  # Python libs, MCP, in-process (default)
+browser = ["lpg", "gql", "regex-lite"]  # WASM / grafeo-web
 server = ["embedded", "languages", "storage", "triple-store", "cdc", "async-storage", "tracing"]  # grafeo-server
 full = ["server"]  # Everything (except embed)
 

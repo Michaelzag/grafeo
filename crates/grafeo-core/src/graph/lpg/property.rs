@@ -1000,14 +1000,6 @@ impl<Id: EntityId> PropertyColumn<Id> {
         }
     }
 
-    /// Estimated heap bytes used by this column's values.
-    fn estimated_heap_bytes(&self) -> usize {
-        // HashMap overhead + per-entry Value size
-        let capacity = self.values.capacity();
-        let entry_overhead = std::mem::size_of::<Id>() + std::mem::size_of::<Value>() + 1;
-        capacity * entry_overhead
-    }
-
     /// Returns the number of values in this column (hot + compressed).
     #[must_use]
     pub fn len(&self) -> usize {
