@@ -56,7 +56,7 @@ impl CheckpointTimer {
         store: Arc<LpgStore>,
         catalog: Arc<Catalog>,
         transaction_manager: Arc<TransactionManager>,
-        #[cfg(feature = "rdf")] rdf_store: Arc<grafeo_core::graph::rdf::RdfStore>,
+        #[cfg(feature = "triple-store")] rdf_store: Arc<grafeo_core::graph::rdf::RdfStore>,
         #[cfg(feature = "wal")] wal: Option<Arc<grafeo_storage::wal::LpgWal>>,
     ) -> Self {
         let shutdown = Arc::new(AtomicBool::new(false));
@@ -72,7 +72,7 @@ impl CheckpointTimer {
                     &store,
                     &catalog,
                     &transaction_manager,
-                    #[cfg(feature = "rdf")]
+                    #[cfg(feature = "triple-store")]
                     &rdf_store,
                     #[cfg(feature = "wal")]
                     wal.as_deref(),
@@ -106,7 +106,7 @@ impl CheckpointTimer {
         store: &Arc<LpgStore>,
         catalog: &Arc<Catalog>,
         transaction_manager: &TransactionManager,
-        #[cfg(feature = "rdf")] rdf_store: &Arc<grafeo_core::graph::rdf::RdfStore>,
+        #[cfg(feature = "triple-store")] rdf_store: &Arc<grafeo_core::graph::rdf::RdfStore>,
         #[cfg(feature = "wal")] wal: Option<&grafeo_storage::wal::LpgWal>,
     ) {
         let mut elapsed = Duration::ZERO;
@@ -130,7 +130,7 @@ impl CheckpointTimer {
                 store,
                 catalog,
                 transaction_manager,
-                #[cfg(feature = "rdf")]
+                #[cfg(feature = "triple-store")]
                 rdf_store,
                 #[cfg(feature = "wal")]
                 wal,
@@ -146,7 +146,7 @@ impl CheckpointTimer {
         store: &Arc<LpgStore>,
         catalog: &Arc<Catalog>,
         transaction_manager: &TransactionManager,
-        #[cfg(feature = "rdf")] rdf_store: &Arc<grafeo_core::graph::rdf::RdfStore>,
+        #[cfg(feature = "triple-store")] rdf_store: &Arc<grafeo_core::graph::rdf::RdfStore>,
         #[cfg(feature = "wal")] wal: Option<&grafeo_storage::wal::LpgWal>,
     ) -> Result<()> {
         use super::flush;
@@ -154,7 +154,7 @@ impl CheckpointTimer {
         let sections = Self::build_sections(
             store,
             catalog,
-            #[cfg(feature = "rdf")]
+            #[cfg(feature = "triple-store")]
             rdf_store,
         );
         let section_refs: Vec<&dyn grafeo_common::storage::Section> =
@@ -175,7 +175,7 @@ impl CheckpointTimer {
     fn build_sections(
         store: &Arc<LpgStore>,
         catalog: &Arc<Catalog>,
-        #[cfg(feature = "rdf")] rdf_store: &Arc<grafeo_core::graph::rdf::RdfStore>,
+        #[cfg(feature = "triple-store")] rdf_store: &Arc<grafeo_core::graph::rdf::RdfStore>,
     ) -> Vec<Box<dyn grafeo_common::storage::Section>> {
         let lpg = grafeo_core::graph::lpg::LpgStoreSection::new(Arc::clone(store));
 
@@ -190,7 +190,7 @@ impl CheckpointTimer {
         let mut sections: Vec<Box<dyn grafeo_common::storage::Section>> =
             vec![Box::new(catalog_section), Box::new(lpg)];
 
-        #[cfg(feature = "rdf")]
+        #[cfg(feature = "triple-store")]
         if !rdf_store.is_empty() || rdf_store.graph_count() > 0 {
             let rdf = grafeo_core::graph::rdf::RdfStoreSection::new(Arc::clone(rdf_store));
             sections.push(Box::new(rdf));
@@ -247,7 +247,7 @@ mod tests {
             store,
             catalog,
             tm,
-            #[cfg(feature = "rdf")]
+            #[cfg(feature = "triple-store")]
             Arc::new(grafeo_core::graph::rdf::RdfStore::new()),
             #[cfg(feature = "wal")]
             None,
@@ -283,7 +283,7 @@ mod tests {
             Arc::clone(&store),
             Arc::clone(&catalog),
             Arc::clone(&tm),
-            #[cfg(feature = "rdf")]
+            #[cfg(feature = "triple-store")]
             Arc::new(grafeo_core::graph::rdf::RdfStore::new()),
             #[cfg(feature = "wal")]
             None,
@@ -319,7 +319,7 @@ mod tests {
             Arc::clone(&store),
             Arc::clone(&catalog),
             Arc::clone(&tm),
-            #[cfg(feature = "rdf")]
+            #[cfg(feature = "triple-store")]
             Arc::new(grafeo_core::graph::rdf::RdfStore::new()),
             #[cfg(feature = "wal")]
             None,

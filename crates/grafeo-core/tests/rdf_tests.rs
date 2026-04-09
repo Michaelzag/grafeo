@@ -1,6 +1,6 @@
 //! Integration tests for RDF support in grafeo-core.
 
-#[cfg(feature = "rdf")]
+#[cfg(feature = "triple-store")]
 mod statistics_tests {
     use grafeo_core::statistics::{RdfStatistics, RdfStatisticsCollector};
 
@@ -91,7 +91,7 @@ mod statistics_tests {
     }
 }
 
-#[cfg(all(feature = "rdf", feature = "parallel"))]
+#[cfg(all(feature = "triple-store", feature = "parallel"))]
 mod parallel_tests {
     use grafeo_common::types::Value;
     use grafeo_core::execution::parallel::{Morsel, ParallelSource, ParallelTripleScanSource};

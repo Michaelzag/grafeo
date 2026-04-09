@@ -11,7 +11,7 @@ use std::hint::black_box;
 use criterion::{Criterion, criterion_group, criterion_main};
 
 use grafeo_engine::GrafeoDB;
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 use {
     grafeo_engine::{Config, GraphModel},
     std::fmt::Write,
@@ -170,7 +170,7 @@ criterion_group!(
 // RDF Benchmarks (SPARQL)
 // ============================================================================
 
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 fn setup_rdf_social_graph(person_count: usize, edge_multiplier: usize) -> GrafeoDB {
     let db = GrafeoDB::with_config(Config::in_memory().with_graph_model(GraphModel::Rdf)).unwrap();
     let session = db.session();
@@ -206,7 +206,7 @@ fn setup_rdf_social_graph(person_count: usize, edge_multiplier: usize) -> Grafeo
 }
 
 /// Single triple pattern lookup with subject bound.
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 fn bench_rdf_single_pattern(c: &mut Criterion) {
     let db = setup_rdf_social_graph(1_000, 5);
     let session = db.session();
@@ -226,7 +226,7 @@ fn bench_rdf_single_pattern(c: &mut Criterion) {
 }
 
 /// Two-pattern star join (shared subject variable).
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 fn bench_rdf_star_join(c: &mut Criterion) {
     let db = setup_rdf_social_graph(1_000, 5);
     let session = db.session();
@@ -247,7 +247,7 @@ fn bench_rdf_star_join(c: &mut Criterion) {
 }
 
 /// Three-pattern star join (shared subject, three predicates).
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 fn bench_rdf_star_join_3(c: &mut Criterion) {
     let db = setup_rdf_social_graph(1_000, 5);
     let session = db.session();
@@ -269,7 +269,7 @@ fn bench_rdf_star_join_3(c: &mut Criterion) {
 }
 
 /// Chain join: ?a knows ?b, ?b has name.
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 fn bench_rdf_chain_join(c: &mut Criterion) {
     let db = setup_rdf_social_graph(1_000, 5);
     let session = db.session();
@@ -290,7 +290,7 @@ fn bench_rdf_chain_join(c: &mut Criterion) {
 }
 
 /// OPTIONAL pattern: name required, email optional.
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 fn bench_rdf_optional(c: &mut Criterion) {
     let db = setup_rdf_social_graph(1_000, 5);
     let session = db.session();
@@ -322,7 +322,7 @@ fn bench_rdf_optional(c: &mut Criterion) {
 }
 
 /// COUNT aggregation over all triples.
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 fn bench_rdf_count(c: &mut Criterion) {
     let db = setup_rdf_social_graph(1_000, 5);
     let session = db.session();
@@ -342,7 +342,7 @@ fn bench_rdf_count(c: &mut Criterion) {
 }
 
 /// FILTER with string comparison.
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 fn bench_rdf_filter(c: &mut Criterion) {
     let db = setup_rdf_social_graph(1_000, 5);
     let session = db.session();
@@ -363,7 +363,7 @@ fn bench_rdf_filter(c: &mut Criterion) {
 }
 
 /// Insert single triple.
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 fn bench_rdf_insert_single(c: &mut Criterion) {
     let db = GrafeoDB::with_config(Config::in_memory().with_graph_model(GraphModel::Rdf)).unwrap();
     let session = db.session();
@@ -386,7 +386,7 @@ fn bench_rdf_insert_single(c: &mut Criterion) {
 // ============================================================================
 
 /// Sets up a 10K triple dataset with diverse predicates for join benchmarks.
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 fn setup_rdf_join_dataset(person_count: usize) -> GrafeoDB {
     let db = GrafeoDB::with_config(Config::in_memory().with_graph_model(GraphModel::Rdf)).unwrap();
     let session = db.session();
@@ -429,7 +429,7 @@ fn setup_rdf_join_dataset(person_count: usize) -> GrafeoDB {
 }
 
 /// 2-pattern star join on 10K persons.
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 fn bench_rdf_join_star_2_10k(c: &mut Criterion) {
     let db = setup_rdf_join_dataset(10_000);
     let session = db.session();
@@ -450,7 +450,7 @@ fn bench_rdf_join_star_2_10k(c: &mut Criterion) {
 }
 
 /// 3-pattern star join on 10K persons.
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 fn bench_rdf_join_star_3_10k(c: &mut Criterion) {
     let db = setup_rdf_join_dataset(10_000);
     let session = db.session();
@@ -472,7 +472,7 @@ fn bench_rdf_join_star_3_10k(c: &mut Criterion) {
 }
 
 /// 4-pattern star join (one pattern has ~50% selectivity via OPTIONAL-like density).
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 fn bench_rdf_join_star_4_10k(c: &mut Criterion) {
     let db = setup_rdf_join_dataset(10_000);
     let session = db.session();
@@ -495,7 +495,7 @@ fn bench_rdf_join_star_4_10k(c: &mut Criterion) {
 }
 
 /// Chain join: ?a knows ?b, ?b has name (traversal pattern).
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 fn bench_rdf_join_chain_10k(c: &mut Criterion) {
     let db = setup_rdf_join_dataset(10_000);
     let session = db.session();
@@ -516,7 +516,7 @@ fn bench_rdf_join_chain_10k(c: &mut Criterion) {
 }
 
 /// 2-hop chain join: ?a knows ?b, ?b knows ?c, ?c has name.
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 fn bench_rdf_join_chain_2hop_10k(c: &mut Criterion) {
     let db = setup_rdf_join_dataset(10_000);
     let session = db.session();
@@ -538,7 +538,7 @@ fn bench_rdf_join_chain_2hop_10k(c: &mut Criterion) {
 }
 
 /// OPTIONAL join on 10K persons (left join performance).
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 fn bench_rdf_join_optional_10k(c: &mut Criterion) {
     let db = setup_rdf_join_dataset(10_000);
     let session = db.session();
@@ -558,7 +558,7 @@ fn bench_rdf_join_optional_10k(c: &mut Criterion) {
     });
 }
 
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 criterion_group!(
     rdf_benches,
     bench_rdf_single_pattern,
@@ -571,7 +571,7 @@ criterion_group!(
     bench_rdf_insert_single,
 );
 
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 criterion_group!(
     rdf_join_benches,
     bench_rdf_join_star_2_10k,
@@ -582,8 +582,8 @@ criterion_group!(
     bench_rdf_join_optional_10k,
 );
 
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 criterion_main!(lpg_benches, rdf_benches, rdf_join_benches);
 
-#[cfg(not(all(feature = "sparql", feature = "rdf")))]
+#[cfg(not(all(feature = "sparql", feature = "triple-store")))]
 criterion_main!(lpg_benches);

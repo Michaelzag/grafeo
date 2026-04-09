@@ -190,7 +190,7 @@ impl super::GrafeoDB {
     /// # Errors
     ///
     /// Returns an error if the file cannot be opened or contains malformed lines.
-    #[cfg(feature = "rdf")]
+    #[cfg(feature = "triple-store")]
     pub fn import_tsv_rdf(
         &self,
         path: impl AsRef<Path>,
@@ -448,7 +448,7 @@ mod tests {
         assert_eq!(edge_count, 4); // 2 edges * 2 directions
     }
 
-    #[cfg(feature = "rdf")]
+    #[cfg(feature = "triple-store")]
     #[test]
     fn test_import_tsv_rdf() {
         use grafeo_core::graph::GraphStore;

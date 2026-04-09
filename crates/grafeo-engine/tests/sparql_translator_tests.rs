@@ -168,7 +168,7 @@ mod tests {
     }
 }
 
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 mod explain_integration {
     use grafeo_engine::GrafeoDB;
 

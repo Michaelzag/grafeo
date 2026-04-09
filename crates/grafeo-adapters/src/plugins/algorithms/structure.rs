@@ -1184,7 +1184,7 @@ mod tests {
 
     // ---- Cross-model: RDF adapter produces same results as LPG ----
 
-    #[cfg(feature = "rdf")]
+    #[cfg(feature = "triple-store")]
     #[test]
     fn test_ktruss_rdf_matches_lpg() {
         use grafeo_core::graph::rdf::{RdfGraphStoreAdapter, RdfStore, Term, Triple};
@@ -1221,7 +1221,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "rdf")]
+    #[cfg(feature = "triple-store")]
     #[test]
     fn test_kcore_rdf_matches_lpg() {
         use grafeo_core::graph::rdf::{RdfGraphStoreAdapter, RdfStore, Term, Triple};

@@ -55,16 +55,18 @@ criterion.workspace = true
 tempfile.workspace = true
 
 [features]
-default = ["parallel", "spill", "mmap", "regex"]
+default = ["lpg", "parallel", "spill", "mmap", "regex"]
+lpg = []  # Enable LPG (labeled property graph) model
 parallel = ["rayon", "crossbeam"]  # Morsel-driven parallelism (rayon, crossbeam work-stealing)
 spill = []                         # Disk spilling for out-of-core execution (sync only, async in grafeo-engine)
 mmap = []                          # File-backed vector storage (MmapStorage)
-rdf = []  # Enable RDF graph model
+triple-store = []  # Enable RDF triple store model
+rdf = ["triple-store"]  # Deprecated: use triple-store
 tiered-storage = ["grafeo-common/tiered-storage"]  # Enable tiered hot/cold storage
 temporal = ["grafeo-common/temporal"]  # Enable append-only versioned properties
 succinct-indexes = []  # Enable succinct data structures (rank/select bitvectors, Elias-Fano, wavelet trees)
 compact-store = []  # CompactStore — columnar graph for read-only workloads
-ring-index = ["succinct-indexes", "rdf"]  # Ring Index for RDF (3x space reduction, requires succinct-indexes and rdf)
+ring-index = ["succinct-indexes", "triple-store"]  # Ring Index for RDF (3x space reduction, requires succinct-indexes and triple-store)
 vector-index = ["ordered-float", "rand"]  # HNSW vector index for approximate nearest neighbor search
 text-index = []  # BM25 inverted index for full-text search
 hybrid-search = ["text-index", "vector-index"]  # Combined text + vector search with score fusion

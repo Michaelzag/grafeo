@@ -265,7 +265,7 @@ fn validate_snapshot_data(nodes: &[SnapshotNode], edges: &[SnapshotEdge]) -> Res
 }
 
 /// Collects all triples from an RDF store into snapshot format.
-#[cfg(feature = "rdf")]
+#[cfg(feature = "triple-store")]
 fn collect_rdf_triples(store: &grafeo_core::graph::rdf::RdfStore) -> Vec<SnapshotTriple> {
     store
         .triples()
@@ -279,7 +279,7 @@ fn collect_rdf_triples(store: &grafeo_core::graph::rdf::RdfStore) -> Vec<Snapsho
 }
 
 /// Populates an RDF store from snapshot triples.
-#[cfg(feature = "rdf")]
+#[cfg(feature = "triple-store")]
 fn populate_rdf_store(store: &grafeo_core::graph::rdf::RdfStore, triples: &[SnapshotTriple]) {
     use grafeo_core::graph::rdf::{Term, Triple};
     for triple in triples {
@@ -302,7 +302,7 @@ fn populate_rdf_store(store: &grafeo_core::graph::rdf::RdfStore, triples: &[Snap
 pub(super) fn load_snapshot_into_store(
     store: &std::sync::Arc<grafeo_core::graph::lpg::LpgStore>,
     catalog: &std::sync::Arc<crate::catalog::Catalog>,
-    #[cfg(feature = "rdf")] rdf_store: &std::sync::Arc<grafeo_core::graph::rdf::RdfStore>,
+    #[cfg(feature = "triple-store")] rdf_store: &std::sync::Arc<grafeo_core::graph::rdf::RdfStore>,
     data: &[u8],
 ) -> grafeo_common::utils::error::Result<()> {
     use grafeo_common::utils::error::Error;
@@ -333,7 +333,7 @@ pub(super) fn load_snapshot_into_store(
     restore_schema_from_snapshot(store, catalog, &snapshot.schema);
 
     // Restore RDF triples
-    #[cfg(feature = "rdf")]
+    #[cfg(feature = "triple-store")]
     {
         populate_rdf_store(rdf_store, &snapshot.rdf_triples);
         for rdf_graph in &snapshot.rdf_named_graphs {
@@ -664,7 +664,7 @@ impl super::GrafeoDB {
         }
 
         // Copy RDF data with WAL logging
-        #[cfg(feature = "rdf")]
+        #[cfg(feature = "triple-store")]
         {
             for triple in self.rdf_store.triples() {
                 let record = WalRecord::InsertRdfTriple {
@@ -796,7 +796,7 @@ impl super::GrafeoDB {
         }
 
         // Copy RDF data
-        #[cfg(feature = "rdf")]
+        #[cfg(feature = "triple-store")]
         {
             for triple in self.rdf_store.triples() {
                 target.rdf_store.insert((*triple).clone());
@@ -874,12 +874,12 @@ impl super::GrafeoDB {
             .collect();
 
         // Collect RDF triples
-        #[cfg(feature = "rdf")]
+        #[cfg(feature = "triple-store")]
         let rdf_triples = collect_rdf_triples(&self.rdf_store);
-        #[cfg(not(feature = "rdf"))]
+        #[cfg(not(feature = "triple-store"))]
         let rdf_triples = Vec::new();
 
-        #[cfg(feature = "rdf")]
+        #[cfg(feature = "triple-store")]
         let rdf_named_graphs: Vec<RdfNamedGraphSnapshot> = self
             .rdf_store
             .graph_names()
@@ -893,7 +893,7 @@ impl super::GrafeoDB {
                     })
             })
             .collect();
-        #[cfg(not(feature = "rdf"))]
+        #[cfg(not(feature = "triple-store"))]
         let rdf_named_graphs = Vec::new();
 
         let schema = collect_schema(&self.catalog);
@@ -986,7 +986,7 @@ impl super::GrafeoDB {
         }
 
         // Restore RDF triples
-        #[cfg(feature = "rdf")]
+        #[cfg(feature = "triple-store")]
         {
             populate_rdf_store(&db.rdf_store, &snapshot.rdf_triples);
             for rng in &snapshot.rdf_named_graphs {
@@ -1071,7 +1071,7 @@ impl super::GrafeoDB {
         }
 
         // Restore RDF data
-        #[cfg(feature = "rdf")]
+        #[cfg(feature = "triple-store")]
         {
             // Clear existing RDF data
             self.rdf_store.clear();

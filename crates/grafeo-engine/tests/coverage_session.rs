@@ -533,7 +533,7 @@ fn test_query_cache_accessible() {
 // execute_sparql_with_params()
 // ---------------------------------------------------------------------------
 
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 #[test]
 fn test_execute_sparql_with_params() {
     use grafeo_engine::config::{Config, GraphModel};

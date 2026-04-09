@@ -47,7 +47,7 @@ pub enum QueryLanguage {
     #[cfg(feature = "sparql")]
     Sparql,
     /// GraphQL for RDF
-    #[cfg(all(feature = "graphql", feature = "rdf"))]
+    #[cfg(all(feature = "graphql", feature = "triple-store"))]
     GraphQLRdf,
 }
 
@@ -68,7 +68,7 @@ impl QueryLanguage {
             Self::SqlPgq => true,
             #[cfg(feature = "sparql")]
             Self::Sparql => false,
-            #[cfg(all(feature = "graphql", feature = "rdf"))]
+            #[cfg(all(feature = "graphql", feature = "triple-store"))]
             Self::GraphQLRdf => false,
         }
     }
@@ -112,7 +112,7 @@ pub struct QueryProcessor {
     /// Current transaction context (if any).
     transaction_context: Option<(EpochId, TransactionId)>,
     /// RDF store for triple pattern queries (optional).
-    #[cfg(feature = "rdf")]
+    #[cfg(feature = "triple-store")]
     rdf_store: Option<Arc<grafeo_core::graph::rdf::RdfStore>>,
 }
 
@@ -131,7 +131,7 @@ impl QueryProcessor {
             catalog: Arc::new(Catalog::new()),
             optimizer,
             transaction_context: None,
-            #[cfg(feature = "rdf")]
+            #[cfg(feature = "triple-store")]
             rdf_store: None,
         }
     }
@@ -153,7 +153,7 @@ impl QueryProcessor {
             catalog: Arc::new(Catalog::new()),
             optimizer,
             transaction_context: None,
-            #[cfg(feature = "rdf")]
+            #[cfg(feature = "triple-store")]
             rdf_store: None,
         }
     }
@@ -177,7 +177,7 @@ impl QueryProcessor {
             catalog: Arc::new(Catalog::new()),
             optimizer,
             transaction_context: None,
-            #[cfg(feature = "rdf")]
+            #[cfg(feature = "triple-store")]
             rdf_store: None,
         })
     }
@@ -201,7 +201,7 @@ impl QueryProcessor {
             catalog: Arc::new(Catalog::new()),
             optimizer,
             transaction_context: None,
-            #[cfg(feature = "rdf")]
+            #[cfg(feature = "triple-store")]
             rdf_store: None,
         })
     }
@@ -261,11 +261,11 @@ impl QueryProcessor {
         if language.is_lpg() {
             self.process_lpg(query, language, params)
         } else {
-            #[cfg(feature = "rdf")]
+            #[cfg(feature = "triple-store")]
             {
                 self.process_rdf(query, language, params)
             }
-            #[cfg(not(feature = "rdf"))]
+            #[cfg(not(feature = "triple-store"))]
             {
                 Err(Error::Internal(
                     "RDF support not enabled. Compile with --features rdf".to_string(),
@@ -425,7 +425,7 @@ impl QueryProcessor {
 // RDF-specific methods (gated behind `rdf` feature)
 // =========================================================================
 
-#[cfg(feature = "rdf")]
+#[cfg(feature = "triple-store")]
 impl QueryProcessor {
     /// Creates a new query processor with both LPG and RDF stores.
     #[must_use]
@@ -514,7 +514,7 @@ impl QueryProcessor {
                 use crate::query::translators::sparql;
                 sparql::translate(query)
             }
-            #[cfg(all(feature = "graphql", feature = "rdf"))]
+            #[cfg(all(feature = "graphql", feature = "triple-store"))]
             QueryLanguage::GraphQLRdf => {
                 use crate::query::translators::graphql_rdf;
                 // Default namespace for GraphQL-RDF queries

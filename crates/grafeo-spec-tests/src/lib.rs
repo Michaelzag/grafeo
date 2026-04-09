@@ -79,13 +79,13 @@ pub fn execute_query_result(
         ("gql" | "", _) => db.execute(query),
         #[cfg(feature = "cypher")]
         ("cypher", _) => db.execute_cypher(query),
-        #[cfg(all(feature = "sparql", feature = "rdf"))]
+        #[cfg(all(feature = "sparql", feature = "triple-store"))]
         ("sparql", _) => db.execute_sparql(query),
         #[cfg(feature = "gremlin")]
         ("gremlin", _) => db.execute_gremlin(query),
         #[cfg(feature = "graphql")]
         ("graphql", _) => db.execute_graphql(query),
-        #[cfg(all(feature = "graphql", feature = "rdf"))]
+        #[cfg(all(feature = "graphql", feature = "triple-store"))]
         ("graphql-rdf", _) => db.execute_language(query, "graphql-rdf", None),
         #[cfg(feature = "sql-pgq")]
         ("sql-pgq" | "sql_pgq", _) => db.execute_sql(query),

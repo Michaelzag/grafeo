@@ -89,7 +89,7 @@ impl super::GrafeoDB {
                 if cfg!(feature = "sql-pgq") {
                     f.push("sql-pgq".into());
                 }
-                if cfg!(feature = "rdf") {
+                if cfg!(feature = "triple-store") {
                     f.push("rdf".into());
                 }
                 if cfg!(feature = "algos") {

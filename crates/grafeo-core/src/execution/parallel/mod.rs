@@ -79,7 +79,7 @@ pub use pipeline::{
     ParallelPipelineConfig, ParallelPipelineResult,
 };
 pub use scheduler::{MorselScheduler, NumaConfig, NumaNode, WorkerHandle};
-#[cfg(feature = "rdf")]
+#[cfg(feature = "triple-store")]
 pub use source::ParallelTripleScanSource;
 pub use source::{
     ParallelChunkSource, ParallelNodeScanSource, ParallelSource, ParallelVectorSource, RangeSource,

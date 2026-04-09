@@ -49,7 +49,8 @@ sparql = ["grafeo-engine/sparql"]
 gremlin = ["grafeo-engine/gremlin"]
 graphql = ["grafeo-engine/graphql"]
 sql-pgq = ["grafeo-engine/sql-pgq"]
-rdf = ["grafeo-engine/rdf"]
+triple-store = ["grafeo-engine/triple-store"]
+rdf = ["triple-store"]  # Deprecated: use triple-store
 algos = ["grafeo-engine/algos"]
 vector-index = ["grafeo-engine/vector-index"]
 text-index = ["grafeo-engine/text-index"]
@@ -61,7 +62,7 @@ ai = ["vector-index", "text-index", "hybrid-search", "cdc"]
 storage = ["grafeo-engine/storage"]
 # Named profiles
 embedded = ["gql", "ai", "algos", "grafeo-engine/parallel", "grafeo-engine/regex"]
-full = ["languages", "ai", "algos", "rdf"]
+full = ["languages", "ai", "algos", "triple-store"]
 
 [dev-dependencies]
 tempfile = "3.27"

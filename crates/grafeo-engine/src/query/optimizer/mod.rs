@@ -104,7 +104,7 @@ impl Optimizer {
     ///
     /// Uses triple pattern cardinality estimates for cost-based optimization
     /// of SPARQL queries. Maps total triples to graph totals for the cost model.
-    #[cfg(feature = "rdf")]
+    #[cfg(feature = "triple-store")]
     #[must_use]
     pub fn from_rdf_statistics(rdf_stats: grafeo_core::statistics::RdfStatistics) -> Self {
         let total = rdf_stats.total_triples;

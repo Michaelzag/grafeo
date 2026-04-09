@@ -448,7 +448,7 @@ impl Source for RangePartition {
 ///
 /// Wraps triple data in a parallel source that can be partitioned for
 /// morsel-driven execution of SPARQL queries.
-#[cfg(feature = "rdf")]
+#[cfg(feature = "triple-store")]
 pub struct ParallelTripleScanSource {
     /// Triple data: (subject, predicate, object) tuples.
     triples: Arc<Vec<(Value, Value, Value)>>,
@@ -456,7 +456,7 @@ pub struct ParallelTripleScanSource {
     position: usize,
 }
 
-#[cfg(feature = "rdf")]
+#[cfg(feature = "triple-store")]
 impl ParallelTripleScanSource {
     /// Creates a new parallel triple scan source.
     #[must_use]
@@ -476,7 +476,7 @@ impl ParallelTripleScanSource {
     }
 }
 
-#[cfg(feature = "rdf")]
+#[cfg(feature = "triple-store")]
 impl Source for ParallelTripleScanSource {
     fn next_chunk(&mut self, chunk_size: usize) -> Result<Option<DataChunk>, OperatorError> {
         if self.position >= self.triples.len() {
@@ -515,7 +515,7 @@ impl Source for ParallelTripleScanSource {
     }
 }
 
-#[cfg(feature = "rdf")]
+#[cfg(feature = "triple-store")]
 impl ParallelSource for ParallelTripleScanSource {
     fn total_rows(&self) -> Option<usize> {
         Some(self.triples.len())
@@ -535,7 +535,7 @@ impl ParallelSource for ParallelTripleScanSource {
 }
 
 /// A partitioned view into a triple scan source.
-#[cfg(feature = "rdf")]
+#[cfg(feature = "triple-store")]
 struct PartitionedTripleScanSource {
     triples: Arc<Vec<(Value, Value, Value)>>,
     start_row: usize,
@@ -543,7 +543,7 @@ struct PartitionedTripleScanSource {
     position: usize,
 }
 
-#[cfg(feature = "rdf")]
+#[cfg(feature = "triple-store")]
 impl PartitionedTripleScanSource {
     fn new(triples: Arc<Vec<(Value, Value, Value)>>, start_row: usize, end_row: usize) -> Self {
         Self {
@@ -555,7 +555,7 @@ impl PartitionedTripleScanSource {
     }
 }
 
-#[cfg(feature = "rdf")]
+#[cfg(feature = "triple-store")]
 impl Source for PartitionedTripleScanSource {
     fn next_chunk(&mut self, chunk_size: usize) -> Result<Option<DataChunk>, OperatorError> {
         if self.position >= self.end_row || self.position >= self.triples.len() {
@@ -899,7 +899,7 @@ mod tests {
         assert_eq!(chunk.len(), 50);
     }
 
-    #[cfg(feature = "rdf")]
+    #[cfg(feature = "triple-store")]
     #[test]
     fn test_parallel_triple_scan_source() {
         let triples = vec![
@@ -926,7 +926,7 @@ mod tests {
         assert_eq!(source.num_columns(), 3);
     }
 
-    #[cfg(feature = "rdf")]
+    #[cfg(feature = "triple-store")]
     #[test]
     fn test_parallel_triple_scan_partition() {
         let triples: Vec<(Value, Value, Value)> = (0..100)

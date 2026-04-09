@@ -1885,7 +1885,7 @@ mod load_data_features {
 // SPARQL Features (covers sparql_translator.rs)
 // ============================================================================
 
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 mod sparql_features {
     use grafeo_common::types::Value;
     use grafeo_engine::{Config, GrafeoDB, GraphModel};

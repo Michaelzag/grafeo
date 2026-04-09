@@ -16,7 +16,7 @@ fn lpg_database_executes_gql() {
     assert_eq!(result.rows.len(), 1);
 }
 
-#[cfg(feature = "rdf")]
+#[cfg(feature = "triple-store")]
 #[test]
 fn rdf_database_rejects_gql() {
     let db = GrafeoDB::with_config(Config::in_memory().with_graph_model(GraphModel::Rdf)).unwrap();
@@ -30,7 +30,7 @@ fn rdf_database_rejects_gql() {
     );
 }
 
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 #[test]
 fn rdf_database_executes_sparql() {
     let db = GrafeoDB::with_config(Config::in_memory().with_graph_model(GraphModel::Rdf)).unwrap();
@@ -40,7 +40,7 @@ fn rdf_database_executes_sparql() {
     assert!(result.is_ok(), "SPARQL on RDF db should work: {result:?}");
 }
 
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 #[test]
 fn lpg_database_allows_explicit_sparql() {
     // Explicit execute_sparql() works on any database (both stores are always initialized).
@@ -64,7 +64,7 @@ fn lpg_database_executes_cypher() {
     assert!(result.is_ok());
 }
 
-#[cfg(all(feature = "cypher", feature = "rdf"))]
+#[cfg(all(feature = "cypher", feature = "triple-store"))]
 #[test]
 fn rdf_database_allows_explicit_cypher() {
     // Explicit execute_cypher() works on any database (both stores are always initialized).
@@ -99,7 +99,7 @@ fn validate_rejects_zero_wal_flush_interval() {
     assert_eq!(config.validate(), Err(ConfigError::ZeroWalFlushInterval));
 }
 
-#[cfg(not(feature = "rdf"))]
+#[cfg(not(feature = "triple-store"))]
 #[test]
 fn validate_rejects_rdf_without_feature() {
     let config = Config::in_memory().with_graph_model(GraphModel::Rdf);
@@ -121,7 +121,7 @@ fn graph_model_accessor_returns_lpg() {
     assert_eq!(db.graph_model(), GraphModel::Lpg);
 }
 
-#[cfg(feature = "rdf")]
+#[cfg(feature = "triple-store")]
 #[test]
 fn graph_model_accessor_returns_rdf() {
     let db = GrafeoDB::with_config(Config::in_memory().with_graph_model(GraphModel::Rdf)).unwrap();
@@ -188,7 +188,7 @@ fn session_reports_graph_model() {
     assert_eq!(session.graph_model(), GraphModel::Lpg);
 }
 
-#[cfg(feature = "rdf")]
+#[cfg(feature = "triple-store")]
 #[test]
 fn session_reports_rdf_graph_model() {
     let db = GrafeoDB::with_config(Config::in_memory().with_graph_model(GraphModel::Rdf)).unwrap();
@@ -204,7 +204,7 @@ fn session_reports_rdf_graph_model() {
 /// expressions parse numeric constants as `Value::Int64`.  Before the fix,
 /// `Eq` used Rust's `PartialEq` (`==`) which never considered
 /// `String("30") == Int64(30)`, causing FILTER(?age = 30) to return no rows.
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 #[test]
 fn sparql_filter_equality_coerces_string_to_numeric() {
     use grafeo_common::types::Value;
@@ -247,7 +247,7 @@ fn sparql_filter_equality_coerces_string_to_numeric() {
 }
 
 /// Regression: FILTER inequality (!=) must also coerce types.
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 #[test]
 fn sparql_filter_inequality_coerces_string_to_numeric() {
     let db = GrafeoDB::with_config(Config::in_memory().with_graph_model(GraphModel::Rdf)).unwrap();

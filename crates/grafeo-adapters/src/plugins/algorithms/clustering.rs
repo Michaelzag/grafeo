@@ -1109,7 +1109,7 @@ mod tests {
 
     // ---- Cross-model: RDF adapter produces same results as LPG ----
 
-    #[cfg(feature = "rdf")]
+    #[cfg(feature = "triple-store")]
     #[test]
     fn test_triangle_count_rdf_matches_lpg() {
         use grafeo_core::graph::rdf::{RdfGraphStoreAdapter, RdfStore, Term, Triple};
@@ -1145,7 +1145,7 @@ mod tests {
         assert_eq!(rdf_triangles, 4);
     }
 
-    #[cfg(feature = "rdf")]
+    #[cfg(feature = "triple-store")]
     #[test]
     fn test_clustering_coefficient_rdf_matches_lpg() {
         use grafeo_core::graph::rdf::{RdfGraphStoreAdapter, RdfStore, Term, Triple};

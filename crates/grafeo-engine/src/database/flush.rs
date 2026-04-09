@@ -116,6 +116,7 @@ pub(super) fn flush(
 }
 
 /// Builds the flush context from the current database state.
+#[cfg(feature = "lpg")]
 pub(super) fn build_context(
     store: &grafeo_core::graph::lpg::LpgStore,
     transaction_manager: &crate::transaction::TransactionManager,
@@ -127,5 +128,20 @@ pub(super) fn build_context(
             .map_or(0, |t| t.0),
         node_count: store.node_count() as u64,
         edge_count: store.edge_count() as u64,
+    }
+}
+
+/// Builds a minimal flush context when no LPG store is available.
+#[cfg(not(feature = "lpg"))]
+pub(super) fn build_context_minimal(
+    transaction_manager: &crate::transaction::TransactionManager,
+) -> FlushContext {
+    FlushContext {
+        epoch: 0,
+        transaction_id: transaction_manager
+            .last_assigned_transaction_id()
+            .map_or(0, |t| t.0),
+        node_count: 0,
+        edge_count: 0,
     }
 }

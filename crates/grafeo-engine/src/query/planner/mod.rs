@@ -14,7 +14,7 @@
 pub(crate) mod common;
 pub mod lpg;
 
-#[cfg(feature = "rdf")]
+#[cfg(feature = "triple-store")]
 pub mod rdf;
 
 // Re-export the LPG planner as the default `Planner` for backwards compatibility.

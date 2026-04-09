@@ -15,11 +15,18 @@
 mod edge;
 mod node;
 mod property;
+#[cfg(feature = "lpg")]
 pub mod section;
+#[cfg(feature = "lpg")]
 mod store;
 
+// Types are always available (used by GraphStore trait and RDF adapter)
 pub use edge::{Edge, EdgeFlags, EdgeRecord};
 pub use node::{Node, NodeFlags, NodeRecord};
 pub use property::{CompareOp, PropertyStorage};
+
+// Store and section require the lpg feature
+#[cfg(feature = "lpg")]
 pub use section::LpgStoreSection;
+#[cfg(feature = "lpg")]
 pub use store::{LpgStore, PropertyUndoEntry};

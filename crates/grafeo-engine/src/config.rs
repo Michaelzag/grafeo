@@ -583,7 +583,7 @@ impl Config {
             return Err(ConfigError::ZeroWalFlushInterval);
         }
 
-        #[cfg(not(feature = "rdf"))]
+        #[cfg(not(feature = "triple-store"))]
         if self.graph_model == GraphModel::Rdf {
             return Err(ConfigError::RdfFeatureRequired);
         }
@@ -887,7 +887,7 @@ mod tests {
         assert_eq!(config.validate(), Err(ConfigError::ZeroWalFlushInterval));
     }
 
-    #[cfg(not(feature = "rdf"))]
+    #[cfg(not(feature = "triple-store"))]
     #[test]
     fn test_validate_rejects_rdf_without_feature() {
         let config = Config::in_memory().with_graph_model(GraphModel::Rdf);

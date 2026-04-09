@@ -1,7 +1,7 @@
 //! RDF-specific session methods.
 //!
 //! This module consolidates all RDF functionality from the session layer.
-//! The entire module is gated behind `#[cfg(feature = "rdf")]` in the parent.
+//! The entire module is gated behind `#[cfg(feature = "triple-store")]` in the parent.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
@@ -10,6 +10,7 @@ use std::time::Instant;
 
 use grafeo_common::types::{TransactionId, Value};
 use grafeo_common::utils::error::Result;
+#[cfg(feature = "lpg")]
 use grafeo_core::graph::lpg::LpgStore;
 use grafeo_core::graph::rdf::RdfStore;
 use grafeo_core::graph::{GraphStore, GraphStoreMut};
@@ -20,6 +21,7 @@ use super::{Session, SessionConfig};
 
 impl Session {
     /// Creates a new session with RDF store and adaptive configuration.
+    #[cfg(feature = "lpg")]
     pub(crate) fn with_rdf_store_and_adaptive(
         store: Arc<LpgStore>,
         rdf_store: Arc<RdfStore>,

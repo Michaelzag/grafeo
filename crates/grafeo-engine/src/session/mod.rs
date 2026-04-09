@@ -4,7 +4,7 @@
 //! its own transaction state, so concurrent sessions don't interfere with
 //! each other. Sessions are cheap to create - spin up as many as you need.
 
-#[cfg(feature = "rdf")]
+#[cfg(feature = "triple-store")]
 mod rdf;
 
 use std::sync::Arc;
@@ -15,8 +15,10 @@ use grafeo_common::types::{EdgeId, EpochId, NodeId, TransactionId, Value};
 use grafeo_common::utils::error::Result;
 use grafeo_common::{grafeo_debug_span, grafeo_info_span, grafeo_warn};
 use grafeo_core::graph::Direction;
-use grafeo_core::graph::lpg::{Edge, LpgStore, Node};
-#[cfg(feature = "rdf")]
+#[cfg(feature = "lpg")]
+use grafeo_core::graph::lpg::LpgStore;
+use grafeo_core::graph::lpg::{Edge, Node};
+#[cfg(feature = "triple-store")]
 use grafeo_core::graph::rdf::RdfStore;
 use grafeo_core::graph::{GraphStore, GraphStoreMut};
 
@@ -86,6 +88,7 @@ pub(crate) struct SessionConfig {
 /// sessions without them interfering.
 pub struct Session {
     /// The underlying store.
+    #[cfg(feature = "lpg")]
     store: Arc<LpgStore>,
     /// Graph store trait object for pluggable storage backends (read path).
     graph_store: Arc<dyn GraphStore>,
@@ -94,7 +97,7 @@ pub struct Session {
     /// Schema and metadata catalog shared across sessions.
     catalog: Arc<Catalog>,
     /// RDF triple store (if RDF feature is enabled).
-    #[cfg(feature = "rdf")]
+    #[cfg(feature = "triple-store")]
     rdf_store: Arc<RdfStore>,
     /// Transaction manager.
     transaction_manager: Arc<TransactionManager>,
@@ -197,6 +200,7 @@ struct SavepointState {
 
 impl Session {
     /// Creates a new session with adaptive execution configuration.
+    #[cfg(feature = "lpg")]
     #[allow(dead_code)]
     pub(crate) fn with_adaptive(store: Arc<LpgStore>, cfg: SessionConfig) -> Self {
         let graph_store = Arc::clone(&store) as Arc<dyn GraphStore>;
@@ -206,7 +210,7 @@ impl Session {
             graph_store,
             graph_store_mut,
             catalog: cfg.catalog,
-            #[cfg(feature = "rdf")]
+            #[cfg(feature = "triple-store")]
             rdf_store: Arc::new(RdfStore::new()),
             transaction_manager: cfg.transaction_manager,
             query_cache: cfg.query_cache,
@@ -249,7 +253,7 @@ impl Session {
     ///
     /// This also wraps `graph_store` in a [`WalGraphStore`] so that mutation
     /// operators (INSERT, DELETE, SET via queries) log to the WAL.
-    #[cfg(feature = "wal")]
+    #[cfg(all(feature = "wal", feature = "lpg"))]
     pub(crate) fn set_wal(
         &mut self,
         wal: Arc<grafeo_storage::wal::LpgWal>,
@@ -308,11 +312,12 @@ impl Session {
         cfg: SessionConfig,
     ) -> Result<Self> {
         Ok(Self {
+            #[cfg(feature = "lpg")]
             store: Arc::new(LpgStore::new()?),
             graph_store: read_store,
             graph_store_mut: write_store,
             catalog: cfg.catalog,
-            #[cfg(feature = "rdf")]
+            #[cfg(feature = "triple-store")]
             rdf_store: Arc::new(RdfStore::new()),
             transaction_manager: cfg.transaction_manager,
             query_cache: cfg.query_cache,
@@ -500,6 +505,7 @@ impl Session {
     ///
     /// Used by direct CRUD methods that need the concrete store type
     /// for versioned operations.
+    #[cfg(feature = "lpg")]
     fn active_lpg_store(&self) -> Arc<LpgStore> {
         let key = self.active_graph_storage_key();
         match key {
@@ -513,6 +519,7 @@ impl Session {
 
     /// Resolves a graph name to a concrete `LpgStore`.
     /// `None` and `"default"` resolve to the session's root store.
+    #[cfg(feature = "lpg")]
     fn resolve_store(&self, graph_name: &Option<String>) -> Arc<LpgStore> {
         match graph_name {
             None => Arc::clone(&self.store),
@@ -3170,7 +3177,7 @@ impl Session {
                     self.execute_graphql(query)
                 }
             }
-            #[cfg(all(feature = "graphql", feature = "rdf"))]
+            #[cfg(all(feature = "graphql", feature = "triple-store"))]
             "graphql-rdf" => {
                 if let Some(p) = params {
                     self.execute_graphql_rdf_with_params(query, p)
@@ -3186,7 +3193,7 @@ impl Session {
                     self.execute_sql(query)
                 }
             }
-            #[cfg(all(feature = "sparql", feature = "rdf"))]
+            #[cfg(all(feature = "sparql", feature = "triple-store"))]
             "sparql" => {
                 if let Some(p) = params {
                     self.execute_sparql_with_params(query, p)
@@ -3352,7 +3359,7 @@ impl Session {
                     let store = self.resolve_store(graph_name);
                     store.rollback_transaction_properties(transaction_id);
                 }
-                #[cfg(feature = "rdf")]
+                #[cfg(feature = "triple-store")]
                 self.rollback_rdf_transaction(transaction_id);
                 // Discard buffered CDC events on conflict rollback
                 #[cfg(feature = "cdc")]
@@ -3387,7 +3394,7 @@ impl Session {
         }
 
         // Commit succeeded: discard undo logs (make changes permanent)
-        #[cfg(feature = "rdf")]
+        #[cfg(feature = "triple-store")]
         self.commit_rdf_transaction(transaction_id);
 
         for graph_name in &touched {
@@ -3509,7 +3516,7 @@ impl Session {
         }
 
         // Discard pending operations in the RDF store
-        #[cfg(feature = "rdf")]
+        #[cfg(feature = "triple-store")]
         self.rollback_rdf_transaction(transaction_id);
 
         // Discard buffered CDC events on rollback

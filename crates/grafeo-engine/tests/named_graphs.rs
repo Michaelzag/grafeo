@@ -4,7 +4,7 @@
 //! graph-aware mode, RdfCreateGraphOperator, RdfDropGraphOperator,
 //! RdfClearGraphOperator, and RdfStore named graph API.
 
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 mod tests {
     use grafeo_engine::{Config, GrafeoDB, GraphModel};
 

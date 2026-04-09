@@ -2,7 +2,7 @@
 //!
 //! This module consolidates all RDF functionality that was previously scattered
 //! across `query.rs`, `crud.rs`, `admin.rs`, and `mod.rs`. The entire module
-//! is gated behind `#[cfg(feature = "rdf")]` in the parent.
+//! is gated behind `#[cfg(feature = "triple-store")]` in the parent.
 
 use std::sync::Arc;
 

@@ -30,7 +30,7 @@ pub fn run(quiet: bool) {
     if cfg!(feature = "sql-pgq") {
         features.push("sql-pgq");
     }
-    if cfg!(feature = "rdf") {
+    if cfg!(feature = "triple-store") {
         features.push("rdf");
     }
     let feature_str = features.join(", ");

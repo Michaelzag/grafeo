@@ -801,7 +801,7 @@ mod wal {
     // RDF WAL Recovery
     // =========================================================================
 
-    #[cfg(all(feature = "sparql", feature = "rdf"))]
+    #[cfg(all(feature = "sparql", feature = "triple-store"))]
     #[test]
     fn test_rdf_triples_persist_across_restart() {
         use grafeo_engine::{Config, GraphModel};
@@ -840,7 +840,7 @@ mod wal {
         }
     }
 
-    #[cfg(all(feature = "sparql", feature = "rdf"))]
+    #[cfg(all(feature = "sparql", feature = "triple-store"))]
     #[test]
     fn test_rdf_named_graph_persists_across_restart() {
         use grafeo_engine::{Config, GraphModel};
@@ -885,7 +885,7 @@ mod wal {
         }
     }
 
-    #[cfg(all(feature = "sparql", feature = "rdf"))]
+    #[cfg(all(feature = "sparql", feature = "triple-store"))]
     #[test]
     fn test_rdf_delete_persists_across_restart() {
         use grafeo_engine::{Config, GraphModel};
@@ -928,7 +928,7 @@ mod wal {
         }
     }
 
-    #[cfg(all(feature = "sparql", feature = "rdf"))]
+    #[cfg(all(feature = "sparql", feature = "triple-store"))]
     #[test]
     fn test_rdf_clear_graph_persists_across_restart() {
         use grafeo_engine::{Config, GraphModel};
@@ -963,7 +963,7 @@ mod wal {
         }
     }
 
-    #[cfg(all(feature = "sparql", feature = "rdf"))]
+    #[cfg(all(feature = "sparql", feature = "triple-store"))]
     #[test]
     fn test_rdf_create_drop_graph_persists() {
         use grafeo_engine::{Config, GraphModel};
@@ -1010,7 +1010,7 @@ mod wal {
         }
     }
 
-    #[cfg(all(feature = "sparql", feature = "rdf"))]
+    #[cfg(all(feature = "sparql", feature = "triple-store"))]
     #[test]
     fn test_rdf_save_preserves_triples() {
         use grafeo_engine::{Config, GraphModel};

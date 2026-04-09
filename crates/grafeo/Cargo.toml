@@ -27,7 +27,7 @@ default = ["embedded"]
 # Atomic query language features
 gql = ["grafeo-engine/gql"]
 cypher = ["grafeo-engine/cypher"]
-sparql = ["grafeo-engine/sparql", "grafeo-engine/rdf"]
+sparql = ["grafeo-engine/sparql", "grafeo-engine/triple-store"]
 gremlin = ["grafeo-engine/gremlin"]
 graphql = ["grafeo-engine/graphql"]
 sql-pgq = ["grafeo-engine/sql-pgq"]
@@ -44,7 +44,8 @@ languages = ["gql", "cypher", "sparql", "gremlin", "graphql", "sql-pgq"]  # All 
 ai = ["vector-index", "text-index", "hybrid-search", "cdc"]  # All AI/RAG features
 storage = ["wal", "grafeo-file", "spill", "mmap"]  # Persistent storage (WAL, single-file, disk spill, mmap)
 algos = ["grafeo-engine/algos"]  # Graph algorithms (SSSP, PageRank, etc.)
-rdf = ["grafeo-engine/rdf"]  # RDF triple store
+triple-store = ["grafeo-engine/triple-store"]  # RDF triple store
+rdf = ["triple-store"]  # Deprecated: use triple-store
 regex = ["grafeo-engine/regex"]  # Full regex (default for non-WASM)
 regex-lite = ["grafeo-engine/regex-lite"]  # Lightweight regex (for WASM)
 metrics = ["grafeo-engine/metrics"]  # Lock-free query, transaction, and session metrics
@@ -54,7 +55,7 @@ arrow-export = ["grafeo-engine/arrow-export"]  # Arrow IPC zero-copy export
 # Named profiles (ecosystem-aligned)
 embedded = ["gql", "ai", "algos", "parallel", "regex", "grafeo-file", "arrow-export"]  # Python libs, MCP, in-process (default)
 browser = ["gql", "regex-lite"]  # WASM / grafeo-web
-server = ["embedded", "languages", "storage", "rdf", "cdc", "async-storage", "tracing"]  # grafeo-server
+server = ["embedded", "languages", "storage", "triple-store", "cdc", "async-storage", "tracing"]  # grafeo-server
 full = ["server"]  # Everything (except embed)
 
 # Platform capabilities

@@ -767,7 +767,7 @@ fn to_memory_copies_named_graphs() {
 // RDF Snapshot Tests
 // =========================================================================
 
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 mod rdf_snapshots {
     use grafeo_common::types::Value;
     use grafeo_engine::{Config, GrafeoDB, GraphModel};

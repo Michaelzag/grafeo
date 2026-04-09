@@ -17,7 +17,7 @@ pub mod traits;
 #[cfg(feature = "compact-store")]
 pub mod compact;
 
-#[cfg(feature = "rdf")]
+#[cfg(feature = "triple-store")]
 pub mod rdf;
 
 pub use traits::{GraphStore, GraphStoreMut, NullGraphStore};

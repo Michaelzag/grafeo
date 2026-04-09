@@ -5,7 +5,7 @@
 //! cargo test -p grafeo-engine --all-features --test sparql_regression_external
 //! ```
 
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 mod tests {
     use grafeo_engine::GrafeoDB;
 
