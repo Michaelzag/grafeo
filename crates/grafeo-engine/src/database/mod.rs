@@ -63,10 +63,10 @@ use grafeo_core::graph::rdf::RdfStore;
 use grafeo_core::graph::{GraphStore, GraphStoreMut};
 #[cfg(feature = "grafeo-file")]
 use grafeo_storage::file::GrafeoFileManager;
+#[cfg(all(feature = "wal", feature = "lpg"))]
+use grafeo_storage::wal::WalRecovery;
 #[cfg(feature = "wal")]
-use grafeo_storage::wal::{
-    DurabilityMode as WalDurabilityMode, LpgWal, WalConfig, WalRecord, WalRecovery,
-};
+use grafeo_storage::wal::{DurabilityMode as WalDurabilityMode, LpgWal, WalConfig, WalRecord};
 
 use crate::catalog::Catalog;
 use crate::config::Config;
@@ -140,7 +140,7 @@ pub struct GrafeoDB {
     pub(super) file_manager: Option<Arc<GrafeoFileManager>>,
     /// Periodic checkpoint timer (when `checkpoint_interval` is configured).
     /// Wrapped in Mutex because `close()` takes `&self` but needs to stop the timer.
-    #[cfg(feature = "grafeo-file")]
+    #[cfg(all(feature = "grafeo-file", feature = "lpg"))]
     checkpoint_timer: parking_lot::Mutex<Option<checkpoint_timer::CheckpointTimer>>,
     /// Shared registry of spilled vector storages.
     /// Used by the search path to create `SpillableVectorAccessor` instances.
@@ -559,7 +559,7 @@ impl GrafeoDB {
             embedding_models: RwLock::new(hashbrown::HashMap::new()),
             #[cfg(feature = "grafeo-file")]
             file_manager,
-            #[cfg(feature = "grafeo-file")]
+            #[cfg(all(feature = "grafeo-file", feature = "lpg"))]
             checkpoint_timer: parking_lot::Mutex::new(None),
             #[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
             vector_spill_storages: None,
@@ -687,7 +687,7 @@ impl GrafeoDB {
             embedding_models: RwLock::new(hashbrown::HashMap::new()),
             #[cfg(feature = "grafeo-file")]
             file_manager: None,
-            #[cfg(feature = "grafeo-file")]
+            #[cfg(all(feature = "grafeo-file", feature = "lpg"))]
             checkpoint_timer: parking_lot::Mutex::new(None),
             #[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
             vector_spill_storages: None,
@@ -770,7 +770,7 @@ impl GrafeoDB {
             embedding_models: RwLock::new(hashbrown::HashMap::new()),
             #[cfg(feature = "grafeo-file")]
             file_manager: None,
-            #[cfg(feature = "grafeo-file")]
+            #[cfg(all(feature = "grafeo-file", feature = "lpg"))]
             checkpoint_timer: parking_lot::Mutex::new(None),
             #[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
             vector_spill_storages: None,
@@ -1366,7 +1366,7 @@ impl GrafeoDB {
             Session::with_external_store(self.graph_store(), self.graph_store_mut(), session_cfg())
                 .expect("session creation for non-lpg build");
 
-        #[cfg(feature = "wal")]
+        #[cfg(all(feature = "wal", feature = "lpg"))]
         if let Some(ref wal) = self.wal {
             session.set_wal(Arc::clone(wal), Arc::clone(&self.wal_graph_context));
         }
@@ -1707,6 +1707,15 @@ impl GrafeoDB {
             return Ok(());
         }
 
+        // Stop the periodic checkpoint timer first, even for read-only databases.
+        // compact() can switch a writable DB to read-only after the timer started,
+        // so the timer must be stopped before any early return to avoid racing
+        // with the closed file manager.
+        #[cfg(all(feature = "grafeo-file", feature = "lpg"))]
+        if let Some(mut timer) = self.checkpoint_timer.lock().take() {
+            timer.stop();
+        }
+
         // Read-only databases: just release the shared lock, no checkpointing
         if self.read_only {
             #[cfg(feature = "grafeo-file")]
@@ -1715,13 +1724,6 @@ impl GrafeoDB {
             }
             *is_open = false;
             return Ok(());
-        }
-
-        // Stop the periodic checkpoint timer before the final checkpoint.
-        // This ensures no concurrent checkpoint races with our close() flush.
-        #[cfg(feature = "grafeo-file")]
-        if let Some(mut timer) = self.checkpoint_timer.lock().take() {
-            timer.stop();
         }
 
         // For single-file format: checkpoint to .grafeo file, then clean up sidecar WAL.
@@ -1892,20 +1894,23 @@ impl GrafeoDB {
                 None => continue,
             };
 
-            // Match pattern: vectors_{label}_{property}.bin
+            // Match pattern: vectors_{Label}--{property}.bin
             if !file_name.starts_with("vectors_") || !file_name.ends_with(".bin") {
                 continue;
             }
 
-            // Extract key: "vectors_item_embedding.bin" -> "item_embedding"
+            // Extract key: "vectors_Label--embedding.bin" -> "Label:embedding"
             let key_part = &file_name["vectors_".len()..file_name.len() - ".bin".len()];
 
-            // Reconstruct "label:property" from "label_property"
-            // Convention: first underscore separates label from property
-            let key = if let Some(pos) = key_part.find('_') {
+            // Reconstruct "Label:property" from "Label--property"
+            let key = if let Some(pos) = key_part.find("--") {
+                let label = &key_part[..pos];
+                let property = &key_part[pos + 2..];
+                format!("{label}:{property}")
+            } else if let Some(pos) = key_part.find('_') {
+                // Legacy fallback: "label_property" format from before 0.5.35
                 let label = &key_part[..pos];
                 let property = &key_part[pos + 1..];
-                // Capitalize label to match original key format
                 let mut label_cap = label.to_string();
                 if let Some(first) = label_cap.get_mut(..1) {
                     first.make_ascii_uppercase();
@@ -2040,6 +2045,7 @@ impl Drop for GrafeoDB {
     }
 }
 
+#[cfg(feature = "lpg")]
 impl crate::admin::AdminService for GrafeoDB {
     fn info(&self) -> crate::admin::DatabaseInfo {
         self.info()

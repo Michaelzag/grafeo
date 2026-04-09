@@ -511,9 +511,10 @@ impl<Id: EntityId> PropertyStorage<Id> {
     #[cfg(not(feature = "temporal"))]
     pub fn mark_column_spilled(&self, key: &PropertyKey) {
         let mut columns = self.columns.write();
-        if let Some(column) = columns.get_mut(key) {
-            column.mark_spilled();
-        }
+        let column = columns
+            .entry(key.clone())
+            .or_insert_with(PropertyColumn::new);
+        column.mark_spilled();
     }
 
     /// Gets a column by key for bulk access.

@@ -88,6 +88,7 @@ mod manager;
 mod mvcc;
 #[cfg(feature = "parallel")]
 pub mod parallel;
+#[cfg(feature = "lpg")]
 mod prepared;
 
 pub use manager::{
@@ -95,6 +96,7 @@ pub use manager::{
 };
 #[doc(hidden)]
 pub use mvcc::{VersionChain, VersionInfo};
+#[cfg(feature = "lpg")]
 pub use prepared::{CommitInfo, PreparedCommit};
 pub use write_tracker::TransactionWriteTracker;
 

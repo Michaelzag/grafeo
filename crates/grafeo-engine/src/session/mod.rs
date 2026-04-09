@@ -8,15 +8,23 @@
 mod rdf;
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::AtomicUsize;
+#[cfg(feature = "lpg")]
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
-use grafeo_common::types::{EdgeId, EpochId, NodeId, TransactionId, Value};
+#[cfg(feature = "lpg")]
+use grafeo_common::grafeo_debug_span;
+#[cfg(feature = "lpg")]
+use grafeo_common::types::{EdgeId, NodeId};
+use grafeo_common::types::{EpochId, TransactionId, Value};
 use grafeo_common::utils::error::Result;
-use grafeo_common::{grafeo_debug_span, grafeo_info_span, grafeo_warn};
+use grafeo_common::{grafeo_info_span, grafeo_warn};
+#[cfg(feature = "lpg")]
 use grafeo_core::graph::Direction;
 #[cfg(feature = "lpg")]
 use grafeo_core::graph::lpg::LpgStore;
+#[cfg(feature = "lpg")]
 use grafeo_core::graph::lpg::{Edge, Node};
 #[cfg(feature = "triple-store")]
 use grafeo_core::graph::rdf::RdfStore;
@@ -658,7 +666,9 @@ impl Session {
         &self,
         cmd: grafeo_adapters::query::gql::ast::SessionCommand,
     ) -> Result<QueryResult> {
-        use grafeo_adapters::query::gql::ast::{SessionCommand, TransactionIsolationLevel};
+        use grafeo_adapters::query::gql::ast::SessionCommand;
+        #[cfg(feature = "lpg")]
+        use grafeo_adapters::query::gql::ast::TransactionIsolationLevel;
         use grafeo_common::utils::error::{Error, QueryError, QueryErrorKind};
 
         // Block DDL in read-only transactions (ISO/IEC 39075 Section 8)
@@ -869,6 +879,7 @@ impl Session {
                 self.reset_session();
                 Ok(QueryResult::empty())
             }
+            #[cfg(feature = "lpg")]
             SessionCommand::StartTransaction {
                 read_only,
                 isolation_level,
@@ -887,28 +898,37 @@ impl Session {
                 self.begin_transaction_inner(read_only, engine_level)?;
                 Ok(QueryResult::status("Transaction started"))
             }
+            #[cfg(feature = "lpg")]
             SessionCommand::Commit => {
                 self.commit_inner()?;
                 Ok(QueryResult::status("Transaction committed"))
             }
+            #[cfg(feature = "lpg")]
             SessionCommand::Rollback => {
                 self.rollback_inner()?;
                 Ok(QueryResult::status("Transaction rolled back"))
             }
+            #[cfg(feature = "lpg")]
             SessionCommand::Savepoint(name) => {
                 self.savepoint(&name)?;
                 Ok(QueryResult::status(format!("Savepoint '{name}' created")))
             }
+            #[cfg(feature = "lpg")]
             SessionCommand::RollbackToSavepoint(name) => {
                 self.rollback_to_savepoint(&name)?;
                 Ok(QueryResult::status(format!(
                     "Rolled back to savepoint '{name}'"
                 )))
             }
+            #[cfg(feature = "lpg")]
             SessionCommand::ReleaseSavepoint(name) => {
                 self.release_savepoint(&name)?;
                 Ok(QueryResult::status(format!("Savepoint '{name}' released")))
             }
+            #[cfg(not(feature = "lpg"))]
+            _ => Err(grafeo_common::utils::error::Error::Internal(
+                "This command requires the `lpg` feature".to_string(),
+            )),
         }
     }
 
@@ -2342,6 +2362,7 @@ impl Session {
             gql::GqlTranslationResult::SessionCommand(cmd) => {
                 return self.execute_session_command(cmd);
             }
+            #[cfg(feature = "lpg")]
             gql::GqlTranslationResult::SchemaCommand(cmd) => {
                 // All DDL is a write operation
                 if *self.read_only_tx.lock() {
@@ -2359,6 +2380,12 @@ impl Session {
                     ));
                 }
                 plan
+            }
+            #[cfg(not(feature = "lpg"))]
+            gql::GqlTranslationResult::SchemaCommand(_) => {
+                return Err(grafeo_common::utils::error::Error::Internal(
+                    "Schema commands require the `lpg` feature".to_string(),
+                ));
             }
         };
 
@@ -3260,6 +3287,7 @@ impl Session {
     /// # Errors
     ///
     /// Returns an error if a transaction is already active.
+    #[cfg(feature = "lpg")]
     pub fn begin_transaction(&mut self) -> Result<()> {
         self.begin_transaction_inner(false, None)
     }
@@ -3271,6 +3299,7 @@ impl Session {
     /// # Errors
     ///
     /// Returns an error if a transaction is already active.
+    #[cfg(feature = "lpg")]
     pub fn begin_transaction_with_isolation(
         &mut self,
         isolation_level: crate::transaction::IsolationLevel,
@@ -3336,6 +3365,7 @@ impl Session {
     /// # Errors
     ///
     /// Returns an error if no transaction is active.
+    #[cfg(feature = "lpg")]
     pub fn commit(&mut self) -> Result<()> {
         self.commit_inner()
     }
@@ -3494,6 +3524,7 @@ impl Session {
     /// # Ok(())
     /// # }
     /// ```
+    #[cfg(feature = "lpg")]
     pub fn rollback(&mut self) -> Result<()> {
         self.rollback_inner()
     }
@@ -3803,6 +3834,7 @@ impl Session {
     /// # Ok(())
     /// # }
     /// ```
+    #[cfg(feature = "lpg")]
     pub fn prepare_commit(&mut self) -> Result<crate::transaction::PreparedCommit<'_>> {
         crate::transaction::PreparedCommit::new(self)
     }
@@ -3828,6 +3860,7 @@ impl Session {
 
     /// Wraps `body` in an automatic begin/commit when [`needs_auto_commit`]
     /// returns `true`. On error the transaction is rolled back.
+    #[cfg(feature = "lpg")]
     fn with_auto_commit<F>(&self, has_mutations: bool, body: F) -> Result<QueryResult>
     where
         F: FnOnce() -> Result<QueryResult>,
@@ -3847,6 +3880,15 @@ impl Session {
         } else {
             body()
         }
+    }
+
+    /// Non-LPG stub: no auto-commit wrapping (SPARQL UPDATE is atomic).
+    #[cfg(not(feature = "lpg"))]
+    fn with_auto_commit<F>(&self, _has_mutations: bool, body: F) -> Result<QueryResult>
+    where
+        F: FnOnce() -> Result<QueryResult>,
+    {
+        body()
     }
 
     /// Quick heuristic: returns `true` when the query text looks like it
@@ -4247,6 +4289,7 @@ impl Session {
     /// let name = session.get_node_property(id, "name");
     /// assert_eq!(name, Some(Value::String("Alix".into())));
     /// ```
+    #[cfg(feature = "lpg")]
     #[must_use]
     pub fn get_node_property(&self, id: NodeId, key: &str) -> Option<Value> {
         self.get_node(id)
@@ -4352,12 +4395,14 @@ impl Session {
     ///
     /// - Time complexity: O(1)
     /// - Fastest existence check available
+    #[cfg(feature = "lpg")]
     #[must_use]
     pub fn node_exists(&self, id: NodeId) -> bool {
         self.get_node(id).is_some()
     }
 
     /// Checks if an edge exists, bypassing query planning.
+    #[cfg(feature = "lpg")]
     #[must_use]
     pub fn edge_exists(&self, id: EdgeId) -> bool {
         self.get_edge(id).is_some()
@@ -4443,6 +4488,7 @@ impl Drop for Session {
     fn drop(&mut self) {
         // Auto-rollback any active transaction to prevent leaked MVCC state,
         // dangling write locks, and uncommitted versions lingering in the store.
+        #[cfg(feature = "lpg")]
         if self.in_transaction() {
             let _ = self.rollback_inner();
         }

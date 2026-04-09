@@ -5,7 +5,12 @@
 //! section memory. This enables accurate `memory_usage()` reporting and
 //! lays the groundwork for automatic spilling when tiered storage is added.
 
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
+#[cfg(any(
+    all(feature = "vector-index", feature = "mmap", not(feature = "temporal")),
+    feature = "text-index"
+))]
+use std::sync::Weak;
 
 use grafeo_common::memory::buffer::{MemoryConsumer, MemoryRegion, SpillError, priorities};
 use grafeo_common::storage::Section;
@@ -181,8 +186,9 @@ impl VectorIndexConsumer {
         // Create spill directory if needed
         std::fs::create_dir_all(spill_dir).map_err(|e| SpillError::IoError(e.to_string()))?;
 
-        // Sanitize key for filename ("Label:property" -> "label_property")
-        let safe_key = key.replace(':', "_").to_lowercase();
+        // Sanitize key for filename ("Label:property" -> "Label--property")
+        // Uses "--" as separator to preserve label case and underscores in names.
+        let safe_key = key.replace(':', "--");
         let spill_file = spill_dir.join(format!("vectors_{safe_key}.bin"));
 
         // Create MmapStorage and write all vectors

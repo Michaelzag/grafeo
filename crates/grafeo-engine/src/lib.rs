@@ -53,4 +53,5 @@ pub use memory_usage::MemoryUsage;
 #[cfg(feature = "metrics")]
 pub use metrics::{MetricsRegistry, MetricsSnapshot};
 pub use session::Session;
+#[cfg(feature = "lpg")]
 pub use transaction::{CommitInfo, PreparedCommit};

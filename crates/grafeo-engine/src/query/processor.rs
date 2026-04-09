@@ -99,6 +99,7 @@ pub type QueryParams = HashMap<String, Value>;
 /// ```
 pub struct QueryProcessor {
     /// LPG store for property graph queries.
+    #[cfg(feature = "lpg")]
     lpg_store: Arc<LpgStore>,
     /// Graph store trait object for pluggable storage backends (read path).
     graph_store: Arc<dyn GraphStore>,
@@ -119,6 +120,7 @@ pub struct QueryProcessor {
 
 impl QueryProcessor {
     /// Creates a new query processor for LPG queries.
+    #[cfg(feature = "lpg")]
     #[must_use]
     pub fn for_lpg(store: Arc<LpgStore>) -> Self {
         let optimizer = Optimizer::from_store(&store);
@@ -138,6 +140,7 @@ impl QueryProcessor {
     }
 
     /// Creates a new query processor with a transaction manager.
+    #[cfg(feature = "lpg")]
     #[must_use]
     pub fn for_lpg_with_transaction(
         store: Arc<LpgStore>,
@@ -171,6 +174,7 @@ impl QueryProcessor {
         let optimizer = Optimizer::from_graph_store(&*store);
         let read_store = Arc::clone(&store) as Arc<dyn GraphStore>;
         Ok(Self {
+            #[cfg(feature = "lpg")]
             lpg_store: Arc::new(LpgStore::new()?),
             graph_store: read_store,
             write_store: Some(store),
@@ -195,6 +199,7 @@ impl QueryProcessor {
     ) -> Result<Self> {
         let optimizer = Optimizer::from_graph_store(&*read_store);
         Ok(Self {
+            #[cfg(feature = "lpg")]
             lpg_store: Arc::new(LpgStore::new()?),
             graph_store: read_store,
             write_store,
@@ -396,6 +401,7 @@ impl QueryProcessor {
     }
 
     /// Returns a reference to the LPG store.
+    #[cfg(feature = "lpg")]
     #[must_use]
     pub fn lpg_store(&self) -> &Arc<LpgStore> {
         &self.lpg_store
@@ -429,6 +435,7 @@ impl QueryProcessor {
 #[cfg(feature = "triple-store")]
 impl QueryProcessor {
     /// Creates a new query processor with both LPG and RDF stores.
+    #[cfg(feature = "lpg")]
     #[must_use]
     pub fn with_rdf(
         lpg_store: Arc<LpgStore>,
