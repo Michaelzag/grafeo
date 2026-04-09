@@ -133,6 +133,16 @@ pub struct GrafeoDB {
     /// Wrapped in Mutex because `close()` takes `&self` but needs to stop the timer.
     #[cfg(feature = "grafeo-file")]
     checkpoint_timer: parking_lot::Mutex<Option<checkpoint_timer::CheckpointTimer>>,
+    /// Shared registry of spilled vector storages.
+    /// Used by the search path to create `SpillableVectorAccessor` instances.
+    #[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
+    vector_spill_storages: Option<
+        Arc<
+            parking_lot::RwLock<
+                std::collections::HashMap<String, Arc<grafeo_core::index::vector::MmapStorage>>,
+            >,
+        >,
+    >,
     /// External read-only graph store (when using with_store() or with_read_store()).
     /// When set, sessions route queries through this store instead of the built-in LpgStore.
     pub(super) external_read_store: Option<Arc<dyn GraphStore>>,
@@ -293,10 +303,13 @@ impl GrafeoDB {
             budget: config.memory_limit.unwrap_or_else(|| {
                 (BufferManagerConfig::detect_system_memory() as f64 * 0.75) as usize
             }),
-            spill_path: config
-                .spill_path
-                .clone()
-                .or_else(|| config.path.as_ref().map(|p| p.join("spill"))),
+            spill_path: config.spill_path.clone().or_else(|| {
+                config.path.as_ref().and_then(|p| {
+                    let parent = p.parent()?;
+                    let name = p.file_name()?.to_str()?;
+                    Some(parent.join(format!("{name}.spill")))
+                })
+            }),
             ..BufferManagerConfig::default()
         };
         let buffer_manager = BufferManager::new(buffer_config);
@@ -508,7 +521,7 @@ impl GrafeoDB {
         #[cfg(feature = "wal")]
         let timer_wal = wal.clone();
 
-        let db = Self {
+        let mut db = Self {
             config,
             store: Some(store),
             catalog,
@@ -533,6 +546,8 @@ impl GrafeoDB {
             file_manager,
             #[cfg(feature = "grafeo-file")]
             checkpoint_timer: parking_lot::Mutex::new(None),
+            #[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
+            vector_spill_storages: None,
             external_read_store: None,
             external_write_store: None,
             #[cfg(feature = "metrics")]
@@ -561,6 +576,18 @@ impl GrafeoDB {
                 #[cfg(feature = "wal")]
                 timer_wal,
             ));
+        }
+
+        // If VectorStore is configured as ForceDisk, immediately spill embeddings.
+        // This must happen after register_section_consumers() which creates the consumer.
+        #[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
+        if db
+            .config
+            .section_configs
+            .get(&grafeo_common::storage::SectionType::VectorStore)
+            .is_some_and(|c| c.tier == grafeo_common::storage::TierOverride::ForceDisk)
+        {
+            db.buffer_manager.spill_all();
         }
 
         Ok(db)
@@ -640,6 +667,8 @@ impl GrafeoDB {
             file_manager: None,
             #[cfg(feature = "grafeo-file")]
             checkpoint_timer: parking_lot::Mutex::new(None),
+            #[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
+            vector_spill_storages: None,
             external_read_store: Some(Arc::clone(&store) as Arc<dyn GraphStore>),
             external_write_store: Some(store),
             #[cfg(feature = "metrics")]
@@ -720,6 +749,8 @@ impl GrafeoDB {
             file_manager: None,
             #[cfg(feature = "grafeo-file")]
             checkpoint_timer: parking_lot::Mutex::new(None),
+            #[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
+            vector_spill_storages: None,
             external_read_store: Some(store),
             external_write_store: None,
             #[cfg(feature = "metrics")]
@@ -1721,7 +1752,7 @@ impl GrafeoDB {
     ///
     /// Each section reports its memory usage to the buffer manager, enabling
     /// accurate pressure tracking. Called once after database construction.
-    fn register_section_consumers(&self) {
+    fn register_section_consumers(&mut self) {
         let Some(ref store) = self.store else {
             return;
         };
@@ -1744,9 +1775,16 @@ impl GrafeoDB {
 
         // Vector indexes: dynamic consumer that re-queries the store on each
         // memory_usage() call, so dropped indexes are freed and new ones tracked.
-        #[cfg(feature = "vector-index")]
-        self.buffer_manager
-            .register_consumer(Arc::new(section_consumer::VectorIndexConsumer::new(store)));
+        #[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
+        {
+            let spill_path = self.buffer_manager.config().spill_path.clone();
+            let consumer = Arc::new(section_consumer::VectorIndexConsumer::new(
+                store, spill_path,
+            ));
+            // Share the spill registry with the search path
+            self.vector_spill_storages = Some(Arc::clone(consumer.spilled_storages()));
+            self.buffer_manager.register_consumer(consumer);
+        }
 
         // Text indexes: same dynamic approach as vector indexes.
         #[cfg(feature = "text-index")]

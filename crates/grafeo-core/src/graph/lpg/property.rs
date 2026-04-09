@@ -451,6 +451,59 @@ impl<Id: EntityId> PropertyStorage<Id> {
         self.columns.write().clear();
     }
 
+    // ── Column-level spill / reload ────────────────────────────────
+
+    /// Evicts all values from a specific property column, freeing heap memory.
+    ///
+    /// Returns `(count, estimated_freed_bytes)`. The column stays registered
+    /// (zone map preserved) but `get()` returns `None` until `restore_column()`.
+    #[cfg(not(feature = "temporal"))]
+    pub fn evict_column(&self, key: &PropertyKey) -> (usize, usize) {
+        let mut columns = self.columns.write();
+        if let Some(column) = columns.get_mut(key) {
+            column.evict_values()
+        } else {
+            (0, 0)
+        }
+    }
+
+    /// Restores values into a previously evicted column.
+    ///
+    /// Clears the `spilled` flag on the column. If the column doesn't exist,
+    /// it is created.
+    #[cfg(not(feature = "temporal"))]
+    pub fn restore_column(&self, key: &PropertyKey, values: impl Iterator<Item = (Id, Value)>) {
+        let mut columns = self.columns.write();
+        let column = columns
+            .entry(key.clone())
+            .or_insert_with(|| PropertyColumn::with_compression(self.default_compression));
+        column.restore_values(values);
+    }
+
+    /// Drains all values from a column, returning them for export to disk.
+    ///
+    /// After this call, `is_column_spilled(key)` returns `true`.
+    /// The column remains registered (zone map preserved).
+    #[cfg(not(feature = "temporal"))]
+    pub fn drain_column(&self, key: &PropertyKey) -> Vec<(Id, Value)> {
+        let mut columns = self.columns.write();
+        if let Some(column) = columns.get_mut(key) {
+            column.drain_values()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Whether a specific column has been spilled to disk.
+    #[cfg(not(feature = "temporal"))]
+    #[must_use]
+    pub fn is_column_spilled(&self, key: &PropertyKey) -> bool {
+        self.columns
+            .read()
+            .get(key)
+            .is_some_and(|col| col.is_spilled())
+    }
+
     /// Gets a column by key for bulk access.
     #[must_use]
     pub fn column(&self, key: &PropertyKey) -> Option<PropertyColumnRef<'_, Id>> {
@@ -740,6 +793,12 @@ pub struct PropertyColumn<Id: EntityId = NodeId> {
     /// Number of values before last compression.
     #[cfg(not(feature = "temporal"))]
     compressed_count: usize,
+    /// Whether this column's values have been spilled to disk.
+    /// When true, `get()` returns `None` for all IDs. The column remains
+    /// registered so the schema knows the property exists, but values are
+    /// served from a mmap-backed store instead.
+    #[cfg(not(feature = "temporal"))]
+    spilled: bool,
 }
 
 #[cfg(not(feature = "temporal"))]
@@ -754,6 +813,7 @@ impl<Id: EntityId> PropertyColumn<Id> {
             compression_mode: CompressionMode::None,
             compressed: None,
             compressed_count: 0,
+            spilled: false,
         }
     }
 
@@ -767,6 +827,7 @@ impl<Id: EntityId> PropertyColumn<Id> {
             compression_mode: mode,
             compressed: None,
             compressed_count: 0,
+            spilled: false,
         }
     }
 
@@ -861,6 +922,67 @@ impl<Id: EntityId> PropertyColumn<Id> {
             self.zone_map_dirty = true;
         }
         removed
+    }
+
+    // ── Spill / Reload ─────────────────────────────────────────────
+
+    /// Whether this column's values have been spilled to disk.
+    ///
+    /// When spilled, `get()` returns `None` and values are served from an
+    /// external mmap-backed store. New writes still go into this column
+    /// (the accessor checks both).
+    #[must_use]
+    pub fn is_spilled(&self) -> bool {
+        self.spilled
+    }
+
+    /// Evicts all values from this column, freeing their heap memory.
+    ///
+    /// Returns `(count, estimated_freed_bytes)`. After this call,
+    /// `is_spilled()` returns `true` and `get()` returns `None` for all IDs.
+    /// The column remains registered in the schema (zone map, compression
+    /// metadata are preserved).
+    pub fn evict_values(&mut self) -> (usize, usize) {
+        let count = self.values.len();
+        let estimated_bytes = self.estimated_heap_bytes();
+        self.values.clear();
+        self.values.shrink_to_fit();
+        self.compressed = None;
+        self.compressed_count = 0;
+        self.spilled = true;
+        (count, estimated_bytes)
+    }
+
+    /// Drains all values from this column, returning them for export.
+    ///
+    /// After this call, `is_spilled()` returns `true`. This combines
+    /// export + evict in one step to avoid cloning all values.
+    pub fn drain_values(&mut self) -> Vec<(Id, Value)> {
+        let drained: Vec<(Id, Value)> = self.values.drain().collect();
+        self.values.shrink_to_fit();
+        self.compressed = None;
+        self.compressed_count = 0;
+        self.spilled = true;
+        drained
+    }
+
+    /// Restores values into this column after a reload from disk.
+    ///
+    /// Clears the `spilled` flag. Callers are responsible for providing
+    /// the correct values (from `MmapStorage::export_all()` or similar).
+    pub fn restore_values(&mut self, values: impl Iterator<Item = (Id, Value)>) {
+        self.spilled = false;
+        for (id, value) in values {
+            self.set(id, value);
+        }
+    }
+
+    /// Estimated heap bytes used by this column's values.
+    fn estimated_heap_bytes(&self) -> usize {
+        // HashMap overhead + per-entry Value size
+        let capacity = self.values.capacity();
+        let entry_overhead = std::mem::size_of::<Id>() + std::mem::size_of::<Value>() + 1;
+        capacity * entry_overhead
     }
 
     /// Returns the number of values in this column (hot + compressed).

@@ -65,6 +65,70 @@ impl VectorAccessor for PropertyVectorAccessor<'_> {
     }
 }
 
+/// Reads vectors from a spill-backed store first, falling back to
+/// property storage for vectors that haven't been spilled (e.g., new inserts).
+///
+/// Created by the engine when a vector index has been spilled to disk.
+/// The mmap-backed store serves the bulk of reads (zero-copy from page cache),
+/// while the property store catches any vectors inserted after the spill.
+pub struct SpillableVectorAccessor<'a> {
+    store: &'a dyn GraphStore,
+    property: PropertyKey,
+    spill_storage: Arc<dyn super::storage::VectorStorage>,
+}
+
+impl<'a> SpillableVectorAccessor<'a> {
+    /// Creates a new accessor that checks `spill_storage` first, then falls
+    /// back to the property store.
+    #[must_use]
+    pub fn new(
+        store: &'a dyn GraphStore,
+        property: impl Into<PropertyKey>,
+        spill_storage: Arc<dyn super::storage::VectorStorage>,
+    ) -> Self {
+        Self {
+            store,
+            property: property.into(),
+            spill_storage,
+        }
+    }
+}
+
+impl VectorAccessor for SpillableVectorAccessor<'_> {
+    fn get_vector(&self, id: NodeId) -> Option<Arc<[f32]>> {
+        // Try spill storage first (mmap-backed, serves most reads)
+        if let Some(v) = self.spill_storage.get(id) {
+            return Some(v);
+        }
+        // Fall back to property store (new inserts after spill)
+        match self.store.get_node_property(id, &self.property) {
+            Some(Value::Vector(v)) => Some(v),
+            _ => None,
+        }
+    }
+}
+
+/// An accessor that dispatches to either a property store or a spill-backed store.
+///
+/// This enum avoids dynamic dispatch (`Box<dyn VectorAccessor>`) so it can be
+/// passed to `HnswIndex::search(&impl VectorAccessor)` without requiring `Sized`
+/// workarounds.
+pub enum VectorAccessorKind<'a> {
+    /// Direct property store lookup (default, no spill).
+    Property(PropertyVectorAccessor<'a>),
+    /// Spill-backed: checks MmapStorage first, falls back to property store.
+    Spilled(SpillableVectorAccessor<'a>),
+}
+
+impl VectorAccessor for VectorAccessorKind<'_> {
+    fn get_vector(&self, id: NodeId) -> Option<Arc<[f32]>> {
+        match self {
+            Self::Property(a) => a.get_vector(id),
+            Self::Spilled(a) => a.get_vector(id),
+        }
+    }
+}
+
 /// Blanket implementation for closures, useful in tests.
 impl<F> VectorAccessor for F
 where

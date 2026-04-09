@@ -255,6 +255,22 @@ impl BufferManager {
         self.run_eviction_internal(to_free)
     }
 
+    /// Spills all consumers that support it, regardless of memory pressure.
+    ///
+    /// Used when `TierOverride::ForceDisk` is configured. Returns total bytes freed.
+    pub fn spill_all(&self) -> usize {
+        let consumers = self.consumers.read();
+        let mut total_freed = 0;
+        for consumer in consumers.iter() {
+            if consumer.can_spill()
+                && let Ok(freed) = consumer.spill(usize::MAX)
+            {
+                total_freed += freed;
+            }
+        }
+        total_freed
+    }
+
     /// Returns the configuration.
     #[must_use]
     pub fn config(&self) -> &BufferManagerConfig {
@@ -334,7 +350,7 @@ impl BufferManager {
         sorted.sort_by_key(|c| c.eviction_priority());
 
         let mut total_freed = 0;
-        for consumer in sorted {
+        for consumer in &sorted {
             if total_freed >= to_free {
                 break;
             }
@@ -347,8 +363,24 @@ impl BufferManager {
             if target_evict > 0 {
                 let freed = consumer.evict(target_evict);
                 total_freed += freed;
-                // Note: consumers should call release through their grants,
-                // so we don't double-decrement here.
+            }
+        }
+
+        // If eviction was not enough, try spilling to disk for consumers
+        // that support it (e.g., vector indexes with mmap storage).
+        if total_freed < to_free {
+            for consumer in &sorted {
+                if total_freed >= to_free {
+                    break;
+                }
+                if !consumer.can_spill() {
+                    continue;
+                }
+                let remaining = to_free - total_freed;
+                match consumer.spill(remaining) {
+                    Ok(freed) => total_freed += freed,
+                    Err(_) => continue,
+                }
             }
         }
 

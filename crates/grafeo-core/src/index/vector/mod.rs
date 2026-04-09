@@ -95,7 +95,9 @@ mod quantized_hnsw;
 #[cfg(feature = "vector-index")]
 pub mod section;
 
-pub use accessor::{PropertyVectorAccessor, VectorAccessor};
+pub use accessor::{
+    PropertyVectorAccessor, SpillableVectorAccessor, VectorAccessor, VectorAccessorKind,
+};
 pub use distance::{
     DistanceMetric, compute_distance, cosine_distance, cosine_similarity, dot_product,
     euclidean_distance, euclidean_distance_squared, l2_norm, manhattan_distance, normalize,
