@@ -14,15 +14,40 @@ use std::sync::Weak;
 
 use grafeo_common::memory::buffer::{MemoryConsumer, MemoryRegion, SpillError, priorities};
 use grafeo_common::storage::Section;
-#[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
+#[cfg(all(
+    feature = "lpg",
+    feature = "vector-index",
+    feature = "mmap",
+    not(feature = "temporal")
+))]
 use grafeo_common::types::{PropertyKey, Value};
-#[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
+#[cfg(all(
+    feature = "lpg",
+    feature = "vector-index",
+    feature = "mmap",
+    not(feature = "temporal")
+))]
 use grafeo_core::index::vector::VectorStorage;
-#[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
+#[cfg(all(
+    feature = "lpg",
+    feature = "vector-index",
+    feature = "mmap",
+    not(feature = "temporal")
+))]
 use parking_lot::RwLock;
-#[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
+#[cfg(all(
+    feature = "lpg",
+    feature = "vector-index",
+    feature = "mmap",
+    not(feature = "temporal")
+))]
 use std::collections::HashMap;
-#[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
+#[cfg(all(
+    feature = "lpg",
+    feature = "vector-index",
+    feature = "mmap",
+    not(feature = "temporal")
+))]
 use std::path::PathBuf;
 
 /// Wraps a [`Section`] as a [`MemoryConsumer`] for the BufferManager.
@@ -124,7 +149,12 @@ impl MemoryConsumer for SectionConsumer {
 /// are drained to `MmapStorage` files, freeing heap memory. Search uses
 /// [`SpillableVectorAccessor`](grafeo_core::index::vector::SpillableVectorAccessor)
 /// which checks the spill storage first, then falls back to property storage.
-#[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
+#[cfg(all(
+    feature = "lpg",
+    feature = "vector-index",
+    feature = "mmap",
+    not(feature = "temporal")
+))]
 pub struct VectorIndexConsumer {
     store: Weak<grafeo_core::graph::lpg::LpgStore>,
     /// Directory for spill files. `None` disables spilling.
@@ -134,7 +164,12 @@ pub struct VectorIndexConsumer {
     pub(crate) spilled: Arc<RwLock<HashMap<String, Arc<grafeo_core::index::vector::MmapStorage>>>>,
 }
 
-#[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
+#[cfg(all(
+    feature = "lpg",
+    feature = "vector-index",
+    feature = "mmap",
+    not(feature = "temporal")
+))]
 impl VectorIndexConsumer {
     /// Creates a consumer that dynamically queries the store for current vector indexes.
     pub fn new(
@@ -218,7 +253,12 @@ impl VectorIndexConsumer {
     }
 }
 
-#[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
+#[cfg(all(
+    feature = "lpg",
+    feature = "vector-index",
+    feature = "mmap",
+    not(feature = "temporal")
+))]
 impl MemoryConsumer for VectorIndexConsumer {
     fn name(&self) -> &str {
         "section:VectorStore"
@@ -315,12 +355,12 @@ impl MemoryConsumer for VectorIndexConsumer {
 ///
 /// Same rationale as [`VectorIndexConsumer`]: avoids holding stale `Arc` refs
 /// to indexes that may have been dropped, and automatically picks up new ones.
-#[cfg(feature = "text-index")]
+#[cfg(all(feature = "lpg", feature = "text-index"))]
 pub struct TextIndexConsumer {
     store: Weak<grafeo_core::graph::lpg::LpgStore>,
 }
 
-#[cfg(feature = "text-index")]
+#[cfg(all(feature = "lpg", feature = "text-index"))]
 impl TextIndexConsumer {
     /// Creates a consumer that dynamically queries the store for current text indexes.
     pub fn new(store: &Arc<grafeo_core::graph::lpg::LpgStore>) -> Self {
@@ -330,7 +370,7 @@ impl TextIndexConsumer {
     }
 }
 
-#[cfg(feature = "text-index")]
+#[cfg(all(feature = "lpg", feature = "text-index"))]
 impl MemoryConsumer for TextIndexConsumer {
     fn name(&self) -> &str {
         "section:TextIndex"

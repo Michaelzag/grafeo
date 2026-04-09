@@ -2633,6 +2633,7 @@ impl Session {
         // Handle schema DDL and SHOW commands before the normal query path
         let translation = cypher::translate_full(query)?;
         match translation {
+            #[cfg(feature = "lpg")]
             cypher::CypherTranslationResult::SchemaCommand(cmd) => {
                 if *self.read_only_tx.lock() {
                     return Err(GrafeoError::Query(QueryError::new(

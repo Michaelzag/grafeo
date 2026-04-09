@@ -15,9 +15,9 @@
 mod admin;
 #[cfg(feature = "arrow-export")]
 pub mod arrow;
-#[cfg(feature = "async-storage")]
+#[cfg(all(feature = "async-storage", feature = "lpg"))]
 mod async_ops;
-#[cfg(feature = "async-storage")]
+#[cfg(all(feature = "async-storage", feature = "lpg"))]
 pub(crate) mod async_wal_store;
 #[cfg(feature = "lpg")]
 pub(crate) mod catalog_section;
@@ -596,7 +596,12 @@ impl GrafeoDB {
         // Discover existing spill files from a previous session.
         // If vectors were spilled before close, the spill files persist on disk
         // and need to be re-mapped so search can read from them.
-        #[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
+        #[cfg(all(
+            feature = "lpg",
+            feature = "vector-index",
+            feature = "mmap",
+            not(feature = "temporal")
+        ))]
         db.restore_spill_files();
 
         // If VectorStore is configured as ForceDisk, immediately spill embeddings.
@@ -1859,7 +1864,12 @@ impl GrafeoDB {
     /// `vectors_*.bin` files persist in the spill directory. This method
     /// scans for them, opens each as `MmapStorage`, and registers them
     /// in the `vector_spill_storages` map so search can read from them.
-    #[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
+    #[cfg(all(
+        feature = "lpg",
+        feature = "vector-index",
+        feature = "mmap",
+        not(feature = "temporal")
+    ))]
     fn restore_spill_files(&mut self) {
         use grafeo_core::index::vector::MmapStorage;
 
