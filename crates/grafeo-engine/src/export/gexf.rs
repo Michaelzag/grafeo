@@ -100,7 +100,7 @@ pub fn write_gexf<W: Write>(
                 writeln!(
                     writer,
                     "          <attvalue for=\"{id}\" value=\"{}\"/>",
-                    escape_xml(val_str)
+                    val_str
                 )?;
             }
             writeln!(writer, "        </attvalues>")?;
@@ -139,7 +139,7 @@ pub fn write_gexf<W: Write>(
                 writeln!(
                     writer,
                     "          <attvalue for=\"{id}\" value=\"{}\"/>",
-                    escape_xml(val_str)
+                    val_str
                 )?;
             }
             writeln!(writer, "        </attvalues>")?;
