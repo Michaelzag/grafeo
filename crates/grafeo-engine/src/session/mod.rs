@@ -2628,13 +2628,15 @@ impl Session {
             Executor, binder::Binder, cache::CacheKey, optimizer::Optimizer,
             processor::QueryLanguage, translators::cypher,
         };
-        use grafeo_common::utils::error::{Error as GrafeoError, QueryError, QueryErrorKind};
 
         // Handle schema DDL and SHOW commands before the normal query path
         let translation = cypher::translate_full(query)?;
         match translation {
             #[cfg(feature = "lpg")]
             cypher::CypherTranslationResult::SchemaCommand(cmd) => {
+                use grafeo_common::utils::error::{
+                    Error as GrafeoError, QueryError, QueryErrorKind,
+                };
                 if *self.read_only_tx.lock() {
                     return Err(GrafeoError::Query(QueryError::new(
                         QueryErrorKind::Semantic,
@@ -2642,6 +2644,12 @@ impl Session {
                     )));
                 }
                 return self.execute_schema_command(cmd);
+            }
+            #[cfg(not(feature = "lpg"))]
+            cypher::CypherTranslationResult::SchemaCommand(_) => {
+                return Err(grafeo_common::utils::error::Error::Internal(
+                    "Schema DDL requires the `lpg` feature".to_string(),
+                ));
             }
             cypher::CypherTranslationResult::ShowIndexes => {
                 return self.execute_show_indexes();

@@ -7,8 +7,13 @@
 
 use std::sync::Arc;
 #[cfg(any(
-    all(feature = "vector-index", feature = "mmap", not(feature = "temporal")),
-    feature = "text-index"
+    all(
+        feature = "lpg",
+        feature = "vector-index",
+        feature = "mmap",
+        not(feature = "temporal")
+    ),
+    all(feature = "lpg", feature = "text-index")
 ))]
 use std::sync::Weak;
 

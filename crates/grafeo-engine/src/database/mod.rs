@@ -461,9 +461,9 @@ impl GrafeoDB {
                 };
 
                 // For legacy WAL directory format, check if WAL exists and recover
-                #[cfg(feature = "grafeo-file")]
+                #[cfg(all(feature = "lpg", feature = "grafeo-file"))]
                 let is_single_file = file_manager.is_some();
-                #[cfg(not(feature = "grafeo-file"))]
+                #[cfg(all(feature = "lpg", not(feature = "grafeo-file")))]
                 let is_single_file = false;
 
                 #[cfg(feature = "lpg")]
@@ -520,19 +520,17 @@ impl GrafeoDB {
 
         // Clone Arcs for the checkpoint timer before moving originals into the struct.
         // The timer captures its own references and runs in a background thread.
-        #[cfg(feature = "grafeo-file")]
+        #[cfg(all(feature = "grafeo-file", feature = "lpg"))]
         let checkpoint_interval = config.checkpoint_interval;
         #[cfg(all(feature = "grafeo-file", feature = "lpg"))]
         let timer_store = Arc::clone(&store);
-        #[cfg(feature = "grafeo-file")]
+        #[cfg(all(feature = "grafeo-file", feature = "lpg"))]
         let timer_catalog = Arc::clone(&catalog);
-        #[cfg(feature = "grafeo-file")]
+        #[cfg(all(feature = "grafeo-file", feature = "lpg"))]
         let timer_tm = Arc::clone(&transaction_manager);
-        #[cfg(feature = "grafeo-file")]
-        #[cfg(feature = "triple-store")]
+        #[cfg(all(feature = "grafeo-file", feature = "lpg", feature = "triple-store"))]
         let timer_rdf = Arc::clone(&rdf_store);
-        #[cfg(feature = "grafeo-file")]
-        #[cfg(feature = "wal")]
+        #[cfg(all(feature = "grafeo-file", feature = "lpg", feature = "wal"))]
         let timer_wal = wal.clone();
 
         let mut db = Self {
@@ -1666,9 +1664,11 @@ impl GrafeoDB {
     /// version chains older than that threshold. Also cleans up completed
     /// transaction metadata in the transaction manager.
     pub fn gc(&self) {
-        let min_epoch = self.transaction_manager.min_active_epoch();
         #[cfg(feature = "lpg")]
-        self.lpg_store().gc_versions(min_epoch);
+        {
+            let min_epoch = self.transaction_manager.min_active_epoch();
+            self.lpg_store().gc_versions(min_epoch);
+        }
         self.transaction_manager.gc();
     }
 
@@ -1812,8 +1812,6 @@ impl GrafeoDB {
         #[cfg(feature = "lpg")]
         let store_ref = self.store.as_ref();
         #[cfg(not(feature = "lpg"))]
-        let store_ref: Option<&Arc<()>> = None;
-
         // LPG store section
         #[cfg(feature = "lpg")]
         if let Some(store) = store_ref {
@@ -1952,14 +1950,9 @@ impl GrafeoDB {
     fn build_sections(&self) -> Vec<Box<dyn grafeo_common::storage::Section>> {
         let mut sections: Vec<Box<dyn grafeo_common::storage::Section>> = Vec::new();
 
-        #[cfg(feature = "lpg")]
-        let store_opt = self.store.as_ref();
-        #[cfg(not(feature = "lpg"))]
-        let store_opt: Option<&Arc<()>> = None;
-
         // LPG sections: store, catalog, vector indexes, text indexes
         #[cfg(feature = "lpg")]
-        if let Some(store) = store_opt {
+        if let Some(store) = self.store.as_ref() {
             let lpg = grafeo_core::graph::lpg::LpgStoreSection::new(Arc::clone(store));
 
             let catalog = catalog_section::CatalogSection::new(
