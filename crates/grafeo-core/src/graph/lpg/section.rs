@@ -2,7 +2,7 @@
 //!
 //! Implements the [`Section`] trait for LPG graph data (nodes, edges,
 //! properties, named graphs). Uses the block-based binary format (v2)
-//! defined in [`super::block`] for efficient serialization, CRC integrity
+//! defined in the `block` submodule for efficient serialization, CRC integrity
 //! checking, and future mmap support.
 
 use std::sync::Arc;
