@@ -5,6 +5,8 @@
 //! consistent snapshots, writers create new versions, and old versions get
 //! garbage collected when no one needs them anymore.
 
+use std::collections::VecDeque;
+
 #[cfg(feature = "tiered-storage")]
 use smallvec::SmallVec;
 
@@ -125,7 +127,7 @@ impl<T> Version<T> {
 #[derive(Debug, Clone)]
 pub struct VersionChain<T> {
     /// Versions ordered newest-first.
-    versions: Vec<Version<T>>,
+    versions: VecDeque<Version<T>>,
 }
 
 impl<T> VersionChain<T> {
@@ -133,7 +135,7 @@ impl<T> VersionChain<T> {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            versions: Vec::new(),
+            versions: VecDeque::new(),
         }
     }
 
@@ -141,7 +143,7 @@ impl<T> VersionChain<T> {
     #[must_use]
     pub fn with_initial(data: T, created_epoch: EpochId, created_by: TransactionId) -> Self {
         Self {
-            versions: vec![Version::new(data, created_epoch, created_by)],
+            versions: VecDeque::from(vec![Version::new(data, created_epoch, created_by)]),
         }
     }
 
@@ -150,7 +152,7 @@ impl<T> VersionChain<T> {
     /// The new version becomes the head of the chain.
     pub fn add_version(&mut self, data: T, created_epoch: EpochId, created_by: TransactionId) {
         let version = Version::new(data, created_epoch, created_by);
-        self.versions.insert(0, version);
+        self.versions.push_front(version);
     }
 
     /// Finds the version visible at the given epoch.
@@ -296,13 +298,13 @@ impl<T> VersionChain<T> {
     /// Returns a reference to the latest version's data regardless of visibility.
     #[must_use]
     pub fn latest(&self) -> Option<&T> {
-        self.versions.first().map(|v| &v.data)
+        self.versions.front().map(|v| &v.data)
     }
 
     /// Returns a mutable reference to the latest version's data.
     #[must_use]
     pub fn latest_mut(&mut self) -> Option<&mut T> {
-        self.versions.first_mut().map(|v| &mut v.data)
+        self.versions.front_mut().map(|v| &mut v.data)
     }
 
     /// Returns estimated heap memory in bytes for this version chain.

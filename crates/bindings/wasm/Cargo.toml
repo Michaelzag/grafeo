@@ -57,7 +57,7 @@ analytics = ["ai"]  # Data Scientist (alias for ai in WASM, no algos/import avai
 edge = ["grafeo-engine/lpg", "gql", "compact-store", "grafeo-engine/regex-lite"]  # Frontend/Edge
 # Deployment-based profiles (deprecated)
 browser = ["edge"]  # Deprecated: use edge
-full = ["languages", "ai"]
+full = ["lpg", "languages", "ai"]
 
 [lints]
 workspace = true

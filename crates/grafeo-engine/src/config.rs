@@ -245,6 +245,15 @@ pub struct Config {
     /// hot path).
     pub cdc_enabled: bool,
 
+    /// CDC event retention policy.
+    ///
+    /// Controls how many events the CDC log retains in memory. By default,
+    /// retains up to 1,000 epochs and 100,000 events. Set to unlimited
+    /// (`max_epochs: None, max_events: None`) to disable pruning, but
+    /// beware of unbounded memory growth on long-running instances.
+    #[cfg(feature = "cdc")]
+    pub cdc_retention: crate::cdc::CdcRetentionConfig,
+
     /// Per-section memory configuration.
     ///
     /// Maps `SectionType` to `SectionMemoryConfig` for sections that need
@@ -351,6 +360,8 @@ impl Default for Config {
             gc_interval: 100,
             access_mode: AccessMode::default(),
             cdc_enabled: false,
+            #[cfg(feature = "cdc")]
+            cdc_retention: crate::cdc::CdcRetentionConfig::default(),
             section_configs: hashbrown::HashMap::new(),
             checkpoint_interval: None,
         }

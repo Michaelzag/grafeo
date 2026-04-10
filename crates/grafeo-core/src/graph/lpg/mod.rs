@@ -12,6 +12,8 @@
 //!
 //! Start with [`LpgStore`] - that's where everything lives.
 
+#[allow(dead_code)] // used by section.rs integration (next step)
+pub(crate) mod block;
 mod edge;
 mod node;
 mod property;

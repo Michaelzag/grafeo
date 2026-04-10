@@ -1,61 +1,27 @@
 //! LPG section serializer for the `.grafeo` container format.
 //!
 //! Implements the [`Section`] trait for LPG graph data (nodes, edges,
-//! properties, named graphs). Produces bincode-encoded bytes that the
-//! container writer stores as the `LPG_STORE` section.
+//! properties, named graphs). Uses the block-based binary format (v2)
+//! defined in [`super::block`] for efficient serialization, CRC integrity
+//! checking, and future mmap support.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use serde::{Deserialize, Serialize};
-
 use grafeo_common::storage::section::{Section, SectionType};
-use grafeo_common::types::{EdgeId, EpochId, NodeId, Value};
-use grafeo_common::utils::error::{Error, Result};
+use grafeo_common::types::{EpochId, Value};
+use grafeo_common::utils::error::Result;
 
+use super::block::{self, BlockEdge, BlockNamedGraph, BlockNode};
 use crate::graph::lpg::LpgStore;
 
-/// Current LPG section format version.
-const LPG_SECTION_VERSION: u8 = 1;
-
-// ── Snapshot types (bincode-serializable) ───────────────────────────
-
-#[derive(Serialize, Deserialize)]
-struct LpgSnapshot {
-    version: u8,
-    nodes: Vec<SnapshotNode>,
-    edges: Vec<SnapshotEdge>,
-    named_graphs: Vec<NamedGraphSnapshot>,
-    epoch: u64,
-}
-
-#[derive(Serialize, Deserialize)]
-struct SnapshotNode {
-    id: NodeId,
-    labels: Vec<String>,
-    properties: Vec<(String, Vec<(EpochId, Value)>)>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct SnapshotEdge {
-    id: EdgeId,
-    src: NodeId,
-    dst: NodeId,
-    edge_type: String,
-    properties: Vec<(String, Vec<(EpochId, Value)>)>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct NamedGraphSnapshot {
-    name: String,
-    nodes: Vec<SnapshotNode>,
-    edges: Vec<SnapshotEdge>,
-}
+/// Current LPG section format version (v2 = block-based).
+const LPG_SECTION_VERSION: u8 = 2;
 
 // ── Collection helpers ──────────────────────────────────────────────
 
-fn collect_nodes(store: &LpgStore) -> Vec<SnapshotNode> {
-    let mut nodes: Vec<SnapshotNode> = store
+fn collect_block_nodes(store: &LpgStore) -> Vec<BlockNode> {
+    let mut nodes: Vec<BlockNode> = store
         .all_nodes()
         .map(|n| {
             #[cfg(feature = "temporal")]
@@ -77,7 +43,7 @@ fn collect_nodes(store: &LpgStore) -> Vec<SnapshotNode> {
             let mut labels: Vec<String> = n.labels.iter().map(|l| l.to_string()).collect();
             labels.sort();
 
-            SnapshotNode {
+            BlockNode {
                 id: n.id,
                 labels,
                 properties,
@@ -88,8 +54,8 @@ fn collect_nodes(store: &LpgStore) -> Vec<SnapshotNode> {
     nodes
 }
 
-fn collect_edges(store: &LpgStore) -> Vec<SnapshotEdge> {
-    let mut edges: Vec<SnapshotEdge> = store
+fn collect_block_edges(store: &LpgStore) -> Vec<BlockEdge> {
+    let mut edges: Vec<BlockEdge> = store
         .all_edges()
         .map(|e| {
             #[cfg(feature = "temporal")]
@@ -108,7 +74,7 @@ fn collect_edges(store: &LpgStore) -> Vec<SnapshotEdge> {
 
             properties.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-            SnapshotEdge {
+            BlockEdge {
                 id: e.id,
                 src: e.src,
                 dst: e.dst,
@@ -121,7 +87,7 @@ fn collect_edges(store: &LpgStore) -> Vec<SnapshotEdge> {
     edges
 }
 
-fn populate_store(store: &LpgStore, nodes: &[SnapshotNode], edges: &[SnapshotEdge]) -> Result<()> {
+fn populate_store(store: &LpgStore, nodes: &[BlockNode], edges: &[BlockEdge]) -> Result<()> {
     for node in nodes {
         let label_refs: Vec<&str> = node.labels.iter().map(|s| s.as_str()).collect();
         store.create_node_with_id(node.id, &label_refs)?;
@@ -157,7 +123,8 @@ fn populate_store(store: &LpgStore, nodes: &[SnapshotNode], edges: &[SnapshotEdg
 /// LPG store section for the `.grafeo` container.
 ///
 /// Wraps an `Arc<LpgStore>` and implements the [`Section`] trait for
-/// serialization/deserialization of LPG graph data.
+/// serialization/deserialization of LPG graph data using the block-based
+/// format (v2).
 pub struct LpgStoreSection {
     store: Arc<LpgStore>,
     dirty: AtomicBool,
@@ -194,21 +161,19 @@ impl Section for LpgStoreSection {
     }
 
     fn serialize(&self) -> Result<Vec<u8>> {
-        let nodes = collect_nodes(&self.store);
-        let edges = collect_edges(&self.store);
+        let nodes = collect_block_nodes(&self.store);
+        let edges = collect_block_edges(&self.store);
 
-        let named_graphs: Vec<NamedGraphSnapshot> = self
+        let named_graphs: Vec<BlockNamedGraph> = self
             .store
             .graph_names()
             .into_iter()
             .filter_map(|name| {
-                self.store
-                    .graph(&name)
-                    .map(|graph_store| NamedGraphSnapshot {
-                        name,
-                        nodes: collect_nodes(&graph_store),
-                        edges: collect_edges(&graph_store),
-                    })
+                self.store.graph(&name).map(|graph_store| BlockNamedGraph {
+                    name,
+                    nodes: collect_block_nodes(&graph_store),
+                    edges: collect_block_edges(&graph_store),
+                })
             })
             .collect();
 
@@ -217,43 +182,33 @@ impl Section for LpgStoreSection {
         #[cfg(not(feature = "temporal"))]
         let epoch = 0u64;
 
-        let snapshot = LpgSnapshot {
-            version: LPG_SECTION_VERSION,
-            nodes,
-            edges,
-            named_graphs,
-            epoch,
-        };
-
-        let config = bincode::config::standard();
-        bincode::serde::encode_to_vec(&snapshot, config)
-            .map_err(|e| Error::Internal(format!("LPG section serialization failed: {e}")))
+        block::write_blocks(&nodes, &edges, &named_graphs, epoch)
     }
 
     fn deserialize(&mut self, data: &[u8]) -> Result<()> {
-        let config = bincode::config::standard();
-        let (snapshot, _): (LpgSnapshot, _) = bincode::serde::decode_from_slice(data, config)
-            .map_err(|e| {
-                Error::Serialization(format!("LPG section deserialization failed: {e}"))
-            })?;
+        let store = &self.store;
 
-        populate_store(&self.store, &snapshot.nodes, &snapshot.edges)?;
+        block::read_blocks(data, &mut |nodes, edges, named_graphs, epoch| {
+            populate_store(store, &nodes, &edges)?;
 
-        #[cfg(feature = "temporal")]
-        self.store.sync_epoch(EpochId::new(snapshot.epoch));
+            #[cfg(feature = "temporal")]
+            store.sync_epoch(EpochId::new(epoch));
+            #[cfg(not(feature = "temporal"))]
+            let _ = epoch;
 
-        for graph in &snapshot.named_graphs {
-            self.store
-                .create_graph(&graph.name)
-                .map_err(|e| Error::Internal(e.to_string()))?;
-            if let Some(graph_store) = self.store.graph(&graph.name) {
-                populate_store(&graph_store, &graph.nodes, &graph.edges)?;
-                #[cfg(feature = "temporal")]
-                graph_store.sync_epoch(EpochId::new(snapshot.epoch));
+            for graph in &named_graphs {
+                store
+                    .create_graph(&graph.name)
+                    .map_err(|e| grafeo_common::utils::error::Error::Internal(e.to_string()))?;
+                if let Some(graph_store) = store.graph(&graph.name) {
+                    populate_store(&graph_store, &graph.nodes, &graph.edges)?;
+                    #[cfg(feature = "temporal")]
+                    graph_store.sync_epoch(EpochId::new(epoch));
+                }
             }
-        }
 
-        Ok(())
+            Ok(())
+        })
     }
 
     fn is_dirty(&self) -> bool {
@@ -273,6 +228,7 @@ impl Section for LpgStoreSection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use grafeo_common::types::{NodeId, PropertyKey, Value};
 
     #[test]
     fn lpg_section_round_trip() {
@@ -288,6 +244,7 @@ mod tests {
         let section = LpgStoreSection::new(Arc::clone(&store));
         let bytes = section.serialize().expect("serialize should succeed");
         assert!(!bytes.is_empty());
+        assert!(block::is_block_format(&bytes));
 
         // Deserialize into a fresh store
         let store2 = Arc::new(LpgStore::new().unwrap());
@@ -318,5 +275,84 @@ mod tests {
         let section = LpgStoreSection::new(store);
         assert_eq!(section.section_type(), SectionType::LpgStore);
         assert_eq!(section.version(), LPG_SECTION_VERSION);
+    }
+
+    #[test]
+    fn lpg_section_empty_round_trip() {
+        let store = Arc::new(LpgStore::new().unwrap());
+        let section = LpgStoreSection::new(Arc::clone(&store));
+        let bytes = section.serialize().unwrap();
+
+        let store2 = Arc::new(LpgStore::new().unwrap());
+        let mut section2 = LpgStoreSection::new(store2);
+        section2.deserialize(&bytes).unwrap();
+        assert_eq!(section2.store().node_count(), 0);
+        assert_eq!(section2.store().edge_count(), 0);
+    }
+
+    #[test]
+    fn lpg_section_properties_preserved() {
+        let store = Arc::new(LpgStore::new().unwrap());
+        let n = store.create_node(&["Person"]);
+        store.set_node_property(n, "name", Value::String("Alix".into()));
+        store.set_node_property(n, "age", Value::Int64(30));
+        store.set_node_property(n, "active", Value::Bool(true));
+
+        let section = LpgStoreSection::new(Arc::clone(&store));
+        let bytes = section.serialize().unwrap();
+
+        let store2 = Arc::new(LpgStore::new().unwrap());
+        let mut section2 = LpgStoreSection::new(Arc::clone(&store2));
+        section2.deserialize(&bytes).unwrap();
+
+        let node = store2.get_node(n).unwrap();
+        let name_key: PropertyKey = "name".into();
+        let age_key: PropertyKey = "age".into();
+        let active_key: PropertyKey = "active".into();
+        assert_eq!(
+            node.properties.get(&name_key),
+            Some(&Value::String("Alix".into()))
+        );
+        assert_eq!(node.properties.get(&age_key), Some(&Value::Int64(30)));
+        assert_eq!(node.properties.get(&active_key), Some(&Value::Bool(true)));
+    }
+
+    #[test]
+    fn lpg_section_named_graphs() {
+        let store = Arc::new(LpgStore::new().unwrap());
+        store.create_node(&["Root"]);
+        store.create_graph("social").unwrap();
+
+        if let Some(g) = store.graph("social") {
+            g.create_node(&["Friend"]);
+        }
+
+        let section = LpgStoreSection::new(Arc::clone(&store));
+        let bytes = section.serialize().unwrap();
+
+        let store2 = Arc::new(LpgStore::new().unwrap());
+        let mut section2 = LpgStoreSection::new(Arc::clone(&store2));
+        section2.deserialize(&bytes).unwrap();
+
+        assert_eq!(store2.node_count(), 1);
+        assert!(store2.graph("social").is_some());
+        assert_eq!(store2.graph("social").unwrap().node_count(), 1);
+    }
+
+    #[test]
+    fn lpg_section_crc_integrity() {
+        let store = Arc::new(LpgStore::new().unwrap());
+        store.create_node(&["Test"]);
+
+        let section = LpgStoreSection::new(Arc::clone(&store));
+        let mut bytes = section.serialize().unwrap();
+
+        // Corrupt a byte
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xFF;
+
+        let store2 = Arc::new(LpgStore::new().unwrap());
+        let mut section2 = LpgStoreSection::new(store2);
+        assert!(section2.deserialize(&bytes).is_err());
     }
 }

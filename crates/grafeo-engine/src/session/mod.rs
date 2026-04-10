@@ -3475,10 +3475,14 @@ impl Session {
         #[cfg(feature = "wal")]
         if let Some(ref wal) = self.wal {
             use grafeo_storage::wal::WalRecord;
-            let _ = wal.log(&WalRecord::TransactionCommit { transaction_id });
-            let _ = wal.log(&WalRecord::EpochAdvance {
+            if let Err(e) = wal.log(&WalRecord::TransactionCommit { transaction_id }) {
+                grafeo_warn!("Failed to log transaction commit to WAL: {}", e);
+            }
+            if let Err(e) = wal.log(&WalRecord::EpochAdvance {
                 epoch: commit_epoch,
-            });
+            }) {
+                grafeo_warn!("Failed to log epoch advance to WAL: {}", e);
+            }
         }
 
         // Sync epoch for all touched graphs so that convenience lookups

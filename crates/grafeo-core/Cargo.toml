@@ -49,6 +49,7 @@ unicode-normalization.workspace = true
 # Vector index (optional)
 ordered-float = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
+crc32fast.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true

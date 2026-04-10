@@ -1292,6 +1292,7 @@ dependencies = [
  "bincode",
  "byteorder",
  "bytes",
+ "crc32fast",
  "criterion",
  "crossbeam",
  "dashmap",

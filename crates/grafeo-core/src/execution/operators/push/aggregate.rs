@@ -240,8 +240,9 @@ fn hash_value(value: &Value) -> u64 {
                 v.hash(&mut hasher);
             }
         }
-        _ => {
+        other => {
             255u8.hash(&mut hasher);
+            std::mem::discriminant(other).hash(&mut hasher);
         }
     }
     hasher.finish()

@@ -517,6 +517,8 @@ impl GrafeoDB {
 
         #[cfg(feature = "cdc")]
         let cdc_enabled_val = config.cdc_enabled;
+        #[cfg(feature = "cdc")]
+        let cdc_retention = config.cdc_retention.clone();
 
         // Clone Arcs for the checkpoint timer before moving originals into the struct.
         // The timer captures its own references and runs in a background thread.
@@ -550,7 +552,7 @@ impl GrafeoDB {
             commit_counter: Arc::new(AtomicUsize::new(0)),
             is_open: RwLock::new(true),
             #[cfg(feature = "cdc")]
-            cdc_log: Arc::new(crate::cdc::CdcLog::new()),
+            cdc_log: Arc::new(crate::cdc::CdcLog::with_retention(cdc_retention)),
             #[cfg(feature = "cdc")]
             cdc_enabled: std::sync::atomic::AtomicBool::new(cdc_enabled_val),
             #[cfg(feature = "embed")]
@@ -1666,14 +1668,23 @@ impl GrafeoDB {
     ///
     /// Determines the minimum epoch required by active transactions and prunes
     /// version chains older than that threshold. Also cleans up completed
-    /// transaction metadata in the transaction manager.
+    /// transaction metadata in the transaction manager, and prunes the CDC
+    /// event log according to its retention policy.
     pub fn gc(&self) {
         #[cfg(feature = "lpg")]
-        {
+        let current_epoch = {
             let min_epoch = self.transaction_manager.min_active_epoch();
             self.lpg_store().gc_versions(min_epoch);
-        }
+            self.transaction_manager.current_epoch()
+        };
         self.transaction_manager.gc();
+
+        // Prune CDC events based on retention config (epoch + count limits)
+        #[cfg(feature = "cdc")]
+        if self.cdc_enabled.load(std::sync::atomic::Ordering::Relaxed) {
+            #[cfg(feature = "lpg")]
+            self.cdc_log.apply_retention(current_epoch);
+        }
     }
 
     /// Returns the buffer manager for memory-aware operations.
@@ -1896,6 +1907,13 @@ impl GrafeoDB {
             self.buffer_manager
                 .register_consumer(Arc::new(section_consumer::TextIndexConsumer::new(store)));
         }
+
+        // CDC log: register as memory consumer so the buffer manager can
+        // prune events under memory pressure.
+        #[cfg(feature = "cdc")]
+        self.buffer_manager.register_consumer(
+            Arc::clone(&self.cdc_log) as Arc<dyn grafeo_common::memory::MemoryConsumer>
+        );
     }
 
     /// Discovers and re-opens spill files from a previous session.
