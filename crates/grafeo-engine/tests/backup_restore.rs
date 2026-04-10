@@ -1,0 +1,194 @@
+//! Integration tests for incremental backup and point-in-time restore.
+//!
+//! Covers: full backup, incremental backup, restore to epoch, and the
+//! backup chain model.
+//!
+//! Note: `backup_full()` copies the .grafeo file while it is open, which
+//! fails on Windows due to file locking. Tests that call `backup_full()`
+//! are gated to non-Windows platforms. The `restore_to_epoch` and manifest
+//! tests work on all platforms.
+//!
+//! ```bash
+//! cargo test -p grafeo-engine --features full --test backup_restore
+//! ```
+
+#![cfg(all(feature = "wal", feature = "grafeo-file", feature = "lpg"))]
+
+use grafeo_common::types::EpochId;
+use grafeo_engine::GrafeoDB;
+
+// ── Full backup roundtrip (Linux/macOS only: Windows file locking) ──
+
+#[cfg(not(target_os = "windows"))]
+#[test]
+fn full_backup_and_restore_to_epoch() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let db_path = dir.path().join("source.grafeo");
+    let backup_dir = dir.path().join("backups");
+    let restore_path = dir.path().join("restored.grafeo");
+
+    // Create and populate
+    {
+        let db = GrafeoDB::open(&db_path).expect("open");
+        let session = db.session();
+        session
+            .execute("INSERT (:Person {name: 'Alix', batch: 1})")
+            .expect("insert");
+        session
+            .execute("INSERT (:Person {name: 'Gus', batch: 1})")
+            .expect("insert");
+        db.close().expect("close");
+    }
+
+    // Take a full backup
+    let db = GrafeoDB::open(&db_path).expect("reopen");
+    let segment = db.backup_full(&backup_dir).expect("full backup");
+    assert_eq!(segment.start_epoch, EpochId::new(0));
+    assert!(segment.size_bytes > 0);
+
+    let current_epoch = segment.end_epoch;
+    db.close().expect("close");
+
+    // Restore to the full backup epoch
+    GrafeoDB::restore_to_epoch(&backup_dir, current_epoch, &restore_path)
+        .expect("restore to epoch");
+
+    // Verify restored data
+    let restored = GrafeoDB::open(&restore_path).expect("open restored");
+    assert_eq!(restored.node_count(), 2, "restored should have 2 nodes");
+    let session = restored.session();
+    let result = session
+        .execute("MATCH (n:Person) RETURN n.name ORDER BY n.name")
+        .unwrap();
+    assert_eq!(result.rows().len(), 2);
+    restored.close().expect("close");
+}
+
+// ── Full + incremental backup cycle (Linux/macOS only) ────────────
+
+#[cfg(not(target_os = "windows"))]
+#[test]
+fn incremental_backup_captures_new_data() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let db_path = dir.path().join("incr.grafeo");
+    let backup_dir = dir.path().join("backups");
+
+    let db = GrafeoDB::open(&db_path).expect("open");
+
+    // Initial data
+    let session = db.session();
+    session
+        .execute("INSERT (:Person {name: 'Alix'})")
+        .expect("insert");
+
+    // Full backup
+    let full = db.backup_full(&backup_dir).expect("full backup");
+    assert!(full.size_bytes > 0);
+
+    // Add more data after the full backup
+    session
+        .execute("INSERT (:Person {name: 'Gus'})")
+        .expect("insert");
+    session
+        .execute("INSERT (:Person {name: 'Vincent'})")
+        .expect("insert");
+
+    // Force a WAL rotation so incremental has new files to capture
+    db.wal().expect("WAL").rotate().expect("rotate");
+    session
+        .execute("INSERT (:Person {name: 'Jules'})")
+        .expect("insert");
+
+    // Incremental backup
+    let incr = db
+        .backup_incremental(&backup_dir)
+        .expect("incremental backup");
+    assert!(incr.size_bytes > 0);
+    assert!(incr.start_epoch > full.end_epoch);
+
+    db.close().expect("close");
+
+    // Verify manifest has both segments
+    let manifest = GrafeoDB::read_backup_manifest(&backup_dir)
+        .expect("read manifest")
+        .expect("manifest exists");
+    assert_eq!(manifest.segments.len(), 2);
+}
+
+// ── Backup cursor tracking (Linux/macOS only) ─────────────────────
+
+#[cfg(not(target_os = "windows"))]
+#[test]
+fn backup_cursor_updated_after_full_backup() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let db_path = dir.path().join("cursor.grafeo");
+    let backup_dir = dir.path().join("backups");
+
+    let db = GrafeoDB::open(&db_path).expect("open");
+    db.create_node(&["Test"]);
+
+    assert!(
+        db.backup_cursor().is_none(),
+        "no cursor before first backup"
+    );
+
+    db.backup_full(&backup_dir).expect("full backup");
+
+    let cursor = db
+        .backup_cursor()
+        .expect("cursor should exist after backup");
+    assert!(cursor.backed_up_epoch.as_u64() > 0);
+
+    db.close().expect("close");
+}
+
+// ── Backup manifest metadata (Linux/macOS only) ───────────────────
+
+#[cfg(not(target_os = "windows"))]
+#[test]
+fn backup_manifest_tracks_segments() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let db_path = dir.path().join("meta.grafeo");
+    let backup_dir = dir.path().join("backups");
+
+    let db = GrafeoDB::open(&db_path).expect("open");
+    db.create_node(&["Test"]);
+
+    let segment = db.backup_full(&backup_dir).expect("full backup");
+
+    let manifest = GrafeoDB::read_backup_manifest(&backup_dir)
+        .unwrap()
+        .unwrap();
+    assert_eq!(manifest.segments.len(), 1);
+    assert_eq!(manifest.segments[0].filename, segment.filename);
+    assert_eq!(manifest.epoch_range().unwrap().1, segment.end_epoch);
+
+    db.close().expect("close");
+}
+
+// ── Error cases (all platforms) ───────────────────────────────────
+
+#[test]
+fn incremental_without_full_fails() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let db_path = dir.path().join("nofull.grafeo");
+    let backup_dir = dir.path().join("backups");
+
+    let db = GrafeoDB::open(&db_path).expect("open");
+    db.create_node(&["Test"]);
+
+    let result = db.backup_incremental(&backup_dir);
+    assert!(result.is_err(), "incremental without full should fail");
+
+    db.close().expect("close");
+}
+
+#[test]
+fn restore_nonexistent_backup_fails() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let backup_dir = dir.path().join("empty_backups");
+    let restore_path = dir.path().join("restored.grafeo");
+
+    let result = GrafeoDB::restore_to_epoch(&backup_dir, EpochId::new(100), &restore_path);
+    assert!(result.is_err(), "restore from empty dir should fail");
+}

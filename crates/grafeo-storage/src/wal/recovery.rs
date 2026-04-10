@@ -346,7 +346,7 @@ impl WalRecovery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use grafeo_common::types::{NodeId, TransactionId};
+    use grafeo_common::types::{EpochId, NodeId, TransactionId};
     use tempfile::tempdir;
 
     #[test]
@@ -708,6 +708,126 @@ mod tests {
         let recovery = WalRecovery::new(dir.path());
         let records = recovery.recover().unwrap();
         assert_eq!(records.len(), 0, "empty WAL should produce no records");
+    }
+
+    // ── recover_until_epoch tests ─────────────────────────────────────
+
+    /// Helper: writes a committed transaction with an EpochAdvance marker,
+    /// matching the pattern used by the engine session commit path.
+    fn write_tx_with_epoch(wal: &WalManager, node_id: u64, tx_id: u64, epoch: u64) {
+        wal.log(&WalRecord::CreateNode {
+            id: NodeId::new(node_id),
+            labels: vec![format!("N{node_id}")],
+        })
+        .unwrap();
+        wal.log(&WalRecord::TransactionCommit {
+            transaction_id: TransactionId::new(tx_id),
+        })
+        .unwrap();
+        wal.log(&WalRecord::EpochAdvance {
+            epoch: EpochId::new(epoch),
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn test_recover_until_epoch_includes_target() {
+        let dir = tempdir().unwrap();
+        {
+            let wal = WalManager::open(dir.path()).unwrap();
+            write_tx_with_epoch(&wal, 1, 1, 5);
+            write_tx_with_epoch(&wal, 2, 2, 10);
+            write_tx_with_epoch(&wal, 3, 3, 15);
+            wal.sync().unwrap();
+        }
+
+        let recovery = WalRecovery::new(dir.path());
+        let records = recovery.recover_until_epoch(EpochId::new(10)).unwrap();
+
+        // Should include tx1 (epoch 5) and tx2 (epoch 10), each producing
+        // CreateNode + TxCommit + EpochAdvance = 3 records per tx.
+        assert_eq!(records.len(), 6, "should include epochs 5 and 10");
+
+        // Verify no records from epoch 15
+        assert!(
+            !records.iter().any(
+                |r| matches!(r, WalRecord::EpochAdvance { epoch } if *epoch > EpochId::new(10))
+            ),
+            "should not include EpochAdvance beyond target"
+        );
+    }
+
+    #[test]
+    fn test_recover_until_epoch_excludes_next_epoch() {
+        let dir = tempdir().unwrap();
+        {
+            let wal = WalManager::open(dir.path()).unwrap();
+            write_tx_with_epoch(&wal, 1, 1, 5);
+            write_tx_with_epoch(&wal, 2, 2, 6);
+            wal.sync().unwrap();
+        }
+
+        let recovery = WalRecovery::new(dir.path());
+        let records = recovery.recover_until_epoch(EpochId::new(5)).unwrap();
+
+        // Only tx1 (epoch 5): CreateNode + TxCommit + EpochAdvance = 3
+        assert_eq!(records.len(), 3, "should exclude epoch 6 transaction");
+
+        // Verify the CreateNode is for node 1 only
+        let nodes: Vec<_> = records
+            .iter()
+            .filter_map(|r| match r {
+                WalRecord::CreateNode { id, .. } => Some(id.as_u64()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(nodes, vec![1], "only node from epoch 5 should be present");
+    }
+
+    #[test]
+    fn test_recover_until_epoch_zero_returns_empty() {
+        let dir = tempdir().unwrap();
+        {
+            let wal = WalManager::open(dir.path()).unwrap();
+            write_tx_with_epoch(&wal, 1, 1, 5);
+            wal.sync().unwrap();
+        }
+
+        let recovery = WalRecovery::new(dir.path());
+        let records = recovery.recover_until_epoch(EpochId::new(0)).unwrap();
+
+        // Epoch 5 > 0, so all records should be excluded
+        assert!(
+            records.is_empty(),
+            "no records should be at or below epoch 0"
+        );
+    }
+
+    #[test]
+    fn test_recover_until_epoch_beyond_max_returns_all() {
+        let dir = tempdir().unwrap();
+        {
+            let wal = WalManager::open(dir.path()).unwrap();
+            write_tx_with_epoch(&wal, 1, 1, 5);
+            write_tx_with_epoch(&wal, 2, 2, 10);
+            wal.sync().unwrap();
+        }
+
+        let recovery = WalRecovery::new(dir.path());
+        let records = recovery.recover_until_epoch(EpochId::new(999)).unwrap();
+
+        // Both transactions are within range: 6 records total
+        assert_eq!(records.len(), 6, "all records should be included");
+    }
+
+    #[test]
+    fn test_recover_until_epoch_empty_wal() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path()).unwrap();
+
+        let recovery = WalRecovery::new(dir.path());
+        let records = recovery.recover_until_epoch(EpochId::new(100)).unwrap();
+        assert!(records.is_empty());
     }
 }
 
