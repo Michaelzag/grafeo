@@ -1583,7 +1583,7 @@ impl Operator for SetPropertyOperator {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "lpg"))]
 mod tests {
     use super::*;
     use crate::execution::DataChunk;

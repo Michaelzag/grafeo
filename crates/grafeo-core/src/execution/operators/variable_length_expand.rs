@@ -649,7 +649,7 @@ impl Operator for VariableLengthExpandOperator {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "lpg"))]
 mod tests {
     use super::*;
     use crate::execution::operators::ScanOperator;

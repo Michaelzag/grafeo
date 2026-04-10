@@ -462,7 +462,7 @@ fn edge_to_map(edge: &Edge) -> Value {
     Value::Map(Arc::new(map))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "lpg"))]
 mod tests {
     use super::*;
     use crate::execution::chunk::DataChunkBuilder;
