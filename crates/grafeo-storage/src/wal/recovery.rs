@@ -109,6 +109,35 @@ impl WalRecovery {
         self.recover_internal_as::<WalRecord>(checkpoint.cloned())
     }
 
+    /// Recovers committed records up to and including the given epoch.
+    ///
+    /// Stops replaying when an `EpochAdvance` record with `epoch > max_epoch`
+    /// is encountered. All records from committed transactions up to that
+    /// point are returned.
+    ///
+    /// Used by point-in-time recovery to restore a database to a specific epoch.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if recovery fails.
+    pub fn recover_until_epoch(
+        &self,
+        max_epoch: grafeo_common::types::EpochId,
+    ) -> Result<Vec<WalRecord>> {
+        let all_records = self.recover()?;
+        let mut result = Vec::new();
+        for record in all_records {
+            // Stop at the first EpochAdvance past our target
+            if let WalRecord::EpochAdvance { epoch } = &record
+                && *epoch > max_epoch
+            {
+                break;
+            }
+            result.push(record);
+        }
+        Ok(result)
+    }
+
     fn recover_internal_as<R: WalEntry>(
         &self,
         checkpoint: Option<CheckpointMetadata>,

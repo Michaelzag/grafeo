@@ -202,6 +202,12 @@ impl<R: WalEntry> TypedWal<R> {
     pub fn path(&self) -> PathBuf {
         self.manager.path()
     }
+
+    /// Returns the current WAL log sequence number.
+    #[must_use]
+    pub fn current_sequence(&self) -> u64 {
+        self.manager.current_sequence()
+    }
 }
 
 /// Type alias for the LPG (labeled property graph) WAL.

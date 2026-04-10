@@ -475,6 +475,15 @@ impl WalManager {
         &self.dir
     }
 
+    /// Returns the current WAL log sequence number.
+    ///
+    /// Each log file has a sequence number embedded in its name
+    /// (`wal_XXXXXXXX.log`). This returns the sequence of the active log file.
+    #[must_use]
+    pub fn current_sequence(&self) -> u64 {
+        self.current_sequence.load(Ordering::Relaxed)
+    }
+
     /// Returns the current durability mode.
     #[must_use]
     pub fn durability_mode(&self) -> DurabilityMode {

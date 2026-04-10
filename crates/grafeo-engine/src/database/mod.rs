@@ -19,6 +19,8 @@ pub mod arrow;
 mod async_ops;
 #[cfg(all(feature = "async-storage", feature = "lpg"))]
 pub(crate) mod async_wal_store;
+#[cfg(all(feature = "wal", feature = "grafeo-file"))]
+pub mod backup;
 #[cfg(feature = "lpg")]
 pub(crate) mod catalog_section;
 #[cfg(feature = "cdc")]
@@ -1945,14 +1947,12 @@ impl GrafeoDB {
             None => return,
         };
 
-        let entries = match std::fs::read_dir(&spill_dir) {
-            Ok(entries) => entries,
-            Err(_) => return,
+        let Ok(entries) = std::fs::read_dir(&spill_dir) else {
+            return;
         };
 
-        let store = match self.store {
-            Some(ref s) => s,
-            None => return,
+        let Some(ref store) = self.store else {
+            return;
         };
 
         for entry in entries.flatten() {
@@ -1963,7 +1963,11 @@ impl GrafeoDB {
             };
 
             // Match pattern: vectors_{key}.bin where key is percent-encoded
-            if !file_name.starts_with("vectors_") || !file_name.ends_with(".bin") {
+            if !file_name.starts_with("vectors_")
+                || !std::path::Path::new(&file_name)
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("bin"))
+            {
                 continue;
             }
 
@@ -2055,6 +2059,94 @@ impl GrafeoDB {
         }
 
         sections
+    }
+
+    // =========================================================================
+    // Backup API
+    // =========================================================================
+
+    /// Creates a full backup of the database in the given directory.
+    ///
+    /// Checkpoints the database, copies the `.grafeo` file, and creates a
+    /// backup manifest. Subsequent incremental backups will use this as the
+    /// base.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database has no file manager or I/O fails.
+    #[cfg(all(feature = "wal", feature = "grafeo-file", feature = "lpg"))]
+    pub fn backup_full(&self, backup_dir: &std::path::Path) -> Result<backup::BackupSegment> {
+        let fm = self
+            .file_manager
+            .as_ref()
+            .ok_or_else(|| Error::Internal("backup requires a persistent database".to_string()))?;
+
+        // Checkpoint first to ensure the container has latest data
+        let _ = self.checkpoint_to_file(fm, flush::FlushReason::Explicit)?;
+
+        let current_epoch = self.transaction_manager.current_epoch();
+        backup::do_backup_full(backup_dir, fm.path(), self.wal.as_deref(), current_epoch)
+    }
+
+    /// Creates an incremental backup containing WAL records since the last backup.
+    ///
+    /// Requires a prior full backup in the backup directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no full backup exists, or if the WAL has no new records.
+    #[cfg(all(feature = "wal", feature = "grafeo-file", feature = "lpg"))]
+    pub fn backup_incremental(
+        &self,
+        backup_dir: &std::path::Path,
+    ) -> Result<backup::BackupSegment> {
+        let wal = self
+            .wal
+            .as_ref()
+            .ok_or_else(|| Error::Internal("incremental backup requires WAL".to_string()))?;
+
+        let current_epoch = self.transaction_manager.current_epoch();
+        backup::do_backup_incremental(backup_dir, wal, current_epoch)
+    }
+
+    /// Returns the backup manifest for a backup directory, if one exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the manifest file exists but cannot be parsed.
+    #[cfg(all(feature = "wal", feature = "grafeo-file"))]
+    pub fn read_backup_manifest(
+        backup_dir: &std::path::Path,
+    ) -> Result<Option<backup::BackupManifest>> {
+        backup::read_manifest(backup_dir)
+    }
+
+    /// Returns the current backup cursor (last backed-up position), if any.
+    #[cfg(all(feature = "wal", feature = "grafeo-file"))]
+    #[must_use]
+    pub fn backup_cursor(&self) -> Option<backup::BackupCursor> {
+        self.wal
+            .as_ref()
+            .and_then(|wal| backup::read_backup_cursor(wal.dir()).ok().flatten())
+    }
+
+    /// Restores a database from a backup chain to a specific epoch.
+    ///
+    /// Copies the full backup to `output_path`, then replays incremental
+    /// WAL segments up to `target_epoch`. The restored database can be
+    /// opened with [`GrafeoDB::open`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the backup chain does not cover the target epoch,
+    /// segment checksums fail, or I/O fails.
+    #[cfg(all(feature = "wal", feature = "grafeo-file"))]
+    pub fn restore_to_epoch(
+        backup_dir: &std::path::Path,
+        target_epoch: grafeo_common::types::EpochId,
+        output_path: &std::path::Path,
+    ) -> Result<()> {
+        backup::do_restore_to_epoch(backup_dir, target_epoch, output_path)
     }
 
     /// Writes the current database state to the `.grafeo` file using the unified flush.
@@ -3082,7 +3174,7 @@ mod tests {
     fn test_from_value_all_success() {
         use grafeo_common::types::Value;
         assert_eq!(i64::from_value(&Value::Int64(99)).unwrap(), 99);
-        assert!((f64::from_value(&Value::Float64(3.14)).unwrap() - 3.14).abs() < f64::EPSILON);
+        assert!((f64::from_value(&Value::Float64(2.72)).unwrap() - 2.72).abs() < f64::EPSILON);
         assert_eq!(String::from_value(&Value::from("hello")).unwrap(), "hello");
         assert!(bool::from_value(&Value::Bool(true)).unwrap());
     }

@@ -1267,7 +1267,7 @@ mod tests {
             ),
             (
                 "float_val".to_string(),
-                vec![(EpochId::new(0), Value::Float64(3.14))],
+                vec![(EpochId::new(0), Value::Float64(2.72))],
             ),
             (
                 "string_val".to_string(),
@@ -1391,7 +1391,7 @@ mod tests {
         let data = write_blocks(&nodes, &[], &[], 0).unwrap();
 
         // Parse header and find string table to verify deduplication
-        let header = SectionHeader::read_from(&data).unwrap();
+        let _header = SectionHeader::read_from(&data).unwrap();
         let dir_start = HEADER_SIZE;
         let st_entry = BlockDirEntry::read_from(&data[dir_start..]).unwrap();
         let st_data = &data[st_entry.offset as usize..(st_entry.offset + st_entry.length) as usize];

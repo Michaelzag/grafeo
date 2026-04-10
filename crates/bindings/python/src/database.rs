@@ -2006,6 +2006,49 @@ impl PyGrafeoDB {
         Ok(())
     }
 
+    /// Creates a full backup of the database.
+    ///
+    /// Checkpoints the database, copies the container file to the backup directory,
+    /// and creates a backup manifest.
+    ///
+    /// Example:
+    ///     db = GrafeoDB("./mydb.grafeo")
+    ///     db.backup_full("./backups/mydb")
+    fn backup_full(&self, backup_dir: String) -> PyResult<()> {
+        let db = self.inner.read();
+        db.backup_full(std::path::Path::new(&backup_dir))
+            .map_err(PyGrafeoError::from)?;
+        Ok(())
+    }
+
+    /// Creates an incremental backup (WAL records since last backup).
+    ///
+    /// Requires a prior full backup in the backup directory.
+    ///
+    /// Example:
+    ///     db.backup_incremental("./backups/mydb")
+    fn backup_incremental(&self, backup_dir: String) -> PyResult<()> {
+        let db = self.inner.read();
+        db.backup_incremental(std::path::Path::new(&backup_dir))
+            .map_err(PyGrafeoError::from)?;
+        Ok(())
+    }
+
+    /// Restores a database to a specific epoch from a backup chain.
+    ///
+    /// Example:
+    ///     GrafeoDB.restore_to_epoch("./backups/mydb", 500, "./restored.grafeo")
+    #[staticmethod]
+    fn restore_to_epoch(backup_dir: String, epoch: u64, output_path: String) -> PyResult<()> {
+        grafeo_engine::GrafeoDB::restore_to_epoch(
+            std::path::Path::new(&backup_dir),
+            grafeo_common::types::EpochId::new(epoch),
+            std::path::Path::new(&output_path),
+        )
+        .map_err(PyGrafeoError::from)?;
+        Ok(())
+    }
+
     /// Creates an in-memory copy of this database.
     ///
     /// Returns a new database that is completely independent.

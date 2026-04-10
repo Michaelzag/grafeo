@@ -22,6 +22,7 @@ use grafeo_storage::file::GrafeoFileManager;
 #[non_exhaustive]
 pub enum FlushReason {
     /// Periodic checkpoint (timer-driven) or database close.
+    #[allow(dead_code)]
     Checkpoint,
     /// User-initiated `CHECKPOINT` command or `wal_checkpoint()` API.
     Explicit,

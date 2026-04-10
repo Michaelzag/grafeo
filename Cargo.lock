@@ -1325,6 +1325,7 @@ dependencies = [
  "arrow-ipc",
  "arrow-schema",
  "bincode",
+ "crc32fast",
  "criterion",
  "crossbeam",
  "grafeo-adapters",

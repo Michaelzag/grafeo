@@ -95,13 +95,17 @@ impl SectionType {
     #[must_use]
     pub const fn default_flags(self) -> SectionFlags {
         match self {
-            Self::Catalog | Self::LpgStore => SectionFlags {
+            Self::Catalog => SectionFlags {
                 required: true,
                 mmap_able: false,
             },
+            Self::LpgStore => SectionFlags {
+                required: true,
+                mmap_able: true,
+            },
             Self::RdfStore => SectionFlags {
                 required: false,
-                mmap_able: false,
+                mmap_able: true,
             },
             Self::VectorStore | Self::TextIndex | Self::RdfRing | Self::PropertyIndex => {
                 SectionFlags {

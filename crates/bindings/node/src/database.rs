@@ -485,6 +485,38 @@ impl JsGrafeoDB {
             .map_err(napi::Error::from)
     }
 
+    /// Create a full backup of the database.
+    #[napi]
+    pub fn backup_full(&self, backup_dir: String) -> Result<()> {
+        let db = self.inner.read();
+        db.backup_full(std::path::Path::new(&backup_dir))
+            .map(|_| ())
+            .map_err(NodeGrafeoError::from)
+            .map_err(napi::Error::from)
+    }
+
+    /// Create an incremental backup (WAL records since last backup).
+    #[napi]
+    pub fn backup_incremental(&self, backup_dir: String) -> Result<()> {
+        let db = self.inner.read();
+        db.backup_incremental(std::path::Path::new(&backup_dir))
+            .map(|_| ())
+            .map_err(NodeGrafeoError::from)
+            .map_err(napi::Error::from)
+    }
+
+    /// Restore a database to a specific epoch from a backup chain.
+    #[napi]
+    pub fn restore_to_epoch(backup_dir: String, epoch: i64, output_path: String) -> Result<()> {
+        grafeo_engine::GrafeoDB::restore_to_epoch(
+            std::path::Path::new(&backup_dir),
+            grafeo_common::types::EpochId::new(epoch as u64),
+            std::path::Path::new(&output_path),
+        )
+        .map_err(NodeGrafeoError::from)
+        .map_err(napi::Error::from)
+    }
+
     /// Close the database.
     #[napi]
     pub fn close(&self) -> Result<()> {

@@ -2,9 +2,9 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
-## [0.5.35] - Unreleased
+## [0.5.35] - 2026-04-11
 
-Breaking: `QueryResult.rows` is now private (use `rows()`/`into_rows()`), all public enums are `#[non_exhaustive]` (add `_ =>` arms), and old feature profiles (`embedded`, `browser`, `server`, `full`) are deprecated in favor of persona-based profiles (`lpg`, `rdf`, `analytics`, `ai`, `edge`, `enterprise`).
+Breaking: `QueryResult.rows` is now private (use `rows()`/`into_rows()`), all public enums are `#[non_exhaustive]` (add `_ =>` arms), old feature profiles (`embedded`, `browser`, `server`, `full`) are deprecated in favor of persona-based profiles (`lpg`, `rdf`, `analytics`, `ai`, `edge`, `enterprise`) and the on-disk storage format changed from bincode blobs to block-based sections (databases created with 0.5.34 or earlier must be re-created).
 
 ### Added
 
@@ -26,6 +26,13 @@ Breaking: `QueryResult.rows` is now private (use `rows()`/`into_rows()`), all pu
 - **Vector spill to disk**: vector columns drain to `MmapStorage` under memory pressure, search reads transparently from mmap
 - **BufferManager spill integration**: eviction calls `spill()` on consumers after in-memory eviction exhausted
 - **PropertyColumn eviction**: `drain_values()`, `evict_values()`, `restore_values()` with `spilled` flag
+- **Block-based LPG section format (v2)**: replaces bincode blob with a structured layout: string table, packed node/edge arrays, columnar property blocks, label assignments, per-block CRC. Enables mmap for data sections.
+- **Block-based RDF section format (v2)**: replaces bincode with string-table-deduplicated triple storage, per-block CRC, named graph sub-sections.
+- **WAL overlay**: in-memory mutation layer (`WalOverlay`) for tracking inserts, updates, deletes on top of mmap'd base data. Supports drain/clear for checkpoint merge.
+- **TieredStore trait**: `StorageTier` enum (InMemory, OnDisk, Uninitialized) and `TieredStore` trait defining `persist()`, `open_mmap()`, `reload_to_ram()` lifecycle in `grafeo-common`.
+- **CDC retention and eviction**: `CdcRetentionConfig` with `max_epochs` and `max_events` limits. `CdcLog` implements `MemoryConsumer` for BufferManager-driven eviction. Pruning hooks into MVCC GC cycle. ([#250](https://github.com/GrafeoDB/grafeo/issues/250))
+- **EpochAdvance WAL record**: new `WalRecord::EpochAdvance { epoch }` logged after each `TransactionCommit`. `is_metadata()` trait method on `WalEntry`. Enables epoch-bounded WAL replay for point-in-time recovery.
+- **Incremental backup**: `backup_full()`, `backup_incremental()`, `restore_to_epoch()` on `GrafeoDB`. Backup manifest tracks the chain, backup cursor in WAL directory prevents premature log truncation. CLI commands: `grafeo backup full`, `grafeo backup incremental`, `grafeo backup status`, `grafeo backup restore-to-epoch`. Exposed in Python, Node.js, and C bindings.
 
 ### Changed
 
@@ -42,10 +49,14 @@ Breaking: `QueryResult.rows` is now private (use `rows()`/`into_rows()`), all pu
 
 ### Fixed
 
+- **WAL not replayed on reopen**: data written via mutations was lost across restarts when no explicit checkpoint was called. Session commits now log `TransactionCommit` + `EpochAdvance` to WAL, and the close path only removes the sidecar WAL after verifying the checkpoint wrote data. ([#252](https://github.com/GrafeoDB/grafeo/issues/252))
+- **CDC event log unbounded memory**: the CDC log stored every mutation with full property snapshots and never pruned. Added epoch-based and count-based retention (`CdcRetentionConfig`), integrated with BufferManager for memory-pressure eviction. ([#250](https://github.com/GrafeoDB/grafeo/issues/250))
+- **`VecDeque::first_mut` compile error**: fixed to `front_mut()` in MVCC `VersionChain` (tiered-storage feature path)
 - **Graph/schema context validation**: reject nonexistent targets, `drop_graph()` auto-clears active context ([#245](https://github.com/GrafeoDB/grafeo/issues/245), [#246](https://github.com/GrafeoDB/grafeo/pull/246) by [@Michaelzag](https://github.com/Michaelzag))
 - **C binding `grafeo_reset_schema`**: propagates errors instead of silently discarding
 - **WASM `setSchema`**: returns proper JS `Error` instead of plain string
 - **CI benchmark `--save-baseline`**: scoped to Criterion crates only
+- **Aggregate grouping hash collision**: wildcard arm now hashes `std::mem::discriminant` to distinguish future `Value` variants
 
 ## [0.5.34] - 2026-04-07
 

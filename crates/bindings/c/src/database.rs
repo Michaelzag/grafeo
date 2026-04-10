@@ -1944,6 +1944,69 @@ pub extern "C" fn grafeo_save(db: *mut GrafeoDatabase, path: *const c_char) -> G
     }
 }
 
+/// Create a full backup of the database.
+#[unsafe(no_mangle)]
+pub extern "C" fn grafeo_backup_full(
+    db: *mut GrafeoDatabase,
+    backup_dir: *const c_char,
+) -> GrafeoStatus {
+    let db = db_ref!(db);
+    let dir = match str_from_ptr(backup_dir) {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    match db.inner.read().backup_full(std::path::Path::new(dir)) {
+        Ok(_) => GrafeoStatus::Ok,
+        Err(e) => set_error(&e),
+    }
+}
+
+/// Create an incremental backup (WAL records since last backup).
+#[unsafe(no_mangle)]
+pub extern "C" fn grafeo_backup_incremental(
+    db: *mut GrafeoDatabase,
+    backup_dir: *const c_char,
+) -> GrafeoStatus {
+    let db = db_ref!(db);
+    let dir = match str_from_ptr(backup_dir) {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    match db
+        .inner
+        .read()
+        .backup_incremental(std::path::Path::new(dir))
+    {
+        Ok(_) => GrafeoStatus::Ok,
+        Err(e) => set_error(&e),
+    }
+}
+
+/// Restore a database to a specific epoch from a backup chain.
+#[unsafe(no_mangle)]
+pub extern "C" fn grafeo_restore_to_epoch(
+    backup_dir: *const c_char,
+    epoch: u64,
+    output_path: *const c_char,
+) -> GrafeoStatus {
+    let dir = match str_from_ptr(backup_dir) {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    let out = match str_from_ptr(output_path) {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    match grafeo_engine::GrafeoDB::restore_to_epoch(
+        std::path::Path::new(dir),
+        grafeo_common::types::EpochId::new(epoch),
+        std::path::Path::new(out),
+    ) {
+        Ok(()) => GrafeoStatus::Ok,
+        Err(e) => set_error(&e),
+    }
+}
+
 /// Trigger a WAL checkpoint.
 #[unsafe(no_mangle)]
 pub extern "C" fn grafeo_wal_checkpoint(db: *mut GrafeoDatabase) -> GrafeoStatus {

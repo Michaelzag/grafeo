@@ -12,10 +12,11 @@
 //!
 //! Start with [`LpgStore`] - that's where everything lives.
 
-#[allow(dead_code)] // used by section.rs integration (next step)
+#[allow(dead_code)]
 pub(crate) mod block;
 mod edge;
 mod node;
+pub mod overlay;
 mod property;
 #[cfg(feature = "lpg")]
 pub mod section;

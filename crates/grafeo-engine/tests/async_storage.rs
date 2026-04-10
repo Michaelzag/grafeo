@@ -54,7 +54,7 @@ async fn test_async_checkpoint_persists_data() {
         let result = session
             .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name")
             .unwrap();
-        assert_eq!(extract_strings(&result.rows()), vec!["Alix", "Gus"]);
+        assert_eq!(extract_strings(result.rows()), vec!["Alix", "Gus"]);
 
         let result = session
             .execute("MATCH ()-[e:KNOWS]->() RETURN e.since")
@@ -98,7 +98,7 @@ async fn test_async_checkpoint_multiple_sessions() {
             .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name")
             .unwrap();
         assert_eq!(
-            extract_strings(&result.rows()),
+            extract_strings(result.rows()),
             vec!["Alix", "Gus", "Vincent"]
         );
         db.close().unwrap();
@@ -131,7 +131,7 @@ async fn test_async_snapshot_then_continue_writing() {
         let result = session
             .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name")
             .unwrap();
-        assert_eq!(extract_strings(&result.rows()), vec!["Alix", "Gus"]);
+        assert_eq!(extract_strings(result.rows()), vec!["Alix", "Gus"]);
         db.close().unwrap();
     }
 }
@@ -181,7 +181,7 @@ async fn test_async_checkpoint_after_deletes() {
         let result = session
             .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name")
             .unwrap();
-        assert_eq!(extract_strings(&result.rows()), vec!["Alix", "Vincent"]);
+        assert_eq!(extract_strings(result.rows()), vec!["Alix", "Vincent"]);
         db.close().unwrap();
     }
 }
@@ -290,12 +290,12 @@ async fn test_async_checkpoint_named_graphs() {
 
         // Default graph should have Gus
         let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
-        assert_eq!(extract_strings(&result.rows()), vec!["Gus"]);
+        assert_eq!(extract_strings(result.rows()), vec!["Gus"]);
 
         // Social graph should have Alix
         session.execute("USE GRAPH social").unwrap();
         let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
-        assert_eq!(extract_strings(&result.rows()), vec!["Alix"]);
+        assert_eq!(extract_strings(result.rows()), vec!["Alix"]);
 
         db.close().unwrap();
     }
