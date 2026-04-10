@@ -120,9 +120,13 @@ fn bench_memory_empty(c: &mut Criterion) {
 
 fn bench_memory_1k(c: &mut Criterion) {
     c.bench_function("memory_1k_nodes_5k_edges", |b| {
-        b.iter(|| {
-            let db = setup_social_graph(1_000, 5);
-            black_box(db.memory_usage().total_bytes)
+        b.iter_custom(|iters| {
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                let db = setup_social_graph(1_000, 5);
+                black_box(db.memory_usage().total_bytes);
+            }
+            start.elapsed()
         });
     });
 
@@ -132,9 +136,13 @@ fn bench_memory_1k(c: &mut Criterion) {
 
 fn bench_memory_10k(c: &mut Criterion) {
     c.bench_function("memory_10k_nodes_50k_edges", |b| {
-        b.iter(|| {
-            let db = setup_social_graph(10_000, 5);
-            black_box(db.memory_usage().total_bytes)
+        b.iter_custom(|iters| {
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                let db = setup_social_graph(10_000, 5);
+                black_box(db.memory_usage().total_bytes);
+            }
+            start.elapsed()
         });
     });
 
@@ -144,14 +152,18 @@ fn bench_memory_10k(c: &mut Criterion) {
 
 fn bench_memory_after_queries(c: &mut Criterion) {
     c.bench_function("memory_after_100_queries", |b| {
-        b.iter(|| {
-            let db = setup_social_graph(1_000, 5);
-            let session = db.session();
-            for i in 0..100 {
-                let query = format!("MATCH (n:Person {{id: {}}}) RETURN n.name", i);
-                let _ = session.execute(&query);
+        b.iter_custom(|iters| {
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                let db = setup_social_graph(1_000, 5);
+                let session = db.session();
+                for i in 0..100 {
+                    let query = format!("MATCH (n:Person {{id: {}}}) RETURN n.name", i);
+                    let _ = session.execute(&query);
+                }
+                black_box(db.memory_usage().total_bytes);
             }
-            black_box(db.memory_usage().total_bytes)
+            start.elapsed()
         });
     });
 
@@ -167,22 +179,26 @@ fn bench_memory_after_queries(c: &mut Criterion) {
 #[cfg(feature = "vector-index")]
 fn bench_memory_vector_index(c: &mut Criterion) {
     c.bench_function("memory_vector_index_1k", |b| {
-        b.iter(|| {
-            let db = GrafeoDB::new_in_memory();
-            let session = db.session();
+        b.iter_custom(|iters| {
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                let db = GrafeoDB::new_in_memory();
+                let session = db.session();
 
-            // Create nodes with 128-dim vector embeddings
-            for i in 0..1_000 {
-                let dims: Vec<String> = (0..128)
-                    .map(|d| format!("{:.4}", (i * 128 + d) as f64 / 128_000.0))
-                    .collect();
-                let vec_str = dims.join(", ");
-                let query = format!("INSERT (:Item {{id: {}, embedding: [{vec_str}]}})", i);
-                session.execute(&query).unwrap();
+                // Create nodes with 128-dim vector embeddings
+                for i in 0..1_000 {
+                    let dims: Vec<String> = (0..128)
+                        .map(|d| format!("{:.4}", (i * 128 + d) as f64 / 128_000.0))
+                        .collect();
+                    let vec_str = dims.join(", ");
+                    let query = format!("INSERT (:Item {{id: {}, embedding: [{vec_str}]}})", i);
+                    session.execute(&query).unwrap();
+                }
+                db.create_vector_index("Item", "embedding", Some(128), Some("cosine"), None, None)
+                    .unwrap();
+                black_box(db.memory_usage().total_bytes);
             }
-            db.create_vector_index("Item", "embedding", Some(128), Some("cosine"), None, None)
-                .unwrap();
-            black_box(db.memory_usage().total_bytes)
+            start.elapsed()
         });
     });
 
@@ -214,25 +230,37 @@ fn flush_snapshots(c: &mut Criterion) {
     recorder_flush();
 }
 
+// Memory benchmarks create entire databases per iteration, so we use a
+// small sample size and short measurement time to keep CI under 5 minutes.
 #[cfg(feature = "vector-index")]
-criterion_group!(
-    memory_benches,
-    bench_memory_empty,
-    bench_memory_1k,
-    bench_memory_10k,
-    bench_memory_after_queries,
-    bench_memory_vector_index,
-    flush_snapshots,
-);
+criterion_group! {
+    name = memory_benches;
+    config = Criterion::default()
+        .sample_size(10)
+        .measurement_time(std::time::Duration::from_secs(10))
+        .warm_up_time(std::time::Duration::from_secs(1));
+    targets =
+        bench_memory_empty,
+        bench_memory_1k,
+        bench_memory_10k,
+        bench_memory_after_queries,
+        bench_memory_vector_index,
+        flush_snapshots,
+}
 
 #[cfg(not(feature = "vector-index"))]
-criterion_group!(
-    memory_benches,
-    bench_memory_empty,
-    bench_memory_1k,
-    bench_memory_10k,
-    bench_memory_after_queries,
-    flush_snapshots,
-);
+criterion_group! {
+    name = memory_benches;
+    config = Criterion::default()
+        .sample_size(10)
+        .measurement_time(std::time::Duration::from_secs(10))
+        .warm_up_time(std::time::Duration::from_secs(1));
+    targets =
+        bench_memory_empty,
+        bench_memory_1k,
+        bench_memory_10k,
+        bench_memory_after_queries,
+        flush_snapshots,
+}
 
 criterion_main!(memory_benches);
