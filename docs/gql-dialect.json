@@ -1,13 +1,13 @@
 {
   "dialect": {
     "name": "GrafeoDB",
-    "version": "0.5.22",
+    "version": "0.5.35",
     "language": "GQL",
     "standard": "ISO/IEC 39075:2024",
     "homepage": "https://grafeo.dev",
     "repository": "https://github.com/GrafeoDB/grafeo"
   },
-  "generated": "2026-03-14T15:38:27Z",
+  "generated": "2026-04-10T21:19:36Z",
   "summary": {
     "total_features": 151,
     "supported": 126,

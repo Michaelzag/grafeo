@@ -1566,23 +1566,6 @@ impl GrafeoDB {
         self.lpg_store()
     }
 
-    /// Returns the LPG store for the currently active graph.
-    ///
-    /// If [`current_graph`](Self::current_graph) is `None` or `"default"`, returns
-    /// the default store. Otherwise looks up the named graph in the root store.
-    /// Falls back to the default store if the named graph does not exist.
-    #[cfg(feature = "lpg")]
-    #[allow(dead_code)] // Reserved for future graph-aware CRUD methods
-    fn active_store(&self) -> Arc<LpgStore> {
-        let store = self.lpg_store();
-        let graph_name = self.current_graph.read().clone();
-        match graph_name {
-            None => Arc::clone(store),
-            Some(ref name) if name.eq_ignore_ascii_case("default") => Arc::clone(store),
-            Some(ref name) => store.graph(name).unwrap_or_else(|| Arc::clone(store)),
-        }
-    }
-
     // === Named Graph Management ===
 
     /// Creates a named graph. Returns `true` if created, `false` if it already exists.

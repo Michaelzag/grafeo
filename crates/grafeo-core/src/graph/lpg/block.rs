@@ -53,20 +53,6 @@ pub enum BlockType {
     NamedGraph = 6,
 }
 
-impl BlockType {
-    fn from_u8(v: u8) -> Option<Self> {
-        match v {
-            1 => Some(Self::StringTable),
-            2 => Some(Self::NodeData),
-            3 => Some(Self::EdgeData),
-            4 => Some(Self::LabelAssignment),
-            5 => Some(Self::PropertyColumn),
-            6 => Some(Self::NamedGraph),
-            _ => None,
-        }
-    }
-}
-
 // ── Value type tags ────────────────────────────────────────────────
 
 /// Type tags for property value encoding within property columns.
@@ -297,10 +283,6 @@ impl<'a> StringTableReader<'a> {
             return None;
         }
         std::str::from_utf8(&self.data[str_start..str_start + len]).ok()
-    }
-
-    fn count(&self) -> u32 {
-        self.count
     }
 }
 
@@ -1143,8 +1125,8 @@ pub(crate) fn read_blocks(
 }
 
 /// Returns `true` if the given data starts with the LPG block magic bytes.
-#[must_use]
-pub fn is_block_format(data: &[u8]) -> bool {
+#[cfg(test)]
+pub(crate) fn is_block_format(data: &[u8]) -> bool {
     data.len() >= 4 && data[0..4] == LPG_BLOCK_MAGIC
 }
 
@@ -1406,7 +1388,7 @@ mod tests {
         let strings = StringTableReader::new(st_data).unwrap();
 
         // "Person" should only appear once in the string table
-        assert_eq!(strings.count(), 1);
+        assert_eq!(strings.count, 1);
         assert_eq!(strings.get(0), Some("Person"));
     }
 

@@ -209,7 +209,7 @@ struct SavepointState {
 impl Session {
     /// Creates a new session with adaptive execution configuration.
     #[cfg(feature = "lpg")]
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Used when lpg enabled without triple-store
     pub(crate) fn with_adaptive(store: Arc<LpgStore>, cfg: SessionConfig) -> Self {
         let graph_store = Arc::clone(&store) as Arc<dyn GraphStore>;
         let graph_store_mut = Some(Arc::clone(&store) as Arc<dyn GraphStoreMut>);

@@ -3,8 +3,7 @@
 //! Serializes schema definitions (node types, edge types, graph types, procedures),
 //! index metadata (property, vector, text), and epoch state into the `CATALOG` section.
 
-// Allowed until Phase 5 wires this into the checkpoint path.
-#![allow(dead_code)]
+// Parts of this module are reserved for Phase 5 checkpoint integration.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -96,6 +95,7 @@ impl CatalogSection {
     }
 
     /// Mark this section as dirty.
+    #[allow(dead_code)] // Wired in Phase 5 checkpoint path
     pub fn mark_dirty(&self) {
         self.dirty.store(true, Ordering::Release);
     }

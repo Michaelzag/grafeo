@@ -12,7 +12,6 @@
 //!
 //! Start with [`LpgStore`] - that's where everything lives.
 
-#[allow(dead_code)]
 pub(crate) mod block;
 mod edge;
 mod node;

@@ -94,21 +94,6 @@ impl WalRecovery {
         self.recover_internal_as::<R>(checkpoint)
     }
 
-    /// Recovers committed records, starting from a specific checkpoint.
-    ///
-    /// This can be used for incremental recovery when you want to
-    /// skip WAL files that precede the checkpoint.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if recovery fails.
-    pub fn recover_from_checkpoint(
-        &self,
-        checkpoint: Option<&CheckpointMetadata>,
-    ) -> Result<Vec<WalRecord>> {
-        self.recover_internal_as::<WalRecord>(checkpoint.cloned())
-    }
-
     /// Recovers committed records up to and including the given epoch.
     ///
     /// Returns only records belonging to transactions committed at or before
@@ -240,50 +225,6 @@ impl WalRecovery {
             .and_then(|s| s.to_str())
             .and_then(|s| s.strip_prefix("wal_"))
             .and_then(|s| s.parse().ok())
-    }
-
-    /// Recovers committed records from a single WAL file.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if recovery fails.
-    pub fn recover_file(&self, path: impl AsRef<Path>) -> Result<Vec<WalRecord>> {
-        self.recover_file_as::<WalRecord>(path)
-    }
-
-    /// Recovers committed records of a specific type from a single WAL file.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if recovery fails.
-    pub fn recover_file_as<R: WalEntry>(&self, path: impl AsRef<Path>) -> Result<Vec<R>> {
-        let file = File::open(path.as_ref())?;
-        let mut reader = BufReader::new(file);
-
-        let mut current_tx_records = Vec::new();
-        let mut committed_records = Vec::new();
-
-        loop {
-            match self.read_record_as::<R>(&mut reader) {
-                Ok(Some(record)) => {
-                    if record.is_commit() {
-                        committed_records.append(&mut current_tx_records);
-                        committed_records.push(record);
-                    } else if record.is_abort() {
-                        current_tx_records.clear();
-                    } else {
-                        current_tx_records.push(record);
-                    }
-                }
-                Ok(None) => break,
-                Err(e) => {
-                    grafeo_warn!("WAL corruption detected: {}", e);
-                    break;
-                }
-            }
-        }
-
-        Ok(committed_records)
     }
 
     fn get_log_files(&self) -> Result<Vec<std::path::PathBuf>> {

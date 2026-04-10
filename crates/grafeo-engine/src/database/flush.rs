@@ -22,13 +22,9 @@ use grafeo_storage::file::GrafeoFileManager;
 #[non_exhaustive]
 pub enum FlushReason {
     /// Periodic checkpoint (timer-driven) or database close.
-    #[allow(dead_code)]
     Checkpoint,
     /// User-initiated `CHECKPOINT` command or `wal_checkpoint()` API.
     Explicit,
-    /// BufferManager memory pressure (future: evict lowest-priority section).
-    #[allow(dead_code)]
-    MemoryPressure,
 }
 
 /// Context needed by each section during serialization.
@@ -65,33 +61,20 @@ pub(super) fn flush(
     maybe_crash("flush:before_serialize");
 
     // Collect sections to write based on flush reason
-    let targets: Vec<(SectionType, Vec<u8>)> = match reason {
-        FlushReason::Checkpoint | FlushReason::Explicit => {
-            // Write all sections (dirty or not for Explicit, only dirty for Checkpoint)
-            let mut result = Vec::new();
-            for section in sections {
-                if reason == FlushReason::Explicit || section.is_dirty() {
-                    result.push((section.section_type(), section.serialize()?));
-                }
-            }
-            // If nothing is dirty on a periodic checkpoint, skip the write entirely.
-            // Previous sections remain intact in the container.
-            if result.is_empty() {
-                return Ok(FlushResult {
-                    sections_written: 0,
-                });
-            }
-            result
+    // Write all sections (dirty or not for Explicit, only dirty for Checkpoint)
+    let mut targets: Vec<(SectionType, Vec<u8>)> = Vec::new();
+    for section in sections {
+        if reason == FlushReason::Explicit || section.is_dirty() {
+            targets.push((section.section_type(), section.serialize()?));
         }
-        FlushReason::MemoryPressure => {
-            // Future: pick lowest-priority dirty section only.
-            // For now, flush all (same as Checkpoint).
-            sections
-                .iter()
-                .map(|s| Ok((s.section_type(), s.serialize()?)))
-                .collect::<Result<Vec<_>>>()?
-        }
-    };
+    }
+    // If nothing is dirty on a periodic checkpoint, skip the write entirely.
+    // Previous sections remain intact in the container.
+    if targets.is_empty() {
+        return Ok(FlushResult {
+            sections_written: 0,
+        });
+    }
 
     let sections_written = targets.len();
 
