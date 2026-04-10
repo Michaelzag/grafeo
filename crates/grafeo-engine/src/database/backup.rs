@@ -396,8 +396,11 @@ pub(super) fn do_backup_incremental(
             .and_then(|s| s.parse::<u64>().ok())
             .unwrap_or(0);
 
-        // Skip files before the cursor
-        if seq < cursor.log_sequence {
+        // Skip files at or before the cursor: the cursor records the
+        // sequence number that was active at the time of the last backup,
+        // so we need files strictly after that sequence to avoid re-including
+        // already-backed-up frames from the active log.
+        if seq <= cursor.log_sequence {
             continue;
         }
 
@@ -558,22 +561,47 @@ pub(super) fn do_restore_to_epoch(
         }
     }
 
-    // Recover WAL records up to target epoch
+    // Recover WAL records up to target epoch, then write a trimmed WAL
+    // that contains only records within the epoch boundary. This ensures
+    // that when GrafeoDB::open() replays the sidecar WAL, it does not
+    // advance beyond the target epoch.
     let recovery = grafeo_storage::wal::WalRecovery::new(&wal_dir);
-    let _records = recovery.recover_until_epoch(target_epoch)?;
+    let records = recovery.recover_until_epoch(target_epoch)?;
 
-    // The records will be applied by GrafeoDB::open() when it detects the
-    // sidecar WAL. For now, we leave the WAL files in place.
-    // The caller should open the restored database using the output_path.
+    // Write a single trimmed WAL file containing only the bounded records
+    let trimmed_dir = wal_dir.parent().unwrap_or(Path::new(".")).join(format!(
+        "{}.trimmed_wal",
+        wal_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("wal")
+    ));
+    std::fs::create_dir_all(&trimmed_dir)
+        .map_err(|e| Error::Internal(format!("failed to create trimmed WAL directory: {e}")))?;
 
-    // Clean up temp WAL directory (records are in the sidecar)
-    // Actually, move the WAL files to the sidecar location
+    if !records.is_empty() {
+        use grafeo_storage::wal::{LpgWal, WalConfig};
+        let trimmed_wal = LpgWal::with_config(&trimmed_dir, WalConfig::default())?;
+        for record in &records {
+            trimmed_wal.log(record)?;
+        }
+        trimmed_wal.flush()?;
+        drop(trimmed_wal);
+    }
+
+    // Remove the original (untrimmed) restore WAL directory
+    std::fs::remove_dir_all(&wal_dir)
+        .map_err(|e| Error::Internal(format!("failed to remove restore WAL directory: {e}")))?;
+
+    // Move the trimmed WAL to the sidecar location
     let sidecar_dir = format!("{}.wal", output_path.display());
     let sidecar_path = std::path::Path::new(&sidecar_dir);
     if sidecar_path.exists() {
-        let _ = std::fs::remove_dir_all(sidecar_path);
+        std::fs::remove_dir_all(sidecar_path)
+            .map_err(|e| Error::Internal(format!("failed to remove existing sidecar WAL: {e}")))?;
     }
-    let _ = std::fs::rename(&wal_dir, sidecar_path);
+    std::fs::rename(&trimmed_dir, sidecar_path)
+        .map_err(|e| Error::Internal(format!("failed to move WAL to sidecar location: {e}")))?;
 
     Ok(())
 }

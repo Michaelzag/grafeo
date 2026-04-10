@@ -237,7 +237,7 @@ enum BackupCommands {
         force: bool,
     },
 
-    /// Create a full incremental backup
+    /// Create a full backup of the database
     Full {
         /// Path to the database
         path: PathBuf,

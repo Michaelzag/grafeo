@@ -101,11 +101,11 @@ impl SectionType {
             },
             Self::LpgStore => SectionFlags {
                 required: true,
-                mmap_able: true,
+                mmap_able: false,
             },
             Self::RdfStore => SectionFlags {
                 required: false,
-                mmap_able: true,
+                mmap_able: false,
             },
             Self::VectorStore | Self::TextIndex | Self::RdfRing | Self::PropertyIndex => {
                 SectionFlags {

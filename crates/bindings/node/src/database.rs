@@ -54,6 +54,17 @@ fn validate_edge_id(id: f64) -> Result<EdgeId> {
     Ok(EdgeId(id as u64))
 }
 
+/// Validate a JavaScript number as a non-negative epoch ID.
+///
+/// Rejects negative values, NaN, Infinity, and values beyond
+/// `Number.MAX_SAFE_INTEGER`. Epochs are unsigned 64-bit integers internally.
+fn validate_epoch(epoch: f64) -> Result<grafeo_common::types::EpochId> {
+    if !(0.0..=9_007_199_254_740_991.0).contains(&epoch) {
+        return Err(NodeGrafeoError::InvalidArgument(format!("Invalid epoch: {epoch}")).into());
+    }
+    Ok(grafeo_common::types::EpochId::new(epoch as u64))
+}
+
 /// Your connection to a Grafeo database.
 #[napi(js_name = "GrafeoDB")]
 pub struct JsGrafeoDB {
@@ -507,10 +518,11 @@ impl JsGrafeoDB {
 
     /// Restore a database to a specific epoch from a backup chain.
     #[napi]
-    pub fn restore_to_epoch(backup_dir: String, epoch: i64, output_path: String) -> Result<()> {
+    pub fn restore_to_epoch(backup_dir: String, epoch: f64, output_path: String) -> Result<()> {
+        let epoch_id = validate_epoch(epoch)?;
         grafeo_engine::GrafeoDB::restore_to_epoch(
             std::path::Path::new(&backup_dir),
-            grafeo_common::types::EpochId::new(epoch as u64),
+            epoch_id,
             std::path::Path::new(&output_path),
         )
         .map_err(NodeGrafeoError::from)
@@ -885,12 +897,13 @@ impl JsGrafeoDB {
         node_id: f64,
         since_epoch: f64,
     ) -> Result<Vec<serde_json::Value>> {
+        let epoch = validate_epoch(since_epoch)?;
         let db = self.inner.clone();
         tokio::task::spawn_blocking(move || {
             let db = db.read();
             let id = grafeo_common::types::NodeId::new(node_id as u64);
             let events = db
-                .history_since(id, grafeo_common::types::EpochId(since_epoch as u64))
+                .history_since(id, epoch)
                 .map_err(NodeGrafeoError::from)
                 .map_err(napi::Error::from)?;
             Ok(events.iter().map(change_event_to_json).collect())
@@ -906,14 +919,13 @@ impl JsGrafeoDB {
         start_epoch: f64,
         end_epoch: f64,
     ) -> Result<Vec<serde_json::Value>> {
+        let start = validate_epoch(start_epoch)?;
+        let end = validate_epoch(end_epoch)?;
         let db = self.inner.clone();
         tokio::task::spawn_blocking(move || {
             let db = db.read();
             let events = db
-                .changes_between(
-                    grafeo_common::types::EpochId(start_epoch as u64),
-                    grafeo_common::types::EpochId(end_epoch as u64),
-                )
+                .changes_between(start, end)
                 .map_err(NodeGrafeoError::from)
                 .map_err(napi::Error::from)?;
             Ok(events.iter().map(change_event_to_json).collect())

@@ -128,20 +128,18 @@ impl<'a> StringTableReader<'a> {
 fn write_rdf_blocks(store: &RdfStore, named_graphs: &[(String, Arc<RdfStore>)]) -> Result<Vec<u8>> {
     let mut strings = StringTableBuilder::new();
 
-    // Phase 1: intern all triple strings
+    // Phase 1: intern strings for this level's triples and graph names.
+    // Named graph triple strings are NOT interned here: each named graph
+    // serializes its own string table via the recursive write_rdf_blocks
+    // call, so interning them at the top level would only waste space.
     let triples: Vec<_> = store.triples().into_iter().collect();
     for t in &triples {
         strings.intern(&t.subject().to_string());
         strings.intern(&t.predicate().to_string());
         strings.intern(&t.object().to_string());
     }
-    for (name, graph) in named_graphs {
+    for (name, _graph) in named_graphs {
         strings.intern(name);
-        for t in graph.triples() {
-            strings.intern(&t.subject().to_string());
-            strings.intern(&t.predicate().to_string());
-            strings.intern(&t.object().to_string());
-        }
     }
 
     // Serialize triple data: [subject_idx:u32][predicate_idx:u32][object_idx:u32] per triple

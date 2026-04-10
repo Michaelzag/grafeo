@@ -111,9 +111,14 @@ impl WalRecovery {
 
     /// Recovers committed records up to and including the given epoch.
     ///
-    /// Stops replaying when an `EpochAdvance` record with `epoch > max_epoch`
-    /// is encountered. All records from committed transactions up to that
-    /// point are returned.
+    /// Returns only records belonging to transactions committed at or before
+    /// `max_epoch`. Records from the first transaction committed after
+    /// `max_epoch` are excluded.
+    ///
+    /// The WAL commit sequence is: `[data records] [TxCommit] [EpochAdvance]`.
+    /// When an `EpochAdvance { epoch }` where `epoch > max_epoch` is seen, we
+    /// discard the preceding transaction's records (everything since the last
+    /// `EpochAdvance` that was within range).
     ///
     /// Used by point-in-time recovery to restore a database to a specific epoch.
     ///
@@ -125,17 +130,29 @@ impl WalRecovery {
         max_epoch: grafeo_common::types::EpochId,
     ) -> Result<Vec<WalRecord>> {
         let all_records = self.recover()?;
-        let mut result = Vec::new();
+        let mut committed = Vec::new();
+        let mut pending = Vec::new();
+
         for record in all_records {
-            // Stop at the first EpochAdvance past our target
-            if let WalRecord::EpochAdvance { epoch } = &record
-                && *epoch > max_epoch
-            {
-                break;
+            if let WalRecord::EpochAdvance { epoch } = &record {
+                if *epoch > max_epoch {
+                    // This epoch's transaction is beyond our target:
+                    // discard the pending records and stop.
+                    break;
+                }
+                // Epoch is within range: flush pending into committed
+                committed.append(&mut pending);
+                committed.push(record);
+            } else {
+                pending.push(record);
             }
-            result.push(record);
         }
-        Ok(result)
+
+        // Any remaining pending records lack a confirming EpochAdvance
+        // within range, so they belong to a transaction beyond max_epoch
+        // (or an incomplete transaction) and are intentionally dropped.
+
+        Ok(committed)
     }
 
     fn recover_internal_as<R: WalEntry>(
