@@ -1,6 +1,6 @@
 //! Arrow IPC export for query results.
 //!
-//! Converts [`QueryResult`] to Arrow [`RecordBatch`] and serializes to Arrow IPC format.
+//! Converts [`QueryResult`](super::QueryResult) to Arrow [`RecordBatch`] and serializes to Arrow IPC format.
 //! Feature-gated behind `arrow-export`.
 
 use std::sync::Arc;
