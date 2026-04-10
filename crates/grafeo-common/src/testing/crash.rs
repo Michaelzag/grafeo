@@ -94,6 +94,7 @@ mod inner {
 pub use inner::*;
 
 /// Outcome of a crash-injected run.
+#[non_exhaustive]
 pub enum CrashResult<T> {
     /// The closure completed without crashing.
     Completed(T),

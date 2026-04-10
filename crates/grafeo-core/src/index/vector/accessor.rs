@@ -113,6 +113,7 @@ impl VectorAccessor for SpillableVectorAccessor<'_> {
 /// This enum avoids dynamic dispatch (`Box<dyn VectorAccessor>`) so it can be
 /// passed to `HnswIndex::search(&impl VectorAccessor)` without requiring `Sized`
 /// workarounds.
+#[non_exhaustive]
 pub enum VectorAccessorKind<'a> {
     /// Direct property store lookup (default, no spill).
     Property(PropertyVectorAccessor<'a>),

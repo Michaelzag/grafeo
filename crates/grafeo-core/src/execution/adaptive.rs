@@ -578,6 +578,7 @@ impl Sink for CardinalityTrackingSink {
 
 /// Decision about whether to re-optimize a query.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum ReoptimizationDecision {
     /// Continue with current plan.
     Continue,
@@ -745,6 +746,7 @@ impl AdaptiveCheckpoint {
 
 /// Event emitted during adaptive execution.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum AdaptiveEvent {
     /// A checkpoint was reached.
     CheckpointReached {

@@ -96,6 +96,7 @@ fn crash_during_close_checkpoint_preserves_data_via_sidecar_wal() {
                     // Close completed: the crash point was past all crash
                     // injection calls. Data should be in the .grafeo file.
                 }
+                _ => {}
             }
         }
 
@@ -155,6 +156,7 @@ fn crash_during_wal_checkpoint_leaves_db_usable() {
             CrashResult::Completed(()) => {
                 // Checkpoint completed successfully
             }
+            _ => {}
         }
 
         // Drop without close to simulate process exit
@@ -301,6 +303,7 @@ fn crash_before_sidecar_wal_removal_recovered_on_reopen() {
                 // Crash point exceeded the injection count - close completed normally.
                 // This is fine; the test still verifies reopen works.
             }
+            _ => {}
         }
     }
 
@@ -452,6 +455,7 @@ fn wal_disabled_crash_during_checkpoint_recovers() {
                 CrashResult::Completed(()) => {
                     // Close completed before crash point was reached
                 }
+                _ => {}
             }
         }
 

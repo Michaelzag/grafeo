@@ -16,6 +16,7 @@ use grafeo_core::graph::lpg::{Edge, Node};
 
 /// Errors from graph export operations.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ExportError {
     /// I/O error while writing output.
     #[error("I/O error: {0}")]
@@ -111,6 +112,7 @@ pub fn value_to_xml_string(value: &Value) -> Option<String> {
         Value::Path { .. } | Value::GCounter(_) | Value::OnCounter { .. } => {
             Some(escape_xml(&value.to_string()))
         }
+        _ => Some(escape_xml(&value.to_string())),
     }
 }
 

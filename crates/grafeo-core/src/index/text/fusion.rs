@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 /// Method for fusing scores from multiple search sources.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum FusionMethod {
     /// Reciprocal Rank Fusion, parameter-free, robust default.
     ///

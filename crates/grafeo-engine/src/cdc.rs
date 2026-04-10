@@ -43,6 +43,7 @@ pub enum ChangeKind {
 
 /// A unique identifier for a graph entity (node, edge, or RDF triple).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub enum EntityId {
     /// A node identifier.
     Node(NodeId),

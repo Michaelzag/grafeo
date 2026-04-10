@@ -74,6 +74,7 @@ pub struct ColumnPredicate {
 
 /// Comparison operators for column predicates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CompareOp {
     /// Equal.
     Eq,

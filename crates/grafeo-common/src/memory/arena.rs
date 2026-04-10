@@ -24,6 +24,7 @@ const DEFAULT_CHUNK_SIZE: usize = 1024 * 1024;
 
 /// Errors from arena allocation operations.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum AllocError {
     /// The system allocator returned null (out of memory).
     OutOfMemory,

@@ -30,6 +30,7 @@ pub struct ColumnPredicate {
 
 /// Comparison operator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CompareOp {
     /// Equal.
     Eq,

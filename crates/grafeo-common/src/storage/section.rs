@@ -21,6 +21,7 @@ use crate::utils::error::Result;
 /// Types 20+ are reserved for future acceleration structures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u32)]
+#[non_exhaustive]
 pub enum SectionType {
     /// Schema definitions, index metadata, epoch, configuration.
     Catalog = 1,
@@ -205,6 +206,7 @@ pub trait Section: Send + Sync {
 /// decide based on memory pressure. Power users can pin a section to a
 /// specific tier for predictable performance.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TierOverride {
     /// Memory-first, spill to disk when budget exceeded (default).
     #[default]

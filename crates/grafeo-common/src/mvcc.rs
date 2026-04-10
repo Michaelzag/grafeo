@@ -584,6 +584,7 @@ impl ColdVersionRef {
 /// Unified reference to either a hot or cold version.
 #[derive(Debug, Clone, Copy)]
 #[cfg(feature = "tiered-storage")]
+#[non_exhaustive]
 pub enum VersionRef {
     /// Version data is in arena (hot tier).
     Hot(HotVersionRef),

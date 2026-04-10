@@ -48,6 +48,7 @@ use std::sync::Arc;
 
 /// Storage backend configuration for vector data.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum StorageBackend {
     /// In-memory storage (fastest, highest memory usage).
     Ram,

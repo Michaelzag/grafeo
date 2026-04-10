@@ -397,6 +397,7 @@ pub(crate) fn value_to_logical_type(value: &grafeo_common::types::Value) -> Logi
         Value::Vector(v) => LogicalType::Vector(v.len()),
         Value::Path { .. } => LogicalType::Any,
         Value::GCounter(_) | Value::OnCounter { .. } => LogicalType::Any,
+        _ => LogicalType::Any,
     }
 }
 

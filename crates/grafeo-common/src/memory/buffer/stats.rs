@@ -7,6 +7,7 @@ use super::region::MemoryRegion;
 /// The buffer manager uses these levels to determine when to
 /// trigger eviction and spilling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
 pub enum PressureLevel {
     /// < 70% used - Normal operation, no action needed.
     Normal,

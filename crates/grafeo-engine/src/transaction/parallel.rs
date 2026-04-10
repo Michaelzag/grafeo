@@ -68,6 +68,7 @@ const MAX_CONFLICT_RATE_FOR_PARALLEL: f64 = 0.3;
 
 /// Status of an operation execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ExecutionStatus {
     /// Execution succeeded and is valid.
     Success,

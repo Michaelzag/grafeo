@@ -240,6 +240,9 @@ fn hash_value(value: &Value) -> u64 {
                 v.hash(&mut hasher);
             }
         }
+        _ => {
+            255u8.hash(&mut hasher);
+        }
     }
     hasher.finish()
 }

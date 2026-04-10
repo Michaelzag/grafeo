@@ -176,6 +176,7 @@ pub fn value_to_string(value: &Value) -> String {
             let neg_sum: u64 = neg.values().sum();
             format!("{}", pos_sum as i64 - neg_sum as i64)
         }
+        _ => value.to_string(),
     }
 }
 

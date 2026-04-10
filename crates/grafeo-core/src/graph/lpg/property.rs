@@ -39,6 +39,7 @@ use std::marker::PhantomData;
 
 /// Compression mode for property columns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum CompressionMode {
     /// Never compress - always use sparse HashMap (default).
     #[default]
@@ -64,6 +65,7 @@ const HOT_BUFFER_SIZE: usize = 4096;
 ///
 /// These map directly to GQL comparison operators like `=`, `<`, `>=`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CompareOp {
     /// Equal to value.
     Eq,
@@ -684,6 +686,7 @@ impl<Id: EntityId> PropertyStorage<Id> {
 /// mapping entity IDs to positions in the compressed array.
 #[cfg(not(feature = "temporal"))]
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum CompressedColumnData {
     /// Compressed integers (Int64 values).
     Integers {

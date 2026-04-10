@@ -19,6 +19,7 @@ use grafeo_storage::file::GrafeoFileManager;
 
 /// Reason for triggering a flush.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FlushReason {
     /// Periodic checkpoint (timer-driven) or database close.
     Checkpoint,

@@ -5,6 +5,7 @@
 /// The buffer manager divides its budget across these regions,
 /// allowing for differentiated eviction policies and pressure tracking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum MemoryRegion {
     /// Graph storage: nodes, edges, properties, adjacency lists.
     GraphStorage,

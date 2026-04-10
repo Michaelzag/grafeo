@@ -550,6 +550,9 @@ fn hash_key(key: &[Value]) -> u64 {
                 pos.len().hash(&mut hasher);
                 neg.len().hash(&mut hasher);
             }
+            _ => {
+                255u8.hash(&mut hasher);
+            }
         }
     }
 

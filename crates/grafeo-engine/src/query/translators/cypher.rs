@@ -24,6 +24,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 
 /// Result of translating a Cypher query: either a plan or a schema DDL command.
+#[non_exhaustive]
 pub enum CypherTranslationResult {
     /// Regular query or mutation, produces a logical plan.
     Plan(LogicalPlan),

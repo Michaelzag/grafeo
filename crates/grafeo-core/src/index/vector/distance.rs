@@ -24,6 +24,7 @@ use super::simd;
 /// - **DotProduct**: Best for maximum inner product search
 /// - **Manhattan**: Alternative to Euclidean, less sensitive to outliers
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum DistanceMetric {
     /// Cosine distance: 1 - cosine_similarity.
     ///

@@ -62,6 +62,7 @@ use crate::graph::lpg::{EdgeRecord, NodeRecord};
 
 /// Compression type used for epoch blocks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum CompressionType {
     /// No compression (raw bincode serialization).
     None,

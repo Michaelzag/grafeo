@@ -286,6 +286,7 @@ impl LpgStore {
                 self.epoch_store
                     .get_edge(cold_ref.epoch, cold_ref.block_offset, cold_ref.length)
             }
+            _ => None,
         }
     }
 

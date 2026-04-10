@@ -11,6 +11,7 @@ use super::operators::OperatorError;
 ///
 /// Operators can provide hints to optimize chunk sizing for their workload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ChunkSizeHint {
     /// Use default chunk size (2048 tuples).
     Default,

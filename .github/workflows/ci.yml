@@ -886,7 +886,16 @@ jobs:
       # (vector, text, ring) so perf regressions are caught across all modules.
       - name: Bench base
         run: |
-          cargo bench --all-features --workspace --benches \
+          cargo bench --all-features \
+            -p grafeo-common \
+            -p grafeo-core \
+            -p grafeo-engine \
+            --bench arena_bench \
+            --bench index_bench \
+            --bench query_bench \
+            --bench serialization_bench \
+            --bench regression_bench \
+            --bench memory_bench \
             -- --save-baseline base --noplot
 
       - name: Save base memory snapshot
@@ -900,7 +909,16 @@ jobs:
 
       - name: Bench PR
         run: |
-          cargo bench --all-features --workspace --benches \
+          cargo bench --all-features \
+            -p grafeo-common \
+            -p grafeo-core \
+            -p grafeo-engine \
+            --bench arena_bench \
+            --bench index_bench \
+            --bench query_bench \
+            --bench serialization_bench \
+            --bench regression_bench \
+            --bench memory_bench \
             -- --save-baseline pr --noplot
 
       - name: Compare and comment
@@ -936,7 +954,16 @@ jobs:
 
       - name: Run all benchmarks
         run: |
-          cargo bench --all-features --workspace --benches \
+          cargo bench --all-features \
+            -p grafeo-common \
+            -p grafeo-core \
+            -p grafeo-engine \
+            --bench arena_bench \
+            --bench index_bench \
+            --bench query_bench \
+            --bench serialization_bench \
+            --bench regression_bench \
+            --bench memory_bench \
             -- --save-baseline main --noplot
 
       - name: Save baseline cache

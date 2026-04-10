@@ -59,6 +59,7 @@ use grafeo_common::temporal::VersionLog;
 ///
 /// Captures the previous state of a property so it can be restored on rollback.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum PropertyUndoEntry {
     /// A node property was changed or added.
     NodeProperty {

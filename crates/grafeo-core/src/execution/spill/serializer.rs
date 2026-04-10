@@ -178,6 +178,10 @@ pub fn serialize_value<W: Write + ?Sized>(value: &Value, w: &mut W) -> std::io::
             }
             Ok(total)
         }
+        _ => {
+            w.write_all(&[TAG_NULL])?;
+            Ok(1)
+        }
     }
 }
 

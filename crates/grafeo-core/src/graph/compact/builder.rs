@@ -25,6 +25,7 @@ use crate::statistics::{EdgeTypeStatistics, LabelStatistics, Statistics};
 
 /// Errors that can occur while building a [`CompactStore`].
 #[derive(Debug, Clone, Error)]
+#[non_exhaustive]
 pub enum CompactStoreError {
     /// A relationship table references a node label that was not defined.
     #[error("node label not found: {0:?}")]

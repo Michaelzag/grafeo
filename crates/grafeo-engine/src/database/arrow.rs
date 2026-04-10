@@ -17,6 +17,7 @@ use grafeo_common::{LogicalType, Value};
 
 /// Errors from Arrow export operations.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ArrowExportError {
     /// Error from the Arrow library.
     #[error("Arrow error: {0}")]
@@ -93,6 +94,7 @@ fn infer_column_type(logical_type: &LogicalType, column: &[&Value]) -> DataType 
             | Value::Path { .. }
             | Value::GCounter(_)
             | Value::OnCounter { .. } => DataType::Utf8,
+            _ => DataType::Utf8,
         };
 
         match &seen_type {

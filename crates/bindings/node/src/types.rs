@@ -335,6 +335,11 @@ pub fn value_to_napi(env: sys::napi_env, value: &Value) -> Result<sys::napi_valu
             })?;
             Ok(obj)
         }
+        _ => {
+            let s = value.to_string();
+            // SAFETY: env is a valid napi_env passed by the caller
+            unsafe { <&str as ToNapiValue>::to_napi_value(env, &s) }
+        }
     }
 }
 

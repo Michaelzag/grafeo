@@ -102,6 +102,7 @@ pub fn compute_morsel_size(pressure_level: PressureLevel) -> usize {
         PressureLevel::Moderate => MODERATE_PRESSURE_MORSEL_SIZE,
         PressureLevel::High => HIGH_PRESSURE_MORSEL_SIZE,
         PressureLevel::Critical => CRITICAL_PRESSURE_MORSEL_SIZE,
+        _ => CRITICAL_PRESSURE_MORSEL_SIZE,
     }
 }
 
@@ -113,6 +114,7 @@ pub fn compute_morsel_size_with_base(base_size: usize, pressure_level: PressureL
         PressureLevel::Moderate => 0.5,
         PressureLevel::High => 0.25,
         PressureLevel::Critical => MIN_MORSEL_SIZE as f64 / base_size as f64,
+        _ => MIN_MORSEL_SIZE as f64 / base_size as f64,
     };
 
     ((base_size as f64 * factor) as usize).max(MIN_MORSEL_SIZE)

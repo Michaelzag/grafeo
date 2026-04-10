@@ -22,6 +22,7 @@ use super::runlength::{RunLengthAnalyzer, RunLengthEncoding};
 
 /// Identifies which compression algorithm was used on a chunk of data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum CompressionCodec {
     /// No compression (raw values).
     None,
@@ -92,6 +93,7 @@ pub struct CompressedData {
 
 /// Metadata needed for decompression.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum CompressionMetadata {
     /// No metadata needed.
     None,

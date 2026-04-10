@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 /// Sort direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SortDirection {
     /// Ascending order.
     Ascending,
@@ -23,6 +24,7 @@ pub enum SortDirection {
 
 /// Null handling in sort.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NullOrder {
     /// NULLs come first.
     First,

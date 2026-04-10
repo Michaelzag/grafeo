@@ -1170,6 +1170,7 @@ pub struct BulkLoadResult {
 
 /// Error from parsing an N-Triples document.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum NTriplesError {
     /// I/O error while reading.
     Io(std::io::Error),

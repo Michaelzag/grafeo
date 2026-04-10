@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 /// A projection expression.
+#[non_exhaustive]
 pub enum ProjectExpr {
     /// Reference to an input column.
     Column(usize),

@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 /// Path traversal mode controlling which paths are allowed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum PathMode {
     /// Allows repeated nodes and edges (default).
     #[default]

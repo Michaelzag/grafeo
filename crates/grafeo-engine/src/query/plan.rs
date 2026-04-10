@@ -11,6 +11,7 @@ use grafeo_common::types::Value;
 
 /// A count expression for SKIP/LIMIT: either a resolved literal or an unresolved parameter.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CountExpr {
     /// A resolved integer count.
     Literal(usize),
@@ -124,6 +125,7 @@ impl LogicalPlan {
 
 /// A logical operator in the query plan.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum LogicalOperator {
     /// Scan all nodes, optionally filtered by label.
     NodeScan(NodeScanOp),
@@ -892,6 +894,7 @@ impl LogicalOperator {
                     LoadDataFormat::Csv => "LoadCsv",
                     LoadDataFormat::Jsonl => "LoadJsonl",
                     LoadDataFormat::Parquet => "LoadParquet",
+                    _ => "LoadData",
                 };
                 let headers = if op.with_headers && op.format == LoadDataFormat::Csv {
                     " WITH HEADERS"
@@ -983,6 +986,7 @@ pub struct EdgeScanOp {
 
 /// Path traversal mode for variable-length expansion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum PathMode {
     /// Allows repeated nodes and edges (default).
     #[default]
@@ -1023,6 +1027,7 @@ pub struct ExpandOp {
 
 /// Direction for edge expansion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ExpandDirection {
     /// Follow outgoing edges.
     Outgoing,
@@ -1047,6 +1052,7 @@ pub struct JoinOp {
 
 /// Join type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum JoinType {
     /// Inner join.
     Inner,
@@ -1103,6 +1109,7 @@ pub struct AggregateOp {
 
 /// Whether a horizontal aggregate operates on edges or nodes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum EntityKind {
     /// Aggregate over edges in a path.
     Edge,
@@ -1151,6 +1158,7 @@ pub struct AggregateExpr {
 
 /// Aggregate function.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum AggregateFunction {
     /// Count all rows (COUNT(*)).
     Count,
@@ -1212,6 +1220,7 @@ pub enum AggregateFunction {
 ///
 /// Set during EXPLAIN annotation to communicate pushdown decisions.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum PushdownHint {
     /// Equality predicate resolved via a property index.
     IndexLookup {
@@ -1300,6 +1309,7 @@ pub struct SortKey {
 
 /// Sort order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SortOrder {
     /// Ascending order.
     Ascending,
@@ -1309,6 +1319,7 @@ pub enum SortOrder {
 
 /// Null ordering for sort operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NullsOrdering {
     /// Nulls sort before all non-null values.
     First,
@@ -1449,6 +1460,7 @@ pub struct TripleScanOp {
 
 /// A component of a triple pattern.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum TripleComponent {
     /// A variable to bind.
     Variable(String),
@@ -1845,6 +1857,7 @@ pub struct VectorScanOp {
 
 /// Vector distance/similarity metric for vector scan operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum VectorMetric {
     /// Cosine similarity (1 - cosine_distance). Best for normalized embeddings.
     Cosine,
@@ -2011,6 +2024,7 @@ pub struct LoadDataOp {
 
 /// A logical expression.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum LogicalExpression {
     /// A literal value.
     Literal(Value),
@@ -2169,6 +2183,7 @@ pub enum LogicalExpression {
 
 /// An entry in a map projection.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum MapProjectionEntry {
     /// `.propertyName`: shorthand for `propertyName: base.propertyName`.
     PropertySelector(String),
@@ -2180,6 +2195,7 @@ pub enum MapProjectionEntry {
 
 /// The kind of list predicate function.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ListPredicateKind {
     /// all(x IN list WHERE pred): true if pred holds for every element.
     All,
@@ -2193,6 +2209,7 @@ pub enum ListPredicateKind {
 
 /// Binary operator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum BinaryOp {
     /// Equality comparison (=).
     Eq,
@@ -2246,6 +2263,7 @@ pub enum BinaryOp {
 
 /// Unary operator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum UnaryOp {
     /// Logical NOT.
     Not,

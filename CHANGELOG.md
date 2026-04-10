@@ -29,6 +29,7 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 
 ### Changed
 
+- **`#[non_exhaustive]` on all public enums**: 95 public enums across grafeo-common, grafeo-core, and grafeo-engine are now marked `#[non_exhaustive]`, allowing new variants in future releases without breaking semver. Downstream `match` statements on these enums must add a wildcard arm (`_ => ...`).
 - **Python abi3 wheels**: single wheel per platform now supports Python 3.12+ (fixes missing 3.13/3.14 wheels on Windows and macOS)
 - **`rdf` feature renamed to `triple-store`**: the atom that enables the RDF triple store model is now `triple-store` across all crates, freeing `rdf` for the upcoming persona-based profile name. A deprecated alias `rdf = ["triple-store"]` is kept for one release. WASM retains `rdf` as the profile name (intentional).
 - **`lpg` feature flag**: LPG graph model is now an explicit feature (`lpg`) in grafeo-core, grafeo-engine, and grafeo-adapters, symmetric to `triple-store`. Included in all default and named profiles, so existing builds are unaffected. Enables future RDF-only builds without LPG compilation.
@@ -42,6 +43,7 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 - **Graph/schema context validation**: `set_current_graph()` and `set_current_schema()` now reject nonexistent targets across all bindings; `drop_graph()` auto-clears the active context ([#245](https://github.com/GrafeoDB/grafeo/issues/245), [#246](https://github.com/GrafeoDB/grafeo/pull/246) by [@Michaelzag](https://github.com/Michaelzag))
 - **C binding `grafeo_reset_schema`**: propagates errors instead of silently discarding them
 - **WASM `setSchema` error type**: returns a proper JS `Error` object instead of a plain string
+- **CI benchmark job**: bench commands now target specific crates (`-p grafeo-common -p grafeo-core -p grafeo-engine`) to avoid passing Criterion flags to non-benchmark crates
 
 ## [0.5.34] - 2026-04-07
 

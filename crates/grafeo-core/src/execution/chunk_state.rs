@@ -29,6 +29,7 @@ use super::selection::SelectionVector;
 /// Similar to LadybugDB's `FStateType`, this provides a single source
 /// of truth for the chunk's factorization status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FactorizationState {
     /// All vectors are flat - one value per logical row.
     ///
@@ -85,6 +86,7 @@ impl FactorizationState {
 /// Supports both sparse (for low selectivity) and dense (for high selectivity)
 /// representations to optimize memory usage.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum LevelSelection {
     /// All values at this level are selected.
     All {

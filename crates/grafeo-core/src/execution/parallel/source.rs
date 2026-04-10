@@ -769,7 +769,7 @@ impl Source for PartitionedNodeScanSource {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "lpg"))]
 mod tests {
     use super::*;
     use crate::graph::GraphStoreMut;

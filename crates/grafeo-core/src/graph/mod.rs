@@ -28,6 +28,7 @@ pub use traits::{GraphStore, GraphStoreMut, NullGraphStore};
 /// when you care about relationships *from* a node, [`Incoming`](Self::Incoming) for
 /// relationships *to* a node, and [`Both`](Self::Both) when direction doesn't matter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Direction {
     /// Follow outgoing edges (A)-\[r\]->(B) from A's perspective.
     Outgoing,

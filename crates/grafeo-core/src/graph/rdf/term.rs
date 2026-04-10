@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 /// An RDF term.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum Term {
     /// An IRI (Internationalized Resource Identifier).
     Iri(Iri),

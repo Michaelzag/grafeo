@@ -18,6 +18,7 @@ use crate::graph::traits::GraphStore;
 
 /// Whether the horizontal aggregate operates on edges or nodes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum EntityKind {
     /// Aggregate over edges in a path.
     Edge,

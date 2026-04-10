@@ -18,6 +18,7 @@ use crate::codec::{BitPackedInts, BitVector, DictionaryEncoding};
 /// `Value`-typed access and the specialised accessors when you know the
 /// underlying codec.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum ColumnCodec {
     /// Fixed-width bit-packed unsigned integers.
     BitPacked(BitPackedInts),

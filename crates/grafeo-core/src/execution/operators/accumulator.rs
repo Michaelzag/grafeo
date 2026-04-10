@@ -7,6 +7,7 @@ use grafeo_common::types::Value;
 
 /// Aggregation function types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum AggregateFunction {
     /// Count of rows (COUNT(*)).
     Count,
@@ -280,6 +281,7 @@ impl AggregateExpr {
 
 /// A wrapper for [`Value`] that can be hashed (for DISTINCT tracking).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum HashableValue {
     /// Null value.
     Null,

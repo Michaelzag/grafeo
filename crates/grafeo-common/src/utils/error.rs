@@ -29,6 +29,7 @@ use std::fmt;
 /// assert!(!err.error_code().is_retryable());
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum ErrorCode {
     // Query errors (Q)
     /// Query failed to parse.
@@ -149,6 +150,7 @@ impl fmt::Display for ErrorCode {
 /// Most methods return `Result<T, Error>`. Use pattern matching to handle
 /// specific cases, or just propagate with `?`.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// A node was not found.
     NodeNotFound(crate::types::NodeId),
@@ -258,6 +260,7 @@ impl From<std::io::Error> for Error {
 
 /// Transaction-specific errors.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum TransactionError {
     /// Transaction was aborted.
     Aborted,
@@ -331,6 +334,7 @@ impl From<TransactionError> for Error {
 
 /// Storage-specific errors.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum StorageError {
     /// Corruption detected in storage.
     Corruption(String),
@@ -492,6 +496,7 @@ impl From<QueryError> for Error {
 
 /// The kind of query error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum QueryErrorKind {
     /// Lexical error (invalid token).
     Lexer,

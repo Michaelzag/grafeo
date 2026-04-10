@@ -1120,6 +1120,7 @@ impl Iterator for FactorizedRowIterator<'_> {
 
 /// A chunk that can be either flat (DataChunk) or factorized (FactorizedChunk).
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum ChunkVariant {
     /// A flat chunk with all rows materialized.
     Flat(DataChunk),

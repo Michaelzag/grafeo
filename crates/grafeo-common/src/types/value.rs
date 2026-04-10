@@ -90,6 +90,7 @@ impl std::borrow::Borrow<str> for PropertyKey {
 /// assert_eq!(age.as_int64(), Some(30));
 /// ```
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum Value {
     /// Null/missing value
     Null,
@@ -658,6 +659,7 @@ pub struct HashableValue(pub Value);
 /// assert_eq!(values, vec![10, 20, 30]);
 /// ```
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum OrderableValue {
     /// 64-bit signed integer
     Int64(i64),

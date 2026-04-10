@@ -3115,6 +3115,7 @@ impl RdfExpressionPredicate {
             | FilterExpression::ExistsSubquery { .. }
             | FilterExpression::CountSubquery { .. }
             | FilterExpression::Reduce { .. } => None,
+            _ => None,
         }
     }
 
@@ -3345,6 +3346,7 @@ impl RdfExpressionPredicate {
                 }
                 _ => None,
             },
+            _ => None,
         }
     }
 
@@ -3358,6 +3360,7 @@ impl RdfExpressionPredicate {
                 Value::Float64(v) => Some(Value::Float64(-v)),
                 _ => None,
             },
+            _ => None,
         }
     }
 
@@ -4321,6 +4324,7 @@ fn term_to_string(term: &Term) -> String {
         Term::Iri(iri) => iri.as_str().to_string(),
         Term::BlankNode(bnode) => format!("_:{}", bnode.id()),
         Term::Literal(lit) => lit.value().to_string(),
+        _ => String::new(),
     }
 }
 
@@ -4338,6 +4342,7 @@ fn push_term_value(col: &mut grafeo_core::execution::ValueVector, term: &Term) {
             // Numeric operations are handled by the filter evaluation
             col.push_string(lit.value().to_string());
         }
+        _ => col.push_value(Value::Null),
     }
 }
 
@@ -4567,6 +4572,7 @@ fn value_to_string(value: &Value) -> String {
             let neg_sum: i64 = neg.values().copied().map(|v| v as i64).sum();
             format!("OnCounter({})", pos_sum - neg_sum)
         }
+        _ => value.to_string(),
     }
 }
 
