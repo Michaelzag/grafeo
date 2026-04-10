@@ -627,4 +627,201 @@ mod tests {
         let _g = manager.try_allocate(300, MemoryRegion::ExecutionBuffers);
         assert_eq!(manager.available(), 700);
     }
+
+    // --- Spill-aware test consumer ---
+
+    struct SpillableConsumer {
+        name: String,
+        usage: AtomicUsize,
+        priority: u8,
+        region: MemoryRegion,
+        evicted: AtomicUsize,
+        spilled: AtomicUsize,
+        spillable: bool,
+        evict_returns_zero: bool,
+    }
+
+    impl SpillableConsumer {
+        fn new(
+            name: &str,
+            usage: usize,
+            priority: u8,
+            region: MemoryRegion,
+            spillable: bool,
+        ) -> Arc<Self> {
+            Arc::new(Self {
+                name: name.to_string(),
+                usage: AtomicUsize::new(usage),
+                priority,
+                region,
+                evicted: AtomicUsize::new(0),
+                spilled: AtomicUsize::new(0),
+                spillable,
+                evict_returns_zero: false,
+            })
+        }
+
+        fn new_evict_fails(
+            name: &str,
+            usage: usize,
+            priority: u8,
+            region: MemoryRegion,
+            spillable: bool,
+        ) -> Arc<Self> {
+            Arc::new(Self {
+                name: name.to_string(),
+                usage: AtomicUsize::new(usage),
+                priority,
+                region,
+                evicted: AtomicUsize::new(0),
+                spilled: AtomicUsize::new(0),
+                spillable,
+                evict_returns_zero: true,
+            })
+        }
+    }
+
+    impl MemoryConsumer for SpillableConsumer {
+        fn name(&self) -> &str {
+            &self.name
+        }
+
+        fn memory_usage(&self) -> usize {
+            self.usage.load(Ordering::Relaxed)
+        }
+
+        fn eviction_priority(&self) -> u8 {
+            self.priority
+        }
+
+        fn region(&self) -> MemoryRegion {
+            self.region
+        }
+
+        fn evict(&self, target_bytes: usize) -> usize {
+            if self.evict_returns_zero {
+                return 0;
+            }
+            let current = self.usage.load(Ordering::Relaxed);
+            let to_evict = target_bytes.min(current);
+            self.usage.fetch_sub(to_evict, Ordering::Relaxed);
+            self.evicted.fetch_add(to_evict, Ordering::Relaxed);
+            to_evict
+        }
+
+        fn can_spill(&self) -> bool {
+            self.spillable
+        }
+
+        fn spill(
+            &self,
+            target_bytes: usize,
+        ) -> Result<usize, crate::memory::buffer::consumer::SpillError> {
+            if !self.spillable {
+                return Err(crate::memory::buffer::consumer::SpillError::NotSupported);
+            }
+            let current = self.usage.load(Ordering::Relaxed);
+            let to_spill = target_bytes.min(current);
+            self.usage.fetch_sub(to_spill, Ordering::Relaxed);
+            self.spilled.fetch_add(to_spill, Ordering::Relaxed);
+            Ok(to_spill)
+        }
+    }
+
+    #[test]
+    fn test_spill_all_calls_spillable_consumers() {
+        let manager = BufferManager::with_budget(10000);
+        let spillable = SpillableConsumer::new(
+            "spillable",
+            500,
+            priorities::QUERY_CACHE,
+            MemoryRegion::ExecutionBuffers,
+            true,
+        );
+        let non_spillable = SpillableConsumer::new(
+            "non_spillable",
+            500,
+            priorities::QUERY_CACHE,
+            MemoryRegion::ExecutionBuffers,
+            false,
+        );
+        manager.register_consumer(Arc::clone(&spillable) as Arc<dyn MemoryConsumer>);
+        manager.register_consumer(Arc::clone(&non_spillable) as Arc<dyn MemoryConsumer>);
+
+        let freed = manager.spill_all();
+        assert_eq!(freed, 500);
+        assert_eq!(spillable.spilled.load(Ordering::Relaxed), 500);
+        assert_eq!(non_spillable.spilled.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn test_spill_all_skips_non_spillable() {
+        let manager = BufferManager::with_budget(10000);
+        let consumer = SpillableConsumer::new(
+            "no_spill",
+            1000,
+            priorities::INDEX_BUFFERS,
+            MemoryRegion::IndexBuffers,
+            false,
+        );
+        manager.register_consumer(Arc::clone(&consumer) as Arc<dyn MemoryConsumer>);
+
+        assert_eq!(manager.spill_all(), 0);
+        assert_eq!(consumer.memory_usage(), 1000);
+    }
+
+    #[test]
+    fn test_eviction_falls_back_to_spill() {
+        let manager = BufferManager::with_budget(10000);
+        let consumer = SpillableConsumer::new_evict_fails(
+            "spill_fallback",
+            1000,
+            priorities::QUERY_CACHE,
+            MemoryRegion::ExecutionBuffers,
+            true,
+        );
+        manager.register_consumer(Arc::clone(&consumer) as Arc<dyn MemoryConsumer>);
+        manager.allocated.store(2000, Ordering::Relaxed);
+
+        let freed = manager.evict_to_target(1500);
+        assert_eq!(consumer.evicted.load(Ordering::Relaxed), 0);
+        assert!(consumer.spilled.load(Ordering::Relaxed) > 0);
+        assert!(freed > 0);
+    }
+
+    #[test]
+    fn test_eviction_no_spill_when_sufficient() {
+        let manager = BufferManager::with_budget(10000);
+        let consumer = SpillableConsumer::new(
+            "eviction_enough",
+            1000,
+            priorities::QUERY_CACHE,
+            MemoryRegion::ExecutionBuffers,
+            true,
+        );
+        manager.register_consumer(Arc::clone(&consumer) as Arc<dyn MemoryConsumer>);
+        manager.allocated.store(1200, Ordering::Relaxed);
+
+        let freed = manager.evict_to_target(1000);
+        assert_eq!(freed, 200);
+        assert_eq!(consumer.spilled.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn test_eviction_spill_skips_non_spillable() {
+        let manager = BufferManager::with_budget(10000);
+        let consumer = SpillableConsumer::new_evict_fails(
+            "no_spill",
+            1000,
+            priorities::QUERY_CACHE,
+            MemoryRegion::ExecutionBuffers,
+            false,
+        );
+        manager.register_consumer(Arc::clone(&consumer) as Arc<dyn MemoryConsumer>);
+        manager.allocated.store(2000, Ordering::Relaxed);
+
+        let freed = manager.evict_to_target(1500);
+        assert_eq!(freed, 0);
+        assert_eq!(consumer.memory_usage(), 1000);
+    }
 }

@@ -354,4 +354,174 @@ mod tests {
         let dir = SectionDirectory::new();
         assert_eq!(dir.to_bytes().len(), 4096);
     }
+
+    #[test]
+    fn directory_full_at_max_sections() {
+        let mut dir = SectionDirectory::new();
+        // Fill with all known section types first
+        let known_types = [
+            SectionType::Catalog,
+            SectionType::LpgStore,
+            SectionType::RdfStore,
+            SectionType::VectorStore,
+            SectionType::TextIndex,
+            SectionType::RdfRing,
+            SectionType::PropertyIndex,
+        ];
+        for (i, st) in known_types.iter().enumerate() {
+            dir.upsert(SectionDirectoryEntry {
+                section_type: *st,
+                version: 1,
+                flags: st.default_flags(),
+                offset: SECTION_DATA_OFFSET + (i as u64) * 4096,
+                length: 4096,
+                checksum: i as u32,
+            })
+            .unwrap();
+        }
+        assert_eq!(dir.len(), known_types.len());
+
+        // Upsert on an existing type should succeed (replace, not grow)
+        dir.upsert(SectionDirectoryEntry {
+            section_type: SectionType::Catalog,
+            version: 2,
+            flags: SectionType::Catalog.default_flags(),
+            offset: SECTION_DATA_OFFSET,
+            length: 8192,
+            checksum: 999,
+        })
+        .unwrap();
+        assert_eq!(dir.len(), known_types.len());
+    }
+
+    #[test]
+    fn from_bytes_too_short_header() {
+        // Less than 8 bytes: should fail
+        let result = SectionDirectory::from_bytes(&[0, 0, 0]);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("too short"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn from_bytes_count_exceeds_max() {
+        let mut buf = vec![0u8; DIRECTORY_PAGE_SIZE];
+        // Set entry count to 200 (exceeds MAX_SECTIONS = 127)
+        buf[0..4].copy_from_slice(&200u32.to_le_bytes());
+        let result = SectionDirectory::from_bytes(&buf);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("200") && err.contains("127"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn from_bytes_truncated_entries() {
+        // Header says 2 entries but data is too short to hold them
+        let mut buf = vec![0u8; 16]; // 8 header + only 8 bytes (need 2*32=64)
+        buf[0..4].copy_from_slice(&2u32.to_le_bytes());
+        let result = SectionDirectory::from_bytes(&buf);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("too short"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn from_bytes_unknown_section_type() {
+        let mut buf = vec![0u8; DIRECTORY_PAGE_SIZE];
+        // 1 entry
+        buf[0..4].copy_from_slice(&1u32.to_le_bytes());
+        // Write an unknown section type (99) at entry offset
+        buf[8..12].copy_from_slice(&99u32.to_le_bytes());
+        let result = SectionDirectory::from_bytes(&buf);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("unknown section type"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn all_section_types_round_trip() {
+        let all_types = [
+            SectionType::Catalog,
+            SectionType::LpgStore,
+            SectionType::RdfStore,
+            SectionType::VectorStore,
+            SectionType::TextIndex,
+            SectionType::RdfRing,
+            SectionType::PropertyIndex,
+        ];
+        let mut dir = SectionDirectory::new();
+        for (i, st) in all_types.iter().enumerate() {
+            dir.upsert(SectionDirectoryEntry {
+                section_type: *st,
+                version: (i as u8) + 1,
+                flags: SectionFlags {
+                    required: i % 2 == 0,
+                    mmap_able: i % 3 == 0,
+                },
+                offset: SECTION_DATA_OFFSET + (i as u64) * 8192,
+                length: (i as u64 + 1) * 1024,
+                checksum: (i as u32) * 111,
+            })
+            .unwrap();
+        }
+
+        let bytes = dir.to_bytes();
+        let dir2 = SectionDirectory::from_bytes(&bytes).unwrap();
+        assert_eq!(dir2.len(), all_types.len());
+
+        for (i, st) in all_types.iter().enumerate() {
+            let entry = dir2.find(*st).unwrap();
+            assert_eq!(entry.version, (i as u8) + 1);
+            assert_eq!(entry.flags.required, i % 2 == 0);
+            assert_eq!(entry.flags.mmap_able, i % 3 == 0);
+            assert_eq!(entry.offset, SECTION_DATA_OFFSET + (i as u64) * 8192);
+            assert_eq!(entry.length, (i as u64 + 1) * 1024);
+            assert_eq!(entry.checksum, (i as u32) * 111);
+        }
+    }
+
+    #[test]
+    fn checksum_changes_with_content() {
+        let mut dir = SectionDirectory::new();
+        let c_empty = dir.checksum();
+
+        dir.upsert(SectionDirectoryEntry {
+            section_type: SectionType::Catalog,
+            version: 1,
+            flags: SectionType::Catalog.default_flags(),
+            offset: SECTION_DATA_OFFSET,
+            length: 512,
+            checksum: 42,
+        })
+        .unwrap();
+
+        let c_with_entry = dir.checksum();
+        assert_ne!(c_empty, c_with_entry);
+    }
+
+    #[test]
+    fn default_creates_empty() {
+        let dir = SectionDirectory::default();
+        assert!(dir.is_empty());
+        assert_eq!(dir.len(), 0);
+        assert!(dir.entries().is_empty());
+    }
+
+    #[test]
+    fn find_returns_none_for_missing() {
+        let dir = SectionDirectory::new();
+        assert!(dir.find(SectionType::LpgStore).is_none());
+    }
+
+    #[test]
+    fn remove_nonexistent_returns_false() {
+        let mut dir = SectionDirectory::new();
+        assert!(!dir.remove(SectionType::RdfStore));
+    }
 }

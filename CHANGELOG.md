@@ -29,6 +29,7 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 
 ### Changed
 
+- **Python abi3 wheels**: single wheel per platform now supports Python 3.12+ (fixes missing 3.13/3.14 wheels on Windows and macOS)
 - **`rdf` feature renamed to `triple-store`**: the atom that enables the RDF triple store model is now `triple-store` across all crates, freeing `rdf` for the upcoming persona-based profile name. A deprecated alias `rdf = ["triple-store"]` is kept for one release. WASM retains `rdf` as the profile name (intentional).
 - **`lpg` feature flag**: LPG graph model is now an explicit feature (`lpg`) in grafeo-core, grafeo-engine, and grafeo-adapters, symmetric to `triple-store`. Included in all default and named profiles, so existing builds are unaffected. Enables future RDF-only builds without LPG compilation.
 - **Crate restructure**: storage backends (WAL, `.grafeo` format) moved from `grafeo-adapters` to new `grafeo-storage` crate. `grafeo-adapters` is now parser-only. `grafeo-core/src/storage/` renamed to `grafeo-core/src/codec/` (compression codecs, not I/O).

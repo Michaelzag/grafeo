@@ -51,7 +51,7 @@ dev = [
 ]
 
 [tool.maturin]
-features = ["pyo3/extension-module", "full"]
+features = ["pyo3/extension-module", "pyo3/abi3-py312", "full"]
 python-source = "python"
 module-name = "grafeo"
 

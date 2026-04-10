@@ -3695,7 +3695,7 @@ fn value_to_string(val: &Value) -> Option<String> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "lpg"))]
 mod tests {
     use super::*;
     use crate::execution::chunk::DataChunkBuilder;
