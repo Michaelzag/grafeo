@@ -303,7 +303,10 @@ mod tests {
 
         let rdf = SectionType::RdfStore.default_flags();
         assert!(!rdf.required);
-        assert!(rdf.mmap_able);
+        assert!(
+            !rdf.mmap_able,
+            "data sections must be deserialized, not mmap'd"
+        );
     }
 
     #[test]
@@ -353,9 +356,9 @@ mod tests {
         // LpgStore is required, RdfStore is not
         assert!(lpg.required);
         assert!(!rdf.required);
-        // Both are mmap-able (block-based format v2)
-        assert!(lpg.mmap_able);
-        assert!(rdf.mmap_able);
+        // Data sections must be deserialized into RAM, not mmap'd
+        assert!(!lpg.mmap_able, "LpgStore is a data section, not mmap-able");
+        assert!(!rdf.mmap_able, "RdfStore is a data section, not mmap-able");
     }
 
     #[test]
