@@ -1161,4 +1161,121 @@ mod tests {
         assert!(debug.contains("MmapSection"));
         assert!(debug.contains("VectorStore"));
     }
+
+    #[test]
+    fn path_returns_database_file_path() {
+        let dir = test_dir();
+        let path = dir.path().join("alix.grafeo");
+        let manager = GrafeoFileManager::create(&path).unwrap();
+        assert_eq!(manager.path(), path);
+    }
+
+    #[test]
+    fn file_header_returns_valid_header() {
+        use crate::file::format;
+        let dir = test_dir();
+        let path = dir.path().join("gus.grafeo");
+        let manager = GrafeoFileManager::create(&path).unwrap();
+        let header = manager.file_header();
+        assert_eq!(header.magic, format::MAGIC);
+        assert_eq!(header.format_version, format::FORMAT_VERSION);
+    }
+
+    #[test]
+    fn sync_succeeds_for_writable_manager() {
+        let dir = test_dir();
+        let path = dir.path().join("vincent.grafeo");
+        let manager = GrafeoFileManager::create(&path).unwrap();
+        manager.write_snapshot(b"sync test", 1, 1, 5, 3).unwrap();
+        manager.sync().unwrap();
+    }
+
+    #[test]
+    fn sync_skips_for_read_only_manager() {
+        let dir = test_dir();
+        let path = dir.path().join("jules.grafeo");
+        {
+            let manager = GrafeoFileManager::create(&path).unwrap();
+            manager.write_snapshot(b"ro sync", 1, 1, 0, 0).unwrap();
+            manager.close().unwrap();
+        }
+        let ro = GrafeoFileManager::open_read_only(&path).unwrap();
+        ro.sync().unwrap();
+    }
+
+    #[test]
+    fn close_succeeds_for_read_only_manager() {
+        let dir = test_dir();
+        let path = dir.path().join("mia.grafeo");
+        {
+            let manager = GrafeoFileManager::create(&path).unwrap();
+            manager.close().unwrap();
+        }
+        let ro = GrafeoFileManager::open_read_only(&path).unwrap();
+        ro.close().unwrap();
+    }
+
+    #[test]
+    fn remove_sidecar_wal_no_op_when_absent() {
+        let dir = test_dir();
+        let path = dir.path().join("django.grafeo");
+        let manager = GrafeoFileManager::create(&path).unwrap();
+        assert!(!manager.has_sidecar_wal());
+        manager.remove_sidecar_wal().unwrap();
+        assert!(!manager.has_sidecar_wal());
+    }
+
+    #[test]
+    fn multiple_snapshots_alternate_slots() {
+        let dir = test_dir();
+        let path = dir.path().join("shosanna.grafeo");
+        let manager = GrafeoFileManager::create(&path).unwrap();
+
+        manager.write_snapshot(b"epoch one", 1, 1, 1, 0).unwrap();
+        assert_eq!(manager.active_header().iteration, 1);
+
+        manager.write_snapshot(b"epoch two", 2, 2, 2, 1).unwrap();
+        assert_eq!(manager.active_header().iteration, 2);
+
+        manager
+            .write_snapshot(b"epoch three, longer data", 3, 3, 3, 2)
+            .unwrap();
+        assert_eq!(manager.active_header().iteration, 3);
+
+        let loaded = manager.read_snapshot().unwrap();
+        assert_eq!(loaded, b"epoch three, longer data");
+
+        let header = manager.active_header();
+        assert_eq!(header.epoch, 3);
+        assert_eq!(header.node_count, 3);
+        assert!(header.timestamp_ms > 0);
+    }
+
+    #[test]
+    fn snapshot_truncates_stale_trailing_data() {
+        let dir = test_dir();
+        let path = dir.path().join("hans.grafeo");
+        let manager = GrafeoFileManager::create(&path).unwrap();
+
+        let large_data = vec![0xAA; 50_000];
+        manager.write_snapshot(&large_data, 1, 1, 0, 0).unwrap();
+        let size_after_large = manager.file_size().unwrap();
+
+        let small_data = b"tiny";
+        manager.write_snapshot(small_data, 2, 2, 0, 0).unwrap();
+        let size_after_small = manager.file_size().unwrap();
+
+        assert!(
+            size_after_small < size_after_large,
+            "file should shrink: {size_after_small} >= {size_after_large}"
+        );
+        assert_eq!(manager.read_snapshot().unwrap(), small_data);
+    }
+
+    #[test]
+    fn open_read_only_fails_for_nonexistent_file() {
+        let dir = test_dir();
+        let path = dir.path().join("beatrix_missing.grafeo");
+        assert!(GrafeoFileManager::open_read_only(&path).is_err());
+    }
 }

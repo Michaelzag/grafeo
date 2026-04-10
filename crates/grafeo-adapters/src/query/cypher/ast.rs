@@ -2,7 +2,7 @@
 //!
 //! This AST represents the openCypher 9.0 query language.
 
-use crate::query::gql::ast as gql_ast;
+use crate::query::schema;
 use grafeo_common::utils::error::SourceSpan;
 
 /// A Cypher statement.
@@ -32,7 +32,7 @@ pub enum Statement {
     /// PROFILE: executes the query and returns per-operator metrics.
     Profile(Box<Statement>),
     /// Schema DDL (CREATE/DROP INDEX, CREATE/DROP CONSTRAINT, SHOW).
-    Schema(gql_ast::SchemaStatement),
+    Schema(schema::SchemaStatement),
     /// SHOW INDEXES: lists all indexes.
     ShowIndexes,
     /// SHOW CONSTRAINTS: lists all constraints.

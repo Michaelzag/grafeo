@@ -65,17 +65,14 @@ The beta series focuses on correctness, completeness and real-world durability. 
 
 ### Planned Releases
 
-| Version    | Focus                                                                    |
-|------------|--------------------------------------------------------------------------|
-| **0.5.34** | Golden fixture tests, format stability, WASM critical fixes              |
-| **0.5.35** | Single-file format completion, encryption at rest, perf regression gates |
-| **0.5.36** | Query language completeness across all 6 parsers, CSV/JSON import        |
-| **0.5.37** | RDF ecosystem: SPARQL HTTP Protocol, SHACL validation, bulk load         |
-| **0.5.38** | Performance: Block-STM parallelism, WASM optimization, observability     |
-| **0.5.39** | API stability markers, streaming results, access control, test coverage  |
-| **0.5.40** | Temporal properties, graph projections, incremental backup, disk storage |
-| **0.5.41** | Disk storage implementation, offline-first sync, 0.6 blocker sweep       |
-| **0.5.42** | Flutter platform support, community request, final audit                 |
+| Version    | Focus                                                                                |
+|------------|--------------------------------------------------------------------------------------|
+| **0.5.34** | GQL schema hierarchy, golden fixture tests, format stability                         |
+| **0.5.35** | Section-based container, LPG/RDF split, persona feature profiles, breaking API prep  |
+| **0.5.36** | Role-based sessions (Auth M1), query language completeness, CSV/JSON import          |
+| **0.5.37** | RDF ecosystem: SPARQL HTTP Protocol, SHACL validation, bulk load                     |
+| **0.5.38** | Algorithms, streaming results, memory introspection, testing unification             |
+| **0.5.39** | API stability markers, feature profile deprecation warnings, C FFI parity            |
 
 ---
 
@@ -95,9 +92,20 @@ The goal is confidence: if something works in 0.6, it works in 1.0.
 
 ---
 
+## 0.7: Scoped Access + Pluggable Auth (Auth M2)
+
+- **Per-graph access control**: Identity gains grants scoped to schemas and graphs
+- **Pluggable auth providers**: `AuthProvider` trait with JWT and OIDC backends
+- **Audit logging**: structured request-level audit trail per identity
+- **Deprecated feature profile removal**: old names (`embedded`, `browser`, `server`, `full`) removed
+
+---
+
 ## 1.0: Stable
 
 Semantic versioning commitment. Public API frozen. No breaking changes without a major version bump.
+
+- **Enterprise auth (Auth M3)**: row-level security, property masking, GRANT/REVOKE, LDAP/SAML, per-tenant encryption, compliance reporting
 
 ---
 

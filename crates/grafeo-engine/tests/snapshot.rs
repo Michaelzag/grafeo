@@ -99,7 +99,7 @@ fn export_import_preserves_nodes() {
     let result = session2
         .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name")
         .unwrap();
-    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows().len(), 2);
 }
 
 #[test]
@@ -121,7 +121,7 @@ fn export_import_preserves_edges() {
     let result = session2
         .execute("MATCH (a)-[:KNOWS]->(b) RETURN a.name, b.name")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
 }
 
 #[test]
@@ -139,7 +139,7 @@ fn export_import_preserves_properties() {
     let result = session2
         .execute("MATCH (i:Item) RETURN i.name, i.price, i.active")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
 }
 
 #[test]
@@ -186,9 +186,9 @@ fn export_import_preserves_edge_properties() {
     let result = session
         .execute("MATCH ()-[e:KNOWS]->() RETURN e.since, e.strength")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Int64(2020));
-    assert_eq!(result.rows[0][1], Value::Float64(0.95));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Int64(2020));
+    assert_eq!(result.rows()[0][1], Value::Float64(0.95));
 }
 
 // --- Multi-label nodes ---
@@ -207,16 +207,16 @@ fn export_import_preserves_multiple_labels() {
 
     let session = restored.session();
     let persons = session.execute("MATCH (p:Person) RETURN p").unwrap();
-    assert_eq!(persons.rows.len(), 2);
+    assert_eq!(persons.rows().len(), 2);
 
     let employees = session.execute("MATCH (e:Employee) RETURN e").unwrap();
-    assert_eq!(employees.rows.len(), 1);
+    assert_eq!(employees.rows().len(), 1);
 
     let managers = session.execute("MATCH (m:Manager) RETURN m").unwrap();
-    assert_eq!(managers.rows.len(), 1);
+    assert_eq!(managers.rows().len(), 1);
 
     let animals = session.execute("MATCH (a:Animal) RETURN a").unwrap();
-    assert_eq!(animals.rows.len(), 1);
+    assert_eq!(animals.rows().len(), 1);
 }
 
 // --- Temporal Value types ---
@@ -247,12 +247,12 @@ fn export_import_preserves_temporal_values() {
     let result = session
         .execute("MATCH (t:Temporal) RETURN t.date_val, t.time_val, t.ts_val, t.dur_val, t.zdt_val")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Date(date));
-    assert_eq!(result.rows[0][1], Value::Time(time));
-    assert_eq!(result.rows[0][2], Value::Timestamp(timestamp));
-    assert_eq!(result.rows[0][3], Value::Duration(duration));
-    assert_eq!(result.rows[0][4], Value::ZonedDatetime(zoned));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Date(date));
+    assert_eq!(result.rows()[0][1], Value::Time(time));
+    assert_eq!(result.rows()[0][2], Value::Timestamp(timestamp));
+    assert_eq!(result.rows()[0][3], Value::Duration(duration));
+    assert_eq!(result.rows()[0][4], Value::ZonedDatetime(zoned));
 }
 
 // --- All scalar Value types ---
@@ -279,14 +279,14 @@ fn export_import_preserves_all_value_types() {
     let result = session
         .execute("MATCH (t:Test) RETURN t.str_val, t.int_val, t.float_val, t.bool_val, t.null_val, t.bytes_val")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("hello".into()));
-    assert_eq!(result.rows[0][1], Value::Int64(42));
-    assert_eq!(result.rows[0][2], Value::Float64(9.81));
-    assert_eq!(result.rows[0][3], Value::Bool(true));
-    assert_eq!(result.rows[0][4], Value::Null);
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("hello".into()));
+    assert_eq!(result.rows()[0][1], Value::Int64(42));
+    assert_eq!(result.rows()[0][2], Value::Float64(9.81));
+    assert_eq!(result.rows()[0][3], Value::Bool(true));
+    assert_eq!(result.rows()[0][4], Value::Null);
     assert_eq!(
-        result.rows[0][5],
+        result.rows()[0][5],
         Value::Bytes(vec![0xDE, 0xAD, 0xBE, 0xEF].into())
     );
 }
@@ -308,9 +308,9 @@ fn export_import_preserves_collection_values() {
 
     let session = restored.session();
     let result = session.execute("MATCH (t:Test) RETURN t.tags").unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::List(vec![Value::String("a".into()), Value::String("b".into()),].into())
     );
 }
@@ -336,12 +336,12 @@ fn export_import_preserves_multiple_edge_types() {
 
     let session = restored.session();
     let knows = session.execute("MATCH ()-[e:KNOWS]->() RETURN e").unwrap();
-    assert_eq!(knows.rows.len(), 1);
+    assert_eq!(knows.rows().len(), 1);
 
     let works = session
         .execute("MATCH ()-[e:WORKS_AT]->() RETURN e")
         .unwrap();
-    assert_eq!(works.rows.len(), 2);
+    assert_eq!(works.rows().len(), 2);
 }
 
 // --- Nodes with no properties ---
@@ -359,7 +359,7 @@ fn export_import_preserves_empty_property_nodes() {
 
     let session = restored.session();
     let result = session.execute("MATCH (e:Empty) RETURN e").unwrap();
-    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows().len(), 2);
 }
 
 // --- Moderate dataset ---
@@ -395,8 +395,8 @@ fn export_import_moderate_dataset() {
     let result = session
         .execute("MATCH (i:Item) WHERE i.index = 42 RETURN i.name")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("item_42".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("item_42".into()));
 }
 
 // --- Import empty bytes ---
@@ -628,17 +628,17 @@ fn export_import_preserves_named_graphs() {
     assert_eq!(restored.node_count(), 1);
     let session2 = restored.session();
     let result = session2.execute("MATCH (p:Person) RETURN p.name").unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
 
     // Named graph
     session2.execute("USE GRAPH analytics").unwrap();
     let result = session2
         .execute("MATCH (m:KPI) RETURN m.name, m.count")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("pageviews".into()));
-    assert_eq!(result.rows[0][1], Value::Int64(42));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("pageviews".into()));
+    assert_eq!(result.rows()[0][1], Value::Int64(42));
 }
 
 #[test]
@@ -665,16 +665,16 @@ fn export_import_preserves_multiple_named_graphs() {
 
     session2.execute("USE GRAPH alpha").unwrap();
     let result = session2.execute("MATCH (i:Item) RETURN i.name").unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Widget".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Widget".into()));
 
     session2.execute("USE GRAPH beta").unwrap();
     let result = session2
         .execute("MATCH (c:City) RETURN c.name ORDER BY c.name")
         .unwrap();
-    assert_eq!(result.rows.len(), 2);
-    assert_eq!(result.rows[0][0], Value::String("Amsterdam".into()));
-    assert_eq!(result.rows[1][0], Value::String("Berlin".into()));
+    assert_eq!(result.rows().len(), 2);
+    assert_eq!(result.rows()[0][0], Value::String("Amsterdam".into()));
+    assert_eq!(result.rows()[1][0], Value::String("Berlin".into()));
 }
 
 #[test]
@@ -701,8 +701,8 @@ fn restore_snapshot_includes_named_graphs() {
     let session2 = db.session();
     session2.execute("USE GRAPH metrics").unwrap();
     let result = session2.execute("MATCH (m:KPI) RETURN m.name").unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("clicks".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("clicks".into()));
 }
 
 #[test]
@@ -752,15 +752,15 @@ fn to_memory_copies_named_graphs() {
     let session2 = copy.session();
     session2.execute("USE GRAPH backup").unwrap();
     let result = session2.execute("MATCH (a:Archive) RETURN a.date").unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("2025-01-01".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("2025-01-01".into()));
 
     // Independence: mutating original doesn't affect copy
     session
         .execute("INSERT (:Archive {date: '2025-02-01'})")
         .unwrap();
     let result2 = session2.execute("MATCH (a:Archive) RETURN a.date").unwrap();
-    assert_eq!(result2.rows.len(), 1, "copy should still have 1 node");
+    assert_eq!(result2.rows().len(), 1, "copy should still have 1 node");
 }
 
 // =========================================================================
@@ -796,9 +796,9 @@ mod rdf_snapshots {
         let result = session2
             .execute_sparql("SELECT ?name WHERE { ?s <http://ex.org/name> ?name } ORDER BY ?name")
             .unwrap();
-        assert_eq!(result.rows.len(), 2);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-        assert_eq!(result.rows[1][0], Value::String("Gus".into()));
+        assert_eq!(result.rows().len(), 2);
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[1][0], Value::String("Gus".into()));
     }
 
     #[test]
@@ -825,8 +825,8 @@ mod rdf_snapshots {
         let result = session2
             .execute_sparql("SELECT ?name WHERE { ?s <http://ex.org/name> ?name }")
             .unwrap();
-        assert_eq!(result.rows.len(), 1);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows().len(), 1);
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
 
         // Named graph
         let result = session2
@@ -836,8 +836,8 @@ mod rdf_snapshots {
                 }"#,
             )
             .unwrap();
-        assert_eq!(result.rows.len(), 1);
-        assert_eq!(result.rows[0][0], Value::String("Gus".into()));
+        assert_eq!(result.rows().len(), 1);
+        assert_eq!(result.rows()[0][0], Value::String("Gus".into()));
     }
 
     #[test]
@@ -870,8 +870,8 @@ mod rdf_snapshots {
         let result = session2
             .execute_sparql("SELECT ?name WHERE { ?s <http://ex.org/name> ?name }")
             .unwrap();
-        assert_eq!(result.rows.len(), 1, "restore should revert to snapshot");
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows().len(), 1, "restore should revert to snapshot");
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
     }
 
     #[test]
@@ -895,8 +895,8 @@ mod rdf_snapshots {
         let result = session2
             .execute_sparql("SELECT ?name WHERE { ?s <http://ex.org/name> ?name }")
             .unwrap();
-        assert_eq!(result.rows.len(), 1, "default RDF graph copied");
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows().len(), 1, "default RDF graph copied");
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
 
         let result = session2
             .execute_sparql(
@@ -905,8 +905,8 @@ mod rdf_snapshots {
                 }"#,
             )
             .unwrap();
-        assert_eq!(result.rows.len(), 1, "named RDF graph copied");
-        assert_eq!(result.rows[0][0], Value::String("Gus".into()));
+        assert_eq!(result.rows().len(), 1, "named RDF graph copied");
+        assert_eq!(result.rows()[0][0], Value::String("Gus".into()));
 
         // Independence: mutating original doesn't affect copy
         session
@@ -919,7 +919,7 @@ mod rdf_snapshots {
         let result = session2
             .execute_sparql("SELECT ?s WHERE { ?s ?p ?o }")
             .unwrap();
-        assert_eq!(result.rows.len(), 1, "copy should be independent");
+        assert_eq!(result.rows().len(), 1, "copy should be independent");
     }
 
     #[test]
@@ -943,7 +943,7 @@ mod rdf_snapshots {
             .execute_sparql("SELECT ?o WHERE { <http://ex.org/alix> ?p ?o } ORDER BY ?o")
             .unwrap();
         assert_eq!(
-            result.rows.len(),
+            result.rows().len(),
             2,
             "typed and lang literals should survive"
         );

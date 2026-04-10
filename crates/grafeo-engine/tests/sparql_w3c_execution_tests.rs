@@ -248,7 +248,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(r.row_count(), 1);
-        let val = r.rows[0][0].to_string();
+        let val = r.rows()[0][0].to_string();
         assert!(
             val.contains("Alix") && val.contains("Vega"),
             "BIND CONCAT should produce 'Alix Vega', got: {val}"
@@ -371,7 +371,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(r.row_count(), 1, "GROUP_CONCAT returns 1 row");
-        let val = r.rows[0][0].to_string();
+        let val = r.rows()[0][0].to_string();
         assert!(
             val.contains("Alix"),
             "GROUP_CONCAT should contain Alix, got: {val}"
@@ -468,7 +468,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(r.row_count(), 3);
-        let names: Vec<String> = r.rows.iter().map(|row| row[0].to_string()).collect();
+        let names: Vec<String> = r.rows().iter().map(|row| row[0].to_string()).collect();
         assert!(
             names[0] <= names[1] && names[1] <= names[2],
             "ORDER BY ASC should be sorted: {names:?}"
@@ -489,7 +489,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(r.row_count(), 3);
-        let names: Vec<String> = r.rows.iter().map(|row| row[0].to_string()).collect();
+        let names: Vec<String> = r.rows().iter().map(|row| row[0].to_string()).collect();
         assert!(
             names[0] >= names[1] && names[1] >= names[2],
             "ORDER BY DESC should be reverse sorted: {names:?}"
@@ -521,7 +521,7 @@ mod tests {
             .unwrap();
         assert_eq!(r.row_count(), 3);
         // Design < Engineering, and within Engineering: Alix < Vincent
-        let first_dept = r.rows[0][0].to_string();
+        let first_dept = r.rows()[0][0].to_string();
         assert!(
             first_dept.contains("Design"),
             "First dept should be Design, got: {first_dept}"
@@ -920,7 +920,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(r.row_count(), 1);
-        let upper = r.rows[0][0].to_string();
+        let upper = r.rows()[0][0].to_string();
         assert!(
             upper.contains("ALIX"),
             "UCASE should produce ALIX, got: {upper}"
@@ -941,7 +941,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(r.row_count(), 1);
-        let lower = r.rows[0][0].to_string();
+        let lower = r.rows()[0][0].to_string();
         assert!(
             lower.contains("alix"),
             "LCASE should produce alix, got: {lower}"
@@ -1026,7 +1026,7 @@ mod tests {
             .unwrap();
         assert_eq!(r.columns, vec!["plan"]);
         assert_eq!(r.row_count(), 1);
-        let plan = r.rows[0][0].to_string();
+        let plan = r.rows()[0][0].to_string();
         assert!(
             plan.contains("TripleScan"),
             "Plan should contain TripleScan, got: {plan}"

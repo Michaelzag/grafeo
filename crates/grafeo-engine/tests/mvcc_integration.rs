@@ -574,7 +574,7 @@ fn edge_type_visible_after_tx_commit_autocommit_edge() {
     assert_eq!(result.row_count(), 1, "Edge should exist");
 
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::String("KNOWS".into()),
         "Edge type must not be NULL after tx-committed nodes"
     );
@@ -604,7 +604,7 @@ fn edge_type_visible_after_tx_commit_transaction_edge() {
         .unwrap();
     assert_eq!(result.row_count(), 1);
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::String("FRIENDS".into()),
         "Edge type must be visible after two sequential transactions"
     );
@@ -630,7 +630,7 @@ fn edge_type_visible_same_tx() {
         .execute("MATCH ({id: 'same_a'})-[r]->() RETURN type(r) AS t")
         .unwrap();
     assert_eq!(result.row_count(), 1);
-    assert_eq!(result.rows[0][0], Value::String("WORKS_WITH".into()));
+    assert_eq!(result.rows()[0][0], Value::String("WORKS_WITH".into()));
 }
 
 /// Bulk: many nodes in tx, many typed edges after commit.
@@ -692,5 +692,5 @@ fn edge_types_interleaved_autocommit_and_tx() {
         .execute("MATCH ({id: 'auto_x'})-[r]->() RETURN type(r) AS t")
         .unwrap();
     assert_eq!(result.row_count(), 1);
-    assert_eq!(result.rows[0][0], Value::String("LINKED".into()),);
+    assert_eq!(result.rows()[0][0], Value::String("LINKED".into()),);
 }

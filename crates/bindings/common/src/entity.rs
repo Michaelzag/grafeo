@@ -72,7 +72,7 @@ pub fn extract_entities(result: &QueryResult) -> (Vec<RawNode>, Vec<RawEdge>) {
     let mut seen_node_ids = HashSet::new();
     let mut seen_edge_ids = HashSet::new();
 
-    for row in &result.rows {
+    for row in result.rows() {
         for value in row {
             if let Value::Map(map) = value {
                 // Check for node: has _id and _labels
@@ -174,11 +174,11 @@ mod tests {
     #[test]
     fn extracts_nodes_and_edges() {
         let mut result = QueryResult::new(vec!["n".into(), "e".into()]);
-        result.rows.push(vec![
+        result.push_row(vec![
             node_map(1, &["Person"], &[("name", Value::String("Alix".into()))]),
             edge_map(10, "KNOWS", 1, 2, &[("since", Value::Int64(2020))]),
         ]);
-        result.rows.push(vec![
+        result.push_row(vec![
             node_map(2, &["Person"], &[("name", Value::String("Gus".into()))]),
             Value::Null,
         ]);
@@ -202,8 +202,8 @@ mod tests {
     #[test]
     fn deduplicates_by_id() {
         let mut result = QueryResult::new(vec!["n".into()]);
-        result.rows.push(vec![node_map(1, &["Person"], &[])]);
-        result.rows.push(vec![node_map(1, &["Person"], &[])]);
+        result.push_row(vec![node_map(1, &["Person"], &[])]);
+        result.push_row(vec![node_map(1, &["Person"], &[])]);
 
         let (nodes, _) = extract_entities(&result);
         assert_eq!(nodes.len(), 1);

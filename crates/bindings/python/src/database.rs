@@ -212,17 +212,20 @@ impl PyGrafeoDB {
         } else {
             None
         };
-        let result = db
+        let mut result = db
             .execute_language(query, language, param_map)
             .map_err(PyGrafeoError::from)?;
         let (nodes, edges) = extract_entities(&result, &db);
+        let columns = std::mem::take(&mut result.columns);
+        let exec_time = result.execution_time_ms;
+        let scanned = result.rows_scanned;
         Ok(PyQueryResult::with_metrics(
-            result.columns,
-            result.rows,
+            columns,
+            result.into_rows(),
             nodes,
             edges,
-            result.execution_time_ms,
-            result.rows_scanned,
+            exec_time,
+            scanned,
         ))
     }
 }
@@ -330,7 +333,7 @@ impl PyGrafeoDB {
         } else {
             None
         };
-        let result = session
+        let mut result = session
             .execute_at_epoch_with_params(
                 query,
                 grafeo_common::types::EpochId::new(epoch),
@@ -338,13 +341,16 @@ impl PyGrafeoDB {
             )
             .map_err(PyGrafeoError::from)?;
         let (nodes, edges) = extract_entities(&result, &db);
+        let columns = std::mem::take(&mut result.columns);
+        let exec_time = result.execution_time_ms;
+        let scanned = result.rows_scanned;
         Ok(PyQueryResult::with_metrics(
-            result.columns,
-            result.rows,
+            columns,
+            result.into_rows(),
             nodes,
             edges,
-            result.execution_time_ms,
-            result.rows_scanned,
+            exec_time,
+            scanned,
         ))
     }
 
@@ -416,7 +422,7 @@ impl PyGrafeoDB {
         future_into_py(py, async move {
             // Perform the query execution in the async context
             // We use spawn_blocking since the actual db.execute is synchronous
-            let result = tokio::task::spawn_blocking(move || {
+            let mut result = tokio::task::spawn_blocking(move || {
                 let db = db.read();
                 if let Some(params) = param_map {
                     db.execute_with_params(&query, params)
@@ -431,10 +437,12 @@ impl PyGrafeoDB {
             // Create PyQueryResult from the result
             // Note: We can't call extract_entities here because we don't have
             // Python references in the async context. We return raw data.
+            let columns = std::mem::take(&mut result.columns);
+            let column_types = std::mem::take(&mut result.column_types);
             Ok(AsyncQueryResult {
-                columns: result.columns,
-                rows: result.rows,
-                column_types: result.column_types,
+                columns,
+                rows: result.into_rows(),
+                column_types,
             })
         })
     }
@@ -2713,17 +2721,20 @@ impl PyTransaction {
         } else {
             None
         };
-        let result = session
+        let mut result = session
             .execute_language(query, language, param_map)
             .map_err(PyGrafeoError::from)?;
         let (nodes, edges) = extract_entities(&result, &db);
+        let columns = std::mem::take(&mut result.columns);
+        let exec_time = result.execution_time_ms;
+        let scanned = result.rows_scanned;
         Ok(PyQueryResult::with_metrics(
-            result.columns,
-            result.rows,
+            columns,
+            result.into_rows(),
             nodes,
             edges,
-            result.execution_time_ms,
-            result.rows_scanned,
+            exec_time,
+            scanned,
         ))
     }
 

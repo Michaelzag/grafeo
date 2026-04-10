@@ -80,6 +80,7 @@ impl GrafeoDB {
                 ));
             };
             db.checkpoint_to_file(fm, super::flush::FlushReason::Checkpoint)
+                .map(|_| ())
         })
         .await
         .map_err(|e| Error::Internal(format!("async snapshot task failed: {e}")))?

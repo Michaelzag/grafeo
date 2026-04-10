@@ -25,7 +25,7 @@ fn test_set_property_rollback_restores_original_value() {
         .execute("MATCH (a:Account {owner: 'Alix'}) RETURN a.balance")
         .unwrap();
     assert_eq!(result.row_count(), 1);
-    assert_eq!(result.rows[0][0], Value::Int64(1000));
+    assert_eq!(result.rows()[0][0], Value::Int64(1000));
 
     // Begin transaction, modify property, then rollback
     session.begin_transaction().unwrap();
@@ -40,7 +40,7 @@ fn test_set_property_rollback_restores_original_value() {
         .unwrap();
     assert_eq!(result.row_count(), 1);
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(1000),
         "balance should be restored to 1000 after rollback"
     );
@@ -59,7 +59,7 @@ fn test_set_new_property_rollback_removes_it() {
         .execute("MATCH (a:Account {owner: 'Gus'}) RETURN a.status")
         .unwrap();
     assert_eq!(result.row_count(), 1);
-    assert_eq!(result.rows[0][0], Value::Null);
+    assert_eq!(result.rows()[0][0], Value::Null);
 
     // Begin transaction, add a new property, then rollback
     session.begin_transaction().unwrap();
@@ -72,7 +72,7 @@ fn test_set_new_property_rollback_removes_it() {
         .execute("MATCH (a:Account {owner: 'Gus'}) RETURN a.status")
         .unwrap();
     assert_eq!(result.row_count(), 1);
-    assert_eq!(result.rows[0][0], Value::String("active".into()));
+    assert_eq!(result.rows()[0][0], Value::String("active".into()));
 
     session.rollback().unwrap();
 
@@ -82,7 +82,7 @@ fn test_set_new_property_rollback_removes_it() {
         .unwrap();
     assert_eq!(result.row_count(), 1);
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Null,
         "status property should not exist after rollback"
     );
@@ -114,7 +114,7 @@ fn test_set_property_twice_rollback_restores_original() {
         .unwrap();
     assert_eq!(result.row_count(), 1);
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(500),
         "balance should be restored to original 500 after rolling back two SETs"
     );
@@ -169,7 +169,7 @@ fn test_set_property_committed_stays() {
         .unwrap();
     assert_eq!(result.row_count(), 1);
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(5000),
         "balance should retain the committed value"
     );
@@ -198,12 +198,12 @@ fn test_set_multiple_properties_rollback() {
         .unwrap();
     assert_eq!(result.row_count(), 1);
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(35),
         "age should be restored to 35"
     );
     assert_eq!(
-        result.rows[0][1],
+        result.rows()[0][1],
         Value::String("Amsterdam".into()),
         "city should be restored to Amsterdam"
     );
@@ -227,7 +227,7 @@ fn test_autocommit_set_not_affected() {
         .unwrap();
     assert_eq!(result.row_count(), 1);
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(2),
         "auto-commit SET should persist"
     );
@@ -263,7 +263,7 @@ fn test_set_then_commit_then_rollback_different_tx() {
         .unwrap();
     assert_eq!(result.row_count(), 1);
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(10),
         "count should be 10 (from committed tx), not 999 (from rolled back tx)"
     );

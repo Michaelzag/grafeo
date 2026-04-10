@@ -5,8 +5,6 @@
 //! consistent snapshots, writers create new versions, and old versions get
 //! garbage collected when no one needs them anymore.
 
-use std::collections::VecDeque;
-
 #[cfg(feature = "tiered-storage")]
 use smallvec::SmallVec;
 
@@ -127,7 +125,7 @@ impl<T> Version<T> {
 #[derive(Debug, Clone)]
 pub struct VersionChain<T> {
     /// Versions ordered newest-first.
-    versions: VecDeque<Version<T>>,
+    versions: Vec<Version<T>>,
 }
 
 impl<T> VersionChain<T> {
@@ -135,16 +133,16 @@ impl<T> VersionChain<T> {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            versions: VecDeque::new(),
+            versions: Vec::new(),
         }
     }
 
     /// Creates a version chain with an initial version.
     #[must_use]
     pub fn with_initial(data: T, created_epoch: EpochId, created_by: TransactionId) -> Self {
-        let mut chain = Self::new();
-        chain.add_version(data, created_epoch, created_by);
-        chain
+        Self {
+            versions: vec![Version::new(data, created_epoch, created_by)],
+        }
     }
 
     /// Adds a new version to the chain.
@@ -152,7 +150,7 @@ impl<T> VersionChain<T> {
     /// The new version becomes the head of the chain.
     pub fn add_version(&mut self, data: T, created_epoch: EpochId, created_by: TransactionId) {
         let version = Version::new(data, created_epoch, created_by);
-        self.versions.push_front(version);
+        self.versions.insert(0, version);
     }
 
     /// Finds the version visible at the given epoch.
@@ -298,18 +296,18 @@ impl<T> VersionChain<T> {
     /// Returns a reference to the latest version's data regardless of visibility.
     #[must_use]
     pub fn latest(&self) -> Option<&T> {
-        self.versions.front().map(|v| &v.data)
+        self.versions.first().map(|v| &v.data)
     }
 
     /// Returns a mutable reference to the latest version's data.
     #[must_use]
     pub fn latest_mut(&mut self) -> Option<&mut T> {
-        self.versions.front_mut().map(|v| &mut v.data)
+        self.versions.first_mut().map(|v| &mut v.data)
     }
 
     /// Returns estimated heap memory in bytes for this version chain.
     ///
-    /// Counts the `VecDeque` capacity overhead. Does not include the
+    /// Counts the `Vec` capacity overhead. Does not include the
     /// size of `T` payloads (the caller accounts for those).
     #[must_use]
     pub fn heap_memory_bytes(&self) -> usize {

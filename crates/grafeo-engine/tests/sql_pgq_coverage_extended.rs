@@ -105,8 +105,8 @@ fn test_param_string_in_inner_where() {
         .unwrap();
 
     assert_eq!(result.row_count(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[0][1], Value::Int64(30));
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[0][1], Value::Int64(30));
 }
 
 #[test]
@@ -129,9 +129,9 @@ fn test_param_integer_in_inner_where() {
         .unwrap();
 
     assert_eq!(result.row_count(), 3);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[1][0], Value::String("Harm".into()));
-    assert_eq!(result.rows[2][0], Value::String("Mia".into()));
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[1][0], Value::String("Harm".into()));
+    assert_eq!(result.rows()[2][0], Value::String("Mia".into()));
 }
 
 #[test]
@@ -155,8 +155,8 @@ fn test_param_multiple_in_inner_where() {
         .unwrap();
 
     assert_eq!(result.row_count(), 2);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[1][0], Value::String("Vincent".into()));
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[1][0], Value::String("Vincent".into()));
 }
 
 #[test]
@@ -179,7 +179,7 @@ fn test_param_in_columns_expression() {
         .unwrap();
 
     assert_eq!(result.row_count(), 1);
-    assert_eq!(result.rows[0][1], Value::Int64(125), "25 + 100 = 125");
+    assert_eq!(result.rows()[0][1], Value::Int64(125), "25 + 100 = 125");
 }
 
 #[test]
@@ -211,9 +211,9 @@ fn test_param_with_in_operator() {
         .unwrap();
 
     assert_eq!(result.row_count(), 3);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[1][0], Value::String("Harm".into()));
-    assert_eq!(result.rows[2][0], Value::String("Vincent".into()));
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[1][0], Value::String("Harm".into()));
+    assert_eq!(result.rows()[2][0], Value::String("Vincent".into()));
 }
 
 #[test]
@@ -235,8 +235,8 @@ fn test_param_in_outer_sql_where() {
         .unwrap();
 
     assert_eq!(result.row_count(), 2);
-    assert_eq!(result.rows[0][0], Value::String("Gus".into()));
-    assert_eq!(result.rows[1][0], Value::String("Mia".into()));
+    assert_eq!(result.rows()[0][0], Value::String("Gus".into()));
+    assert_eq!(result.rows()[1][0], Value::String("Mia".into()));
 }
 
 #[test]
@@ -330,7 +330,7 @@ fn test_tx_rollback_hides_data_from_sql_pgq() {
         .unwrap();
 
     assert_eq!(result.row_count(), 1);
-    assert_eq!(result.rows[0][0].as_str(), Some("Alix"));
+    assert_eq!(result.rows()[0][0].as_str(), Some("Alix"));
 }
 
 #[test]
@@ -377,7 +377,7 @@ fn test_tx_isolation_uncommitted_not_visible() {
         1,
         "session2 should not see uncommitted data"
     );
-    assert_eq!(result.rows[0][0].as_str(), Some("Alix"));
+    assert_eq!(result.rows()[0][0].as_str(), Some("Alix"));
 
     session1.rollback().unwrap();
 }

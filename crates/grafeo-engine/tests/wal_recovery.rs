@@ -39,8 +39,8 @@ mod wal {
             let result = session
                 .execute("MATCH (n:Person {name: 'Alix'}) RETURN n.age")
                 .unwrap();
-            assert_eq!(result.rows.len(), 1);
-            assert_eq!(result.rows[0][0], Value::Int64(30));
+            assert_eq!(result.rows().len(), 1);
+            assert_eq!(result.rows()[0][0], Value::Int64(30));
 
             db.close().expect("close");
         }
@@ -62,7 +62,7 @@ mod wal {
             let db = GrafeoDB::open(&path).expect("reopen");
             let session = db.session();
             let result = session.execute("MATCH (n:Employee) RETURN n").unwrap();
-            assert_eq!(result.rows.len(), 1, "label should survive WAL recovery");
+            assert_eq!(result.rows().len(), 1, "label should survive WAL recovery");
             db.close().expect("close");
         }
     }
@@ -192,7 +192,7 @@ mod wal {
             let result = session
                 .execute("MATCH (n:Person) RETURN n.name ORDER BY n.name")
                 .unwrap();
-            assert_eq!(result.rows.len(), 2);
+            assert_eq!(result.rows().len(), 2);
 
             db.close().expect("close");
         }
@@ -207,13 +207,13 @@ mod wal {
             let result = session
                 .execute("MATCH (n:Person {name: 'Alix'}) RETURN n.age")
                 .unwrap();
-            assert_eq!(result.rows.len(), 1, "Alix should be queryable");
-            assert_eq!(result.rows[0][0], Value::Int64(30));
+            assert_eq!(result.rows().len(), 1, "Alix should be queryable");
+            assert_eq!(result.rows()[0][0], Value::Int64(30));
 
             let result = session
                 .execute("MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a.name, b.name")
                 .unwrap();
-            assert_eq!(result.rows.len(), 1, "KNOWS edge should persist");
+            assert_eq!(result.rows().len(), 1, "KNOWS edge should persist");
 
             db.close().expect("close");
         }
@@ -244,8 +244,8 @@ mod wal {
             assert_eq!(db.node_count(), 1, "delete should persist");
             let session = db.session();
             let result = session.execute("MATCH (n:Person) RETURN n.name").unwrap();
-            assert_eq!(result.rows.len(), 1);
-            assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+            assert_eq!(result.rows().len(), 1);
+            assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
             db.close().expect("close");
         }
     }
@@ -273,8 +273,8 @@ mod wal {
             let result = session
                 .execute("MATCH (n:Person {name: 'Alix'}) RETURN n.age")
                 .unwrap();
-            assert_eq!(result.rows.len(), 1);
-            assert_eq!(result.rows[0][0], Value::Int64(31), "SET should persist");
+            assert_eq!(result.rows().len(), 1);
+            assert_eq!(result.rows()[0][0], Value::Int64(31), "SET should persist");
             db.close().expect("close");
         }
     }
@@ -329,9 +329,9 @@ mod wal {
             let result = session
                 .execute("MATCH (m:KPI) RETURN m.name, m.count")
                 .unwrap();
-            assert_eq!(result.rows.len(), 1);
-            assert_eq!(result.rows[0][0], Value::String("pageviews".into()));
-            assert_eq!(result.rows[0][1], Value::Int64(42));
+            assert_eq!(result.rows().len(), 1);
+            assert_eq!(result.rows()[0][0], Value::String("pageviews".into()));
+            assert_eq!(result.rows()[0][1], Value::Int64(42));
             db.close().expect("close");
         }
     }
@@ -400,20 +400,20 @@ mod wal {
 
             // Check default graph
             let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
-            assert_eq!(result.rows.len(), 1);
-            assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+            assert_eq!(result.rows().len(), 1);
+            assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
 
             // Check alpha graph
             session.execute("USE GRAPH alpha").unwrap();
             let result = session.execute("MATCH (i:Item) RETURN i.name").unwrap();
-            assert_eq!(result.rows.len(), 1);
-            assert_eq!(result.rows[0][0], Value::String("Widget".into()));
+            assert_eq!(result.rows().len(), 1);
+            assert_eq!(result.rows()[0][0], Value::String("Widget".into()));
 
             // Check beta graph
             session.execute("USE GRAPH beta").unwrap();
             let result = session.execute("MATCH (c:City) RETURN c.name").unwrap();
-            assert_eq!(result.rows.len(), 1);
-            assert_eq!(result.rows[0][0], Value::String("Amsterdam".into()));
+            assert_eq!(result.rows().len(), 1);
+            assert_eq!(result.rows()[0][0], Value::String("Amsterdam".into()));
 
             db.close().expect("close");
         }
@@ -449,18 +449,18 @@ mod wal {
             let result = session
                 .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name")
                 .unwrap();
-            assert_eq!(result.rows.len(), 2);
-            assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-            assert_eq!(result.rows[1][0], Value::String("Gus".into()));
+            assert_eq!(result.rows().len(), 2);
+            assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+            assert_eq!(result.rows()[1][0], Value::String("Gus".into()));
 
             // Other graph: 2 robots
             session.execute("USE GRAPH other").unwrap();
             let result = session
                 .execute("MATCH (r:Robot) RETURN r.name ORDER BY r.name")
                 .unwrap();
-            assert_eq!(result.rows.len(), 2);
-            assert_eq!(result.rows[0][0], Value::String("C3PO".into()));
-            assert_eq!(result.rows[1][0], Value::String("R2D2".into()));
+            assert_eq!(result.rows().len(), 2);
+            assert_eq!(result.rows()[0][0], Value::String("C3PO".into()));
+            assert_eq!(result.rows()[1][0], Value::String("R2D2".into()));
 
             db.close().expect("close");
         }
@@ -498,8 +498,8 @@ mod wal {
             let result = session
                 .execute("MATCH (c:Config) RETURN c.prefs AS prefs")
                 .unwrap();
-            assert_eq!(result.rows.len(), 1);
-            match &result.rows[0][0] {
+            assert_eq!(result.rows().len(), 1);
+            match &result.rows()[0][0] {
                 Value::Map(m) => {
                     assert_eq!(m.len(), 2);
                     assert_eq!(
@@ -534,8 +534,8 @@ mod wal {
             let result = session
                 .execute("MATCH (d:Document) RETURN d.embedding AS emb")
                 .unwrap();
-            assert_eq!(result.rows.len(), 1);
-            match &result.rows[0][0] {
+            assert_eq!(result.rows().len(), 1);
+            match &result.rows()[0][0] {
                 Value::Vector(v) => {
                     assert_eq!(v.len(), 4);
                     assert!((v[0] - 0.1).abs() < f32::EPSILON);
@@ -566,8 +566,8 @@ mod wal {
             let result = session
                 .execute("MATCH (e:Event) RETURN e.occurred_at AS ts")
                 .unwrap();
-            assert_eq!(result.rows.len(), 1);
-            match &result.rows[0][0] {
+            assert_eq!(result.rows().len(), 1);
+            match &result.rows()[0][0] {
                 Value::Timestamp(t) => {
                     assert_eq!(t.as_secs(), 1_700_000_000);
                 }
@@ -598,8 +598,8 @@ mod wal {
             let result = session
                 .execute("MATCH (m:Meeting) RETURN m.scheduled_at AS zdt")
                 .unwrap();
-            assert_eq!(result.rows.len(), 1);
-            match &result.rows[0][0] {
+            assert_eq!(result.rows().len(), 1);
+            match &result.rows()[0][0] {
                 Value::ZonedDatetime(z) => {
                     assert_eq!(z.as_timestamp().as_secs(), 1_700_000_000);
                     assert_eq!(z.offset_seconds(), 3600);
@@ -630,8 +630,8 @@ mod wal {
             let result = session
                 .execute("MATCH (t:Task) RETURN t.duration AS dur")
                 .unwrap();
-            assert_eq!(result.rows.len(), 1);
-            match &result.rows[0][0] {
+            assert_eq!(result.rows().len(), 1);
+            match &result.rows()[0][0] {
                 Value::Duration(d) => {
                     assert_eq!(d.days(), 14);
                     assert_eq!(d.months(), 0);
@@ -665,7 +665,7 @@ mod wal {
             let session = db.session();
             let result = session.execute("SHOW NODE TYPES").unwrap();
             let type_names: Vec<&str> = result
-                .rows
+                .rows()
                 .iter()
                 .filter_map(|row| match &row[0] {
                     Value::String(s) => Some(s.as_str()),
@@ -699,7 +699,7 @@ mod wal {
             let session = db.session();
             let result = session.execute("SHOW EDGE TYPES").unwrap();
             let type_names: Vec<&str> = result
-                .rows
+                .rows()
                 .iter()
                 .filter_map(|row| match &row[0] {
                     Value::String(s) => Some(s.as_str()),
@@ -734,7 +734,7 @@ mod wal {
             let session = db.session();
             let result = session.execute("SHOW NODE TYPES").unwrap();
             let type_names: Vec<&str> = result
-                .rows
+                .rows()
                 .iter()
                 .filter_map(|row| match &row[0] {
                     Value::String(s) => Some(s.as_str()),
@@ -776,7 +776,7 @@ mod wal {
             // Schema should be present
             let types = session.execute("SHOW NODE TYPES").unwrap();
             let type_names: Vec<&str> = types
-                .rows
+                .rows()
                 .iter()
                 .filter_map(|row| match &row[0] {
                     Value::String(s) => Some(s.as_str()),
@@ -789,9 +789,9 @@ mod wal {
             let data = session
                 .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name")
                 .unwrap();
-            assert_eq!(data.rows.len(), 2);
-            assert_eq!(data.rows[0][0], Value::String("Alix".into()));
-            assert_eq!(data.rows[1][0], Value::String("Gus".into()));
+            assert_eq!(data.rows().len(), 2);
+            assert_eq!(data.rows()[0][0], Value::String("Alix".into()));
+            assert_eq!(data.rows()[1][0], Value::String("Gus".into()));
 
             db.close().expect("close");
         }
@@ -833,9 +833,9 @@ mod wal {
                     "SELECT ?name WHERE { ?s <http://ex.org/name> ?name } ORDER BY ?name",
                 )
                 .unwrap();
-            assert_eq!(result.rows.len(), 2, "RDF triples should survive restart");
-            assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-            assert_eq!(result.rows[1][0], Value::String("Gus".into()));
+            assert_eq!(result.rows().len(), 2, "RDF triples should survive restart");
+            assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+            assert_eq!(result.rows()[1][0], Value::String("Gus".into()));
             db.close().expect("close");
         }
     }
@@ -876,11 +876,11 @@ mod wal {
                 )
                 .unwrap();
             assert_eq!(
-                result.rows.len(),
+                result.rows().len(),
                 1,
                 "RDF named graph should survive restart"
             );
-            assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+            assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
             db.close().expect("close");
         }
     }
@@ -922,8 +922,8 @@ mod wal {
             let result = session
                 .execute_sparql("SELECT ?name WHERE { ?s <http://ex.org/name> ?name }")
                 .unwrap();
-            assert_eq!(result.rows.len(), 1, "delete should persist");
-            assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+            assert_eq!(result.rows().len(), 1, "delete should persist");
+            assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
             db.close().expect("close");
         }
     }
@@ -958,7 +958,7 @@ mod wal {
             let result = session
                 .execute_sparql("SELECT ?s WHERE { ?s ?p ?o }")
                 .unwrap();
-            assert_eq!(result.rows.len(), 0, "CLEAR should persist");
+            assert_eq!(result.rows().len(), 0, "CLEAR should persist");
             db.close().expect("close");
         }
     }
@@ -1005,7 +1005,11 @@ mod wal {
                     }"#,
                 )
                 .unwrap();
-            assert_eq!(result.rows.len(), 0, "dropped RDF graph should not survive");
+            assert_eq!(
+                result.rows().len(),
+                0,
+                "dropped RDF graph should not survive"
+            );
             db.close().expect("close");
         }
     }
@@ -1039,8 +1043,8 @@ mod wal {
         let result = session2
             .execute_sparql("SELECT ?name WHERE { ?s <http://ex.org/name> ?name }")
             .unwrap();
-        assert_eq!(result.rows.len(), 1, "default RDF graph saved");
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows().len(), 1, "default RDF graph saved");
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
 
         let result = session2
             .execute_sparql(
@@ -1049,8 +1053,8 @@ mod wal {
                 }"#,
             )
             .unwrap();
-        assert_eq!(result.rows.len(), 1, "named RDF graph saved");
-        assert_eq!(result.rows[0][0], Value::String("Gus".into()));
+        assert_eq!(result.rows().len(), 1, "named RDF graph saved");
+        assert_eq!(result.rows()[0][0], Value::String("Gus".into()));
         restored.close().expect("close");
     }
 
@@ -1077,8 +1081,8 @@ mod wal {
         let session2 = restored.session();
         session2.execute("USE GRAPH analytics").unwrap();
         let result = session2.execute("MATCH (m:KPI) RETURN m.name").unwrap();
-        assert_eq!(result.rows.len(), 1);
-        assert_eq!(result.rows[0][0], Value::String("views".into()));
+        assert_eq!(result.rows().len(), 1);
+        assert_eq!(result.rows()[0][0], Value::String("views".into()));
         restored.close().expect("close");
     }
 }

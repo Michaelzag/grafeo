@@ -309,7 +309,7 @@ fn test_length_path_function() {
         .expect("distance column should exist");
 
     let mut distances: Vec<i64> = result
-        .rows
+        .rows()
         .iter()
         .map(|row| match &row[distance_col] {
             Value::Int64(d) => *d,
@@ -346,7 +346,7 @@ fn test_nodes_path_function() {
         .expect("path_nodes column should exist");
 
     // Every path_nodes value should be a list
-    for row in &result.rows {
+    for row in result.rows() {
         assert!(
             matches!(&row[nodes_col], Value::List(_)),
             "path_nodes should be a list, got: {:?}",
@@ -378,7 +378,7 @@ fn test_edges_path_function() {
         .expect("path_edges column should exist");
 
     // Every path_edges value should be a list
-    for row in &result.rows {
+    for row in result.rows() {
         assert!(
             matches!(&row[edges_col], Value::List(_)),
             "path_edges should be a list, got: {:?}",
@@ -440,8 +440,8 @@ fn test_create_property_graph() {
         .expect("CREATE PROPERTY GRAPH should succeed");
 
     assert_eq!(result.columns, vec!["status"]);
-    assert_eq!(result.rows.len(), 1);
-    let status = &result.rows[0][0];
+    assert_eq!(result.rows().len(), 1);
+    let status = &result.rows()[0][0];
     match status {
         Value::String(s) => {
             assert!(
@@ -483,8 +483,8 @@ fn test_create_property_graph_multiple_tables() {
         )
         .expect("CREATE PROPERTY GRAPH should succeed");
 
-    assert_eq!(result.rows.len(), 1);
-    let status = &result.rows[0][0];
+    assert_eq!(result.rows().len(), 1);
+    let status = &result.rows()[0][0];
     match status {
         Value::String(s) => {
             assert!(s.contains("CompanyGraph"));
@@ -564,7 +564,7 @@ fn test_left_outer_join_basic() {
     );
 
     let names: Vec<&str> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| r[0].as_str().unwrap_or("NULL"))
         .collect();
@@ -574,7 +574,7 @@ fn test_left_outer_join_basic() {
 
     // Alix's friend column should be Gus, others should be NULL
     let alix_row = result
-        .rows
+        .rows()
         .iter()
         .find(|r| r[0].as_str() == Some("Alix"))
         .unwrap();
@@ -648,7 +648,7 @@ fn test_left_join_null_values() {
 
     // Vincent has no friends: friend column should be NULL
     let vincent_row = result
-        .rows
+        .rows()
         .iter()
         .find(|r| r[0].as_str() == Some("Vincent"))
         .unwrap();
@@ -681,7 +681,7 @@ fn test_where_inside_graph_table() {
     // Only Alix (age 30) and Harm (age 35) satisfy a.age > 28,
     // but Harm has no outgoing KNOWS edges. So only Alix's edges match.
     assert_eq!(result.row_count(), 2, "only Alix's KNOWS edges match");
-    for row in &result.rows {
+    for row in result.rows() {
         assert_eq!(row[0], Value::String("Alix".into()));
     }
 }
@@ -703,8 +703,8 @@ fn test_where_inside_graph_table_combined_with_sql_where() {
         .unwrap();
 
     assert_eq!(result.row_count(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[0][1], Value::String("Harm".into()));
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[0][1], Value::String("Harm".into()));
 }
 
 // ============================================================================
@@ -772,14 +772,14 @@ fn test_group_by() {
 
     // Find Alix's row (2 friends) and Gus's row (1 friend)
     let alix_row = result
-        .rows
+        .rows()
         .iter()
         .find(|r| r[0].as_str() == Some("Alix"))
         .expect("Alix should appear");
     assert_eq!(alix_row[1], Value::Int64(2));
 
     let gus_row = result
-        .rows
+        .rows()
         .iter()
         .find(|r| r[0].as_str() == Some("Gus"))
         .expect("Gus should appear");
@@ -803,8 +803,8 @@ fn test_group_by_having() {
 
     // Only Alix has more than 1 friend
     assert_eq!(result.row_count(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[0][1], Value::Int64(2));
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[0][1], Value::Int64(2));
 }
 
 // ============================================================================
@@ -848,7 +848,7 @@ fn test_nullif_function() {
 
     // Alix's filtered value should be NULL, others unchanged
     let alix_row = result
-        .rows
+        .rows()
         .iter()
         .find(|r| r[0].as_str() == Some("Alix"))
         .expect("Alix should appear");
@@ -858,7 +858,7 @@ fn test_nullif_function() {
     );
 
     let gus_row = result
-        .rows
+        .rows()
         .iter()
         .find(|r| r[0].as_str() == Some("Gus"))
         .expect("Gus should appear");
@@ -895,11 +895,11 @@ fn test_group_by_with_non_aggregate_column() {
     // Alix -> Gus, Alix -> Harm, Gus -> Harm
     assert_eq!(result.row_count(), 2);
     // Alix has 2 KNOWS edges, Gus has 1
-    let alix_row = result.rows.iter().find(|r| r[0].as_str() == Some("Alix"));
+    let alix_row = result.rows().iter().find(|r| r[0].as_str() == Some("Alix"));
     assert!(alix_row.is_some(), "Alix should appear in results");
     assert_eq!(alix_row.unwrap()[1], Value::Int64(2));
 
-    let gus_row = result.rows.iter().find(|r| r[0].as_str() == Some("Gus"));
+    let gus_row = result.rows().iter().find(|r| r[0].as_str() == Some("Gus"));
     assert!(gus_row.is_some(), "Gus should appear in results");
     assert_eq!(gus_row.unwrap()[1], Value::Int64(1));
 }
@@ -921,8 +921,8 @@ fn having_count_star_filters_groups() {
         )
         .unwrap();
     // Alix knows 2 people, Gus knows 1 => only Alix passes HAVING COUNT(*) > 1
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0].as_str(), Some("Alix"));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0].as_str(), Some("Alix"));
 }
 
 /// HAVING with SUM aggregate.
@@ -939,8 +939,8 @@ fn having_sum_filters_groups() {
         .unwrap();
     // Alix's friends: Gus(25) + Harm(35) = 60 > 50
     // Gus's friend: Harm(35) = 35 < 50
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0].as_str(), Some("Alix"));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0].as_str(), Some("Alix"));
 }
 
 /// HAVING COUNT(*) = 0 on empty groups: should return no rows.
@@ -955,5 +955,5 @@ fn having_count_zero_returns_empty() {
             ) GROUP BY name HAVING COUNT(*) > 10",
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 0);
+    assert_eq!(result.rows().len(), 0);
 }

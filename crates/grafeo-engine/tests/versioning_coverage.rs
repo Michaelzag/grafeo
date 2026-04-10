@@ -26,7 +26,7 @@ fn edge_property_set_then_rollback_removes_property() {
     let before = session
         .execute("MATCH (:Person {name: 'Alix'})-[r:KNOWS]->() RETURN r.since")
         .unwrap();
-    assert_eq!(before.rows[0][0], Value::Null);
+    assert_eq!(before.rows()[0][0], Value::Null);
 
     session.begin_transaction().unwrap();
     session
@@ -39,7 +39,7 @@ fn edge_property_set_then_rollback_removes_property() {
     let during = session
         .execute("MATCH (:Person {name: 'Alix'})-[r:KNOWS]->() RETURN r.since")
         .unwrap();
-    assert_eq!(during.rows[0][0], Value::Int64(2020));
+    assert_eq!(during.rows()[0][0], Value::Int64(2020));
 
     session.rollback().unwrap();
 
@@ -47,7 +47,7 @@ fn edge_property_set_then_rollback_removes_property() {
         .execute("MATCH (:Person {name: 'Alix'})-[r:KNOWS]->() RETURN r.since")
         .unwrap();
     assert_eq!(
-        after.rows[0][0],
+        after.rows()[0][0],
         Value::Null,
         "edge property should be gone after rollback"
     );
@@ -78,7 +78,7 @@ fn edge_property_overwrite_then_rollback_restores_original() {
         .execute("MATCH (:Person {name: 'Vincent'})-[r:KNOWS]->() RETURN r.since")
         .unwrap();
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(2018),
         "edge property should revert to 2018 after rollback"
     );
@@ -108,12 +108,12 @@ fn edge_multiple_properties_rollback() {
         .execute("MATCH (:City {name: 'Amsterdam'})-[r:ROUTE]->() RETURN r.distance, r.toll")
         .unwrap();
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(650),
         "distance should revert to 650"
     );
     assert_eq!(
-        result.rows[0][1],
+        result.rows()[0][1],
         Value::Int64(15),
         "toll should revert to 15"
     );
@@ -142,7 +142,7 @@ fn remove_node_property_rollback_restores_value() {
     let during = session
         .execute("MATCH (p:Person {name: 'Mia'}) RETURN p.age")
         .unwrap();
-    assert_eq!(during.rows[0][0], Value::Null);
+    assert_eq!(during.rows()[0][0], Value::Null);
 
     session.rollback().unwrap();
 
@@ -150,7 +150,7 @@ fn remove_node_property_rollback_restores_value() {
         .execute("MATCH (p:Person {name: 'Mia'}) RETURN p.age")
         .unwrap();
     assert_eq!(
-        after.rows[0][0],
+        after.rows()[0][0],
         Value::Int64(28),
         "age should be restored to 28 after rollback of REMOVE"
     );
@@ -180,7 +180,7 @@ fn set_then_remove_same_property_rollback() {
         .execute("MATCH (c:Config {key: 'timeout'}) RETURN c.value")
         .unwrap();
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(30),
         "value should revert to original 30, not null or 60"
     );
@@ -330,12 +330,12 @@ fn node_delete_rollback_restores_all_properties_and_labels() {
         .unwrap();
     assert_eq!(result.row_count(), 1, "node should exist after rollback");
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(55),
         "age should be restored"
     );
     assert_eq!(
-        result.rows[0][1],
+        result.rows()[0][1],
         Value::String("Berlin".into()),
         "city should be restored"
     );
@@ -385,12 +385,12 @@ fn edge_delete_rollback_restores_properties() {
         .unwrap();
     assert_eq!(after.row_count(), 1, "edge should be restored");
     assert_eq!(
-        after.rows[0][0],
+        after.rows()[0][0],
         Value::Int64(2015),
         "edge 'since' property should be restored"
     );
     assert_eq!(
-        after.rows[0][1],
+        after.rows()[0][1],
         Value::Int64(9),
         "edge 'trust' property should be restored"
     );
@@ -440,21 +440,21 @@ fn detach_delete_rollback_restores_node_edges_and_properties() {
         .execute("MATCH (v:Person {name: 'Vincent'}) RETURN v.age")
         .unwrap();
     assert_eq!(node.row_count(), 1, "node should be restored");
-    assert_eq!(node.rows[0][0], Value::Int64(40));
+    assert_eq!(node.rows()[0][0], Value::Int64(40));
 
     // KNOWS edge restored with property
     let knows = session
         .execute("MATCH (:Person {name: 'Vincent'})-[r:KNOWS]->() RETURN r.since")
         .unwrap();
     assert_eq!(knows.row_count(), 1, "KNOWS edge should be restored");
-    assert_eq!(knows.rows[0][0], Value::Int64(2010));
+    assert_eq!(knows.rows()[0][0], Value::Int64(2010));
 
     // LIKES edge restored with property
     let likes = session
         .execute("MATCH (:Person {name: 'Vincent'})-[r:LIKES]->() RETURN r.intensity")
         .unwrap();
     assert_eq!(likes.row_count(), 1, "LIKES edge should be restored");
-    assert_eq!(likes.rows[0][0], Value::Int64(8));
+    assert_eq!(likes.rows()[0][0], Value::Int64(8));
 }
 
 // ============================================================================
@@ -498,7 +498,11 @@ fn interleaved_property_label_and_delete_rollback() {
     let alix = session
         .execute("MATCH (p:Person {name: 'Alix'}) RETURN p.age")
         .unwrap();
-    assert_eq!(alix.rows[0][0], Value::Int64(30), "age should revert to 30");
+    assert_eq!(
+        alix.rows()[0][0],
+        Value::Int64(30),
+        "age should revert to 30"
+    );
 
     // Alix's VIP label removed
     let vip = session
@@ -515,7 +519,7 @@ fn interleaved_property_label_and_delete_rollback() {
         .execute("MATCH (t:Temporary {name: 'ephemeral'}) RETURN t.data")
         .unwrap();
     assert_eq!(temp.row_count(), 1, "Temporary node should be restored");
-    assert_eq!(temp.rows[0][0], Value::Int64(42));
+    assert_eq!(temp.rows()[0][0], Value::Int64(42));
 }
 
 /// Property set, label add, edge property set, node delete, all in one tx.
@@ -554,7 +558,7 @@ fn kitchen_sink_operations_rollback() {
         .execute("MATCH (p:Person {name: 'Gus'}) RETURN p.score")
         .unwrap();
     assert_eq!(
-        score.rows[0][0],
+        score.rows()[0][0],
         Value::Int64(10),
         "score should revert to 10"
     );
@@ -574,7 +578,7 @@ fn kitchen_sink_operations_rollback() {
         .execute("MATCH (:Person {name: 'Gus'})-[r:WORKS_WITH]->() RETURN r.years")
         .unwrap();
     assert_eq!(
-        years.rows[0][0],
+        years.rows()[0][0],
         Value::Int64(3),
         "edge years should revert to 3"
     );
@@ -622,7 +626,7 @@ fn sequential_commit_then_rollback_different_nodes() {
         .execute("MATCH (a:Account {owner: 'Alix'}) RETURN a.balance")
         .unwrap();
     assert_eq!(
-        alix.rows[0][0],
+        alix.rows()[0][0],
         Value::Int64(500),
         "Alix's committed balance should be 500"
     );
@@ -631,7 +635,7 @@ fn sequential_commit_then_rollback_different_nodes() {
         .execute("MATCH (a:Account {owner: 'Gus'}) RETURN a.balance")
         .unwrap();
     assert_eq!(
-        gus.rows[0][0],
+        gus.rows()[0][0],
         Value::Int64(200),
         "Gus's balance should remain 200 after session2's rollback"
     );
@@ -715,7 +719,7 @@ fn triple_overwrite_same_property_rollback_restores_original() {
         .execute("MATCH (c:Counter {name: 'visits'}) RETURN c.count")
         .unwrap();
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(0),
         "count should be 0 (original), not 1, 2, or 3"
     );
@@ -831,7 +835,7 @@ fn property_type_change_rollback_restores_original_type() {
     let during = session
         .execute("MATCH (s:Setting {key: 'mode'}) RETURN s.value")
         .unwrap();
-    assert_eq!(during.rows[0][0], Value::String("debug".into()));
+    assert_eq!(during.rows()[0][0], Value::String("debug".into()));
 
     session.rollback().unwrap();
 
@@ -839,7 +843,7 @@ fn property_type_change_rollback_restores_original_type() {
         .execute("MATCH (s:Setting {key: 'mode'}) RETURN s.value")
         .unwrap();
     assert_eq!(
-        after.rows[0][0],
+        after.rows()[0][0],
         Value::Int64(1),
         "value should revert to int 1, not string 'debug'"
     );
@@ -867,7 +871,7 @@ fn empty_transaction_rollback_leaves_data_intact() {
         .execute("MATCH (p:Person {name: 'Alix'}) RETURN p.age")
         .unwrap();
     assert_eq!(result.row_count(), 1);
-    assert_eq!(result.rows[0][0], Value::Int64(30));
+    assert_eq!(result.rows()[0][0], Value::Int64(30));
 }
 
 // ============================================================================
@@ -894,7 +898,7 @@ fn read_only_transaction_rollback() {
     let after = session
         .execute("MATCH (p:Person {name: 'Gus'}) RETURN p.score")
         .unwrap();
-    assert_eq!(after.rows[0][0], Value::Int64(42));
+    assert_eq!(after.rows()[0][0], Value::Int64(42));
 }
 
 // ============================================================================
@@ -925,7 +929,7 @@ fn rollback_only_affects_modified_node_shared_property_key() {
         .execute("MATCH (p:Person {name: 'Alix'}) RETURN p.score")
         .unwrap();
     assert_eq!(
-        alix.rows[0][0],
+        alix.rows()[0][0],
         Value::Int64(10),
         "Alix's score should revert to 10"
     );
@@ -934,7 +938,7 @@ fn rollback_only_affects_modified_node_shared_property_key() {
         .execute("MATCH (p:Person {name: 'Gus'}) RETURN p.score")
         .unwrap();
     assert_eq!(
-        gus.rows[0][0],
+        gus.rows()[0][0],
         Value::Int64(20),
         "Gus's score should be unaffected (20)"
     );
@@ -1025,7 +1029,7 @@ fn commit_then_rollback_same_property_retains_committed_value() {
         .execute("MATCH (p:Person {name: 'Mia'}) RETURN p.level")
         .unwrap();
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(5),
         "level should be 5 (committed value), not 99 (rolled back)"
     );
@@ -1055,12 +1059,12 @@ fn rollback_preserves_boolean_and_float_property_types() {
         .execute("MATCH (s:Sensor {name: 'thermostat'}) RETURN s.enabled, s.reading")
         .unwrap();
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Bool(true),
         "enabled should revert to true"
     );
     assert_eq!(
-        result.rows[0][1],
+        result.rows()[0][1],
         Value::Float64(21.5),
         "reading should revert to 21.5"
     );
@@ -1095,7 +1099,7 @@ fn rapid_begin_rollback_cycles_no_state_leak() {
         .execute("MATCH (c:Counter {name: 'stable'}) RETURN c.value")
         .unwrap();
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(42),
         "value should remain 42 after 10 begin/rollback cycles"
     );

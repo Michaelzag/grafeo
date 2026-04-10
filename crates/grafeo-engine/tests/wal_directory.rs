@@ -91,7 +91,7 @@ mod wal_directory {
                 .execute("MATCH (n:Person {name: 'Alix'}) RETURN n.name")
                 .unwrap();
             assert_eq!(
-                result.rows.len(),
+                result.rows().len(),
                 1,
                 "node created before WAL rotation should be recoverable"
             );
@@ -152,12 +152,16 @@ mod wal_directory {
             let result = session
                 .execute("MATCH (n:Batch) WHERE n.cycle = 1 RETURN count(n)")
                 .unwrap();
-            assert_eq!(result.rows[0][0], Value::Int64(5), "cycle-1 nodes intact");
+            assert_eq!(result.rows()[0][0], Value::Int64(5), "cycle-1 nodes intact");
 
             let result = session
                 .execute("MATCH (n:Batch) WHERE n.cycle = 2 RETURN count(n)")
                 .unwrap();
-            assert_eq!(result.rows[0][0], Value::Int64(13), "cycle-2 nodes intact");
+            assert_eq!(
+                result.rows()[0][0],
+                Value::Int64(13),
+                "cycle-2 nodes intact"
+            );
             db.close().expect("close");
         }
     }
@@ -185,7 +189,7 @@ mod wal_directory {
             let session = db.session();
             let result = session.execute("MATCH (n:Person) RETURN n.name").unwrap();
             assert_eq!(
-                result.rows[0][0],
+                result.rows()[0][0],
                 Value::String("Alix".into()),
                 "property should survive implicit Drop"
             );

@@ -71,9 +71,9 @@ fn test_case_when_then_else() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows().len(), 3);
     // Alix(30) -> junior, Gus(25) -> junior, Harm(35) -> senior
-    let categories: Vec<&Value> = result.rows.iter().map(|r| &r[1]).collect();
+    let categories: Vec<&Value> = result.rows().iter().map(|r| &r[1]).collect();
     assert!(categories.contains(&&Value::String("senior".into())));
     assert!(categories.contains(&&Value::String("junior".into())));
 }
@@ -95,7 +95,7 @@ fn test_exists_subquery_in_where() {
 
     // All 3 persons have outgoing KNOWS edges
     assert!(
-        !result.rows.is_empty(),
+        !result.rows().is_empty(),
         "EXISTS should match nodes with KNOWS edges"
     );
 }
@@ -110,7 +110,7 @@ fn test_exists_subquery_no_match() {
         .execute("MATCH (n:Person) WHERE EXISTS { MATCH (n)-[:MANAGES]->() } RETURN n.name")
         .unwrap();
 
-    assert!(result.rows.is_empty(), "No MANAGES edges exist");
+    assert!(result.rows().is_empty(), "No MANAGES edges exist");
 }
 
 // Issue #173: EXISTS with correlated variable on the target side of the pattern.
@@ -130,8 +130,8 @@ fn test_exists_target_side_correlation() {
         .unwrap();
 
     assert_eq!(result.row_count(), 2);
-    assert_eq!(result.rows[0][0], Value::String("Gus".into()));
-    assert_eq!(result.rows[1][0], Value::String("Harm".into()));
+    assert_eq!(result.rows()[0][0], Value::String("Gus".into()));
+    assert_eq!(result.rows()[1][0], Value::String("Harm".into()));
 }
 
 #[test]
@@ -148,7 +148,7 @@ fn test_not_exists_target_side_correlation() {
         .unwrap();
 
     assert_eq!(result.row_count(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
 }
 
 // ============================================================================
@@ -199,8 +199,8 @@ fn test_exists_end_labels_flipped_direction() {
         .unwrap();
 
     assert_eq!(result.row_count(), 2);
-    assert_eq!(result.rows[0][0], Value::String("Gus".into()));
-    assert_eq!(result.rows[1][0], Value::String("Harm".into()));
+    assert_eq!(result.rows()[0][0], Value::String("Gus".into()));
+    assert_eq!(result.rows()[1][0], Value::String("Harm".into()));
 }
 
 #[test]
@@ -217,7 +217,7 @@ fn test_exists_end_labels_no_match() {
         .unwrap();
 
     assert_eq!(result.row_count(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Gus".into()));
+    assert_eq!(result.rows()[0][0], Value::String("Gus".into()));
 }
 
 #[test]
@@ -234,8 +234,8 @@ fn test_not_exists_end_labels() {
         .unwrap();
 
     assert_eq!(result.row_count(), 2);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[1][0], Value::String("Harm".into()));
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[1][0], Value::String("Harm".into()));
 }
 
 #[test]
@@ -254,8 +254,8 @@ fn test_count_subquery_end_labels() {
         .unwrap();
 
     assert_eq!(result.row_count(), 2);
-    assert_eq!(result.rows[0][0], Value::String("Gus".into()));
-    assert_eq!(result.rows[1][0], Value::String("Harm".into()));
+    assert_eq!(result.rows()[0][0], Value::String("Gus".into()));
+    assert_eq!(result.rows()[1][0], Value::String("Harm".into()));
 }
 
 // ============================================================================
@@ -303,7 +303,7 @@ fn test_exists_source_label_not_leaked_to_end_labels() {
         1,
         "Jules follows Mia(Bot); source label Person must not constrain target"
     );
-    assert_eq!(result.rows[0][0], Value::String("Jules".into()));
+    assert_eq!(result.rows()[0][0], Value::String("Jules".into()));
 
     // Case 2: sanity check without inner label (should behave identically).
     let result2 = session
@@ -380,7 +380,7 @@ fn sorted_names(db: &GrafeoDB, query: &str) -> Vec<String> {
     let session = db.session();
     let result = session.execute(query).unwrap();
     let mut names: Vec<String> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[0] {
             Value::String(s) => s.to_string(),
@@ -494,7 +494,7 @@ fn test_exists_complex_gql_syntax() {
         .unwrap();
 
     let mut names: Vec<String> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[0] {
             Value::String(s) => s.to_string(),
@@ -621,7 +621,8 @@ mod cypher_bugs {
         );
 
         assert!(result.is_ok(), "Query failed: {:?}", result.err());
-        let rows = &result.unwrap().rows;
+        let result = result.unwrap();
+        let rows = result.rows();
         // m1->m2 (AuthService->LoginModule) should be excluded (has Composition)
         // Remaining 5 directed pairs should be returned
         assert_eq!(rows.len(), 5, "Expected 5 rows but got {}", rows.len());
@@ -646,7 +647,8 @@ mod cypher_bugs {
             "Bare pattern query failed: {:?}",
             result.err()
         );
-        let rows = &result.unwrap().rows;
+        let result = result.unwrap();
+        let rows = result.rows();
         assert_eq!(rows.len(), 5, "Expected 5 rows but got {}", rows.len());
     }
 
@@ -677,7 +679,8 @@ mod cypher_bugs {
             "CASE in aggregate failed: {:?}",
             result.err()
         );
-        let rows = &result.unwrap().rows;
+        let result = result.unwrap();
+        let rows = result.rows();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0][0], Value::Int64(3), "total should be 3");
         assert_eq!(rows[0][1], Value::Int64(2), "source_count should be 2");
@@ -699,7 +702,8 @@ mod cypher_bugs {
             "any(labels) STARTS WITH failed: {:?}",
             result.err()
         );
-        let rows = &result.unwrap().rows;
+        let result = result.unwrap();
+        let rows = result.rows();
         assert_eq!(rows.len(), 3);
     }
 
@@ -738,7 +742,8 @@ mod cypher_bugs {
             "List comprehension on labels failed: {:?}",
             result.err()
         );
-        let rows = &result.unwrap().rows;
+        let result = result.unwrap();
+        let rows = result.rows();
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0][0], Value::String("Model".into()));
     }
@@ -763,7 +768,8 @@ mod cypher_bugs {
             "Many conditions + NOT EXISTS failed: {:?}",
             result.err()
         );
-        let rows = &result.unwrap().rows;
+        let result = result.unwrap();
+        let rows = result.rows();
         // 3 nodes * 2 remaining pairs per node = 6, minus 1 (m1->m2 Composition) = 5
         assert_eq!(rows.len(), 5, "Expected 5 rows but got {}", rows.len());
     }
@@ -781,7 +787,8 @@ mod cypher_bugs {
             "MATCH (n) WHERE any(lbl IN labels(n) WHERE lbl IN ['A', 'B']) RETURN n.name",
         );
         assert!(result.is_ok(), "any() IN list failed: {:?}", result.err());
-        let rows = &result.unwrap().rows;
+        let result = result.unwrap();
+        let rows = result.rows();
         assert_eq!(rows.len(), 1, "Expected 1 row but got {}", rows.len());
 
         // Should return 0 rows: no matching labels
@@ -811,7 +818,8 @@ mod cypher_bugs {
             "CASE in reduce() failed: {:?}",
             result.err()
         );
-        let rows = &result.unwrap().rows;
+        let result = result.unwrap();
+        let rows = result.rows();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0][0], Value::Int64(5), "max_val should be 5");
     }
@@ -838,7 +846,8 @@ mod cypher_bugs {
              RETURN x.name, y.name",
         );
         assert!(result.is_ok(), "Two NOT EXISTS failed: {:?}", result.err());
-        let rows = &result.unwrap().rows;
+        let result = result.unwrap();
+        let rows = result.rows();
         // A->B has KNOWS, so (A,B) excluded by first NOT EXISTS
         // B->A has no edge, but (B,A) is not excluded by either NOT EXISTS
         // Wait: first NOT EXISTS checks (x)->(y), second checks (y)->(x)
@@ -867,7 +876,8 @@ mod cypher_bugs {
             "Three NOT EXISTS failed: {:?}",
             result.err()
         );
-        let rows = &result.unwrap().rows;
+        let result = result.unwrap();
+        let rows = result.rows();
         // m1->m2: Composition (excluded by 1st), m2->m3: Flow (excluded by 2nd)
         // Reverse: m2->m1 Composition (excluded by 3rd)
         // Remaining valid pairs: (m1,m3), (m3,m1), (m3,m2)
@@ -893,7 +903,8 @@ mod cypher_bugs {
             "Two NOT EXISTS (types) failed: {:?}",
             result.err()
         );
-        let rows = &result.unwrap().rows;
+        let result = result.unwrap();
+        let rows = result.rows();
         // m1->m2 (Composition): excluded by 1st NOT EXISTS
         // m2->m3 (Flow): excluded by 2nd NOT EXISTS
         // Remaining: (m1,m3), (m2,m1), (m3,m1), (m3,m2) = 4
@@ -917,8 +928,8 @@ fn test_list_property_in_return() {
 
     let result = session.execute("MATCH (t:Tag) RETURN t.names").unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    match &result.rows[0][0] {
+    assert_eq!(result.rows().len(), 1);
+    match &result.rows()[0][0] {
         Value::List(items) => assert_eq!(items.len(), 3),
         other => panic!("expected list, got {:?}", other),
     }
@@ -938,9 +949,9 @@ fn test_index_access() {
         .unwrap();
 
     // list[1] should be 'b'
-    if !result.rows.is_empty() {
+    if !result.rows().is_empty() {
         // Index access is supported if this doesn't error
-        assert_eq!(result.rows.len(), 1);
+        assert_eq!(result.rows().len(), 1);
     }
 }
 
@@ -957,8 +968,8 @@ fn test_return_type_function() {
         .execute("MATCH (a:Person)-[r:KNOWS]->(b:Person) RETURN type(r)")
         .unwrap();
 
-    assert!(!result.rows.is_empty());
-    for row in &result.rows {
+    assert!(!result.rows().is_empty());
+    for row in result.rows() {
         assert_eq!(row[0], Value::String("KNOWS".into()));
     }
 }
@@ -976,11 +987,11 @@ fn test_order_by_property_asc() {
         .execute("MATCH (n:Person) RETURN n.name ORDER BY n.age")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows().len(), 3);
     // Gus(25), Alix(30), Harm(35)
-    assert_eq!(result.rows[0][0], Value::String("Gus".into()));
-    assert_eq!(result.rows[1][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[2][0], Value::String("Harm".into()));
+    assert_eq!(result.rows()[0][0], Value::String("Gus".into()));
+    assert_eq!(result.rows()[1][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[2][0], Value::String("Harm".into()));
 }
 
 #[test]
@@ -992,11 +1003,11 @@ fn test_order_by_property_desc() {
         .execute("MATCH (n:Person) RETURN n.name ORDER BY n.age DESC")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows().len(), 3);
     // Harm(35), Alix(30), Gus(25)
-    assert_eq!(result.rows[0][0], Value::String("Harm".into()));
-    assert_eq!(result.rows[1][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[2][0], Value::String("Gus".into()));
+    assert_eq!(result.rows()[0][0], Value::String("Harm".into()));
+    assert_eq!(result.rows()[1][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[2][0], Value::String("Gus".into()));
 }
 
 // ============================================================================
@@ -1013,8 +1024,8 @@ fn test_with_node_passthrough() {
         .execute("MATCH (n:Person {name: 'Alix'}) WITH n RETURN n.name")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
 }
 
 #[test]
@@ -1028,7 +1039,7 @@ fn test_with_filters_pipeline() {
         .unwrap();
 
     // Alix(30) and Harm(35) pass the WHERE filter
-    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows().len(), 2);
 }
 
 // ============================================================================
@@ -1045,8 +1056,8 @@ fn test_count_aggregation() {
         .execute("MATCH (n:Person) RETURN count(n) AS cnt")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Int64(3));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Int64(3));
 }
 
 #[test]
@@ -1060,7 +1071,7 @@ fn test_group_by_with_count() {
         .unwrap();
 
     // London: 1, NYC: 2
-    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows().len(), 2);
 }
 
 #[test]
@@ -1072,9 +1083,9 @@ fn test_sum_aggregation() {
         .execute("MATCH (n:Person) RETURN sum(n.age) AS total_age")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     // 30 + 25 + 35 = 90
-    assert_eq!(result.rows[0][0], Value::Int64(90));
+    assert_eq!(result.rows()[0][0], Value::Int64(90));
 }
 
 #[test]
@@ -1086,9 +1097,9 @@ fn test_avg_aggregation() {
         .execute("MATCH (n:Person) RETURN avg(n.age) AS avg_age")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     // (30 + 25 + 35) / 3 = 30
-    match &result.rows[0][0] {
+    match &result.rows()[0][0] {
         Value::Float64(v) => assert!((v - 30.0).abs() < 0.01),
         Value::Int64(v) => assert_eq!(*v, 30),
         other => panic!("expected numeric, got {:?}", other),
@@ -1104,9 +1115,9 @@ fn test_min_max_aggregation() {
         .execute("MATCH (n:Person) RETURN min(n.age) AS youngest, max(n.age) AS oldest")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Int64(25));
-    assert_eq!(result.rows[0][1], Value::Int64(35));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Int64(25));
+    assert_eq!(result.rows()[0][1], Value::Int64(35));
 }
 
 #[test]
@@ -1118,9 +1129,9 @@ fn test_aggregate_order_by() {
         .execute("MATCH (n:Person) RETURN n.city, count(n) AS cnt ORDER BY cnt DESC")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows().len(), 2);
     // NYC: 2 should come first (DESC)
-    assert_eq!(result.rows[0][0], Value::String("NYC".into()));
+    assert_eq!(result.rows()[0][0], Value::String("NYC".into()));
 }
 
 // ============================================================================
@@ -1170,10 +1181,10 @@ fn test_sum_case_when_in_aggregate() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("src".into()));
-    assert_eq!(result.rows[0][1], Value::Int64(3));
-    assert_eq!(result.rows[0][2], Value::Int64(2));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("src".into()));
+    assert_eq!(result.rows()[0][1], Value::Int64(3));
+    assert_eq!(result.rows()[0][2], Value::Int64(2));
 }
 
 // ============================================================================
@@ -1190,7 +1201,7 @@ fn test_limit_restricts_rows() {
         .execute("MATCH (n:Person) RETURN n.name LIMIT 2")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows().len(), 2);
 }
 
 #[test]
@@ -1204,8 +1215,8 @@ fn test_skip_offsets_rows() {
         .execute("MATCH (n:Person) RETURN n.name SKIP 1")
         .unwrap();
 
-    assert_eq!(all.rows.len(), 3);
-    assert_eq!(skipped.rows.len(), 2);
+    assert_eq!(all.rows().len(), 3);
+    assert_eq!(skipped.rows().len(), 2);
 }
 
 // ============================================================================
@@ -1223,7 +1234,7 @@ fn test_distinct_values() {
         .unwrap();
 
     // Collect the unique cities returned
-    let cities: Vec<&Value> = result.rows.iter().map(|r| &r[0]).collect();
+    let cities: Vec<&Value> = result.rows().iter().map(|r| &r[0]).collect();
     assert!(
         cities.contains(&&Value::String("NYC".into())),
         "Should contain NYC"
@@ -1234,7 +1245,7 @@ fn test_distinct_values() {
     );
     // With DISTINCT, we should have at most 2 unique cities (not 3 rows)
     assert!(
-        result.rows.len() <= 3,
+        result.rows().len() <= 3,
         "DISTINCT should not increase row count"
     );
 }
@@ -1252,10 +1263,10 @@ fn test_return_multiple_expressions() {
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN n.name, n.age, n.city")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[0][1], Value::Int64(30));
-    assert_eq!(result.rows[0][2], Value::String("NYC".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[0][1], Value::Int64(30));
+    assert_eq!(result.rows()[0][2], Value::String("NYC".into()));
 }
 
 // ============================================================================
@@ -1271,9 +1282,9 @@ fn test_gql_let_binding_standalone() {
         .execute("MATCH (n:Person {name: 'Alix'}) LET bonus = n.age * 2 RETURN n.name, bonus")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[0][1], Value::Int64(60));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[0][1], Value::Int64(60));
 }
 
 #[test]
@@ -1289,9 +1300,9 @@ fn test_gql_let_multiple_bindings() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][1], Value::Int64(50));
-    assert_eq!(result.rows[0][2], Value::String("young".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][1], Value::Int64(50));
+    assert_eq!(result.rows()[0][2], Value::String("young".into()));
 }
 
 // ============================================================================
@@ -1312,8 +1323,8 @@ fn test_gql_with_let_binding() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 3);
-    let categories: Vec<&Value> = result.rows.iter().map(|r| &r[1]).collect();
+    assert_eq!(result.rows().len(), 3);
+    let categories: Vec<&Value> = result.rows().iter().map(|r| &r[1]).collect();
     assert!(categories.contains(&&Value::String("senior".into())));
     assert!(categories.contains(&&Value::String("junior".into())));
 }
@@ -1335,9 +1346,9 @@ fn test_gql_with_where_filter() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows().len(), 2);
     let mut names: Vec<String> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[0] {
             Value::String(s) => s.to_string(),
@@ -1361,7 +1372,7 @@ fn test_gql_with_distinct() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 2); // London, NYC
+    assert_eq!(result.rows().len(), 2); // London, NYC
 }
 
 // ============================================================================
@@ -1382,8 +1393,8 @@ mod cypher_filter_ops {
             .execute_cypher("RETURN substring('Amsterdam', 0, 4) AS sub")
             .unwrap();
 
-        assert_eq!(result.rows.len(), 1);
-        assert_eq!(result.rows[0][0], Value::String("Amst".into()));
+        assert_eq!(result.rows().len(), 1);
+        assert_eq!(result.rows()[0][0], Value::String("Amst".into()));
     }
 
     #[test]
@@ -1398,14 +1409,14 @@ mod cypher_filter_ops {
             )
             .unwrap();
 
-        assert_eq!(result.rows.len(), 1);
-        if let Value::List(items) = &result.rows[0][0] {
+        assert_eq!(result.rows().len(), 1);
+        if let Value::List(items) = &result.rows()[0][0] {
             assert_eq!(items.len(), 3);
             assert!(items.contains(&Value::Int64(30)));
             assert!(items.contains(&Value::Int64(40)));
             assert!(items.contains(&Value::Int64(50)));
         } else {
-            panic!("expected list, got {:?}", result.rows[0][0]);
+            panic!("expected list, got {:?}", result.rows()[0][0]);
         }
     }
 
@@ -1421,14 +1432,14 @@ mod cypher_filter_ops {
             )
             .unwrap();
 
-        assert_eq!(result.rows.len(), 1);
-        if let Value::List(items) = &result.rows[0][0] {
+        assert_eq!(result.rows().len(), 1);
+        if let Value::List(items) = &result.rows()[0][0] {
             assert_eq!(items.len(), 3);
             assert!(items.contains(&Value::Int64(2)));
             assert!(items.contains(&Value::Int64(4)));
             assert!(items.contains(&Value::Int64(6)));
         } else {
-            panic!("expected list, got {:?}", result.rows[0][0]);
+            panic!("expected list, got {:?}", result.rows()[0][0]);
         }
     }
 
@@ -1444,7 +1455,7 @@ mod cypher_filter_ops {
             )
             .unwrap();
 
-        assert_eq!(result.rows[0][0], Value::Bool(true));
+        assert_eq!(result.rows()[0][0], Value::Bool(true));
     }
 
     #[test]
@@ -1459,7 +1470,7 @@ mod cypher_filter_ops {
             )
             .unwrap();
 
-        assert_eq!(result.rows[0][0], Value::Bool(false));
+        assert_eq!(result.rows()[0][0], Value::Bool(false));
     }
 
     #[test]
@@ -1474,7 +1485,7 @@ mod cypher_filter_ops {
             )
             .unwrap();
 
-        assert_eq!(result.rows[0][0], Value::Bool(true));
+        assert_eq!(result.rows()[0][0], Value::Bool(true));
     }
 
     #[test]
@@ -1489,7 +1500,7 @@ mod cypher_filter_ops {
             )
             .unwrap();
 
-        assert_eq!(result.rows[0][0], Value::Bool(true));
+        assert_eq!(result.rows()[0][0], Value::Bool(true));
     }
 
     #[test]
@@ -1504,7 +1515,7 @@ mod cypher_filter_ops {
             )
             .unwrap();
 
-        assert_eq!(result.rows[0][0], Value::Int64(15));
+        assert_eq!(result.rows()[0][0], Value::Int64(15));
     }
 
     #[test]
@@ -1519,7 +1530,7 @@ mod cypher_filter_ops {
             )
             .unwrap();
 
-        assert_eq!(result.rows[0][0], Value::String("abc".into()));
+        assert_eq!(result.rows()[0][0], Value::String("abc".into()));
     }
 
     #[test]
@@ -1540,7 +1551,7 @@ mod cypher_filter_ops {
             )
             .unwrap();
 
-        assert_eq!(result.rows.len(), 3);
+        assert_eq!(result.rows().len(), 3);
     }
 
     #[test]
@@ -1561,11 +1572,11 @@ mod cypher_filter_ops {
             )
             .unwrap();
 
-        assert_eq!(result.rows.len(), 3);
+        assert_eq!(result.rows().len(), 3);
         // Alix(30)->mid, Gus(25)->young, Harm(35)->senior
-        assert_eq!(result.rows[0][1], Value::String("mid".into()));
-        assert_eq!(result.rows[1][1], Value::String("young".into()));
-        assert_eq!(result.rows[2][1], Value::String("senior".into()));
+        assert_eq!(result.rows()[0][1], Value::String("mid".into()));
+        assert_eq!(result.rows()[1][1], Value::String("young".into()));
+        assert_eq!(result.rows()[2][1], Value::String("senior".into()));
     }
 
     #[test]
@@ -1583,7 +1594,7 @@ mod cypher_filter_ops {
             .unwrap();
 
         // Harm has no outgoing KNOWS edges in the create_test_graph fixture
-        assert!(!result.rows.is_empty());
+        assert!(!result.rows().is_empty());
     }
 
     #[test]
@@ -1600,8 +1611,8 @@ mod cypher_filter_ops {
             )
             .unwrap();
 
-        assert_eq!(result.rows.len(), 1);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows().len(), 1);
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
     }
 
     #[test]
@@ -1619,7 +1630,7 @@ mod cypher_filter_ops {
 
         // Alix(30, 2 KNOWS), Gus(25, 1 KNOWS) pass both conditions
         let mut names: Vec<String> = result
-            .rows
+            .rows()
             .iter()
             .map(|r| match &r[0] {
                 Value::String(s) => s.to_string(),
@@ -1647,7 +1658,7 @@ mod cypher_filter_ops {
             .unwrap();
 
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::String("Harm".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Harm".into()));
     }
 }
 
@@ -1665,8 +1676,8 @@ fn test_gql_contains_operator() {
              RETURN p.name AS name",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::String("Alix".into()));
 }
 
 #[test]
@@ -1676,7 +1687,7 @@ fn test_gql_contains_no_match() {
     let r = session
         .execute("MATCH (p:Person) WHERE p.name CONTAINS 'xyz' RETURN p.name")
         .unwrap();
-    assert_eq!(r.rows.len(), 0);
+    assert_eq!(r.rows().len(), 0);
 }
 
 #[test]
@@ -1689,8 +1700,8 @@ fn test_gql_ends_with_operator() {
              RETURN p.name AS name",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::String("Harm".into()));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::String("Harm".into()));
 }
 
 #[test]
@@ -1703,8 +1714,8 @@ fn test_gql_starts_with_operator() {
              RETURN p.name AS name",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::String("Gus".into()));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::String("Gus".into()));
 }
 
 #[test]
@@ -1717,8 +1728,8 @@ fn test_gql_string_concat_operator() {
              RETURN p.name || ' from ' || p.city AS intro",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::String("Alix from NYC".into()));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::String("Alix from NYC".into()));
 }
 
 #[test]
@@ -1731,13 +1742,13 @@ fn test_gql_concat_with_non_string() {
              RETURN p.name || ' age ' || p.age AS info",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows().len(), 1);
     // age is Int64(30), concatenation should coerce to string
-    if let Value::String(s) = &r.rows[0][0] {
+    if let Value::String(s) = &r.rows()[0][0] {
         assert!(s.contains("Alix"), "should contain name: {s}");
         assert!(s.contains("30"), "should contain age: {s}");
     } else {
-        panic!("expected string, got {:?}", r.rows[0][0]);
+        panic!("expected string, got {:?}", r.rows()[0][0]);
     }
 }
 
@@ -1757,8 +1768,8 @@ fn test_gql_is_null_in_where() {
     let r = session
         .execute("MATCH (i:Item) WHERE i.color IS NULL RETURN i.name AS name")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::String("widget".into()));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::String("widget".into()));
 }
 
 #[test]
@@ -1777,8 +1788,8 @@ fn test_gql_is_not_null_in_where() {
     let r = session
         .execute("MATCH (i:Item) WHERE i.color IS NOT NULL RETURN i.name AS name")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::String("gadget".into()));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::String("gadget".into()));
 }
 
 #[test]
@@ -1789,7 +1800,10 @@ fn test_gql_explain_returns_plan() {
         .execute("EXPLAIN MATCH (p:Person) RETURN p.name")
         .unwrap();
     // EXPLAIN should return at least one row with plan information
-    assert!(!r.rows.is_empty(), "EXPLAIN should return plan information");
+    assert!(
+        !r.rows().is_empty(),
+        "EXPLAIN should return plan information"
+    );
 }
 
 #[test]
@@ -1801,7 +1815,7 @@ fn test_gql_profile_returns_metrics() {
         .unwrap();
     // PROFILE should return rows with execution metrics
     assert!(
-        !r.rows.is_empty(),
+        !r.rows().is_empty(),
         "PROFILE should return execution metrics"
     );
 }
@@ -1814,7 +1828,7 @@ fn test_timestamp_returns_millis() {
     let session = db.session();
     let r = session.execute("RETURN timestamp() AS ts").unwrap();
     assert_eq!(r.row_count(), 1);
-    match &r.rows[0][0] {
+    match &r.rows()[0][0] {
         Value::Int64(ts) => assert!(*ts > 1_577_836_800_000, "timestamp too small: {ts}"),
         other => panic!("expected Int64, got {other:?}"),
     }
@@ -1832,7 +1846,7 @@ fn test_set_property_to_timestamp() {
         .execute("MATCH (e:Event) RETURN e.created_at")
         .unwrap();
     assert_eq!(r.row_count(), 1);
-    match &r.rows[0][0] {
+    match &r.rows()[0][0] {
         Value::Int64(ts) => assert!(*ts > 1_577_836_800_000),
         other => panic!("expected Int64, got {other:?}"),
     }
@@ -1851,8 +1865,8 @@ fn test_start_node_end_node_gql() {
         .execute("MATCH ()-[r:KNOWS]->() RETURN startNode(r) AS sn, endNode(r) AS en")
         .unwrap();
     assert_eq!(r.row_count(), 1);
-    assert!(matches!(&r.rows[0][0], Value::Int64(_)));
-    assert!(matches!(&r.rows[0][1], Value::Int64(_)));
+    assert!(matches!(&r.rows()[0][0], Value::Int64(_)));
+    assert!(matches!(&r.rows()[0][1], Value::Int64(_)));
 }
 
 #[test]
@@ -1869,8 +1883,8 @@ fn test_start_node_equals_source_id() {
         )
         .unwrap();
     assert_eq!(r.row_count(), 1);
-    assert_eq!(r.rows[0][0], Value::Bool(true), "startNode(r) != id(s)");
-    assert_eq!(r.rows[0][1], Value::Bool(true), "endNode(r) != id(t)");
+    assert_eq!(r.rows()[0][0], Value::Bool(true), "startNode(r) != id(s)");
+    assert_eq!(r.rows()[0][1], Value::Bool(true), "endNode(r) != id(t)");
 }
 
 // ============================================================================
@@ -1905,14 +1919,14 @@ fn test_order_by_desc_sort_key_in_return() {
         .execute("MATCH (i:Item) RETURN i.name, i.score ORDER BY i.score DESC LIMIT 3")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 3);
-    for (i, row) in result.rows.iter().enumerate() {
+    assert_eq!(result.rows().len(), 3);
+    for (i, row) in result.rows().iter().enumerate() {
         eprintln!("row {i}: {:?}", row);
     }
     // Descending top 3: E(9.1), B(8.7), C(8.0)
-    assert_eq!(result.rows[0][0], Value::String("E".into()));
-    assert_eq!(result.rows[1][0], Value::String("B".into()));
-    assert_eq!(result.rows[2][0], Value::String("C".into()));
+    assert_eq!(result.rows()[0][0], Value::String("E".into()));
+    assert_eq!(result.rows()[1][0], Value::String("B".into()));
+    assert_eq!(result.rows()[2][0], Value::String("C".into()));
 }
 
 /// ORDER BY DESC on an integer property that is in the RETURN clause.
@@ -1935,11 +1949,11 @@ fn test_order_by_desc_integer_in_return() {
         .execute("MATCH (c:City) RETURN c.name, c.pop ORDER BY c.pop DESC")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows().len(), 3);
     // Descending: Berlin, Paris, Amsterdam
-    assert_eq!(result.rows[0][0], Value::String("Berlin".into()));
-    assert_eq!(result.rows[1][0], Value::String("Paris".into()));
-    assert_eq!(result.rows[2][0], Value::String("Amsterdam".into()));
+    assert_eq!(result.rows()[0][0], Value::String("Berlin".into()));
+    assert_eq!(result.rows()[1][0], Value::String("Paris".into()));
+    assert_eq!(result.rows()[2][0], Value::String("Amsterdam".into()));
 }
 
 /// Secondary sort: ORDER BY count DESC, name ASC to break ties.
@@ -1958,11 +1972,11 @@ fn test_order_by_secondary_sort_after_aggregation() {
         .execute("MATCH (t:T) RETURN t.grp, count(t) AS cnt ORDER BY cnt DESC, t.grp")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows().len(), 3);
     // X(2) and Y(2) tied on cnt DESC, broken by grp ASC: X before Y
-    assert_eq!(result.rows[0][0], Value::String("X".into()));
-    assert_eq!(result.rows[1][0], Value::String("Y".into()));
-    assert_eq!(result.rows[2][0], Value::String("Z".into()));
+    assert_eq!(result.rows()[0][0], Value::String("X".into()));
+    assert_eq!(result.rows()[1][0], Value::String("Y".into()));
+    assert_eq!(result.rows()[2][0], Value::String("Z".into()));
 }
 
 /// Exact reproduction of movie_database scenario with 5 items, LIMIT 3.
@@ -1996,10 +2010,10 @@ fn test_order_by_desc_with_limit_multi_label() {
         .unwrap();
 
     eprintln!("All movies sorted DESC:");
-    for (i, row) in result.rows.iter().enumerate() {
+    for (i, row) in result.rows().iter().enumerate() {
         eprintln!("  row {i}: {:?}", row);
     }
-    assert_eq!(result.rows.len(), 5, "Should have 5 movies");
+    assert_eq!(result.rows().len(), 5, "Should have 5 movies");
 
     // Now test with LIMIT
     let result = session
@@ -2007,13 +2021,13 @@ fn test_order_by_desc_with_limit_multi_label() {
         .unwrap();
 
     eprintln!("Top 3 movies sorted DESC:");
-    for (i, row) in result.rows.iter().enumerate() {
+    for (i, row) in result.rows().iter().enumerate() {
         eprintln!("  row {i}: {:?}", row);
     }
-    assert_eq!(result.rows.len(), 3);
-    assert_eq!(result.rows[0][0], Value::String("Berlin Express".into()));
-    assert_eq!(result.rows[1][0], Value::String("The Heist".into()));
-    assert_eq!(result.rows[2][0], Value::String("The Algorithm".into()));
+    assert_eq!(result.rows().len(), 3);
+    assert_eq!(result.rows()[0][0], Value::String("Berlin Express".into()));
+    assert_eq!(result.rows()[1][0], Value::String("The Heist".into()));
+    assert_eq!(result.rows()[2][0], Value::String("The Algorithm".into()));
 }
 
 /// Test min/max on float properties.
@@ -2036,10 +2050,10 @@ fn test_min_max_float_properties() {
         .execute("MATCH (p:Product) RETURN min(p.price) AS cheapest, max(p.price) AS expensive")
         .unwrap();
 
-    eprintln!("min/max result: {:?}", result.rows);
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Float64(39.99));
-    assert_eq!(result.rows[0][1], Value::Float64(1299.99));
+    eprintln!("min/max result: {:?}", result.rows());
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Float64(39.99));
+    assert_eq!(result.rows()[0][1], Value::Float64(1299.99));
 }
 
 #[test]
@@ -2096,12 +2110,12 @@ fn test_multi_pattern_match_join() {
         )
         .unwrap();
 
-    eprintln!("multi-pattern result: {:?}", result.rows);
+    eprintln!("multi-pattern result: {:?}", result.rows());
     // Should only match (Alix, Laptop, 5) because Alix reviewed only Laptop
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[0][1], Value::String("Laptop".into()));
-    assert_eq!(result.rows[0][2], Value::Int64(5));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[0][1], Value::String("Laptop".into()));
+    assert_eq!(result.rows()[0][2], Value::Int64(5));
 }
 
 #[test]
@@ -2141,10 +2155,10 @@ fn test_with_aggregate_having_filter() {
         )
         .unwrap();
 
-    eprintln!("WITH HAVING result: {:?}", result.rows);
+    eprintln!("WITH HAVING result: {:?}", result.rows());
     // Only Alix->Gus has 2 messages
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[0][1], Value::String("Gus".into()));
-    assert_eq!(result.rows[0][2], Value::Int64(2));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[0][1], Value::String("Gus".into()));
+    assert_eq!(result.rows()[0][2], Value::Int64(2));
 }

@@ -306,4 +306,183 @@ mod tests {
     fn directory_entry_size() {
         assert_eq!(SectionDirectoryEntry::SIZE, 32);
     }
+
+    #[test]
+    fn alix_tier_override_variants() {
+        assert_eq!(TierOverride::Auto, TierOverride::default());
+        // Verify all variants are distinct
+        assert_ne!(TierOverride::Auto, TierOverride::ForceRam);
+        assert_ne!(TierOverride::Auto, TierOverride::ForceDisk);
+        assert_ne!(TierOverride::ForceRam, TierOverride::ForceDisk);
+    }
+
+    #[test]
+    fn gus_section_memory_config_default() {
+        let config = SectionMemoryConfig::default();
+        assert!(config.max_ram.is_none());
+        assert_eq!(config.tier, TierOverride::Auto);
+    }
+
+    #[test]
+    fn vincent_section_memory_config_with_cap() {
+        let config = SectionMemoryConfig {
+            max_ram: Some(1024 * 1024),
+            tier: TierOverride::ForceRam,
+        };
+        assert_eq!(config.max_ram, Some(1024 * 1024));
+        assert_eq!(config.tier, TierOverride::ForceRam);
+    }
+
+    #[test]
+    fn jules_force_disk_tier() {
+        let config = SectionMemoryConfig {
+            max_ram: None,
+            tier: TierOverride::ForceDisk,
+        };
+        assert_eq!(config.tier, TierOverride::ForceDisk);
+    }
+
+    #[test]
+    fn mia_lpg_store_default_flags_distinct_from_rdf() {
+        let lpg = SectionType::LpgStore.default_flags();
+        let rdf = SectionType::RdfStore.default_flags();
+        // LpgStore is required, RdfStore is not
+        assert!(lpg.required);
+        assert!(!rdf.required);
+        // Both are not mmap-able
+        assert!(!lpg.mmap_able);
+        assert!(!rdf.mmap_able);
+    }
+
+    #[test]
+    fn butch_index_section_default_flags_all_variants() {
+        // All index section types share the same flags
+        for section_type in [
+            SectionType::VectorStore,
+            SectionType::TextIndex,
+            SectionType::RdfRing,
+            SectionType::PropertyIndex,
+        ] {
+            let flags = section_type.default_flags();
+            assert!(!flags.required, "{section_type:?} should not be required");
+            assert!(flags.mmap_able, "{section_type:?} should be mmap-able");
+        }
+    }
+
+    #[test]
+    fn django_directory_entry_construction() {
+        let entry = SectionDirectoryEntry {
+            section_type: SectionType::LpgStore,
+            version: 1,
+            flags: SectionFlags {
+                required: true,
+                mmap_able: false,
+            },
+            offset: 4096,
+            length: 8192,
+            checksum: 0xDEAD_BEEF,
+        };
+        assert_eq!(entry.section_type, SectionType::LpgStore);
+        assert_eq!(entry.version, 1);
+        assert!(entry.flags.required);
+        assert!(!entry.flags.mmap_able);
+        assert_eq!(entry.offset, 4096);
+        assert_eq!(entry.length, 8192);
+        assert_eq!(entry.checksum, 0xDEAD_BEEF);
+    }
+
+    #[test]
+    fn shosanna_section_type_is_data_vs_index_boundary() {
+        // Data sections: discriminant < 10
+        assert!(SectionType::Catalog.is_data_section());
+        assert!(!SectionType::Catalog.is_index_section());
+
+        // Index sections: discriminant >= 10
+        assert!(SectionType::VectorStore.is_index_section());
+        assert!(!SectionType::VectorStore.is_data_section());
+
+        // PropertyIndex at discriminant 20 is still an index section
+        assert!(SectionType::PropertyIndex.is_index_section());
+        assert!(!SectionType::PropertyIndex.is_data_section());
+    }
+
+    #[test]
+    fn hans_section_flags_extra_bits_ignored() {
+        // Bits beyond 0 and 1 are ignored by from_byte
+        let flags = SectionFlags::from_byte(0xFF);
+        assert!(flags.required);
+        assert!(flags.mmap_able);
+
+        let flags = SectionFlags::from_byte(0xFC);
+        assert!(!flags.required);
+        assert!(!flags.mmap_able);
+    }
+
+    #[test]
+    fn beatrix_directory_entry_clone_eq() {
+        let entry = SectionDirectoryEntry {
+            section_type: SectionType::RdfRing,
+            version: 2,
+            flags: SectionFlags {
+                required: false,
+                mmap_able: true,
+            },
+            offset: 0,
+            length: 1024,
+            checksum: 42,
+        };
+        let cloned = entry.clone();
+        assert_eq!(entry, cloned);
+    }
+
+    /// Minimal Section trait implementation for testing default methods.
+    struct StubSection {
+        dirty: bool,
+    }
+
+    impl Section for StubSection {
+        fn section_type(&self) -> SectionType {
+            SectionType::LpgStore
+        }
+
+        fn serialize(&self) -> crate::utils::error::Result<Vec<u8>> {
+            Ok(vec![1, 2, 3])
+        }
+
+        fn deserialize(&mut self, _data: &[u8]) -> crate::utils::error::Result<()> {
+            Ok(())
+        }
+
+        fn is_dirty(&self) -> bool {
+            self.dirty
+        }
+
+        fn mark_clean(&self) {}
+
+        fn memory_usage(&self) -> usize {
+            64
+        }
+    }
+
+    #[test]
+    fn mia_section_trait_default_version() {
+        let stub = StubSection { dirty: false };
+        // The default version() method returns 1
+        assert_eq!(stub.version(), 1);
+        assert_eq!(stub.section_type(), SectionType::LpgStore);
+        assert!(!stub.is_dirty());
+        assert_eq!(stub.memory_usage(), 64);
+    }
+
+    #[test]
+    fn butch_section_trait_serialize_deserialize() {
+        let mut stub = StubSection { dirty: true };
+        assert!(stub.is_dirty());
+
+        let data = stub.serialize().unwrap();
+        assert_eq!(data, vec![1, 2, 3]);
+
+        stub.deserialize(&[4, 5, 6]).unwrap();
+        stub.mark_clean();
+    }
 }

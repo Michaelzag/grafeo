@@ -138,7 +138,10 @@ fn checkpoint_after_spill_preserves_non_vector_data() {
         // Non-vector properties should survive (they're in the LPG section)
         let session = db.session();
         let result = session.execute("MATCH (n:Item) RETURN n.name").unwrap();
-        assert!(!result.rows.is_empty(), "should find the node after reopen");
-        assert_eq!(result.rows[0][0], Value::from("test"));
+        assert!(
+            !result.rows().is_empty(),
+            "should find the node after reopen"
+        );
+        assert_eq!(result.rows()[0][0], Value::from("test"));
     }
 }

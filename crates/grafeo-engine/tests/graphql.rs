@@ -427,7 +427,7 @@ fn test_order_by_asc() {
         .unwrap();
     assert_eq!(result.row_count(), 3);
 
-    let names: Vec<&str> = result.rows.iter().filter_map(|r| r[0].as_str()).collect();
+    let names: Vec<&str> = result.rows().iter().filter_map(|r| r[0].as_str()).collect();
     assert_eq!(names, vec!["Gus", "Alix", "Vincent"]);
 }
 
@@ -439,7 +439,7 @@ fn test_order_by_desc() {
         .unwrap();
     assert_eq!(result.row_count(), 3);
 
-    let names: Vec<&str> = result.rows.iter().filter_map(|r| r[0].as_str()).collect();
+    let names: Vec<&str> = result.rows().iter().filter_map(|r| r[0].as_str()).collect();
     assert_eq!(names, vec!["Vincent", "Alix", "Gus"]);
 }
 
@@ -451,7 +451,7 @@ fn test_order_by_with_pagination() {
         .unwrap();
     assert_eq!(result.row_count(), 2);
 
-    let names: Vec<&str> = result.rows.iter().filter_map(|r| r[0].as_str()).collect();
+    let names: Vec<&str> = result.rows().iter().filter_map(|r| r[0].as_str()).collect();
     assert_eq!(names, vec!["Gus", "Alix"]);
 }
 
@@ -463,7 +463,7 @@ fn test_order_by_multiple_fields() {
         .unwrap();
     assert_eq!(result.row_count(), 3);
 
-    let cities: Vec<&str> = result.rows.iter().filter_map(|r| r[1].as_str()).collect();
+    let cities: Vec<&str> = result.rows().iter().filter_map(|r| r[1].as_str()).collect();
     assert_eq!(cities, vec!["Amsterdam", "Berlin", "Paris"]);
 }
 
@@ -545,7 +545,7 @@ fn test_create_mutation() {
     let result = db.execute_graphql("{ person { name } }").unwrap();
     assert_eq!(result.row_count(), 1, "Should have 1 Person after create");
 
-    let names: Vec<&str> = result.rows.iter().filter_map(|r| r[0].as_str()).collect();
+    let names: Vec<&str> = result.rows().iter().filter_map(|r| r[0].as_str()).collect();
     assert!(names.contains(&"Jules"));
 }
 
@@ -698,7 +698,7 @@ fn test_create_then_query() {
         .unwrap();
     assert_eq!(result.row_count(), 1);
 
-    let names: Vec<&str> = result.rows.iter().filter_map(|r| r[0].as_str()).collect();
+    let names: Vec<&str> = result.rows().iter().filter_map(|r| r[0].as_str()).collect();
     assert!(names.contains(&"Alix"));
 }
 
@@ -737,7 +737,7 @@ fn test_create_delete_query() {
     let result = db.execute_graphql("{ person { name } }").unwrap();
     assert_eq!(result.row_count(), 1);
 
-    let names: Vec<&str> = result.rows.iter().filter_map(|r| r[0].as_str()).collect();
+    let names: Vec<&str> = result.rows().iter().filter_map(|r| r[0].as_str()).collect();
     assert!(names.contains(&"Shosanna"));
 }
 

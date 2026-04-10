@@ -2332,7 +2332,7 @@ impl Session {
     ///
     /// // Query nodes
     /// let result = session.execute("MATCH (n:Person) RETURN n.name, n.age")?;
-    /// for row in &result.rows {
+    /// for row in result.rows() {
     ///     println!("{:?}", row);
     /// }
     /// # Ok(())
@@ -3466,6 +3466,19 @@ impl Session {
                 e.epoch = commit_epoch;
                 e
             }));
+        }
+
+        // Log transaction commit and epoch advance to WAL so that crash
+        // recovery can identify committed transactions and their epoch
+        // boundaries. Without these markers, WAL recovery discards all
+        // records as uncommitted (fixes #252 for the crash scenario).
+        #[cfg(feature = "wal")]
+        if let Some(ref wal) = self.wal {
+            use grafeo_storage::wal::WalRecord;
+            let _ = wal.log(&WalRecord::TransactionCommit { transaction_id });
+            let _ = wal.log(&WalRecord::EpochAdvance {
+                epoch: commit_epoch,
+            });
         }
 
         // Sync epoch for all touched graphs so that convenience lookups

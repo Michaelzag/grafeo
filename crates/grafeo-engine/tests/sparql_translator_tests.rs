@@ -187,8 +187,8 @@ mod explain_integration {
             .unwrap();
 
         assert_eq!(result.columns, vec!["plan"]);
-        assert_eq!(result.rows.len(), 1);
-        let plan_text = result.rows[0][0].to_string();
+        assert_eq!(result.rows().len(), 1);
+        let plan_text = result.rows()[0][0].to_string();
         assert!(
             plan_text.contains("TripleScan"),
             "Plan should contain TripleScan, got: {plan_text}"

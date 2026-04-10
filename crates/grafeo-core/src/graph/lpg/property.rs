@@ -513,9 +513,7 @@ impl<Id: EntityId> PropertyStorage<Id> {
     #[cfg(not(feature = "temporal"))]
     pub fn mark_column_spilled(&self, key: &PropertyKey) {
         let mut columns = self.columns.write();
-        let column = columns
-            .entry(key.clone())
-            .or_insert_with(PropertyColumn::new);
+        let column = columns.entry(key.clone()).or_default();
         column.mark_spilled();
     }
 

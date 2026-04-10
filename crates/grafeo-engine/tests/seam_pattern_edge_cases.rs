@@ -47,7 +47,7 @@ mod empty_result_aggregation {
             1,
             "Aggregate should always return one row"
         );
-        assert_eq!(result.rows[0][0], Value::Int64(0));
+        assert_eq!(result.rows()[0][0], Value::Int64(0));
     }
 
     #[test]
@@ -59,7 +59,7 @@ mod empty_result_aggregation {
         let result = session
             .execute("MATCH (n:Animal) RETURN COUNT(*) AS cnt")
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::Int64(0));
+        assert_eq!(result.rows()[0][0], Value::Int64(0));
     }
 
     #[test]
@@ -72,7 +72,7 @@ mod empty_result_aggregation {
             .unwrap();
         assert_eq!(result.row_count(), 1);
         assert_eq!(
-            result.rows[0][0],
+            result.rows()[0][0],
             Value::Null,
             "SUM on empty should be NULL"
         );
@@ -88,7 +88,7 @@ mod empty_result_aggregation {
             .unwrap();
         assert_eq!(result.row_count(), 1);
         assert_eq!(
-            result.rows[0][0],
+            result.rows()[0][0],
             Value::Null,
             "AVG on empty should be NULL"
         );
@@ -104,7 +104,7 @@ mod empty_result_aggregation {
             .unwrap();
         assert_eq!(result.row_count(), 1);
         assert_eq!(
-            result.rows[0][0],
+            result.rows()[0][0],
             Value::Null,
             "MIN on empty should be NULL"
         );
@@ -120,7 +120,7 @@ mod empty_result_aggregation {
             .unwrap();
         assert_eq!(result.row_count(), 1);
         assert_eq!(
-            result.rows[0][0],
+            result.rows()[0][0],
             Value::Null,
             "MAX on empty should be NULL"
         );
@@ -136,7 +136,7 @@ mod empty_result_aggregation {
             .unwrap();
         assert_eq!(result.row_count(), 1);
         assert_eq!(
-            result.rows[0][0],
+            result.rows()[0][0],
             Value::List(vec![].into()),
             "COLLECT on empty should be empty list"
         );
@@ -159,7 +159,7 @@ mod quantified_paths {
             .execute("MATCH (a:Person {name: 'Alix'})-[:KNOWS*1..1]->(b) RETURN b.name")
             .unwrap();
         assert_eq!(result.row_count(), 1, "1..1 should match exactly one hop");
-        assert_eq!(result.rows[0][0], Value::String("Gus".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Gus".into()));
     }
 
     #[test]
@@ -171,7 +171,7 @@ mod quantified_paths {
             .execute("MATCH (a:Person {name: 'Alix'})-[:KNOWS*2..2]->(b) RETURN b.name")
             .unwrap();
         assert_eq!(result.row_count(), 1, "2..2 should reach Vincent");
-        assert_eq!(result.rows[0][0], Value::String("Vincent".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Vincent".into()));
     }
 
     #[test]
@@ -234,9 +234,9 @@ mod optional_match {
             )
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
         assert_eq!(
-            result.rows[0][1],
+            result.rows()[0][1],
             Value::Null,
             "No match should return NULL"
         );
@@ -256,7 +256,7 @@ mod optional_match {
             )
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::String("Gus".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Gus".into()));
     }
 
     #[test]
@@ -386,7 +386,7 @@ mod edge_directions {
             .execute("MATCH (a:Person {name: 'Alix'})-[:KNOWS]->(b) RETURN b.name")
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::String("Gus".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Gus".into()));
     }
 
     #[test]
@@ -401,7 +401,7 @@ mod edge_directions {
             .execute("MATCH (b:Person {name: 'Gus'})<-[:KNOWS]-(a) RETURN a.name")
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
     }
 
     #[test]

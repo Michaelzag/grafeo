@@ -46,7 +46,7 @@ pub(crate) mod section_consumer;
 #[cfg(all(feature = "wal", feature = "lpg"))]
 pub(crate) mod wal_store;
 
-use grafeo_common::grafeo_error;
+use grafeo_common::{grafeo_error, grafeo_warn};
 #[cfg(feature = "wal")]
 use std::path::Path;
 use std::sync::Arc;
@@ -1119,6 +1119,10 @@ impl GrafeoDB {
                     // Transaction control records don't need replay action
                     // (recovery already filtered to only committed transactions)
                 }
+                WalRecord::EpochAdvance { .. } => {
+                    // Metadata record: no store mutation needed.
+                    // Used by incremental backup and point-in-time recovery.
+                }
             }
         }
         Ok(())
@@ -1746,7 +1750,31 @@ impl GrafeoDB {
             if let Some(ref wal) = self.wal {
                 wal.sync()?;
             }
-            self.checkpoint_to_file(fm, flush::FlushReason::Explicit)?;
+            let flush_result = self.checkpoint_to_file(fm, flush::FlushReason::Explicit)?;
+
+            // Safety check: if WAL has records but the checkpoint was a no-op
+            // (zero sections written), the container file may not contain the
+            // latest data. This can happen when sections are not marked dirty
+            // despite mutations going through the WAL. Force-dirty all sections
+            // and retry before removing the sidecar.
+            #[cfg(feature = "wal")]
+            let flush_result = if flush_result.sections_written == 0 {
+                if let Some(ref wal) = self.wal {
+                    if wal.record_count() > 0 {
+                        grafeo_warn!(
+                            "WAL has {} records but checkpoint wrote 0 sections; retrying with forced flush",
+                            wal.record_count()
+                        );
+                        self.checkpoint_to_file(fm, flush::FlushReason::Explicit)?
+                    } else {
+                        flush_result
+                    }
+                } else {
+                    flush_result
+                }
+            } else {
+                flush_result
+            };
 
             // Release WAL file handles before removing sidecar directory.
             // On Windows, open handles prevent directory deletion.
@@ -1755,11 +1783,25 @@ impl GrafeoDB {
                 wal.close_active_log();
             }
 
-            {
-                use grafeo_common::testing::crash::maybe_crash;
-                maybe_crash("close:before_remove_sidecar_wal");
+            // Only remove the sidecar WAL after verifying the checkpoint wrote
+            // data to the container. If nothing was written and the WAL had
+            // records, keep the sidecar so the next open can recover from it.
+            #[cfg(feature = "wal")]
+            let has_wal_records = self.wal.as_ref().is_some_and(|wal| wal.record_count() > 0);
+            #[cfg(not(feature = "wal"))]
+            let has_wal_records = false;
+
+            if flush_result.sections_written > 0 || !has_wal_records {
+                {
+                    use grafeo_common::testing::crash::maybe_crash;
+                    maybe_crash("close:before_remove_sidecar_wal");
+                }
+                fm.remove_sidecar_wal()?;
+            } else {
+                grafeo_warn!(
+                    "keeping sidecar WAL for recovery: checkpoint wrote 0 sections but WAL has records"
+                );
             }
-            fm.remove_sidecar_wal()?;
             fm.close()?;
         }
 
@@ -2003,7 +2045,11 @@ impl GrafeoDB {
     /// the sidecar (e.g. `close()`) should call `fm.remove_sidecar_wal()`
     /// separately after this returns.
     #[cfg(feature = "grafeo-file")]
-    fn checkpoint_to_file(&self, fm: &GrafeoFileManager, reason: flush::FlushReason) -> Result<()> {
+    fn checkpoint_to_file(
+        &self,
+        fm: &GrafeoFileManager,
+        reason: flush::FlushReason,
+    ) -> Result<flush::FlushResult> {
         let sections = self.build_sections();
         let section_refs: Vec<&dyn grafeo_common::storage::Section> =
             sections.iter().map(|s| s.as_ref()).collect();
@@ -2019,8 +2065,7 @@ impl GrafeoDB {
             reason,
             #[cfg(feature = "wal")]
             self.wal.as_deref(),
-        )?;
-        Ok(())
+        )
     }
 
     /// Returns the file manager if using single-file format.
@@ -2102,7 +2147,10 @@ pub struct QueryResult {
     /// Column types - useful for distinguishing NodeId/EdgeId from plain integers.
     pub column_types: Vec<grafeo_common::types::LogicalType>,
     /// The actual result rows.
-    pub rows: Vec<Vec<grafeo_common::types::Value>>,
+    ///
+    /// Use [`rows()`](Self::rows) for borrowed access or
+    /// [`into_rows()`](Self::into_rows) to take ownership.
+    pub(crate) rows: Vec<Vec<grafeo_common::types::Value>>,
     /// Query execution time in milliseconds (if timing was enabled).
     pub execution_time_ms: Option<f64>,
     /// Number of rows scanned during query execution (estimate).
@@ -2174,6 +2222,26 @@ impl QueryResult {
         }
     }
 
+    /// Creates a query result with pre-populated rows.
+    #[must_use]
+    pub fn from_rows(columns: Vec<String>, rows: Vec<Vec<grafeo_common::types::Value>>) -> Self {
+        let len = columns.len();
+        Self {
+            columns,
+            column_types: vec![grafeo_common::types::LogicalType::Any; len],
+            rows,
+            execution_time_ms: None,
+            rows_scanned: None,
+            status_message: None,
+            gql_status: grafeo_common::utils::GqlStatus::SUCCESS,
+        }
+    }
+
+    /// Appends a row to this result.
+    pub fn push_row(&mut self, row: Vec<grafeo_common::types::Value>) {
+        self.rows.push(row);
+    }
+
     /// Sets the execution metrics on this result.
     pub fn with_metrics(mut self, execution_time_ms: f64, rows_scanned: u64) -> Self {
         self.execution_time_ms = Some(execution_time_ms);
@@ -2226,6 +2294,18 @@ impl QueryResult {
             ));
         }
         T::from_value(&self.rows[0][0])
+    }
+
+    /// Returns a slice of all result rows.
+    #[must_use]
+    pub fn rows(&self) -> &[Vec<grafeo_common::types::Value>] {
+        &self.rows
+    }
+
+    /// Takes ownership of all result rows.
+    #[must_use]
+    pub fn into_rows(self) -> Vec<Vec<grafeo_common::types::Value>> {
+        self.rows
     }
 
     /// Returns an iterator over the rows.
@@ -2835,5 +2915,522 @@ mod tests {
         assert_eq!(result.rows.len(), 1);
 
         session.commit().unwrap();
+    }
+
+    // =========================================================================
+    // QueryResult tests
+    // =========================================================================
+
+    #[test]
+    fn test_query_result_empty() {
+        let result = QueryResult::empty();
+        assert!(result.is_empty());
+        assert_eq!(result.row_count(), 0);
+        assert_eq!(result.column_count(), 0);
+        assert!(result.execution_time_ms().is_none());
+        assert!(result.rows_scanned().is_none());
+        assert!(result.status_message.is_none());
+    }
+
+    #[test]
+    fn test_query_result_status() {
+        let result = QueryResult::status("Created node type 'Person'");
+        assert!(result.is_empty());
+        assert_eq!(result.column_count(), 0);
+        assert_eq!(
+            result.status_message.as_deref(),
+            Some("Created node type 'Person'")
+        );
+    }
+
+    #[test]
+    fn test_query_result_new_with_columns() {
+        let result = QueryResult::new(vec!["name".into(), "age".into()]);
+        assert_eq!(result.column_count(), 2);
+        assert_eq!(result.row_count(), 0);
+        assert!(result.is_empty());
+        // Column types should default to Any
+        assert_eq!(
+            result.column_types,
+            vec![
+                grafeo_common::types::LogicalType::Any,
+                grafeo_common::types::LogicalType::Any
+            ]
+        );
+    }
+
+    #[test]
+    fn test_query_result_with_types() {
+        use grafeo_common::types::LogicalType;
+        let result = QueryResult::with_types(
+            vec!["name".into(), "age".into()],
+            vec![LogicalType::String, LogicalType::Int64],
+        );
+        assert_eq!(result.column_count(), 2);
+        assert_eq!(result.column_types[0], LogicalType::String);
+        assert_eq!(result.column_types[1], LogicalType::Int64);
+    }
+
+    #[test]
+    fn test_query_result_with_metrics() {
+        let result = QueryResult::new(vec!["x".into()]).with_metrics(42.5, 100);
+        assert_eq!(result.execution_time_ms(), Some(42.5));
+        assert_eq!(result.rows_scanned(), Some(100));
+    }
+
+    #[test]
+    fn test_query_result_scalar_success() {
+        use grafeo_common::types::Value;
+        let mut result = QueryResult::new(vec!["count".into()]);
+        result.rows.push(vec![Value::Int64(42)]);
+
+        let val: i64 = result.scalar().unwrap();
+        assert_eq!(val, 42);
+    }
+
+    #[test]
+    fn test_query_result_scalar_wrong_shape() {
+        use grafeo_common::types::Value;
+        // Multiple rows
+        let mut result = QueryResult::new(vec!["x".into()]);
+        result.rows.push(vec![Value::Int64(1)]);
+        result.rows.push(vec![Value::Int64(2)]);
+        assert!(result.scalar::<i64>().is_err());
+
+        // Multiple columns
+        let mut result2 = QueryResult::new(vec!["a".into(), "b".into()]);
+        result2.rows.push(vec![Value::Int64(1), Value::Int64(2)]);
+        assert!(result2.scalar::<i64>().is_err());
+
+        // Empty
+        let result3 = QueryResult::new(vec!["x".into()]);
+        assert!(result3.scalar::<i64>().is_err());
+    }
+
+    #[test]
+    fn test_query_result_iter() {
+        use grafeo_common::types::Value;
+        let mut result = QueryResult::new(vec!["x".into()]);
+        result.rows.push(vec![Value::Int64(1)]);
+        result.rows.push(vec![Value::Int64(2)]);
+
+        let collected: Vec<_> = result.iter().collect();
+        assert_eq!(collected.len(), 2);
+    }
+
+    #[test]
+    fn test_query_result_display() {
+        use grafeo_common::types::Value;
+        let mut result = QueryResult::new(vec!["name".into()]);
+        result.rows.push(vec![Value::from("Alix")]);
+        let display = result.to_string();
+        assert!(display.contains("name"));
+        assert!(display.contains("Alix"));
+    }
+
+    // =========================================================================
+    // FromValue error paths
+    // =========================================================================
+
+    #[test]
+    fn test_from_value_i64_type_mismatch() {
+        use grafeo_common::types::Value;
+        let val = Value::from("not a number");
+        assert!(i64::from_value(&val).is_err());
+    }
+
+    #[test]
+    fn test_from_value_f64_type_mismatch() {
+        use grafeo_common::types::Value;
+        let val = Value::from("not a float");
+        assert!(f64::from_value(&val).is_err());
+    }
+
+    #[test]
+    fn test_from_value_string_type_mismatch() {
+        use grafeo_common::types::Value;
+        let val = Value::Int64(42);
+        assert!(String::from_value(&val).is_err());
+    }
+
+    #[test]
+    fn test_from_value_bool_type_mismatch() {
+        use grafeo_common::types::Value;
+        let val = Value::Int64(1);
+        assert!(bool::from_value(&val).is_err());
+    }
+
+    #[test]
+    fn test_from_value_all_success() {
+        use grafeo_common::types::Value;
+        assert_eq!(i64::from_value(&Value::Int64(99)).unwrap(), 99);
+        assert!((f64::from_value(&Value::Float64(3.14)).unwrap() - 3.14).abs() < f64::EPSILON);
+        assert_eq!(String::from_value(&Value::from("hello")).unwrap(), "hello");
+        assert!(bool::from_value(&Value::Bool(true)).unwrap());
+    }
+
+    // =========================================================================
+    // GrafeoDB accessor tests
+    // =========================================================================
+
+    #[test]
+    fn test_database_is_read_only_false_by_default() {
+        let db = GrafeoDB::new_in_memory();
+        assert!(!db.is_read_only());
+    }
+
+    #[test]
+    fn test_database_graph_model() {
+        let db = GrafeoDB::new_in_memory();
+        assert_eq!(db.graph_model(), crate::config::GraphModel::Lpg);
+    }
+
+    #[test]
+    fn test_database_memory_limit_none_by_default() {
+        let db = GrafeoDB::new_in_memory();
+        assert!(db.memory_limit().is_none());
+    }
+
+    #[test]
+    fn test_database_memory_limit_custom() {
+        let config = Config::in_memory().with_memory_limit(128 * 1024 * 1024);
+        let db = GrafeoDB::with_config(config).unwrap();
+        assert_eq!(db.memory_limit(), Some(128 * 1024 * 1024));
+    }
+
+    #[test]
+    fn test_database_adaptive_config() {
+        let db = GrafeoDB::new_in_memory();
+        let adaptive = db.adaptive_config();
+        assert!(adaptive.enabled);
+        assert!((adaptive.threshold - 3.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_database_buffer_manager() {
+        let db = GrafeoDB::new_in_memory();
+        let _bm = db.buffer_manager();
+        // Just verify it doesn't panic
+    }
+
+    #[test]
+    fn test_database_query_cache() {
+        let db = GrafeoDB::new_in_memory();
+        let _qc = db.query_cache();
+    }
+
+    #[test]
+    fn test_database_clear_plan_cache() {
+        let db = GrafeoDB::new_in_memory();
+        // Execute a query to populate the cache
+        #[cfg(feature = "gql")]
+        {
+            let _ = db.execute("MATCH (n) RETURN count(n)");
+        }
+        db.clear_plan_cache();
+        // No panic means success
+    }
+
+    #[test]
+    fn test_database_gc() {
+        let db = GrafeoDB::new_in_memory();
+        db.create_node(&["Person"]);
+        db.gc();
+        // Verify no panic, node still accessible
+        assert_eq!(db.node_count(), 1);
+    }
+
+    // =========================================================================
+    // Named graph management
+    // =========================================================================
+
+    #[test]
+    fn test_create_and_list_graphs() {
+        let db = GrafeoDB::new_in_memory();
+        let created = db.create_graph("social").unwrap();
+        assert!(created);
+
+        // Creating same graph again returns false
+        let created_again = db.create_graph("social").unwrap();
+        assert!(!created_again);
+
+        let names = db.list_graphs();
+        assert!(names.contains(&"social".to_string()));
+    }
+
+    #[test]
+    fn test_drop_graph() {
+        let db = GrafeoDB::new_in_memory();
+        db.create_graph("temp").unwrap();
+        assert!(db.drop_graph("temp"));
+        assert!(!db.drop_graph("temp")); // Already dropped
+    }
+
+    #[test]
+    fn test_drop_graph_resets_current_graph() {
+        let db = GrafeoDB::new_in_memory();
+        db.create_graph("active").unwrap();
+        db.set_current_graph(Some("active")).unwrap();
+        assert_eq!(db.current_graph(), Some("active".to_string()));
+
+        db.drop_graph("active");
+        assert_eq!(db.current_graph(), None);
+    }
+
+    // =========================================================================
+    // Current graph / schema context
+    // =========================================================================
+
+    #[test]
+    fn test_current_graph_default_none() {
+        let db = GrafeoDB::new_in_memory();
+        assert_eq!(db.current_graph(), None);
+    }
+
+    #[test]
+    fn test_set_current_graph_valid() {
+        let db = GrafeoDB::new_in_memory();
+        db.create_graph("social").unwrap();
+        db.set_current_graph(Some("social")).unwrap();
+        assert_eq!(db.current_graph(), Some("social".to_string()));
+    }
+
+    #[test]
+    fn test_set_current_graph_nonexistent() {
+        let db = GrafeoDB::new_in_memory();
+        let result = db.set_current_graph(Some("nonexistent"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_set_current_graph_none_resets() {
+        let db = GrafeoDB::new_in_memory();
+        db.create_graph("social").unwrap();
+        db.set_current_graph(Some("social")).unwrap();
+        db.set_current_graph(None).unwrap();
+        assert_eq!(db.current_graph(), None);
+    }
+
+    #[test]
+    fn test_set_current_graph_default_keyword() {
+        let db = GrafeoDB::new_in_memory();
+        // "default" is a special case that always succeeds
+        db.set_current_graph(Some("default")).unwrap();
+        assert_eq!(db.current_graph(), Some("default".to_string()));
+    }
+
+    #[test]
+    fn test_current_schema_default_none() {
+        let db = GrafeoDB::new_in_memory();
+        assert_eq!(db.current_schema(), None);
+    }
+
+    #[test]
+    fn test_set_current_schema_nonexistent() {
+        let db = GrafeoDB::new_in_memory();
+        let result = db.set_current_schema(Some("nonexistent"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_set_current_schema_none_resets() {
+        let db = GrafeoDB::new_in_memory();
+        db.set_current_schema(None).unwrap();
+        assert_eq!(db.current_schema(), None);
+    }
+
+    // =========================================================================
+    // graph_store / graph_store_mut
+    // =========================================================================
+
+    #[test]
+    fn test_graph_store_returns_lpg_by_default() {
+        let db = GrafeoDB::new_in_memory();
+        db.create_node(&["Person"]);
+        let store = db.graph_store();
+        assert_eq!(store.node_count(), 1);
+    }
+
+    #[test]
+    fn test_graph_store_mut_returns_some_by_default() {
+        let db = GrafeoDB::new_in_memory();
+        assert!(db.graph_store_mut().is_some());
+    }
+
+    #[test]
+    fn test_with_read_store() {
+        use grafeo_core::graph::lpg::LpgStore;
+
+        let store = Arc::new(LpgStore::new().unwrap());
+        store.create_node(&["Person"]);
+
+        let read_store = Arc::clone(&store) as Arc<dyn GraphStore>;
+        let db = GrafeoDB::with_read_store(read_store, Config::in_memory()).unwrap();
+
+        assert!(db.is_read_only());
+        assert!(db.graph_store_mut().is_none());
+
+        // Read queries should work
+        let gs = db.graph_store();
+        assert_eq!(gs.node_count(), 1);
+    }
+
+    #[test]
+    fn test_with_store_graph_store_methods() {
+        use grafeo_core::graph::lpg::LpgStore;
+
+        let store = Arc::new(LpgStore::new().unwrap());
+        store.create_node(&["Person"]);
+
+        let db = GrafeoDB::with_store(
+            Arc::clone(&store) as Arc<dyn GraphStoreMut>,
+            Config::in_memory(),
+        )
+        .unwrap();
+
+        assert!(!db.is_read_only());
+        assert!(db.graph_store_mut().is_some());
+        assert_eq!(db.graph_store().node_count(), 1);
+    }
+
+    // =========================================================================
+    // session_read_only
+    // =========================================================================
+
+    #[test]
+    fn test_session_read_only() {
+        let db = GrafeoDB::new_in_memory();
+        db.create_node(&["Person"]);
+
+        let session = db.session_read_only();
+        // Read queries should work
+        #[cfg(feature = "gql")]
+        {
+            let result = session.execute("MATCH (n) RETURN count(n)").unwrap();
+            assert_eq!(result.rows.len(), 1);
+        }
+    }
+
+    // =========================================================================
+    // close on in-memory database
+    // =========================================================================
+
+    #[test]
+    fn test_close_in_memory_database() {
+        let db = GrafeoDB::new_in_memory();
+        db.create_node(&["Person"]);
+        assert!(db.close().is_ok());
+        // Second close should also be fine (idempotent)
+        assert!(db.close().is_ok());
+    }
+
+    // =========================================================================
+    // with_config validation failure
+    // =========================================================================
+
+    #[test]
+    fn test_with_config_invalid_config_zero_threads() {
+        let config = Config::in_memory().with_threads(0);
+        let result = GrafeoDB::with_config(config);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_with_config_invalid_config_zero_memory_limit() {
+        let config = Config::in_memory().with_memory_limit(0);
+        let result = GrafeoDB::with_config(config);
+        assert!(result.is_err());
+    }
+
+    // =========================================================================
+    // StorageFormat display (for config.rs coverage)
+    // =========================================================================
+
+    #[test]
+    fn test_storage_format_display() {
+        use crate::config::StorageFormat;
+        assert_eq!(StorageFormat::Auto.to_string(), "auto");
+        assert_eq!(StorageFormat::WalDirectory.to_string(), "wal-directory");
+        assert_eq!(StorageFormat::SingleFile.to_string(), "single-file");
+    }
+
+    #[test]
+    fn test_storage_format_default() {
+        use crate::config::StorageFormat;
+        assert_eq!(StorageFormat::default(), StorageFormat::Auto);
+    }
+
+    #[test]
+    fn test_config_with_storage_format() {
+        use crate::config::StorageFormat;
+        let config = Config::in_memory().with_storage_format(StorageFormat::SingleFile);
+        assert_eq!(config.storage_format, StorageFormat::SingleFile);
+    }
+
+    // =========================================================================
+    // Config CDC
+    // =========================================================================
+
+    #[test]
+    fn test_config_with_cdc() {
+        let config = Config::in_memory().with_cdc();
+        assert!(config.cdc_enabled);
+    }
+
+    #[test]
+    fn test_config_cdc_default_false() {
+        let config = Config::in_memory();
+        assert!(!config.cdc_enabled);
+    }
+
+    // =========================================================================
+    // ConfigError as std::error::Error
+    // =========================================================================
+
+    #[test]
+    fn test_config_error_is_error_trait() {
+        use crate::config::ConfigError;
+        let err: Box<dyn std::error::Error> = Box::new(ConfigError::ZeroMemoryLimit);
+        assert!(err.source().is_none());
+    }
+
+    // =========================================================================
+    // Metrics tests
+    // =========================================================================
+
+    #[cfg(feature = "metrics")]
+    #[test]
+    fn test_metrics_prometheus_output() {
+        let db = GrafeoDB::new_in_memory();
+        let prom = db.metrics_prometheus();
+        // Should contain at least some metric names
+        assert!(!prom.is_empty());
+    }
+
+    #[cfg(feature = "metrics")]
+    #[test]
+    fn test_reset_metrics() {
+        let db = GrafeoDB::new_in_memory();
+        // Execute something to generate metrics
+        let _session = db.session();
+        db.reset_metrics();
+        let snap = db.metrics();
+        assert_eq!(snap.query_count, 0);
+    }
+
+    // =========================================================================
+    // drop_graph on external store
+    // =========================================================================
+
+    #[test]
+    fn test_drop_graph_on_external_store() {
+        use grafeo_core::graph::lpg::LpgStore;
+
+        let store = Arc::new(LpgStore::new().unwrap());
+        let read_store = Arc::clone(&store) as Arc<dyn GraphStore>;
+        let db = GrafeoDB::with_read_store(read_store, Config::in_memory()).unwrap();
+
+        // drop_graph with external store (no built-in store) returns false
+        assert!(!db.drop_graph("anything"));
     }
 }

@@ -106,7 +106,7 @@ impl JsGrafeoDB {
         params: Option<serde_json::Value>,
     ) -> Result<QueryResult> {
         let db = self.inner.clone();
-        let result = tokio::task::spawn_blocking(move || {
+        let mut result = tokio::task::spawn_blocking(move || {
             let db = db.read();
             execute_language_query(&db, &query, language, params.as_ref())
         })
@@ -115,14 +115,17 @@ impl JsGrafeoDB {
 
         let db = self.inner.read();
         let (nodes, edges) = extract_entities(&result, &db);
+        let columns = std::mem::take(&mut result.columns);
+        let exec_time = result.execution_time_ms;
+        let scanned = result.rows_scanned;
 
         Ok(QueryResult::with_metrics(
-            result.columns,
-            result.rows,
+            columns,
+            result.into_rows(),
             nodes,
             edges,
-            result.execution_time_ms,
-            result.rows_scanned,
+            exec_time,
+            scanned,
         ))
     }
 
@@ -1075,7 +1078,7 @@ impl JsGrafeoDB {
         params: Option<serde_json::Value>,
     ) -> Result<QueryResult> {
         let db = self.inner.clone();
-        let result = tokio::task::spawn_blocking(move || {
+        let mut result = tokio::task::spawn_blocking(move || {
             let db = db.read();
             execute_language_query(&db, &query, &language, params.as_ref())
         })
@@ -1084,14 +1087,17 @@ impl JsGrafeoDB {
 
         let db = self.inner.read();
         let (nodes, edges) = extract_entities(&result, &db);
+        let columns = std::mem::take(&mut result.columns);
+        let exec_time = result.execution_time_ms;
+        let scanned = result.rows_scanned;
 
         Ok(QueryResult::with_metrics(
-            result.columns,
-            result.rows,
+            columns,
+            result.into_rows(),
             nodes,
             edges,
-            result.execution_time_ms,
-            result.rows_scanned,
+            exec_time,
+            scanned,
         ))
     }
 }

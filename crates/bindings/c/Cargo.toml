@@ -33,12 +33,18 @@ hybrid-search = ["grafeo-engine/hybrid-search"]
 cdc = ["grafeo-engine/cdc"]
 algos = ["grafeo-engine/algos"]
 triple-store = ["grafeo-engine/triple-store"]
-rdf = ["triple-store"]  # Deprecated: use triple-store
 compact-store = ["grafeo-engine/compact-store"]
+jsonl-import = ["grafeo-engine/jsonl-import"]
+parquet-import = ["grafeo-engine/parquet-import"]
 languages = ["gql", "cypher", "sparql", "gremlin", "graphql", "sql-pgq"]
 ai = ["vector-index", "text-index", "hybrid-search", "cdc"]
 storage = ["grafeo-engine/storage"]
-# Named profiles
+# Persona-based profiles
+lpg = ["grafeo-engine/lpg", "gql", "cypher", "gremlin", "sql-pgq", "storage", "grafeo-engine/regex"]
+rdf = ["triple-store", "gql", "sparql", "graphql", "storage", "grafeo-engine/regex"]
+analytics = ["algos", "vector-index", "text-index", "hybrid-search", "jsonl-import", "parquet-import"]
+edge = ["grafeo-engine/lpg", "gql", "grafeo-engine/regex-lite"]
+# Deployment-based profiles (deprecated)
 embedded = ["gql", "ai", "algos", "compact-store", "grafeo-engine/parallel", "grafeo-engine/regex", "grafeo-engine/grafeo-file"]
 full = ["languages", "ai", "algos", "triple-store"]
 

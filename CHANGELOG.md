@@ -4,46 +4,48 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 
 ## [0.5.35] - Unreleased
 
+Breaking: `QueryResult.rows` is now private (use `rows()`/`into_rows()`), all public enums are `#[non_exhaustive]` (add `_ =>` arms), and old feature profiles (`embedded`, `browser`, `server`, `full`) are deprecated in favor of persona-based profiles (`lpg`, `rdf`, `analytics`, `ai`, `edge`, `enterprise`).
+
 ### Added
 
+- **Persona-based feature profiles**: new named profiles `lpg`, `rdf`, `analytics`, `ai`, `edge`, `enterprise` describe use cases instead of deployment targets. Compose them freely: `features = ["lpg", "ai"]` for a graph app with search, `features = ["rdf", "analytics"]` for a knowledge graph with algorithms. Old profiles (`embedded`, `browser`, `server`, `full`) remain as deprecated aliases with unchanged behavior, scheduled for removal in 0.7.0.
 - **Python named graph management**: `create_graph()`, `drop_graph()`, `list_graphs()`, `set_graph()`/`reset_graph()`/`current_graph()`, `set_schema()`/`reset_schema()`/`current_schema()` ([#241](https://github.com/GrafeoDB/grafeo/issues/241), [#243](https://github.com/GrafeoDB/grafeo/pull/243) by [@Michaelzag](https://github.com/Michaelzag))
-- **Python per-transaction CDC override**: `begin_transaction_with_cdc(True|False)` to enable or suppress change tracking per transaction ([#242](https://github.com/GrafeoDB/grafeo/issues/242), [#244](https://github.com/GrafeoDB/grafeo/pull/244) by [@Michaelzag](https://github.com/Michaelzag))
-- **Arrow IPC export** (`arrow-export` feature): zero-copy data export from query results to Arrow IPC format, enabling interop with DuckDB, Polars, pandas, and DataFusion. Python `result.to_arrow()` / `result.to_arrow_ipc()`, Node.js `result.toArrowIPC()`, CLI `--export-format arrow`
-- **GEXF + GraphML export**: graph interchange formats for Gephi, Gephi Lite, Cytoscape, NetworkX, yEd, and igraph. CLI `--export-format gexf|graphml` with streaming XML serialization and full property type mapping
-- **Section-based container format**: `.grafeo` files now use a section directory with independently addressable, checksummed sections (Catalog, LPG Store, RDF Store) instead of a monolithic blob. Checkpoint writes only dirty sections, recovery loads sections in parallel. Forward-compatible: unknown optional sections are safely skipped by older versions.
-- **`grafeo-storage` crate**: new crate for persistence I/O (WAL, container format, crash safety), extracted from `grafeo-adapters`. Depends only on `grafeo-common`, enabling clean crate boundaries: `grafeo-core` and `grafeo-storage` are siblings with no mutual dependency.
-- **Unified flush model**: checkpoint, explicit `CHECKPOINT`, and future memory-pressure eviction share one code path (`FlushReason::Checkpoint | Explicit | MemoryPressure`)
-- **Performance regression benchmarks**: 11 targeted Criterion benchmarks covering multi-hop traversal, repeated execution overhead, and edge-type filtering regressions. Per-benchmark threshold config (`bench-thresholds.toml`) with category-aware CI comparison.
-- **Memory benchmarks**: 5 benchmarks tracking absolute memory usage (empty DB, 1K/10K graphs, post-query, vector index) with JSON snapshot output for CI bounds checking.
-- **Section trait** (`grafeo_common::storage::Section`): trait contract for section serializers, with `SectionType` enum, `SectionDirectoryEntry`, and `SectionFlags` for forward compatibility.
-- **Vector Store section serializer**: persists HNSW topology (entry point, layers, neighbor lists) to the container, eliminating O(N log N) index rebuild on database open.
-- **Text Index section serializer**: persists BM25 postings, document lengths, and term dictionaries, eliminating full-text index rebuild from LPG properties on open.
-- **Per-section memory config**: `SectionMemoryConfig` with `max_ram` caps and `TierOverride` (Auto/ForceRam/ForceDisk) per section type, configurable via `Config::with_section_config()`.
-- **Mmap for index sections**: `GrafeoFileManager::mmap_section()` provides zero-copy read access to container sections via `memmap2`. CRC-verified on creation, cross-platform lifecycle (drop before checkpoint).
-- **BufferManager section consumers**: storage sections register as `MemoryConsumer`s with the buffer manager, enabling accurate memory pressure tracking and per-region usage reporting. Dynamic consumers for vector and text indexes use `Weak<LpgStore>` to avoid stale references.
-- **Periodic checkpoint timer**: background thread flushes dirty sections at `Config::checkpoint_interval`, bounding WAL size and limiting data loss to one interval on crash. Stops promptly (<100 ms) on database close.
-- **Container format specification**: `docs/architecture/storage/container-format.md` documents the `.grafeo` file layout, section directory, checkpoint flow, mmap lifecycle, and recovery procedure.
-- **Vector embedding spill to disk**: when memory pressure is detected or `TierOverride::ForceDisk` is configured, vector property columns are drained to `MmapStorage` files, freeing heap memory. Search transparently reads spilled vectors from mmap via `SpillableVectorAccessor`, with fallback to property storage for post-spill inserts.
-- **BufferManager spill integration**: eviction cycle now calls `spill()` on consumers that support disk offloading after in-memory eviction is exhausted. `BufferManager::spill_all()` for explicit ForceDisk at startup.
-- **PropertyColumn eviction**: `drain_values()`, `evict_values()`, `restore_values()` on property columns with a `spilled` flag, enabling column-level memory management for large vector properties.
+- **Python per-transaction CDC override**: `begin_transaction_with_cdc(True|False)` ([#242](https://github.com/GrafeoDB/grafeo/issues/242), [#244](https://github.com/GrafeoDB/grafeo/pull/244) by [@Michaelzag](https://github.com/Michaelzag))
+- **Arrow IPC export** (`arrow-export`): zero-copy export to Arrow IPC for DuckDB, Polars, pandas, DataFusion interop
+- **GEXF + GraphML export**: graph interchange for Gephi, Cytoscape, NetworkX, yEd, igraph. CLI `--export-format gexf|graphml`
+- **Section-based container format**: `.grafeo` files use a section directory with checksummed, independently addressable sections. Checkpoint writes only dirty sections, recovery loads in parallel.
+- **`grafeo-storage` crate**: persistence I/O extracted from `grafeo-adapters`. `grafeo-core` and `grafeo-storage` are now siblings (both depend only on `grafeo-common`).
+- **Unified flush model**: checkpoint, `CHECKPOINT`, and memory-pressure eviction share one code path
+- **Regression + memory benchmarks**: 11 Criterion benchmarks with per-benchmark thresholds, 5 memory benchmarks with CI bounds checking
+- **Section serializers**: Vector Store (HNSW topology) and Text Index (BM25 postings) persist to container, eliminating index rebuild on open
+- **Per-section memory config**: `SectionMemoryConfig` with `max_ram` caps and `TierOverride` per section type
+- **Mmap for index sections**: zero-copy read via `memmap2`, CRC-verified, cross-platform lifecycle
+- **BufferManager section consumers**: sections register as `MemoryConsumer`s for accurate pressure tracking
+- **Periodic checkpoint timer**: background flush at `Config::checkpoint_interval`, bounds WAL size
+- **Container format spec**: `docs/architecture/storage/container-format.md`
+- **Vector spill to disk**: vector columns drain to `MmapStorage` under memory pressure, search reads transparently from mmap
+- **BufferManager spill integration**: eviction calls `spill()` on consumers after in-memory eviction exhausted
+- **PropertyColumn eviction**: `drain_values()`, `evict_values()`, `restore_values()` with `spilled` flag
 
 ### Changed
 
-- **`#[non_exhaustive]` on all public enums**: 95 public enums across grafeo-common, grafeo-core, and grafeo-engine are now marked `#[non_exhaustive]`, allowing new variants in future releases without breaking semver. Downstream `match` statements on these enums must add a wildcard arm (`_ => ...`).
-- **Python abi3 wheels**: single wheel per platform now supports Python 3.12+ (fixes missing 3.13/3.14 wheels on Windows and macOS)
-- **`rdf` feature renamed to `triple-store`**: the atom that enables the RDF triple store model is now `triple-store` across all crates, freeing `rdf` for the upcoming persona-based profile name. A deprecated alias `rdf = ["triple-store"]` is kept for one release. WASM retains `rdf` as the profile name (intentional).
-- **`lpg` feature flag**: LPG graph model is now an explicit feature (`lpg`) in grafeo-core, grafeo-engine, and grafeo-adapters, symmetric to `triple-store`. Included in all default and named profiles, so existing builds are unaffected. Enables future RDF-only builds without LPG compilation.
-- **Crate restructure**: storage backends (WAL, `.grafeo` format) moved from `grafeo-adapters` to new `grafeo-storage` crate. `grafeo-adapters` is now parser-only. `grafeo-core/src/storage/` renamed to `grafeo-core/src/codec/` (compression codecs, not I/O).
-- **Removed tokio from grafeo-core**: async spill files moved to `grafeo-engine/src/execution/spill/`, keeping `grafeo-core` free of I/O runtime dependencies.
-- **CI benchmark job**: now runs all 6 bench files (added `serialization_bench`, `regression_bench`, `memory_bench`), uses per-benchmark thresholds from `bench-thresholds.toml`, adds `benchmark-main` job for baseline persistence on push to main.
-- **CI**: moved Python CLI wheel build from `pypi.yml` to `release.yml`
+- **`VersionChain` uses `Vec` instead of `VecDeque`**: eliminates 4-slot minimum allocation per entity, reducing per-entity memory 14-31% ([#251](https://github.com/GrafeoDB/grafeo/issues/251))
+- **Schema DDL types decoupled from GQL parser**: shared types (`SchemaStatement`, `PropertyDefinition`, etc.) moved to `query::schema` module, allowing Cypher to compile without the `gql` feature ([#234](https://github.com/GrafeoDB/grafeo/issues/234))
+- **`QueryResult.rows` is now private**: use `rows()` for borrowed access, `into_rows()` for ownership, `push_row()`/`from_rows()` for construction
+- **`#[non_exhaustive]` on 95 public enums**: downstream `match` must add `_ =>` wildcard arms
+- **Python abi3 wheels**: single wheel per platform supports Python 3.12+
+- **`rdf` feature renamed to `triple-store`**: deprecated `rdf` alias kept for one release, `rdf` now names the persona profile
+- **`lpg` feature flag**: LPG model is now explicit in grafeo-core/engine/adapters, symmetric to `triple-store`
+- **Crate restructure**: storage backends moved to `grafeo-storage`, `grafeo-adapters` is parser-only, `grafeo-core/src/storage/` renamed to `codec/`
+- **Removed tokio from grafeo-core**: async spill moved to `grafeo-engine/src/execution/spill/`
+- **CI**: benchmark job adds per-benchmark thresholds and baseline persistence on main
 
 ### Fixed
 
-- **Graph/schema context validation**: `set_current_graph()` and `set_current_schema()` now reject nonexistent targets across all bindings; `drop_graph()` auto-clears the active context ([#245](https://github.com/GrafeoDB/grafeo/issues/245), [#246](https://github.com/GrafeoDB/grafeo/pull/246) by [@Michaelzag](https://github.com/Michaelzag))
-- **C binding `grafeo_reset_schema`**: propagates errors instead of silently discarding them
-- **WASM `setSchema` error type**: returns a proper JS `Error` object instead of a plain string
-- **CI benchmark job**: bench commands now target specific crates (`-p grafeo-common -p grafeo-core -p grafeo-engine`) to avoid passing Criterion flags to non-benchmark crates
+- **Graph/schema context validation**: reject nonexistent targets, `drop_graph()` auto-clears active context ([#245](https://github.com/GrafeoDB/grafeo/issues/245), [#246](https://github.com/GrafeoDB/grafeo/pull/246) by [@Michaelzag](https://github.com/Michaelzag))
+- **C binding `grafeo_reset_schema`**: propagates errors instead of silently discarding
+- **WASM `setSchema`**: returns proper JS `Error` instead of plain string
+- **CI benchmark `--save-baseline`**: scoped to Criterion crates only
 
 ## [0.5.34] - 2026-04-07
 

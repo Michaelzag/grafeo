@@ -169,6 +169,7 @@ impl CheckpointTimer {
             #[cfg(feature = "wal")]
             wal,
         )
+        .map(|_| ())
     }
 
     /// Builds section objects from the captured components.

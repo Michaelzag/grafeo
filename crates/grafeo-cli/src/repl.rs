@@ -173,7 +173,7 @@ pub fn run(
             Ok(qr) => {
                 let headers = qr.columns.clone();
                 let rows: Vec<Vec<String>> = qr
-                    .rows
+                    .rows()
                     .iter()
                     .map(|row| row.iter().map(format_value).collect())
                     .collect();

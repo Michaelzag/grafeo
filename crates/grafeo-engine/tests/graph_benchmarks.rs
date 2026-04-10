@@ -278,11 +278,11 @@ fn bench_graph_traversals() {
     // Verify setup: node count matches expectations
     let count_result = session.execute("MATCH (n:Person) RETURN COUNT(n)").unwrap();
     assert_eq!(
-        count_result.rows.len(),
+        count_result.rows().len(),
         1,
         "COUNT query should return one row"
     );
-    let node_total = match &count_result.rows[0][0] {
+    let node_total = match &count_result.rows()[0][0] {
         Value::Int64(n) => *n as usize,
         other => panic!("Expected integer count, got {:?}", other),
     };
@@ -353,11 +353,11 @@ fn bench_graph_traversals() {
         .execute("MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN COUNT(a)")
         .unwrap();
     assert_eq!(
-        edge_check.rows.len(),
+        edge_check.rows().len(),
         1,
         "Edge count query should return one row"
     );
-    let total_edges = match &edge_check.rows[0][0] {
+    let total_edges = match &edge_check.rows()[0][0] {
         Value::Int64(n) => *n as usize,
         other => panic!("Expected integer edge count, got {:?}", other),
     };
@@ -409,11 +409,11 @@ fn bench_filtering() {
     // Verify setup: node count matches expectations
     let count_result = session.execute("MATCH (u:User) RETURN COUNT(u)").unwrap();
     assert_eq!(
-        count_result.rows.len(),
+        count_result.rows().len(),
         1,
         "COUNT query should return one row"
     );
-    let user_total = match &count_result.rows[0][0] {
+    let user_total = match &count_result.rows()[0][0] {
         Value::Int64(n) => *n as usize,
         other => panic!("Expected integer count, got {:?}", other),
     };
@@ -489,7 +489,7 @@ fn bench_filtering() {
         .unwrap();
     let expected_category_a = node_count / 5; // i % 5 == 0
     assert_eq!(
-        check.rows.len(),
+        check.rows().len(),
         expected_category_a,
         "Category 'A' filter should return exactly 1/5 of nodes"
     );
@@ -626,11 +626,11 @@ fn bench_point_lookups() {
     // Verify setup: node count matches expectations
     let count_result = session.execute("MATCH (r:Record) RETURN COUNT(r)").unwrap();
     assert_eq!(
-        count_result.rows.len(),
+        count_result.rows().len(),
         1,
         "COUNT query should return one row"
     );
-    let record_total = match &count_result.rows[0][0] {
+    let record_total = match &count_result.rows()[0][0] {
         Value::Int64(n) => *n as usize,
         other => panic!("Expected integer count, got {:?}", other),
     };
@@ -687,12 +687,12 @@ fn bench_point_lookups() {
         .execute("MATCH (r:Record {id: 0}) RETURN r.uuid")
         .unwrap();
     assert_eq!(
-        check.rows.len(),
+        check.rows().len(),
         1,
         "Point lookup for id=0 should return exactly one row"
     );
     assert_eq!(
-        check.rows[0][0],
+        check.rows()[0][0],
         Value::String("uuid-0".into()),
         "Record 0 should have uuid 'uuid-0'"
     );
@@ -936,11 +936,11 @@ fn bench_concurrent_reads() {
             .execute("MATCH (item:Item) RETURN COUNT(item)")
             .unwrap();
         assert_eq!(
-            count_result.rows.len(),
+            count_result.rows().len(),
             1,
             "COUNT query should return one row"
         );
-        let item_total = match &count_result.rows[0][0] {
+        let item_total = match &count_result.rows()[0][0] {
             Value::Int64(n) => *n as usize,
             other => panic!("Expected integer count, got {:?}", other),
         };

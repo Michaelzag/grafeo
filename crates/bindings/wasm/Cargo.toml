@@ -48,13 +48,16 @@ vector-index = ["grafeo-engine/vector-index"]
 text-index = ["grafeo-engine/text-index"]
 hybrid-search = ["grafeo-engine/hybrid-search"]
 languages = ["gql", "cypher", "sparql", "gremlin", "graphql", "sql-pgq"]
-ai = ["vector-index", "text-index", "hybrid-search"]
 compact-store = ["grafeo-engine/compact-store"]
-# Named profiles
-browser = ["gql", "compact-store", "grafeo-engine/lpg", "grafeo-engine/regex-lite"]  # GQL + LPG + compact (~507 KB gzip)
-lpg = ["languages", "ai", "grafeo-engine/regex"]    # All LPG languages + AI search
-rdf = ["sparql", "graphql", "grafeo-engine/regex-lite"]  # SPARQL + GraphQL over RDF
-full = ["languages", "ai"]                          # All languages + AI search
+# Persona-based profiles
+lpg = ["grafeo-engine/lpg", "gql", "cypher", "gremlin", "sql-pgq", "grafeo-engine/regex"]  # Graph App Developer
+rdf = ["rdf-model", "gql", "sparql", "graphql", "grafeo-engine/regex-lite"]  # Knowledge Engineer
+ai = ["vector-index", "text-index", "hybrid-search"]  # AI/Agent Developer
+analytics = ["ai"]  # Data Scientist (alias for ai in WASM, no algos/import available)
+edge = ["grafeo-engine/lpg", "gql", "compact-store", "grafeo-engine/regex-lite"]  # Frontend/Edge
+# Deployment-based profiles (deprecated)
+browser = ["edge"]  # Deprecated: use edge
+full = ["languages", "ai"]
 
 [lints]
 workspace = true

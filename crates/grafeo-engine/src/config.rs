@@ -975,4 +975,93 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.access_mode, AccessMode::ReadWrite);
     }
+
+    // --- StorageFormat tests ---
+
+    #[test]
+    fn test_storage_format_default_is_auto() {
+        assert_eq!(StorageFormat::default(), StorageFormat::Auto);
+    }
+
+    #[test]
+    fn test_storage_format_display() {
+        assert_eq!(StorageFormat::Auto.to_string(), "auto");
+        assert_eq!(StorageFormat::WalDirectory.to_string(), "wal-directory");
+        assert_eq!(StorageFormat::SingleFile.to_string(), "single-file");
+    }
+
+    #[test]
+    fn test_config_with_storage_format() {
+        let config = Config::in_memory().with_storage_format(StorageFormat::SingleFile);
+        assert_eq!(config.storage_format, StorageFormat::SingleFile);
+
+        let config2 = Config::in_memory().with_storage_format(StorageFormat::WalDirectory);
+        assert_eq!(config2.storage_format, StorageFormat::WalDirectory);
+    }
+
+    // --- CDC config tests ---
+
+    #[test]
+    fn test_config_with_cdc() {
+        let config = Config::in_memory().with_cdc();
+        assert!(config.cdc_enabled);
+    }
+
+    #[test]
+    fn test_config_cdc_default_false() {
+        let config = Config::default();
+        assert!(!config.cdc_enabled);
+    }
+
+    // --- ConfigError as std::error::Error ---
+
+    #[test]
+    fn test_config_error_is_std_error() {
+        let err = ConfigError::ZeroMemoryLimit;
+        // Ensure it implements std::error::Error (no source)
+        let dyn_err: &dyn std::error::Error = &err;
+        assert!(dyn_err.source().is_none());
+        assert!(!dyn_err.to_string().is_empty());
+    }
+
+    // --- Validate accepts non-zero memory limit ---
+
+    #[test]
+    fn test_validate_accepts_nonzero_memory_limit() {
+        let config = Config::in_memory().with_memory_limit(1);
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_accepts_none_memory_limit() {
+        let config = Config::in_memory();
+        assert!(config.memory_limit.is_none());
+        assert!(config.validate().is_ok());
+    }
+
+    // --- DurabilityMode variants ---
+
+    #[test]
+    fn test_durability_mode_debug() {
+        let sync = DurabilityMode::Sync;
+        let debug = format!("{sync:?}");
+        assert_eq!(debug, "Sync");
+
+        let no_sync = DurabilityMode::NoSync;
+        let debug = format!("{no_sync:?}");
+        assert_eq!(debug, "NoSync");
+    }
+
+    // --- read_only config ---
+
+    #[test]
+    fn test_read_only_config_full() {
+        let config = Config::read_only("/tmp/data.grafeo");
+        assert_eq!(config.access_mode, AccessMode::ReadOnly);
+        assert!(!config.wal_enabled);
+        assert!(config.path.is_some());
+        // Other defaults should still apply
+        assert!(config.backward_edges);
+        assert_eq!(config.graph_model, GraphModel::Lpg);
+    }
 }

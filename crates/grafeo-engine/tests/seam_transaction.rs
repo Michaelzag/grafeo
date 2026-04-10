@@ -403,7 +403,7 @@ mod savepoint_graphs {
             1,
             "Only pre-savepoint insert should survive"
         );
-        assert_eq!(result.rows[0][0], Value::String("before".into()));
+        assert_eq!(result.rows()[0][0], Value::String("before".into()));
     }
 
     #[test]
@@ -503,7 +503,7 @@ mod savepoint_graphs {
 
         let result = session.execute("MATCH (n:Person) RETURN n.name").unwrap();
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
     }
 
     #[test]
@@ -583,8 +583,8 @@ mod session_isolation {
 
         assert_eq!(r1.row_count(), 1);
         assert_eq!(r2.row_count(), 1);
-        assert_eq!(r1.rows[0][0], Value::String("widget".into()));
-        assert_eq!(r2.rows[0][0], Value::String("gadget".into()));
+        assert_eq!(r1.rows()[0][0], Value::String("widget".into()));
+        assert_eq!(r2.rows()[0][0], Value::String("gadget".into()));
     }
 
     #[test]
@@ -627,7 +627,7 @@ mod session_isolation {
             1,
             "s2's committed data should survive s1's rollback"
         );
-        assert_eq!(result.rows[0][0], Value::String("Gus".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Gus".into()));
     }
 
     #[test]
@@ -649,7 +649,7 @@ mod session_isolation {
         // Outer transaction should still have Alix
         let result = session.execute("MATCH (n:Person) RETURN n.name").unwrap();
         assert_eq!(result.row_count(), 1, "Outer transaction should have Alix");
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
 
         session.execute("COMMIT").unwrap();
 

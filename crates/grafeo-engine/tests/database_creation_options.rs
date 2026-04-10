@@ -13,7 +13,7 @@ fn lpg_database_executes_gql() {
     let session = db.session();
     session.execute("INSERT (:Person {name: 'Alix'})").unwrap();
     let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
 }
 
 #[cfg(feature = "triple-store")]
@@ -233,13 +233,13 @@ fn sparql_filter_equality_coerces_string_to_numeric() {
         .unwrap();
 
     assert_eq!(
-        result.rows.len(),
+        result.rows().len(),
         1,
         "FILTER(?age = 30) should match String '30' via type coercion"
     );
 
     // Verify the matched value
-    let age = &result.rows[0][1];
+    let age = &result.rows()[0][1];
     assert!(
         matches!(age, Value::String(s) if s.as_str() == "30"),
         "Expected String '30', got {age:?}"
@@ -273,7 +273,7 @@ fn sparql_filter_inequality_coerces_string_to_numeric() {
         .unwrap();
 
     assert_eq!(
-        result.rows.len(),
+        result.rows().len(),
         1,
         "FILTER(?age != 30) should exclude String '30'"
     );

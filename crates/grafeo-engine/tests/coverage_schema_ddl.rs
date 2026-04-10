@@ -271,7 +271,7 @@ fn test_not_null_constraint_allows_all_properties_present() {
     let result = session
         .execute("MATCH (i:Invoice) RETURN i.number, i.total")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
 }
 
 // ---------------------------------------------------------------------------

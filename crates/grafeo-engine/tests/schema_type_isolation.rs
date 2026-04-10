@@ -36,7 +36,7 @@ fn show_graph_types_respects_schema() {
     // Default schema sees the graph type
     let result = session.execute("SHOW GRAPH TYPES").unwrap();
     assert_eq!(
-        result.rows.len(),
+        result.rows().len(),
         1,
         "default schema should see 1 graph type"
     );
@@ -50,7 +50,7 @@ fn show_graph_types_respects_schema() {
     // my_schema2 should see no graph types
     let result = session.execute("SHOW GRAPH TYPES").unwrap();
     assert_eq!(
-        result.rows.len(),
+        result.rows().len(),
         0,
         "my_schema2 should see 0 graph types (issue #167)"
     );
@@ -73,13 +73,13 @@ fn show_node_types_respects_schema() {
 
     // Visible in s1
     let result = session.execute("SHOW NODE TYPES").unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
 
     // Not visible in default schema
     session.execute("SESSION RESET SCHEMA").unwrap();
     let result = session.execute("SHOW NODE TYPES").unwrap();
     assert_eq!(
-        result.rows.len(),
+        result.rows().len(),
         0,
         "default schema should not see s1 types"
     );
@@ -101,12 +101,12 @@ fn show_edge_types_respects_schema() {
         .unwrap();
 
     let result = session.execute("SHOW EDGE TYPES").unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
 
     session.execute("SESSION RESET SCHEMA").unwrap();
     let result = session.execute("SHOW EDGE TYPES").unwrap();
     assert_eq!(
-        result.rows.len(),
+        result.rows().len(),
         0,
         "default schema should not see s1 edge types"
     );
@@ -140,16 +140,16 @@ fn types_isolated_between_schemas() {
     // Each schema sees exactly one
     session.execute("SESSION SET SCHEMA alpha").unwrap();
     let result = session.execute("SHOW NODE TYPES").unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
 
     session.execute("SESSION SET SCHEMA beta").unwrap();
     let result = session.execute("SHOW NODE TYPES").unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
 
     // Default schema sees none
     session.execute("SESSION RESET SCHEMA").unwrap();
     let result = session.execute("SHOW NODE TYPES").unwrap();
-    assert_eq!(result.rows.len(), 0);
+    assert_eq!(result.rows().len(), 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -167,7 +167,7 @@ fn default_schema_types_hidden_in_named_schema() {
         .unwrap();
 
     let result = session.execute("SHOW NODE TYPES").unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
 
     // Switch to named schema: default types not visible
     session
@@ -176,7 +176,7 @@ fn default_schema_types_hidden_in_named_schema() {
     session.execute("SESSION SET SCHEMA isolated").unwrap();
     let result = session.execute("SHOW NODE TYPES").unwrap();
     assert_eq!(
-        result.rows.len(),
+        result.rows().len(),
         0,
         "named schema should not see default types"
     );
@@ -198,11 +198,11 @@ fn drop_type_respects_schema() {
         .unwrap();
 
     let result = session.execute("SHOW NODE TYPES").unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
 
     session.execute("DROP NODE TYPE Temp").unwrap();
     let result = session.execute("SHOW NODE TYPES").unwrap();
-    assert_eq!(result.rows.len(), 0);
+    assert_eq!(result.rows().len(), 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -248,13 +248,13 @@ fn alter_type_respects_schema() {
 
     // Verify the type is still visible and was altered in s1
     let result = session.execute("SHOW NODE TYPES").unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
 
     // Not visible in default schema (isolation preserved after alter)
     session.execute("SESSION RESET SCHEMA").unwrap();
     let result = session.execute("SHOW NODE TYPES").unwrap();
     assert_eq!(
-        result.rows.len(),
+        result.rows().len(),
         0,
         "altered schema type should not leak to default"
     );

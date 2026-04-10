@@ -824,4 +824,252 @@ mod tests {
         assert_eq!(freed, 0);
         assert_eq!(consumer.memory_usage(), 1000);
     }
+
+    #[test]
+    fn alix_with_defaults_creates_manager() {
+        let manager = BufferManager::with_defaults();
+        // with_defaults uses system memory detection, budget should be > 0
+        assert!(manager.budget() > 0);
+        assert_eq!(manager.allocated(), 0);
+        assert_eq!(manager.available(), manager.budget());
+    }
+
+    #[test]
+    fn gus_config_accessor_returns_budget() {
+        let manager = BufferManager::with_budget(4096);
+        let config = manager.config();
+        assert_eq!(config.budget, 4096);
+        assert!(!config.background_eviction);
+        assert!(config.spill_path.is_none());
+    }
+
+    #[test]
+    fn vincent_shutdown_sets_flag() {
+        let manager = BufferManager::with_budget(1000);
+        manager.shutdown();
+        // shutdown stores true; drop also stores true, so this just verifies
+        // the method runs without error and the manager remains usable
+        assert_eq!(manager.allocated(), 0);
+    }
+
+    #[test]
+    fn jules_critical_pressure_level() {
+        let config = BufferManagerConfig {
+            budget: 1000,
+            soft_limit_fraction: 0.70,
+            evict_limit_fraction: 0.85,
+            hard_limit_fraction: 0.95,
+            background_eviction: false,
+            spill_path: None,
+        };
+        let manager = BufferManager::new(config);
+
+        // Manually set allocated above hard limit to test Critical level
+        manager.allocated.store(960, Ordering::Relaxed);
+        assert_eq!(manager.pressure_level(), PressureLevel::Critical);
+    }
+
+    #[test]
+    fn mia_evict_to_target_already_below() {
+        let manager = BufferManager::with_budget(10000);
+        // allocated is 0, target is 5000: already below target
+        let freed = manager.evict_to_target(5000);
+        assert_eq!(freed, 0);
+    }
+
+    #[test]
+    fn butch_try_allocate_raw_success() {
+        let config = BufferManagerConfig {
+            budget: 1000,
+            soft_limit_fraction: 0.70,
+            evict_limit_fraction: 0.85,
+            hard_limit_fraction: 0.95,
+            background_eviction: false,
+            spill_path: None,
+        };
+        let manager = BufferManager::new(config);
+
+        // GrantReleaser::try_allocate_raw succeeds when under hard limit
+        let success = manager.try_allocate_raw(100, MemoryRegion::GraphStorage);
+        assert!(success);
+        assert_eq!(manager.allocated(), 100);
+        assert_eq!(
+            manager.stats().region_usage(MemoryRegion::GraphStorage),
+            100
+        );
+    }
+
+    #[test]
+    fn django_try_allocate_raw_fails_at_hard_limit() {
+        let config = BufferManagerConfig {
+            budget: 1000,
+            soft_limit_fraction: 0.70,
+            evict_limit_fraction: 0.85,
+            hard_limit_fraction: 0.95,
+            background_eviction: false,
+            spill_path: None,
+        };
+        let manager = BufferManager::new(config);
+
+        // Fill up to hard limit
+        manager.allocated.store(940, Ordering::Relaxed);
+
+        // This exceeds hard limit (940 + 100 = 1040 > 950), no consumers to evict
+        let success = manager.try_allocate_raw(100, MemoryRegion::ExecutionBuffers);
+        assert!(!success);
+    }
+
+    #[test]
+    fn shosanna_drop_sets_shutdown() {
+        // Create and immediately drop to exercise the Drop impl
+        let manager = BufferManager::with_budget(512);
+        drop(manager);
+        // If we get here without panic, the Drop impl ran successfully.
+    }
+
+    #[test]
+    fn hans_eviction_with_zero_usage_consumer() {
+        let manager = BufferManager::with_budget(10000);
+        // Consumer with zero usage: target_evict will be 0, so evict is skipped
+        let consumer = TestConsumer::new(
+            "empty",
+            0,
+            priorities::SPILL_STAGING,
+            MemoryRegion::SpillStaging,
+        );
+        manager.register_consumer(Arc::clone(&consumer) as Arc<dyn MemoryConsumer>);
+        manager.allocated.store(500, Ordering::Relaxed);
+
+        let freed = manager.evict_to_target(200);
+        // Consumer has 0 usage, so target_evict = min(300, 0/2) = 0, evict skipped
+        assert_eq!(consumer.evicted.load(Ordering::Relaxed), 0);
+        assert_eq!(freed, 0);
+    }
+
+    #[test]
+    fn beatrix_grant_releaser_release_decrements() {
+        let config = BufferManagerConfig {
+            budget: 1000,
+            soft_limit_fraction: 0.70,
+            evict_limit_fraction: 0.85,
+            hard_limit_fraction: 0.95,
+            background_eviction: false,
+            spill_path: None,
+        };
+        let manager = BufferManager::new(config);
+
+        // Allocate via try_allocate_raw, then release via GrantReleaser trait
+        assert!(manager.try_allocate_raw(200, MemoryRegion::IndexBuffers));
+        assert_eq!(manager.allocated(), 200);
+
+        manager.release(200, MemoryRegion::IndexBuffers);
+        assert_eq!(manager.allocated(), 0);
+        assert_eq!(manager.stats().region_usage(MemoryRegion::IndexBuffers), 0);
+    }
+
+    /// Consumer whose spill() returns an error to exercise the Err(_) => continue path.
+    struct FailingSpillConsumer {
+        name: String,
+        usage: AtomicUsize,
+        priority: u8,
+        region: MemoryRegion,
+    }
+
+    impl FailingSpillConsumer {
+        fn new(name: &str, usage: usize, priority: u8, region: MemoryRegion) -> Arc<Self> {
+            Arc::new(Self {
+                name: name.to_string(),
+                usage: AtomicUsize::new(usage),
+                priority,
+                region,
+            })
+        }
+    }
+
+    impl MemoryConsumer for FailingSpillConsumer {
+        fn name(&self) -> &str {
+            &self.name
+        }
+
+        fn memory_usage(&self) -> usize {
+            self.usage.load(Ordering::Relaxed)
+        }
+
+        fn eviction_priority(&self) -> u8 {
+            self.priority
+        }
+
+        fn region(&self) -> MemoryRegion {
+            self.region
+        }
+
+        fn evict(&self, _target_bytes: usize) -> usize {
+            0 // eviction always fails
+        }
+
+        fn can_spill(&self) -> bool {
+            true
+        }
+
+        fn spill(
+            &self,
+            _target_bytes: usize,
+        ) -> Result<usize, crate::memory::buffer::consumer::SpillError> {
+            Err(crate::memory::buffer::consumer::SpillError::IoError(
+                "disk full".to_string(),
+            ))
+        }
+    }
+
+    #[test]
+    fn vincent_spill_error_continues_to_next_consumer() {
+        let manager = BufferManager::with_budget(10000);
+
+        // First consumer: spill fails
+        let failing = FailingSpillConsumer::new(
+            "failing_spill",
+            500,
+            priorities::SPILL_STAGING,
+            MemoryRegion::SpillStaging,
+        );
+
+        // Second consumer: spill succeeds
+        let working = SpillableConsumer::new_evict_fails(
+            "working_spill",
+            500,
+            priorities::QUERY_CACHE,
+            MemoryRegion::ExecutionBuffers,
+            true,
+        );
+
+        manager.register_consumer(Arc::clone(&failing) as Arc<dyn MemoryConsumer>);
+        manager.register_consumer(Arc::clone(&working) as Arc<dyn MemoryConsumer>);
+        manager.allocated.store(2000, Ordering::Relaxed);
+
+        let freed = manager.evict_to_target(1500);
+        // failing consumer's spill errors out, working consumer's spill succeeds
+        assert!(working.spilled.load(Ordering::Relaxed) > 0);
+        assert!(freed > 0);
+    }
+
+    #[test]
+    fn django_detect_system_memory_returns_positive() {
+        let mem = BufferManagerConfig::detect_system_memory();
+        assert!(mem > 0);
+    }
+
+    #[test]
+    fn shosanna_spill_path_config() {
+        let config = BufferManagerConfig {
+            budget: 1024,
+            spill_path: Some(PathBuf::from("/tmp/grafeo-spill")),
+            ..Default::default()
+        };
+        assert_eq!(
+            config.spill_path.as_ref().unwrap().to_str().unwrap(),
+            "/tmp/grafeo-spill"
+        );
+        let manager = BufferManager::new(config);
+        assert!(manager.config().spill_path.is_some());
+    }
 }

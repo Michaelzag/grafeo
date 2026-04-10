@@ -53,7 +53,7 @@ macro_rules! db_ref_or_null {
 /// Serialize a `QueryResult` into a `GrafeoResult`.
 fn build_result(result: &grafeo_engine::database::QueryResult) -> *mut GrafeoResult {
     let json_rows: Vec<serde_json::Value> = result
-        .rows
+        .rows()
         .iter()
         .map(|row| {
             let obj: serde_json::Map<String, serde_json::Value> = result
@@ -136,7 +136,7 @@ fn build_result(result: &grafeo_engine::database::QueryResult) -> *mut GrafeoRes
 
     Box::into_raw(Box::new(GrafeoResult {
         json: c_json,
-        row_count: result.rows.len(),
+        row_count: result.rows().len(),
         execution_time_ms: result.execution_time_ms.unwrap_or(0.0),
         rows_scanned: result.rows_scanned.unwrap_or(0),
         nodes_json: CString::new(nodes_str).unwrap_or_default(),

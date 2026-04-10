@@ -571,4 +571,769 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("source"));
     }
+
+    #[test]
+    fn test_load_edge_missing_target_fails() {
+        let temp = TempDir::new().unwrap();
+        let input_path = temp.path().join("no_target.jsonl");
+        let db_path = temp.path().join("target.grafeo");
+
+        let content = "{\"type\":\"edge\",\"source\":1,\"edge_type\":\"KNOWS\"}\n";
+        std::fs::write(&input_path, content).unwrap();
+
+        let result = run(
+            DataCommands::Load {
+                input: input_path,
+                path: db_path,
+            },
+            OutputFormat::Json,
+            true,
+        );
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("target"),
+            "expected 'target' in: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn test_load_edge_missing_edge_type_fails() {
+        let temp = TempDir::new().unwrap();
+        let input_path = temp.path().join("no_edge_type.jsonl");
+        let db_path = temp.path().join("target.grafeo");
+
+        let content = "{\"type\":\"edge\",\"source\":1,\"target\":2}\n";
+        std::fs::write(&input_path, content).unwrap();
+
+        let result = run(
+            DataCommands::Load {
+                input: input_path,
+                path: db_path,
+            },
+            OutputFormat::Json,
+            true,
+        );
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("edge_type"),
+            "expected 'edge_type' in: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn test_load_record_with_no_type_field_fails() {
+        let temp = TempDir::new().unwrap();
+        let input_path = temp.path().join("no_type.jsonl");
+        let db_path = temp.path().join("target.grafeo");
+
+        let content = "{\"labels\":[\"Person\"],\"properties\":{}}\n";
+        std::fs::write(&input_path, content).unwrap();
+
+        let result = run(
+            DataCommands::Load {
+                input: input_path,
+                path: db_path,
+            },
+            OutputFormat::Json,
+            true,
+        );
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Unknown record type"),
+            "expected 'Unknown record type' in: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn test_load_into_existing_database() {
+        let temp = TempDir::new().unwrap();
+        let db_path = temp.path().join("existing.grafeo");
+        let input_path = temp.path().join("data.jsonl");
+
+        // Create a database with one node already in it
+        {
+            let db = grafeo_engine::GrafeoDB::open(&db_path).expect("create db");
+            db.create_node(&["Existing"]);
+        }
+
+        let content = "{\"type\":\"node\",\"labels\":[\"Imported\"],\"properties\":{}}\n";
+        std::fs::write(&input_path, content).unwrap();
+
+        run(
+            DataCommands::Load {
+                input: input_path,
+                path: db_path.clone(),
+            },
+            OutputFormat::Json,
+            true,
+        )
+        .expect("load into existing db should succeed");
+
+        let db = grafeo_engine::GrafeoDB::open(&db_path).unwrap();
+        assert_eq!(db.info().node_count, 2);
+    }
+
+    #[test]
+    fn test_load_nonexistent_input_file_fails() {
+        let temp = TempDir::new().unwrap();
+        let input_path = temp.path().join("does_not_exist.jsonl");
+        let db_path = temp.path().join("target.grafeo");
+
+        let result = run(
+            DataCommands::Load {
+                input: input_path,
+                path: db_path,
+            },
+            OutputFormat::Json,
+            true,
+        );
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Failed to open input file"),
+            "expected file open error in: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn test_dump_nonexistent_database_fails() {
+        let temp = TempDir::new().unwrap();
+        let db_path = temp.path().join("nonexistent.grafeo");
+        let dump_path = temp.path().join("dump.jsonl");
+
+        let result = run(
+            DataCommands::Dump {
+                path: db_path,
+                output: dump_path,
+                export_format: None,
+            },
+            OutputFormat::Json,
+            true,
+        );
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Database not found"),
+            "expected 'Database not found' in: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn test_dump_jsonl_format_accepted() {
+        let temp = TempDir::new().unwrap();
+        let db_path = temp.path().join("test.grafeo");
+        let dump_path = temp.path().join("dump.jsonl");
+
+        drop(create_test_db(&db_path));
+
+        run(
+            DataCommands::Dump {
+                path: db_path,
+                output: dump_path.clone(),
+                export_format: Some("jsonl".to_string()),
+            },
+            OutputFormat::Json,
+            true,
+        )
+        .expect("dump with jsonl format should succeed");
+
+        let content = std::fs::read_to_string(&dump_path).unwrap();
+        assert!(!content.is_empty());
+    }
+
+    #[test]
+    fn test_dump_verifies_node_json_structure() {
+        let temp = TempDir::new().unwrap();
+        let db_path = temp.path().join("test.grafeo");
+        let dump_path = temp.path().join("dump.jsonl");
+
+        drop(create_test_db(&db_path));
+
+        run(
+            DataCommands::Dump {
+                path: db_path,
+                output: dump_path.clone(),
+                export_format: None,
+            },
+            OutputFormat::Json,
+            true,
+        )
+        .expect("dump should succeed");
+
+        let content = std::fs::read_to_string(&dump_path).unwrap();
+        let lines: Vec<&str> = content.trim().lines().collect();
+
+        // Parse first line as a node record and verify structure
+        let first: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(first["type"], "node");
+        assert!(first["id"].is_number(), "node id should be a number");
+        assert!(first["labels"].is_array(), "labels should be an array");
+        assert!(
+            first["properties"].is_object(),
+            "properties should be an object"
+        );
+    }
+
+    #[test]
+    fn test_dump_verifies_edge_json_structure() {
+        let temp = TempDir::new().unwrap();
+        let db_path = temp.path().join("test.grafeo");
+        let dump_path = temp.path().join("dump.jsonl");
+
+        drop(create_test_db(&db_path));
+
+        run(
+            DataCommands::Dump {
+                path: db_path,
+                output: dump_path.clone(),
+                export_format: None,
+            },
+            OutputFormat::Json,
+            true,
+        )
+        .expect("dump should succeed");
+
+        let content = std::fs::read_to_string(&dump_path).unwrap();
+        let lines: Vec<&str> = content.trim().lines().collect();
+
+        // Find the edge record (last line)
+        let edge: serde_json::Value = serde_json::from_str(lines[2]).unwrap();
+        assert_eq!(edge["type"], "edge");
+        assert!(edge["id"].is_number(), "edge id should be a number");
+        assert!(edge["source"].is_number(), "source should be a number");
+        assert!(edge["target"].is_number(), "target should be a number");
+        assert_eq!(edge["edge_type"], "WORKS_AT");
+        assert!(
+            edge["properties"].is_object(),
+            "properties should be an object"
+        );
+        // Value is serialized with its enum variant, e.g. {"Int64": 2020}
+        assert_eq!(edge["properties"]["since"]["Int64"], 2020);
+    }
+
+    #[test]
+    fn test_dump_non_quiet_mode() {
+        let temp = TempDir::new().unwrap();
+        let db_path = temp.path().join("test.grafeo");
+        let dump_path = temp.path().join("dump.jsonl");
+
+        drop(create_test_db(&db_path));
+
+        // Run with quiet=false to cover the output::status branch
+        run(
+            DataCommands::Dump {
+                path: db_path,
+                output: dump_path,
+                export_format: None,
+            },
+            OutputFormat::Json,
+            false,
+        )
+        .expect("dump non-quiet should succeed");
+    }
+
+    #[test]
+    fn test_load_non_quiet_mode() {
+        let temp = TempDir::new().unwrap();
+        let input_path = temp.path().join("data.jsonl");
+        let db_path = temp.path().join("target.grafeo");
+
+        let content =
+            "{\"type\":\"node\",\"labels\":[\"Person\"],\"properties\":{\"name\":\"Gus\"}}\n";
+        std::fs::write(&input_path, content).unwrap();
+
+        run(
+            DataCommands::Load {
+                input: input_path,
+                path: db_path,
+            },
+            OutputFormat::Json,
+            false,
+        )
+        .expect("load non-quiet should succeed");
+    }
+
+    #[test]
+    fn test_load_node_without_labels() {
+        let temp = TempDir::new().unwrap();
+        let input_path = temp.path().join("no_labels.jsonl");
+        let db_path = temp.path().join("target.grafeo");
+
+        // Missing labels field entirely
+        let content = "{\"type\":\"node\",\"properties\":{}}\n";
+        std::fs::write(&input_path, content).unwrap();
+
+        run(
+            DataCommands::Load {
+                input: input_path,
+                path: db_path.clone(),
+            },
+            OutputFormat::Json,
+            true,
+        )
+        .expect("load node without labels should succeed");
+
+        let db = grafeo_engine::GrafeoDB::open(&db_path).unwrap();
+        assert_eq!(db.info().node_count, 1);
+    }
+
+    #[test]
+    fn test_load_node_without_properties() {
+        let temp = TempDir::new().unwrap();
+        let input_path = temp.path().join("no_props.jsonl");
+        let db_path = temp.path().join("target.grafeo");
+
+        // No properties field at all
+        let content = "{\"type\":\"node\",\"labels\":[\"City\"]}\n";
+        std::fs::write(&input_path, content).unwrap();
+
+        run(
+            DataCommands::Load {
+                input: input_path,
+                path: db_path.clone(),
+            },
+            OutputFormat::Json,
+            true,
+        )
+        .expect("load node without properties should succeed");
+
+        let db = grafeo_engine::GrafeoDB::open(&db_path).unwrap();
+        assert_eq!(db.info().node_count, 1);
+    }
+
+    #[test]
+    fn test_load_edge_with_properties() {
+        let temp = TempDir::new().unwrap();
+        let input_path = temp.path().join("edge_props.jsonl");
+        let db_path = temp.path().join("target.grafeo");
+
+        // Create two nodes first, then an edge with properties
+        let content = "\
+{\"type\":\"node\",\"labels\":[\"Person\"],\"properties\":{\"name\":\"Vincent\"}}\n\
+{\"type\":\"node\",\"labels\":[\"Person\"],\"properties\":{\"name\":\"Jules\"}}\n\
+{\"type\":\"edge\",\"source\":0,\"target\":1,\"edge_type\":\"KNOWS\",\"properties\":{\"since\":1994,\"close\":true}}\n";
+        std::fs::write(&input_path, content).unwrap();
+
+        run(
+            DataCommands::Load {
+                input: input_path,
+                path: db_path.clone(),
+            },
+            OutputFormat::Json,
+            true,
+        )
+        .expect("load edge with properties should succeed");
+
+        let db = grafeo_engine::GrafeoDB::open(&db_path).unwrap();
+        assert_eq!(db.info().node_count, 2);
+        assert_eq!(db.info().edge_count, 1);
+    }
+
+    #[test]
+    fn test_load_node_with_null_property_value() {
+        let temp = TempDir::new().unwrap();
+        let input_path = temp.path().join("null_prop.jsonl");
+        let db_path = temp.path().join("target.grafeo");
+
+        // Property value that cannot be deserialized into a Value falls back to Value::Null
+        let content = "{\"type\":\"node\",\"labels\":[\"Person\"],\"properties\":{\"name\":\"Mia\",\"unknown_field\":null}}\n";
+        std::fs::write(&input_path, content).unwrap();
+
+        run(
+            DataCommands::Load {
+                input: input_path,
+                path: db_path.clone(),
+            },
+            OutputFormat::Json,
+            true,
+        )
+        .expect("load with null property should succeed");
+
+        let db = grafeo_engine::GrafeoDB::open(&db_path).unwrap();
+        assert_eq!(db.info().node_count, 1);
+    }
+
+    #[test]
+    fn test_load_whitespace_only_lines_skipped() {
+        let temp = TempDir::new().unwrap();
+        let input_path = temp.path().join("whitespace.jsonl");
+        let db_path = temp.path().join("target.grafeo");
+
+        let content = "   \n\t\n{\"type\":\"node\",\"labels\":[\"City\"],\"properties\":{\"name\":\"Berlin\"}}\n  \n";
+        std::fs::write(&input_path, content).unwrap();
+
+        run(
+            DataCommands::Load {
+                input: input_path,
+                path: db_path.clone(),
+            },
+            OutputFormat::Json,
+            true,
+        )
+        .expect("whitespace-only lines should be skipped");
+
+        let db = grafeo_engine::GrafeoDB::open(&db_path).unwrap();
+        assert_eq!(db.info().node_count, 1);
+    }
+
+    #[test]
+    fn test_dump_empty_database() {
+        let temp = TempDir::new().unwrap();
+        let db_path = temp.path().join("empty.grafeo");
+        let dump_path = temp.path().join("dump.jsonl");
+
+        // Create empty database
+        drop(grafeo_engine::GrafeoDB::open(&db_path).expect("create empty db"));
+
+        run(
+            DataCommands::Dump {
+                path: db_path,
+                output: dump_path.clone(),
+                export_format: None,
+            },
+            OutputFormat::Json,
+            true,
+        )
+        .expect("dump empty db should succeed");
+
+        let content = std::fs::read_to_string(&dump_path).unwrap();
+        assert!(
+            content.trim().is_empty(),
+            "empty db dump should produce no lines"
+        );
+    }
+
+    #[test]
+    fn test_load_invalid_json_on_later_line() {
+        let temp = TempDir::new().unwrap();
+        let input_path = temp.path().join("bad_line3.jsonl");
+        let db_path = temp.path().join("target.grafeo");
+
+        let content = "\
+{\"type\":\"node\",\"labels\":[\"A\"],\"properties\":{}}\n\
+{\"type\":\"node\",\"labels\":[\"B\"],\"properties\":{}}\n\
+this is not json\n";
+        std::fs::write(&input_path, content).unwrap();
+
+        let result = run(
+            DataCommands::Load {
+                input: input_path,
+                path: db_path,
+            },
+            OutputFormat::Json,
+            true,
+        );
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("line 3"),
+            "expected line 3 in error: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn test_dump_node_with_multiple_labels() {
+        let temp = TempDir::new().unwrap();
+        let db_path = temp.path().join("multi_label.grafeo");
+        let dump_path = temp.path().join("dump.jsonl");
+
+        {
+            let db = grafeo_engine::GrafeoDB::open(&db_path).expect("create db");
+            db.create_node(&["Person", "Employee"]);
+        }
+
+        run(
+            DataCommands::Dump {
+                path: db_path,
+                output: dump_path.clone(),
+                export_format: None,
+            },
+            OutputFormat::Json,
+            true,
+        )
+        .expect("dump should succeed");
+
+        let content = std::fs::read_to_string(&dump_path).unwrap();
+        let record: serde_json::Value = serde_json::from_str(content.trim()).unwrap();
+        let labels = record["labels"].as_array().unwrap();
+        assert_eq!(labels.len(), 2);
+    }
+
+    #[test]
+    fn test_load_edge_without_properties() {
+        let temp = TempDir::new().unwrap();
+        let input_path = temp.path().join("edge_no_props.jsonl");
+        let db_path = temp.path().join("target.grafeo");
+
+        let content = "\
+{\"type\":\"node\",\"labels\":[\"A\"],\"properties\":{}}\n\
+{\"type\":\"node\",\"labels\":[\"B\"],\"properties\":{}}\n\
+{\"type\":\"edge\",\"source\":0,\"target\":1,\"edge_type\":\"LINKS\"}\n";
+        std::fs::write(&input_path, content).unwrap();
+
+        run(
+            DataCommands::Load {
+                input: input_path,
+                path: db_path.clone(),
+            },
+            OutputFormat::Json,
+            true,
+        )
+        .expect("load edge without properties should succeed");
+
+        let db = grafeo_engine::GrafeoDB::open(&db_path).unwrap();
+        assert_eq!(db.info().edge_count, 1);
+    }
+
+    #[test]
+    fn test_dump_to_invalid_output_path_fails() {
+        let temp = TempDir::new().unwrap();
+        let db_path = temp.path().join("test.grafeo");
+
+        drop(create_test_db(&db_path));
+
+        // Try to write to a path inside a nonexistent directory
+        let bad_output = temp.path().join("nonexistent_dir").join("dump.jsonl");
+
+        let result = run(
+            DataCommands::Dump {
+                path: db_path,
+                output: bad_output,
+                export_format: None,
+            },
+            OutputFormat::Json,
+            true,
+        );
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Failed to create output file"),
+            "expected file creation error in: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn test_load_node_with_various_property_types() {
+        let temp = TempDir::new().unwrap();
+        let input_path = temp.path().join("various_types.jsonl");
+        let db_path = temp.path().join("target.grafeo");
+
+        // Test string, integer, float, boolean, and null property values
+        let content = "{\"type\":\"node\",\"labels\":[\"Person\"],\"properties\":{\
+            \"name\":\"Butch\",\
+            \"age\":42,\
+            \"height\":1.85,\
+            \"active\":true,\
+            \"nickname\":null\
+        }}\n";
+        std::fs::write(&input_path, content).unwrap();
+
+        run(
+            DataCommands::Load {
+                input: input_path,
+                path: db_path.clone(),
+            },
+            OutputFormat::Json,
+            true,
+        )
+        .expect("load with various property types should succeed");
+
+        let db = grafeo_engine::GrafeoDB::open(&db_path).unwrap();
+        assert_eq!(db.info().node_count, 1);
+    }
+
+    #[test]
+    fn test_dump_preserves_edge_properties() {
+        let temp = TempDir::new().unwrap();
+        let db_path = temp.path().join("edge_props.grafeo");
+        let dump_path = temp.path().join("dump.jsonl");
+
+        {
+            let db = grafeo_engine::GrafeoDB::open(&db_path).expect("create db");
+            let n1 = db.create_node(&["Person"]);
+            let n2 = db.create_node(&["Person"]);
+            db.set_node_property(n1, "name", Value::from("Django"));
+            db.set_node_property(n2, "name", Value::from("Shosanna"));
+            let edge = db.create_edge(n1, n2, "FRIENDS_WITH");
+            db.set_edge_property(edge, "year", Value::Int64(2012));
+            db.set_edge_property(edge, "strong", Value::Bool(true));
+        }
+
+        run(
+            DataCommands::Dump {
+                path: db_path,
+                output: dump_path.clone(),
+                export_format: None,
+            },
+            OutputFormat::Json,
+            true,
+        )
+        .expect("dump should succeed");
+
+        let content = std::fs::read_to_string(&dump_path).unwrap();
+        let lines: Vec<&str> = content.trim().lines().collect();
+        assert_eq!(lines.len(), 3, "should have 2 nodes + 1 edge");
+
+        // Find the edge record
+        let edge_line = lines
+            .iter()
+            .find(|line| line.contains("\"type\":\"edge\""))
+            .expect("should have an edge record");
+        let edge: serde_json::Value = serde_json::from_str(edge_line).unwrap();
+        assert_eq!(edge["edge_type"], "FRIENDS_WITH");
+        let props = edge["properties"].as_object().unwrap();
+        // Value serializes with variant tags: {"Int64": 2012}, {"Bool": true}
+        assert_eq!(props["year"]["Int64"], 2012);
+        assert_eq!(props["strong"]["Bool"], true);
+    }
+
+    #[test]
+    fn test_dump_node_properties_serialized() {
+        let temp = TempDir::new().unwrap();
+        let db_path = temp.path().join("props.grafeo");
+        let dump_path = temp.path().join("dump.jsonl");
+
+        {
+            let db = grafeo_engine::GrafeoDB::open(&db_path).expect("create db");
+            let node = db.create_node(&["City"]);
+            db.set_node_property(node, "name", Value::from("Amsterdam"));
+            db.set_node_property(node, "population", Value::Int64(905_234));
+            db.set_node_property(node, "capital", Value::Bool(true));
+        }
+
+        run(
+            DataCommands::Dump {
+                path: db_path,
+                output: dump_path.clone(),
+                export_format: None,
+            },
+            OutputFormat::Json,
+            true,
+        )
+        .expect("dump should succeed");
+
+        let content = std::fs::read_to_string(&dump_path).unwrap();
+        let record: serde_json::Value = serde_json::from_str(content.trim()).unwrap();
+        assert_eq!(record["type"], "node");
+        let props = record["properties"].as_object().unwrap();
+        // Value serializes with variant tags: {"String": "Amsterdam"}, {"Int64": 905234}, {"Bool": true}
+        assert_eq!(props["name"]["String"], "Amsterdam");
+        assert_eq!(props["population"]["Int64"], 905_234);
+        assert_eq!(props["capital"]["Bool"], true);
+    }
+
+    #[test]
+    fn test_full_roundtrip_preserves_data() {
+        let temp = TempDir::new().unwrap();
+        let src_path = temp.path().join("source.grafeo");
+        let dump_path = temp.path().join("roundtrip.jsonl");
+        let dst_path = temp.path().join("dest.grafeo");
+
+        // Build a richer graph
+        {
+            let db = grafeo_engine::GrafeoDB::open(&src_path).expect("create db");
+            let hans = db.create_node(&["Person"]);
+            let beatrix = db.create_node(&["Person"]);
+            let paris = db.create_node(&["City"]);
+            db.set_node_property(hans, "name", Value::from("Hans"));
+            db.set_node_property(beatrix, "name", Value::from("Beatrix"));
+            db.set_node_property(paris, "name", Value::from("Paris"));
+            db.set_node_property(paris, "country", Value::from("France"));
+
+            let edge1 = db.create_edge(hans, paris, "LIVES_IN");
+            db.set_edge_property(edge1, "since", Value::Int64(2015));
+            let edge2 = db.create_edge(beatrix, paris, "VISITED");
+            db.set_edge_property(edge2, "year", Value::Int64(2023));
+        }
+
+        // Dump
+        run(
+            DataCommands::Dump {
+                path: src_path,
+                output: dump_path.clone(),
+                export_format: None,
+            },
+            OutputFormat::Json,
+            true,
+        )
+        .expect("dump should succeed");
+
+        // Load
+        run(
+            DataCommands::Load {
+                input: dump_path,
+                path: dst_path.clone(),
+            },
+            OutputFormat::Json,
+            true,
+        )
+        .expect("load should succeed");
+
+        let db = grafeo_engine::GrafeoDB::open(&dst_path).unwrap();
+        let info = db.info();
+        assert_eq!(info.node_count, 3);
+        assert_eq!(info.edge_count, 2);
+    }
+
+    #[test]
+    fn test_load_node_with_empty_labels_array() {
+        let temp = TempDir::new().unwrap();
+        let input_path = temp.path().join("empty_labels.jsonl");
+        let db_path = temp.path().join("target.grafeo");
+
+        let content = "{\"type\":\"node\",\"labels\":[],\"properties\":{\"name\":\"Gus\"}}\n";
+        std::fs::write(&input_path, content).unwrap();
+
+        run(
+            DataCommands::Load {
+                input: input_path,
+                path: db_path.clone(),
+            },
+            OutputFormat::Json,
+            true,
+        )
+        .expect("load node with empty labels should succeed");
+
+        let db = grafeo_engine::GrafeoDB::open(&db_path).unwrap();
+        assert_eq!(db.info().node_count, 1);
+    }
+
+    #[test]
+    fn test_load_mixed_nodes_and_edges() {
+        let temp = TempDir::new().unwrap();
+        let input_path = temp.path().join("mixed.jsonl");
+        let db_path = temp.path().join("target.grafeo");
+
+        let content = "\
+{\"type\":\"node\",\"labels\":[\"Person\"],\"properties\":{\"name\":\"Vincent\"}}\n\
+{\"type\":\"node\",\"labels\":[\"Person\"],\"properties\":{\"name\":\"Jules\"}}\n\
+{\"type\":\"node\",\"labels\":[\"City\"],\"properties\":{\"name\":\"Amsterdam\"}}\n\
+{\"type\":\"edge\",\"source\":0,\"target\":1,\"edge_type\":\"KNOWS\",\"properties\":{\"years\":5}}\n\
+{\"type\":\"edge\",\"source\":0,\"target\":2,\"edge_type\":\"LIVES_IN\",\"properties\":{}}\n";
+        std::fs::write(&input_path, content).unwrap();
+
+        run(
+            DataCommands::Load {
+                input: input_path,
+                path: db_path.clone(),
+            },
+            OutputFormat::Json,
+            true,
+        )
+        .expect("load mixed content should succeed");
+
+        let db = grafeo_engine::GrafeoDB::open(&db_path).unwrap();
+        assert_eq!(db.info().node_count, 3);
+        assert_eq!(db.info().edge_count, 2);
+    }
 }

@@ -132,7 +132,7 @@ fn test_call_labels_basic() {
     let result = session.execute_sql("CALL grafeo.labels()").unwrap();
 
     assert_eq!(result.columns[0], "label");
-    let labels: Vec<&str> = result.rows.iter().filter_map(|r| r[0].as_str()).collect();
+    let labels: Vec<&str> = result.rows().iter().filter_map(|r| r[0].as_str()).collect();
     assert!(labels.contains(&"Person"));
 }
 
@@ -178,7 +178,7 @@ fn test_call_labels_multi_label_graph() {
     );
 
     let result = session.execute_sql("CALL grafeo.labels()").unwrap();
-    let labels: Vec<&str> = result.rows.iter().filter_map(|r| r[0].as_str()).collect();
+    let labels: Vec<&str> = result.rows().iter().filter_map(|r| r[0].as_str()).collect();
     assert!(labels.contains(&"Person"));
     assert!(labels.contains(&"Employee"));
     assert!(labels.contains(&"Company"));
@@ -197,7 +197,7 @@ fn test_call_relationship_types_basic() {
         .unwrap();
 
     assert_eq!(result.columns[0], "relationshipType");
-    let types: Vec<&str> = result.rows.iter().filter_map(|r| r[0].as_str()).collect();
+    let types: Vec<&str> = result.rows().iter().filter_map(|r| r[0].as_str()).collect();
     assert!(types.contains(&"KNOWS"));
     assert!(types.contains(&"FOLLOWS"));
 }
@@ -234,7 +234,7 @@ fn test_call_property_keys_basic() {
     let result = session.execute_sql("CALL grafeo.propertyKeys()").unwrap();
 
     assert_eq!(result.columns[0], "propertyKey");
-    let keys: Vec<&str> = result.rows.iter().filter_map(|r| r[0].as_str()).collect();
+    let keys: Vec<&str> = result.rows().iter().filter_map(|r| r[0].as_str()).collect();
     assert!(keys.contains(&"name"));
     assert!(keys.contains(&"age"));
     assert!(keys.contains(&"city"));
@@ -284,7 +284,7 @@ fn test_call_pagerank_yield_score() {
 
     assert_eq!(result.columns.len(), 1);
     assert_eq!(result.columns[0], "score");
-    for row in &result.rows {
+    for row in result.rows() {
         if let Value::Float64(s) = &row[0] {
             assert!(*s > 0.0, "PageRank score should be positive");
         }
@@ -323,7 +323,7 @@ fn test_call_pagerank_yield_order_by_desc() {
         .unwrap();
 
     let scores: Vec<f64> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[1] {
             Value::Float64(f) => *f,
@@ -465,8 +465,8 @@ fn test_call_connected_components_basic() {
     assert_eq!(result.row_count(), 5);
 
     // All nodes should be in the same component
-    let first_cid = &result.rows[0][1];
-    for row in &result.rows {
+    let first_cid = &result.rows()[0][1];
+    for row in result.rows() {
         assert_eq!(&row[1], first_cid, "All nodes should share a component");
     }
 }
@@ -487,7 +487,11 @@ fn test_call_connected_components_disconnected() {
 
     assert_eq!(result.row_count(), 3);
     // Count distinct component IDs: connected pair + isolated node = 2 components
-    let mut cids: Vec<String> = result.rows.iter().map(|r| format!("{:?}", r[1])).collect();
+    let mut cids: Vec<String> = result
+        .rows()
+        .iter()
+        .map(|r| format!("{:?}", r[1]))
+        .collect();
     cids.sort();
     cids.dedup();
     assert_eq!(
@@ -633,7 +637,7 @@ fn test_call_clustering_coefficient_basic() {
     assert_eq!(result.columns[2], "triangle_count");
     assert_eq!(result.row_count(), 5);
 
-    for row in &result.rows {
+    for row in result.rows() {
         if let Value::Float64(coeff) = &row[1] {
             assert!(
                 (0.0..=1.0).contains(coeff),
@@ -808,7 +812,7 @@ fn test_call_pagerank_top_1() {
     // Verify this is actually the max score
     let all = session.execute_sql("CALL grafeo.pagerank()").unwrap();
     let max_score = all
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[1] {
             Value::Float64(f) => *f,
@@ -816,7 +820,7 @@ fn test_call_pagerank_top_1() {
         })
         .fold(f64::NEG_INFINITY, f64::max);
 
-    if let Value::Float64(top) = &result.rows[0][1] {
+    if let Value::Float64(top) = &result.rows()[0][1] {
         assert!(
             (*top - max_score).abs() < 1e-10,
             "Top score {top} should equal max {max_score}"
@@ -838,7 +842,7 @@ fn test_call_relationship_types_yield_order() {
         )
         .unwrap();
 
-    let types: Vec<&str> = result.rows.iter().filter_map(|r| r[0].as_str()).collect();
+    let types: Vec<&str> = result.rows().iter().filter_map(|r| r[0].as_str()).collect();
     for i in 1..types.len() {
         assert!(types[i - 1] <= types[i], "Should be ASC order: {types:?}");
     }

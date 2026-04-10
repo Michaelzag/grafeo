@@ -49,7 +49,7 @@ fn test_return_star() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN *")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     // Should have at least the 'n' variable
     assert!(!result.columns.is_empty());
 }
@@ -61,7 +61,7 @@ fn test_with_star() {
     let result = session
         .execute("MATCH (n:Person) WITH * WHERE n.age > 28 RETURN n.name")
         .unwrap();
-    assert_eq!(result.rows.len(), 2); // Alix (30) and Vincent (35)
+    assert_eq!(result.rows().len(), 2); // Alix (30) and Vincent (35)
 }
 
 #[test]
@@ -71,7 +71,7 @@ fn test_fetch_first_n_rows() {
     let result = session
         .execute("MATCH (n:Person) RETURN n.name FETCH FIRST 2 ROWS ONLY")
         .unwrap();
-    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows().len(), 2);
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn test_fetch_next_n_row() {
     let result = session
         .execute("MATCH (n:Person) RETURN n.name FETCH NEXT 1 ROW ONLY")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
 }
 
 #[test]
@@ -91,9 +91,9 @@ fn test_list_comprehension() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN [x IN [1, 2, 3, 4, 5] WHERE x > 2 | x * 10] AS filtered")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     // Should be [30, 40, 50]
-    match &result.rows[0][0] {
+    match &result.rows()[0][0] {
         Value::List(items) => {
             assert_eq!(items.len(), 3);
             assert_eq!(items[0], Value::Int64(30));
@@ -115,8 +115,8 @@ fn test_list_predicate_all() {
             "MATCH (n:Person {name: 'Alix'}) RETURN all(x IN [2, 4, 6] WHERE x % 2 = 0) AS result",
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Bool(true));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Bool(true));
 }
 
 #[test]
@@ -126,8 +126,8 @@ fn test_list_predicate_any() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN any(x IN [1, 2, 3] WHERE x > 2) AS result")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Bool(true));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Bool(true));
 }
 
 #[test]
@@ -139,8 +139,8 @@ fn test_list_predicate_none() {
             "MATCH (n:Person {name: 'Alix'}) RETURN none(x IN [1, 2, 3] WHERE x > 10) AS result",
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Bool(true));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Bool(true));
 }
 
 #[test]
@@ -152,8 +152,8 @@ fn test_list_predicate_single() {
             "MATCH (n:Person {name: 'Alix'}) RETURN single(x IN [1, 2, 3] WHERE x = 2) AS result",
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Bool(true));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Bool(true));
 }
 
 #[test]
@@ -167,7 +167,7 @@ fn test_except_all() {
              MATCH (n:Person {name: 'Gus'}) RETURN n.name",
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 2); // Alix, Vincent
+    assert_eq!(result.rows().len(), 2); // Alix, Vincent
 }
 
 #[test]
@@ -181,7 +181,7 @@ fn test_intersect_all() {
              MATCH (n:Person) WHERE n.age >= 30 RETURN n.name",
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 2); // Alix, Vincent
+    assert_eq!(result.rows().len(), 2); // Alix, Vincent
 }
 
 // ---------------------------------------------------------------------------
@@ -195,8 +195,8 @@ fn test_like_percent_wildcard() {
     let result = session
         .execute("MATCH (n:Person) WHERE n.name LIKE 'A%' RETURN n.name")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
 }
 
 #[test]
@@ -206,8 +206,8 @@ fn test_like_underscore_wildcard() {
     let result = session
         .execute("MATCH (n:Person) WHERE n.name LIKE 'Gu_' RETURN n.name")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Gus".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Gus".into()));
 }
 
 #[test]
@@ -217,7 +217,7 @@ fn test_like_no_match() {
     let result = session
         .execute("MATCH (n:Person) WHERE n.name LIKE 'X%' RETURN n.name")
         .unwrap();
-    assert!(result.rows.is_empty());
+    assert!(result.rows().is_empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -231,8 +231,8 @@ fn test_cast_to_date() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN CAST('2024-06-15' AS DATE) AS d")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    match &result.rows[0][0] {
+    assert_eq!(result.rows().len(), 1);
+    match &result.rows()[0][0] {
         Value::Date(_) => {} // OK
         other => panic!("Expected Date, got {:?}", other),
     }
@@ -245,8 +245,8 @@ fn test_cast_to_time() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN CAST('14:30:00' AS TIME) AS t")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    match &result.rows[0][0] {
+    assert_eq!(result.rows().len(), 1);
+    match &result.rows()[0][0] {
         Value::Time(_) => {} // OK
         other => panic!("Expected Time, got {:?}", other),
     }
@@ -259,8 +259,8 @@ fn test_cast_to_duration() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN CAST('P1Y2M3D' AS DURATION) AS dur")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    match &result.rows[0][0] {
+    assert_eq!(result.rows().len(), 1);
+    match &result.rows()[0][0] {
         Value::Duration(_) => {} // OK
         other => panic!("Expected Duration, got {:?}", other),
     }
@@ -273,8 +273,8 @@ fn test_todate_function() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN toDate('2024-06-15') AS d")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    match &result.rows[0][0] {
+    assert_eq!(result.rows().len(), 1);
+    match &result.rows()[0][0] {
         Value::Date(_) => {} // OK
         other => panic!("Expected Date, got {:?}", other),
     }
@@ -287,8 +287,8 @@ fn test_totime_function() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN toTime('14:30:00') AS t")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    match &result.rows[0][0] {
+    assert_eq!(result.rows().len(), 1);
+    match &result.rows()[0][0] {
         Value::Time(_) => {} // OK
         other => panic!("Expected Time, got {:?}", other),
     }
@@ -301,8 +301,8 @@ fn test_toduration_function() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN toDuration('P1Y2M') AS dur")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    match &result.rows[0][0] {
+    assert_eq!(result.rows().len(), 1);
+    match &result.rows()[0][0] {
         Value::Duration(_) => {} // OK
         other => panic!("Expected Duration, got {:?}", other),
     }
@@ -345,7 +345,7 @@ fn test_call_inline_subquery() {
         .execute("MATCH (n:Person) CALL { MATCH (m:Person) RETURN count(m) AS total } RETURN n.name, total")
         .unwrap();
     // Each person row should have the total count
-    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows().len(), 3);
 }
 
 // ---------------------------------------------------------------------------
@@ -361,8 +361,8 @@ fn test_string_join() {
             "MATCH (n:Person {name: 'Alix'}) RETURN string_join(['a', 'b', 'c'], '-') AS joined",
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("a-b-c".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("a-b-c".into()));
 }
 
 // ---------------------------------------------------------------------------
@@ -388,9 +388,9 @@ fn test_set_map_merge() {
     let result = session
         .execute("MATCH (n:Person {name: 'Dave'}) RETURN n.age, n.city")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Int64(41)); // age updated
-    assert_eq!(result.rows[0][1], Value::String("NYC".into())); // city added
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Int64(41)); // age updated
+    assert_eq!(result.rows()[0][1], Value::String("NYC".into())); // city added
 }
 
 #[test]
@@ -412,9 +412,9 @@ fn test_set_map_replace() {
     let result = session
         .execute("MATCH (n:Person {name: 'Eve'}) RETURN n.age, n.role")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Null); // age gone (replaced)
-    assert_eq!(result.rows[0][1], Value::String("admin".into())); // role set
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Null); // age gone (replaced)
+    assert_eq!(result.rows()[0][1], Value::String("admin".into())); // role set
 }
 
 // ---------------------------------------------------------------------------
@@ -429,8 +429,8 @@ fn test_property_exists_true() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN PROPERTY_EXISTS(n, 'name') AS has_name")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Bool(true));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Bool(true));
 }
 
 // ISO: G115
@@ -441,8 +441,8 @@ fn test_property_exists_false() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN PROPERTY_EXISTS(n, 'email') AS has_email")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Bool(false));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Bool(false));
 }
 
 // ISO: G113
@@ -456,8 +456,8 @@ fn test_all_different_distinct_nodes() {
             "MATCH (a:Person {name: 'Alix'}), (b:Person {name: 'Gus'}) RETURN ALL_DIFFERENT(a, b) AS diff",
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Bool(true));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Bool(true));
 }
 
 // ISO: G113
@@ -471,8 +471,8 @@ fn test_all_different_same_node() {
             "MATCH (a:Person {name: 'Alix'}), (b:Person {name: 'Alix'}) RETURN ALL_DIFFERENT(a, b) AS diff",
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Bool(false));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Bool(false));
 }
 
 // ISO: G114
@@ -486,8 +486,8 @@ fn test_same_identical_nodes() {
             "MATCH (a:Person {name: 'Alix'}), (b:Person {name: 'Alix'}) RETURN SAME(a, b) AS identical",
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Bool(true));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Bool(true));
 }
 
 // ISO: G114
@@ -500,8 +500,8 @@ fn test_same_different_nodes() {
             "MATCH (a:Person {name: 'Alix'}), (b:Person {name: 'Gus'}) RETURN SAME(a, b) AS identical",
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Bool(false));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Bool(false));
 }
 
 // ---------------------------------------------------------------------------
@@ -518,8 +518,8 @@ fn test_coalesce_syntax() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN COALESCE(null, null, n.name) AS val")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
 }
 
 // ISO: GA03
@@ -541,9 +541,9 @@ fn test_order_by_nulls_first() {
     let result = session
         .execute("MATCH (n:Item) RETURN n.name, n.rank ORDER BY n.rank ASC NULLS FIRST")
         .unwrap();
-    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows().len(), 3);
     // Null rank should come first
-    assert_eq!(result.rows[0][0], Value::String("B".into()));
+    assert_eq!(result.rows()[0][0], Value::String("B".into()));
 }
 
 // ISO: GA03
@@ -565,9 +565,9 @@ fn test_order_by_nulls_last() {
     let result = session
         .execute("MATCH (n:Item) RETURN n.name, n.rank ORDER BY n.rank ASC NULLS LAST")
         .unwrap();
-    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows().len(), 3);
     // Null rank should come last
-    assert_eq!(result.rows[2][0], Value::String("B".into()));
+    assert_eq!(result.rows()[2][0], Value::String("B".into()));
 }
 
 // ---------------------------------------------------------------------------
@@ -581,8 +581,8 @@ fn test_is_normalized_default() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN n.name IS NORMALIZED AS norm")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Bool(true));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Bool(true));
 }
 
 #[test]
@@ -592,8 +592,8 @@ fn test_is_nfc_normalized() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN n.name IS NFC NORMALIZED AS norm")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Bool(true));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Bool(true));
 }
 
 #[test]
@@ -603,9 +603,9 @@ fn test_is_not_normalized() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN n.name IS NOT NFD NORMALIZED AS norm")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     // 'Alix' is already in NFD, so IS NOT NFD NORMALIZED should be false
-    assert_eq!(result.rows[0][0], Value::Bool(false));
+    assert_eq!(result.rows()[0][0], Value::Bool(false));
 }
 
 // --- Group 4: Parenthesized Path Enhancements (G049, G050) ---
@@ -624,7 +624,7 @@ fn test_parenthesized_path_mode_trail() {
         .unwrap();
     // Should find paths: Alix->Gus, Gus->Vincent, Alix->Gus->Vincent
     assert!(
-        !result.rows.is_empty(),
+        !result.rows().is_empty(),
         "TRAIL quantified pattern should produce results"
     );
 }
@@ -643,7 +643,7 @@ fn test_parenthesized_where_clause() {
         .unwrap();
     // Gus (age 25) should be filtered out; only Vincent (age 35) qualifies
     let names: Vec<&str> = result
-        .rows
+        .rows()
         .iter()
         .filter_map(|r| match &r[0] {
             Value::String(s) => Some(s.as_ref()),
@@ -670,7 +670,7 @@ fn test_parenthesized_path_mode_with_where() {
         .execute("MATCH (TRAIL (a)-[e:KNOWS]->(b) WHERE b.age >= 25){1,3} RETURN DISTINCT b.name AS name ORDER BY name")
         .unwrap();
     assert!(
-        !result.rows.is_empty(),
+        !result.rows().is_empty(),
         "Combined TRAIL + WHERE should produce results"
     );
 }
@@ -689,12 +689,12 @@ fn test_subpath_variable_binding() {
         )
         .unwrap();
     assert!(
-        !result.rows.is_empty(),
+        !result.rows().is_empty(),
         "Subpath variable should produce results"
     );
     // Should include 1-hop (Alix->Gus) and 2-hop (Alix->Gus->Vincent)
     let lengths: Vec<i64> = result
-        .rows
+        .rows()
         .iter()
         .filter_map(|r| match &r[0] {
             Value::Int64(n) => Some(*n),
@@ -720,12 +720,12 @@ fn test_subpath_variable_nodes_edges() {
     let result = session
         .execute("MATCH (p = (a:Person {name: 'Alix'})-[:KNOWS]->(b)){1,1} RETURN nodes(p) AS ns")
         .unwrap();
-    assert_eq!(result.rows.len(), 1, "Single 1-hop path expected");
+    assert_eq!(result.rows().len(), 1, "Single 1-hop path expected");
     // nodes(p) should be a list with 2 elements (Alix, Gus)
-    if let Value::List(nodes) = &result.rows[0][0] {
+    if let Value::List(nodes) = &result.rows()[0][0] {
         assert_eq!(nodes.len(), 2, "Path should have 2 nodes");
     } else {
-        panic!("Expected list for nodes(p), got: {:?}", result.rows[0][0]);
+        panic!("Expected list for nodes(p), got: {:?}", result.rows()[0][0]);
     }
 }
 
@@ -740,8 +740,8 @@ fn test_simplified_outgoing_path() {
     let result = session
         .execute("MATCH (a:Person {name: 'Alix'})-/:KNOWS/->(b) RETURN b.name AS name")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Gus".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Gus".into()));
 }
 
 // ISO: G080
@@ -753,8 +753,8 @@ fn test_simplified_incoming_path() {
     let result = session
         .execute("MATCH (b:Person {name: 'Gus'})<-/:KNOWS/-(a) RETURN a.name AS name")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
 }
 
 // ISO: G039, G080
@@ -767,7 +767,7 @@ fn test_simplified_multi_label_path() {
     let result = session
         .execute("MATCH (a:Person)-/:KNOWS/->(b:Person) RETURN a.name AS src, b.name AS dst ORDER BY src, dst")
         .unwrap();
-    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows().len(), 2);
 }
 
 // ============================================================
@@ -783,8 +783,8 @@ fn test_power_function() {
     let result = session
         .execute("MATCH (n:Person) RETURN power(2, 10) AS val LIMIT 1")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    match &result.rows[0][0] {
+    assert_eq!(result.rows().len(), 1);
+    match &result.rows()[0][0] {
         Value::Float64(f) => assert!((f - 1024.0).abs() < 1e-9),
         other => panic!("Expected Float64, got {:?}", other),
     }
@@ -799,7 +799,7 @@ fn test_power_fractional_exponent() {
     let result = session
         .execute("MATCH (n:Person) RETURN power(9, 0.5) AS val LIMIT 1")
         .unwrap();
-    match &result.rows[0][0] {
+    match &result.rows()[0][0] {
         Value::Float64(f) => assert!((f - 3.0).abs() < 1e-9),
         other => panic!("Expected Float64, got {:?}", other),
     }
@@ -814,7 +814,7 @@ fn test_log2_function() {
     let result = session
         .execute("MATCH (n:Person) RETURN log2(8) AS val LIMIT 1")
         .unwrap();
-    match &result.rows[0][0] {
+    match &result.rows()[0][0] {
         Value::Float64(f) => assert!((f - 3.0).abs() < 1e-9),
         other => panic!("Expected Float64, got {:?}", other),
     }
@@ -829,8 +829,8 @@ fn test_trig_functions() {
     let result = session
         .execute("MATCH (n:Person) RETURN sin(0) AS s, cos(0) AS c, tan(0) AS t, asin(0) AS as2, acos(1) AS ac, atan(0) AS at, atan2(1, 1) AS at2 LIMIT 1")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    let row = &result.rows[0];
+    assert_eq!(result.rows().len(), 1);
+    let row = &result.rows()[0];
     match &row[0] {
         Value::Float64(f) => assert!(f.abs() < 1e-9, "sin(0) = {}", f),
         other => panic!("Expected Float64, got {:?}", other),
@@ -855,8 +855,8 @@ fn test_enhanced_numeric_functions() {
     let result = session
         .execute("MATCH (n:Person) RETURN abs(-5) AS a, ceil(2.3) AS c, floor(2.7) AS f, sign(-42) AS s, sqrt(16) AS sq, round(2.5) AS r LIMIT 1")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    let row = &result.rows[0];
+    assert_eq!(result.rows().len(), 1);
+    let row = &result.rows()[0];
     assert_eq!(row[0], Value::Int64(5)); // abs(-5)
     assert_eq!(row[1], Value::Float64(3.0)); // ceil(2.3)
     assert_eq!(row[2], Value::Float64(2.0)); // floor(2.7)
@@ -877,8 +877,8 @@ fn test_logarithmic_functions() {
     let result = session
         .execute("MATCH (n:Person) RETURN ln(e()) AS a, log10(100) AS b, log2(16) AS c, exp(0) AS d LIMIT 1")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    let row = &result.rows[0];
+    assert_eq!(result.rows().len(), 1);
+    let row = &result.rows()[0];
     match &row[0] {
         Value::Float64(f) => assert!((f - 1.0).abs() < 1e-9, "ln(e) = {}", f),
         other => panic!("Expected Float64, got {:?}", other),
@@ -906,8 +906,8 @@ fn test_cardinality_function() {
     let result = session
         .execute("MATCH (n:Person) RETURN cardinality([1, 2, 3, 4, 5]) AS val LIMIT 1")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Int64(5));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Int64(5));
 }
 
 // ISO: GF12
@@ -918,8 +918,8 @@ fn test_cardinality_empty_list() {
     let result = session
         .execute("MATCH (n:Person) RETURN cardinality([]) AS val LIMIT 1")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Int64(0));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Int64(0));
 }
 
 // ============================================================
@@ -935,8 +935,8 @@ fn test_hex_integer_literal() {
     let result = session
         .execute("MATCH (n:Person) RETURN 0xFF AS val LIMIT 1")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Int64(255));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Int64(255));
 }
 
 // ISO: GL02
@@ -948,8 +948,8 @@ fn test_octal_integer_literal() {
     let result = session
         .execute("MATCH (n:Person) RETURN 0o77 AS val LIMIT 1")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Int64(63));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Int64(63));
 }
 
 // ISO: GL03
@@ -961,8 +961,8 @@ fn test_binary_integer_literal() {
     let result = session
         .execute("MATCH (n:Person) RETURN 0b1010 AS val LIMIT 1")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Int64(10));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Int64(10));
 }
 
 // ISO: GL01
@@ -974,8 +974,8 @@ fn test_hex_in_expression() {
     let result = session
         .execute("MATCH (n:Person) RETURN 0x10 + 0b100 AS val LIMIT 1")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Int64(20)); // 16 + 4
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Int64(20)); // 16 + 4
 }
 
 // ============================================================
@@ -991,8 +991,8 @@ fn test_trim_both_chars() {
     let result = session
         .execute("MATCH (n:Person) RETURN TRIM(BOTH 'xy' FROM 'xxyhelloxyy') AS val LIMIT 1")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("hello".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("hello".into()));
 }
 
 // ISO: GF05
@@ -1004,8 +1004,8 @@ fn test_trim_leading_chars() {
     let result = session
         .execute("MATCH (n:Person) RETURN TRIM(LEADING '0' FROM '000123') AS val LIMIT 1")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("123".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("123".into()));
 }
 
 // ISO: GF05
@@ -1017,8 +1017,8 @@ fn test_trim_trailing_chars() {
     let result = session
         .execute("MATCH (n:Person) RETURN TRIM(TRAILING '.' FROM 'hello...') AS val LIMIT 1")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("hello".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("hello".into()));
 }
 
 #[test]
@@ -1029,8 +1029,8 @@ fn test_trim_simple() {
     let result = session
         .execute("MATCH (n:Person) RETURN trim('  hello  ') AS val LIMIT 1")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("hello".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("hello".into()));
 }
 
 // ============================================================
@@ -1052,10 +1052,10 @@ fn test_multiset_alternation_basic() {
         .unwrap();
     // Each KNOWS edge appears twice (once per alternative): 2 edges × 2 = 4
     assert_eq!(
-        result.rows.len(),
+        result.rows().len(),
         4,
         "Multiset union should duplicate: 2 KNOWS edges × 2 alternatives, got {}",
-        result.rows.len()
+        result.rows().len()
     );
 }
 
@@ -1073,10 +1073,10 @@ fn test_set_alternation_basic() {
         .unwrap();
     // 2 KNOWS edges + 0 WORKS_AT edges (no Company nodes in fixture)
     assert_eq!(
-        result.rows.len(),
+        result.rows().len(),
         2,
         "Set union should return 2 KNOWS edges, got {}",
-        result.rows.len()
+        result.rows().len()
     );
 }
 
@@ -1097,7 +1097,7 @@ fn test_delete_variable() {
 
     // Verify node exists
     let result = session.execute("MATCH (n:Temp) RETURN n.name").unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
 
     // Delete it
     session.begin_transaction().unwrap();
@@ -1106,7 +1106,7 @@ fn test_delete_variable() {
 
     // Verify it's gone
     let result = session.execute("MATCH (n:Temp) RETURN n.name").unwrap();
-    assert_eq!(result.rows.len(), 0, "Node should be deleted");
+    assert_eq!(result.rows().len(), 0, "Node should be deleted");
 }
 
 #[test]
@@ -1129,7 +1129,7 @@ fn test_delete_edge_variable() {
     let result = session
         .execute("MATCH (:A)-[r:LINK]->(:B) RETURN r")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
 
     // Delete just the edge
     session.begin_transaction().unwrap();
@@ -1142,10 +1142,10 @@ fn test_delete_edge_variable() {
     let result = session
         .execute("MATCH (:A)-[r:LINK]->(:B) RETURN r")
         .unwrap();
-    assert_eq!(result.rows.len(), 0, "Edge should be deleted");
+    assert_eq!(result.rows().len(), 0, "Edge should be deleted");
 
     let result = session.execute("MATCH (n:A) RETURN n").unwrap();
-    assert_eq!(result.rows.len(), 1, "Node A should still exist");
+    assert_eq!(result.rows().len(), 1, "Node A should still exist");
 }
 
 #[test]
@@ -1165,9 +1165,9 @@ fn test_delete_multiple_sequential() {
     session.commit().unwrap();
 
     let result = session.execute("MATCH (n:X) RETURN n").unwrap();
-    assert_eq!(result.rows.len(), 0, "X should be deleted");
+    assert_eq!(result.rows().len(), 0, "X should be deleted");
     let result = session.execute("MATCH (n:Y) RETURN n").unwrap();
-    assert_eq!(result.rows.len(), 0, "Y should be deleted");
+    assert_eq!(result.rows().len(), 0, "Y should be deleted");
 }
 
 // ISO: GD04
@@ -1191,7 +1191,7 @@ fn test_delete_expression_property_access() {
 
     // Verify the leaf exists
     let result = session.execute("MATCH (n:Leaf) RETURN n.name").unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
 
     // Delete using expression: head(collect(m)) evaluates to the matched node
     session.begin_transaction().unwrap();
@@ -1202,7 +1202,7 @@ fn test_delete_expression_property_access() {
         session.commit().unwrap();
         let result = session.execute("MATCH (n:Leaf) RETURN n.name").unwrap();
         assert_eq!(
-            result.rows.len(),
+            result.rows().len(),
             0,
             "Leaf should be deleted via expression"
         );
@@ -1223,11 +1223,11 @@ fn test_path_as_value() {
         .execute("MATCH p = (a:Person {name: 'Alix'})-[:KNOWS]->(b:Person) RETURN p")
         .unwrap();
     assert!(
-        !result.rows.is_empty(),
+        !result.rows().is_empty(),
         "Path variable should return results"
     );
     // The result should be a Path value
-    let path_val = &result.rows[0][0];
+    let path_val = &result.rows()[0][0];
     assert!(
         matches!(path_val, Value::Path { .. }),
         "Expected Path value, got {:?}",
@@ -1247,9 +1247,9 @@ fn test_path_length_function() {
              RETURN length(p) AS len",
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert!(!result.rows().is_empty());
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(1),
         "Single-hop path should have length 1"
     );
@@ -1267,8 +1267,8 @@ fn test_path_nodes_function() {
              RETURN nodes(p) AS node_list",
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
-    match &result.rows[0][0] {
+    assert!(!result.rows().is_empty());
+    match &result.rows()[0][0] {
         Value::List(items) => {
             assert_eq!(items.len(), 2, "Single-hop path should have 2 nodes");
         }
@@ -1288,8 +1288,8 @@ fn test_path_edges_function() {
              RETURN edges(p) AS edge_list",
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
-    match &result.rows[0][0] {
+    assert!(!result.rows().is_empty());
+    match &result.rows()[0][0] {
         Value::List(items) => {
             assert_eq!(items.len(), 1, "Single-hop path should have 1 edge");
         }
@@ -1309,9 +1309,9 @@ fn test_path_is_acyclic() {
              RETURN isAcyclic(p) AS is_acyclic_result",
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert!(!result.rows().is_empty());
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Bool(true),
         "A->B path should be acyclic"
     );
@@ -1329,9 +1329,9 @@ fn test_path_is_simple() {
              RETURN isSimple(p) AS is_simple_result",
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert!(!result.rows().is_empty());
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Bool(true),
         "A->B path should be simple"
     );
@@ -1349,9 +1349,9 @@ fn test_path_is_trail() {
              RETURN isTrail(p) AS is_trail_result",
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert!(!result.rows().is_empty());
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Bool(true),
         "A->B path should be a trail"
     );
@@ -1367,8 +1367,8 @@ fn test_path_constructor() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN path([1, 2, 3], ['a', 'b']) AS p")
         .unwrap();
-    assert!(!result.rows.is_empty());
-    match &result.rows[0][0] {
+    assert!(!result.rows().is_empty());
+    match &result.rows()[0][0] {
         Value::Path { nodes, edges } => {
             assert_eq!(nodes.len(), 3, "path should have 3 nodes");
             assert_eq!(edges.len(), 2, "path should have 2 edges");
@@ -1390,9 +1390,9 @@ fn test_path_constructor_from_match() {
              RETURN isSimple(rebuilt) AS is_simple",
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert!(!result.rows().is_empty());
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Bool(true),
         "Rebuilt path should be simple"
     );
@@ -1411,9 +1411,9 @@ fn test_path_equality() {
              RETURN p = p AS self_equal",
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert!(!result.rows().is_empty());
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Bool(true),
         "A path should equal itself"
     );
@@ -1434,7 +1434,7 @@ fn test_path_multi_hop_nodes() {
     // This test verifies the function is accepted.
     if let Ok(result) = result {
         assert!(
-            !result.rows.is_empty(),
+            !result.rows().is_empty(),
             "Multi-hop path should return results"
         );
     }
@@ -1453,9 +1453,9 @@ fn test_variance_function() {
     let result = session
         .execute("MATCH (n:Person) RETURN variance(n.age) AS var_age")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     // ages: 30, 25, 35 -> mean = 30, var_samp = ((0+25+25)/2) = 25.0
-    match &result.rows[0][0] {
+    match &result.rows()[0][0] {
         Value::Float64(v) => {
             assert!((v - 25.0).abs() < 0.01, "Expected variance ~25.0, got {v}");
         }
@@ -1472,9 +1472,9 @@ fn test_var_pop_function() {
     let result = session
         .execute("MATCH (n:Person) RETURN var_pop(n.age) AS var_pop_age")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     // ages: 30, 25, 35 -> mean = 30, var_pop = ((0+25+25)/3) = 16.6667
-    match &result.rows[0][0] {
+    match &result.rows()[0][0] {
         Value::Float64(v) => {
             assert!(
                 (v - 16.6667).abs() < 0.01,
@@ -1494,9 +1494,9 @@ fn test_stddev_samp_alias() {
     let result = session
         .execute("MATCH (n:Person) RETURN stddev_samp(n.age) AS sd")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     // sqrt(25.0) = 5.0
-    match &result.rows[0][0] {
+    match &result.rows()[0][0] {
         Value::Float64(v) => {
             assert!((v - 5.0).abs() < 0.01, "Expected stddev ~5.0, got {v}");
         }
@@ -1513,9 +1513,9 @@ fn test_stddev_pop_alias() {
     let result = session
         .execute("MATCH (n:Person) RETURN stddev_pop(n.age) AS sd_pop")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     // sqrt(16.6667) ~ 4.0825
-    match &result.rows[0][0] {
+    match &result.rows()[0][0] {
         Value::Float64(v) => {
             assert!(
                 (v - 4.0825).abs() < 0.01,
@@ -1540,7 +1540,7 @@ fn test_aggregate_in_order_by() {
              ORDER BY friend_count DESC",
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert!(!result.rows().is_empty());
 }
 
 // ISO: GF20
@@ -1556,7 +1556,7 @@ fn test_aggregate_order_by_alias() {
              ORDER BY friend_count DESC",
         )
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert!(!result.rows().is_empty());
 }
 
 // =========================================================================
@@ -1765,9 +1765,9 @@ fn test_covar_samp_perfect_linear() {
     let result = session
         .execute("MATCH (p:Point) RETURN COVAR_SAMP(p.y, p.x) AS cov")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     // For y=2x: Cov(y,x) = 2 * Var(x) = 2 * 2.5 = 5.0
-    let cov = match &result.rows[0][0] {
+    let cov = match &result.rows()[0][0] {
         Value::Float64(f) => *f,
         other => panic!("Expected Float64, got: {:?}", other),
     };
@@ -1785,11 +1785,11 @@ fn test_covar_pop_perfect_linear() {
     let result = session
         .execute("MATCH (p:Point) RETURN COVAR_POP(p.y, p.x) AS cov")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     // Pop covariance = S_xy / n = (5 * 5.0) / 5... actually S_xy/n = c_xy/n
     // Welford c_xy for y=2x data: sum of dx*dy2 increments
     // For n=5: CovarPop = CovarSamp * (n-1)/n = 5.0 * 4/5 = 4.0
-    let cov = match &result.rows[0][0] {
+    let cov = match &result.rows()[0][0] {
         Value::Float64(f) => *f,
         other => panic!("Expected Float64, got: {:?}", other),
     };
@@ -1807,8 +1807,8 @@ fn test_corr_perfect_positive() {
     let result = session
         .execute("MATCH (p:Point) RETURN CORR(p.y, p.x) AS r")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    let r = match &result.rows[0][0] {
+    assert_eq!(result.rows().len(), 1);
+    let r = match &result.rows()[0][0] {
         Value::Float64(f) => *f,
         other => panic!("Expected Float64, got: {:?}", other),
     };
@@ -1827,12 +1827,12 @@ fn test_regr_slope_and_intercept() {
     let result = session
         .execute("MATCH (p:Point) RETURN REGR_SLOPE(p.y, p.x) AS slope, REGR_INTERCEPT(p.y, p.x) AS intercept")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    let slope = match &result.rows[0][0] {
+    assert_eq!(result.rows().len(), 1);
+    let slope = match &result.rows()[0][0] {
         Value::Float64(f) => *f,
         other => panic!("Expected Float64 for slope, got: {:?}", other),
     };
-    let intercept = match &result.rows[0][1] {
+    let intercept = match &result.rows()[0][1] {
         Value::Float64(f) => *f,
         other => panic!("Expected Float64 for intercept, got: {:?}", other),
     };
@@ -1854,8 +1854,8 @@ fn test_regr_r2() {
     let result = session
         .execute("MATCH (p:Point) RETURN REGR_R2(p.y, p.x) AS r2")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    let r2 = match &result.rows[0][0] {
+    assert_eq!(result.rows().len(), 1);
+    let r2 = match &result.rows()[0][0] {
         Value::Float64(f) => *f,
         other => panic!("Expected Float64, got: {:?}", other),
     };
@@ -1870,8 +1870,8 @@ fn test_regr_count() {
     let result = session
         .execute("MATCH (p:Point) RETURN REGR_COUNT(p.y, p.x) AS cnt")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    let cnt = match &result.rows[0][0] {
+    assert_eq!(result.rows().len(), 1);
+    let cnt = match &result.rows()[0][0] {
         Value::Int64(i) => *i,
         other => panic!("Expected Int64, got: {:?}", other),
     };
@@ -1888,19 +1888,19 @@ fn test_regr_sxx_syy_sxy() {
             "MATCH (p:Point) RETURN REGR_SXX(p.y, p.x) AS sxx, REGR_SYY(p.y, p.x) AS syy, REGR_SXY(p.y, p.x) AS sxy",
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     // Var(x) = 2.5, so S_xx (population) = sum of (xi - mean_x)^2 = 10.0
     // Var(y) = 10.0, so S_yy = 40.0
     // Cov(y,x) = 5.0 (sample), S_xy = 20.0
-    let sxx = match &result.rows[0][0] {
+    let sxx = match &result.rows()[0][0] {
         Value::Float64(f) => *f,
         other => panic!("Expected Float64, got: {:?}", other),
     };
-    let syy = match &result.rows[0][1] {
+    let syy = match &result.rows()[0][1] {
         Value::Float64(f) => *f,
         other => panic!("Expected Float64, got: {:?}", other),
     };
-    let sxy = match &result.rows[0][2] {
+    let sxy = match &result.rows()[0][2] {
         Value::Float64(f) => *f,
         other => panic!("Expected Float64, got: {:?}", other),
     };
@@ -1926,12 +1926,12 @@ fn test_regr_avgx_avgy() {
     let result = session
         .execute("MATCH (p:Point) RETURN REGR_AVGX(p.y, p.x) AS ax, REGR_AVGY(p.y, p.x) AS ay")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    let ax = match &result.rows[0][0] {
+    assert_eq!(result.rows().len(), 1);
+    let ax = match &result.rows()[0][0] {
         Value::Float64(f) => *f,
         other => panic!("Expected Float64, got: {:?}", other),
     };
-    let ay = match &result.rows[0][1] {
+    let ay = match &result.rows()[0][1] {
         Value::Float64(f) => *f,
         other => panic!("Expected Float64, got: {:?}", other),
     };
@@ -1962,8 +1962,8 @@ fn test_binary_null_pair_skipping() {
     let result = session
         .execute("MATCH (p:Point) RETURN REGR_COUNT(p.y, p.x) AS cnt")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    let cnt = match &result.rows[0][0] {
+    assert_eq!(result.rows().len(), 1);
+    let cnt = match &result.rows()[0][0] {
         Value::Int64(i) => *i,
         other => panic!("Expected Int64, got: {:?}", other),
     };
@@ -1981,11 +1981,11 @@ fn test_binary_edge_case_empty() {
         .execute("MATCH (p:Point) RETURN COVAR_SAMP(p.y, p.x) AS cov")
         .unwrap();
     // With no rows, the aggregate should return NULL (or empty result)
-    if !result.rows.is_empty() {
+    if !result.rows().is_empty() {
         assert!(
-            matches!(&result.rows[0][0], Value::Null),
+            matches!(&result.rows()[0][0], Value::Null),
             "COVAR_SAMP with 0 rows should be NULL, got {:?}",
-            result.rows[0][0]
+            result.rows()[0][0]
         );
     }
 }
@@ -2044,7 +2044,7 @@ fn test_exists_correlated_outer_variable_reference() {
         )
         .unwrap();
     let names: Vec<&str> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[0] {
             Value::String(s) => s.as_str(),
@@ -2069,14 +2069,14 @@ fn test_count_subquery_in_return() {
     assert_eq!(result.columns, vec!["p.name", "friends"]);
     // Alix: 1 outgoing KNOWS, Gus: 1 outgoing KNOWS, Vincent: 0
     let alix_row = result
-        .rows
+        .rows()
         .iter()
         .find(|r| r[0] == Value::String("Alix".into()))
         .unwrap();
     assert_eq!(alix_row[1], Value::Int64(1));
 
     let vincent_row = result
-        .rows
+        .rows()
         .iter()
         .find(|r| r[0] == Value::String("Vincent".into()))
         .unwrap();
@@ -2097,7 +2097,7 @@ fn test_count_subquery_in_where() {
         )
         .unwrap();
     let names: Vec<&str> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[0] {
             Value::String(s) => s.as_str(),
@@ -2143,7 +2143,7 @@ fn test_nested_exists_subquery() {
     match result {
         Ok(r) => {
             let names: Vec<&str> = r
-                .rows
+                .rows()
                 .iter()
                 .map(|row| match &row[0] {
                     Value::String(s) => s.as_str(),
@@ -2171,7 +2171,7 @@ fn test_path_constructor_function() {
         .unwrap();
     assert_eq!(result.columns, vec!["p"]);
     // Each row should be a Path value
-    for row in &result.rows {
+    for row in result.rows() {
         match &row[0] {
             Value::Path { nodes, edges } => {
                 assert_eq!(nodes.len(), 2, "path should have 2 nodes");
@@ -2197,7 +2197,7 @@ fn test_count_subquery_equals_zero_in_where() {
         )
         .unwrap();
     let names: Vec<&str> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[0] {
             Value::String(s) => s.as_str(),
@@ -2220,7 +2220,7 @@ fn test_db_labels() {
     assert_eq!(result.columns, vec!["label"]);
 
     let mut labels: Vec<String> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[0] {
             Value::String(s) => s.to_string(),
@@ -2240,7 +2240,7 @@ fn test_db_relationship_types() {
     assert_eq!(result.columns, vec!["relationshipType"]);
 
     let types: Vec<String> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[0] {
             Value::String(s) => s.to_string(),
@@ -2259,7 +2259,7 @@ fn test_db_property_keys() {
     assert_eq!(result.columns, vec!["propertyKey"]);
 
     let mut keys: Vec<String> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[0] {
             Value::String(s) => s.to_string(),
@@ -2279,7 +2279,7 @@ fn test_db_labels_with_yield() {
     let result = session
         .execute("CALL db.labels() YIELD label RETURN label")
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert!(!result.rows().is_empty());
     assert_eq!(result.columns, vec!["label"]);
 }
 
@@ -2310,8 +2310,8 @@ fn test_savepoint_basic() {
     let result = session
         .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
 }
 
 #[test]
@@ -2333,7 +2333,7 @@ fn test_savepoint_release() {
     let result = session
         .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name")
         .unwrap();
-    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows().len(), 2);
 }
 
 #[test]
@@ -2368,8 +2368,8 @@ fn test_savepoint_nested() {
     let result = session
         .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
 }
 
 // ── LIST<T> typed list tests ──────────────────────────────────────────────────
@@ -2382,9 +2382,9 @@ fn test_cast_to_typed_list_int() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN CAST([1, 2, 3] AS LIST<INT>) AS nums")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::List(vec![Value::Int64(1), Value::Int64(2), Value::Int64(3)].into())
     );
 }
@@ -2399,9 +2399,9 @@ fn test_cast_to_typed_list_coercion() {
             "MATCH (n:Person {name: 'Alix'}) RETURN CAST([1.5, 2.9, 3.0] AS LIST<INT>) AS nums",
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::List(vec![Value::Int64(1), Value::Int64(2), Value::Int64(3)].into())
     );
 }
@@ -2416,9 +2416,9 @@ fn test_cast_to_typed_list_string() {
             "MATCH (n:Person {name: 'Alix'}) RETURN CAST([1, true, 'hello'] AS LIST<STRING>) AS strs",
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::List(
             vec![
                 Value::String("1".into()),
@@ -2438,16 +2438,16 @@ fn test_is_typed_list_int() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN [1, 2, 3] IS TYPED LIST<INT> AS check")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Bool(true));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Bool(true));
 
     let result = session
         .execute(
             "MATCH (n:Person {name: 'Alix'}) RETURN [1, 'hello', 3] IS TYPED LIST<INT> AS check",
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Bool(false));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Bool(false));
 }
 
 #[test]
@@ -2460,8 +2460,8 @@ fn test_is_not_typed_list() {
             "MATCH (n:Person {name: 'Alix'}) RETURN [1, 2, 3] IS NOT TYPED LIST<STRING> AS check",
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Bool(true));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Bool(true));
 }
 
 // ── Record types and graph reference types ─────────────────────────────────────
@@ -2477,8 +2477,8 @@ fn test_is_typed_record() {
             "MATCH (n:Person {name: 'Alix'}) RETURN {x: 1, y: 'hello'} IS TYPED RECORD AS check",
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Bool(true));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Bool(true));
 }
 
 #[test]
@@ -2493,8 +2493,8 @@ fn test_is_typed_path() {
              RETURN path(a, e, b) IS TYPED PATH AS check",
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Bool(true));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Bool(true));
 }
 
 #[test]
@@ -2506,8 +2506,8 @@ fn test_is_not_typed_graph() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN n.name IS NOT TYPED GRAPH AS check")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Bool(true));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Bool(true));
 }
 
 // ── LIKE graph and AS COPY OF DDL ──────────────────────────────────────────────
@@ -2676,9 +2676,9 @@ fn test_nested_transaction_commit() {
     let result = session2
         .execute("MATCH (i:Item) RETURN i.name ORDER BY i.name")
         .unwrap();
-    assert_eq!(result.rows.len(), 2);
-    assert_eq!(result.rows[0][0], Value::String("inner".into()));
-    assert_eq!(result.rows[1][0], Value::String("outer".into()));
+    assert_eq!(result.rows().len(), 2);
+    assert_eq!(result.rows()[0][0], Value::String("inner".into()));
+    assert_eq!(result.rows()[1][0], Value::String("outer".into()));
     session2.rollback().unwrap();
 }
 
@@ -2705,8 +2705,8 @@ fn test_nested_transaction_rollback() {
     let mut session2 = db.session();
     session2.begin_transaction().unwrap();
     let result = session2.execute("MATCH (i:Item) RETURN i.name").unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("outer".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("outer".into()));
     session2.rollback().unwrap();
 }
 
@@ -2741,9 +2741,9 @@ fn test_nested_transaction_double_nesting() {
     let result = session2
         .execute("MATCH (i:Item) RETURN i.name ORDER BY i.name")
         .unwrap();
-    assert_eq!(result.rows.len(), 2);
-    assert_eq!(result.rows[0][0], Value::String("level0".into()));
-    assert_eq!(result.rows[1][0], Value::String("level1".into()));
+    assert_eq!(result.rows().len(), 2);
+    assert_eq!(result.rows()[0][0], Value::String("level0".into()));
+    assert_eq!(result.rows()[1][0], Value::String("level1".into()));
     session2.rollback().unwrap();
 }
 
@@ -2761,12 +2761,12 @@ fn test_date_trunc_on_date() {
             "MATCH (n:Person {name: 'Alix'}) RETURN date_trunc('month', DATE '2026-03-15') AS d",
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    if let Value::Date(d) = &result.rows[0][0] {
+    assert_eq!(result.rows().len(), 1);
+    if let Value::Date(d) = &result.rows()[0][0] {
         assert_eq!(d.month(), 3);
         assert_eq!(d.day(), 1);
     } else {
-        panic!("Expected Date, got {:?}", result.rows[0][0]);
+        panic!("Expected Date, got {:?}", result.rows()[0][0]);
     }
 }
 
@@ -2777,13 +2777,13 @@ fn test_date_trunc_on_time() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN date_trunc('hour', TIME '14:30:45') AS t")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    if let Value::Time(t) = &result.rows[0][0] {
+    assert_eq!(result.rows().len(), 1);
+    if let Value::Time(t) = &result.rows()[0][0] {
         assert_eq!(t.hour(), 14);
         assert_eq!(t.minute(), 0);
         assert_eq!(t.second(), 0);
     } else {
-        panic!("Expected Time, got {:?}", result.rows[0][0]);
+        panic!("Expected Time, got {:?}", result.rows()[0][0]);
     }
 }
 
@@ -2796,8 +2796,8 @@ fn test_date_trunc_invalid_unit_returns_null() {
             "MATCH (n:Person {name: 'Alix'}) RETURN date_trunc('millennium', DATE '2026-03-15') AS d",
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Null);
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Null);
 }
 
 #[test]
@@ -2807,8 +2807,8 @@ fn test_local_time_no_args() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN local_time() AS t")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert!(matches!(result.rows[0][0], Value::Time(_)));
+    assert_eq!(result.rows().len(), 1);
+    assert!(matches!(result.rows()[0][0], Value::Time(_)));
 }
 
 #[test]
@@ -2818,8 +2818,8 @@ fn test_local_datetime_no_args() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN local_datetime() AS dt")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert!(matches!(result.rows[0][0], Value::Timestamp(_)));
+    assert_eq!(result.rows().len(), 1);
+    assert!(matches!(result.rows()[0][0], Value::Timestamp(_)));
 }
 
 #[test]
@@ -2829,8 +2829,8 @@ fn test_zoned_datetime_no_args() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN zoned_datetime() AS zdt")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert!(matches!(result.rows[0][0], Value::ZonedDatetime(_)));
+    assert_eq!(result.rows().len(), 1);
+    assert!(matches!(result.rows()[0][0], Value::ZonedDatetime(_)));
 }
 
 #[test]
@@ -2840,8 +2840,8 @@ fn test_path_constructor_from_traversal() {
     let result = session
         .execute("MATCH p = (a:Person {name: 'Alix'})-[:KNOWS]->(b) RETURN length(p)")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Int64(1));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Int64(1));
 }
 
 #[test]
@@ -2851,8 +2851,8 @@ fn test_is_not_null_on_list() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN [1, 2, 3] IS NOT NULL AS check")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Bool(true));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Bool(true));
 }
 
 // ---------------------------------------------------------------------------
@@ -2873,8 +2873,8 @@ fn test_percentile_cont_boundaries() {
     let result = session
         .execute("MATCH (v:Val) RETURN percentile_cont(v.x, 0.0)")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    let val = match &result.rows[0][0] {
+    assert_eq!(result.rows().len(), 1);
+    let val = match &result.rows()[0][0] {
         Value::Float64(f) => *f,
         Value::Int64(i) => *i as f64,
         other => panic!("Expected numeric, got {:?}", other),
@@ -2885,7 +2885,7 @@ fn test_percentile_cont_boundaries() {
     let result = session
         .execute("MATCH (v:Val) RETURN percentile_cont(v.x, 1.0)")
         .unwrap();
-    let val = match &result.rows[0][0] {
+    let val = match &result.rows()[0][0] {
         Value::Float64(f) => *f,
         Value::Int64(i) => *i as f64,
         other => panic!("Expected numeric, got {:?}", other),
@@ -2906,10 +2906,10 @@ fn test_percentile_disc() {
     let result = session
         .execute("MATCH (v:Val) RETURN percentile_disc(v.x, 0.5)")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     // Discrete percentile at 0.5 with 3 values
     assert!(matches!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(_) | Value::Float64(_)
     ));
 }
@@ -2923,9 +2923,9 @@ fn test_stddev_single_value_returns_zero_or_null() {
     session.commit().unwrap();
 
     let result = session.execute("MATCH (v:Val) RETURN stdev(v.x)").unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     // With n=1, sample stddev is typically 0 or null
-    match &result.rows[0][0] {
+    match &result.rows()[0][0] {
         Value::Null => {} // acceptable: sample stddev undefined for n=1
         Value::Float64(f) => assert!(*f == 0.0 || f.is_nan()),
         Value::Int64(i) => assert_eq!(*i, 0),
@@ -2942,8 +2942,8 @@ fn test_variance_empty_returns_null() {
         .execute("MATCH (v:Val) RETURN variance(v.x)")
         .unwrap();
     // Empty match might return 0 rows or 1 row with null
-    if !result.rows.is_empty() {
-        assert_eq!(result.rows[0][0], Value::Null);
+    if !result.rows().is_empty() {
+        assert_eq!(result.rows()[0][0], Value::Null);
     }
 }
 
@@ -2954,15 +2954,15 @@ fn test_listagg_with_separator() {
     let result = session
         .execute("MATCH (p:Person) RETURN listagg(p.name, ', ') AS names")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    if let Value::String(s) = &result.rows[0][0] {
+    assert_eq!(result.rows().len(), 1);
+    if let Value::String(s) = &result.rows()[0][0] {
         // Should contain all three names separated by comma-space
         assert!(s.contains("Alix"));
         assert!(s.contains("Gus"));
         assert!(s.contains("Vincent"));
         assert!(s.contains(", "));
     } else {
-        panic!("Expected String, got {:?}", result.rows[0][0]);
+        panic!("Expected String, got {:?}", result.rows()[0][0]);
     }
 }
 
@@ -3014,15 +3014,15 @@ fn test_savepoint_rollback_discards_mutations() {
 
     // Verify both visible within transaction
     let result = session.execute("MATCH (i:Item) RETURN count(i)").unwrap();
-    assert_eq!(result.rows[0][0], Value::Int64(2));
+    assert_eq!(result.rows()[0][0], Value::Int64(2));
 
     // Rollback to savepoint
     session.rollback_to_savepoint("sp1").unwrap();
 
     // Only the node before savepoint should remain
     let result = session.execute("MATCH (i:Item) RETURN i.name").unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("before_sp".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("before_sp".into()));
 
     session.commit().unwrap();
 }
@@ -3054,7 +3054,7 @@ fn test_viewing_epoch_limits_visibility() {
     session.set_viewing_epoch(grafeo_common::types::EpochId(1));
     // Query with viewing epoch set should not panic
     let result = session.execute("MATCH (m:Marker) RETURN count(m)").unwrap();
-    assert!(!result.rows.is_empty());
+    assert!(!result.rows().is_empty());
     session.clear_viewing_epoch();
 }
 

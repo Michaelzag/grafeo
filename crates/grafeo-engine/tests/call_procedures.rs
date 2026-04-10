@@ -49,7 +49,7 @@ fn test_gql_call_pagerank_with_params() {
     assert_eq!(result.row_count(), 3);
     // Scores should sum to approximately 1.0
     let total_score: f64 = result
-        .rows
+        .rows()
         .iter()
         .map(|row| match &row[1] {
             Value::Float64(f) => *f,
@@ -102,7 +102,7 @@ fn test_gql_call_connected_components() {
     assert_eq!(result.columns[1], "component_id");
     assert_eq!(result.row_count(), 3);
     // All 3 nodes should be in the same component (connected graph)
-    let components: Vec<&Value> = result.rows.iter().map(|r| &r[1]).collect();
+    let components: Vec<&Value> = result.rows().iter().map(|r| &r[1]).collect();
     assert_eq!(components[0], components[1]);
     assert_eq!(components[1], components[2]);
 }
@@ -267,7 +267,7 @@ fn test_call_clustering_coefficient() {
     assert_eq!(result.row_count(), 3);
 
     // Coefficients should be in [0.0, 1.0]
-    for row in &result.rows {
+    for row in result.rows() {
         if let Value::Float64(coeff) = &row[1] {
             assert!(
                 (0.0..=1.0).contains(coeff),
@@ -349,7 +349,7 @@ fn test_call_procedures_list_has_expected_columns() {
     assert_eq!(result.columns[3], "output_columns");
 
     // Every procedure should have a non-empty name
-    for row in &result.rows {
+    for row in result.rows() {
         if let Value::String(name) = &row[0] {
             assert!(!name.is_empty(), "Procedure name should not be empty");
         } else {
@@ -427,7 +427,7 @@ fn test_call_pagerank_single_node() {
     let session = db.session();
     let result = session.execute("CALL grafeo.pagerank()").unwrap();
     assert_eq!(result.row_count(), 1, "Single node should get PageRank");
-    if let Value::Float64(score) = &result.rows[0][1] {
+    if let Value::Float64(score) = &result.rows()[0][1] {
         assert!(
             (*score - 1.0).abs() < 0.01,
             "Single node should have PageRank ~1.0, got {}",
@@ -476,7 +476,7 @@ fn test_gql_call_yield_where() {
     assert_eq!(result.row_count(), 3);
 
     // Verify all scores are positive
-    for row in &result.rows {
+    for row in result.rows() {
         if let Value::Float64(score) = &row[1] {
             assert!(*score > 0.0, "Expected score > 0.0, got {}", score);
         }
@@ -490,7 +490,7 @@ fn test_gql_call_yield_where_filters_rows() {
     // Use a high threshold that eliminates some results
     let all = session.execute("CALL grafeo.pagerank()").unwrap();
     let max_score = all
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[1] {
             Value::Float64(f) => *f,
@@ -548,7 +548,7 @@ fn test_gql_call_yield_return_order_by() {
     assert_eq!(result.row_count(), 3);
     // Verify descending order
     let scores: Vec<f64> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[1] {
             Value::Float64(f) => *f,
@@ -594,11 +594,11 @@ fn test_gql_call_yield_where_return_order_limit() {
     );
     // Verify descending order
     if result.row_count() == 2 {
-        let s0 = match &result.rows[0][1] {
+        let s0 = match &result.rows()[0][1] {
             Value::Float64(f) => *f,
             _ => 0.0,
         };
-        let s1 = match &result.rows[1][1] {
+        let s1 = match &result.rows()[1][1] {
             Value::Float64(f) => *f,
             _ => 0.0,
         };
@@ -663,11 +663,11 @@ fn test_sql_pgq_call_yield_order_by_limit() {
     assert!(result.row_count() <= 2);
     // Verify descending order
     if result.row_count() == 2 {
-        let s0 = match &result.rows[0][1] {
+        let s0 = match &result.rows()[0][1] {
             Value::Float64(f) => *f,
             _ => 0.0,
         };
-        let s1 = match &result.rows[1][1] {
+        let s1 = match &result.rows()[1][1] {
             Value::Float64(f) => *f,
             _ => 0.0,
         };
@@ -710,7 +710,7 @@ fn test_sql_pgq_call_yield_where_return_skip_limit() {
     let all = session
         .execute_sql("CALL grafeo.pagerank() YIELD score ORDER BY score ASC")
         .unwrap();
-    assert_eq!(result.rows[0][1], all.rows[0][0]);
+    assert_eq!(result.rows()[0][1], all.rows()[0][0]);
 }
 
 // ==================== Phase 2: GQL ORDER ASC + RETURN DISTINCT ====================
@@ -728,7 +728,7 @@ fn test_gql_call_yield_return_order_asc() {
 
     assert_eq!(result.row_count(), 3);
     let scores: Vec<f64> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[1] {
             Value::Float64(f) => *f,

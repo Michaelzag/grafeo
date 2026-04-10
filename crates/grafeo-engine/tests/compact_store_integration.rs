@@ -49,7 +49,7 @@ fn match_all_items() {
     let db = build_test_db();
     let session = db.session();
     let result = session.execute("MATCH (n:Item) RETURN n").unwrap();
-    assert_eq!(result.rows.len(), 10);
+    assert_eq!(result.rows().len(), 10);
 }
 
 #[test]
@@ -57,7 +57,7 @@ fn match_all_activities() {
     let db = build_test_db();
     let session = db.session();
     let result = session.execute("MATCH (n:Activity) RETURN n").unwrap();
-    assert_eq!(result.rows.len(), 50);
+    assert_eq!(result.rows().len(), 50);
 }
 
 // ── Property access ──────────────────────────────────────────────
@@ -69,9 +69,9 @@ fn return_property() {
     let result = session
         .execute("MATCH (n:Item) RETURN n.name ORDER BY n.name")
         .unwrap();
-    assert_eq!(result.rows.len(), 10);
+    assert_eq!(result.rows().len(), 10);
     // Verify we get string values back
-    let first_name = &result.rows[0][0];
+    let first_name = &result.rows()[0][0];
     assert!(
         matches!(first_name, grafeo_common::types::Value::String(_)),
         "Expected string property, got {:?}",
@@ -89,7 +89,7 @@ fn traverse_outgoing() {
         .execute("MATCH (a:Activity)-[:ACTIVITY_ON]->(i:Item) RETURN a, i")
         .unwrap();
     // 50 activities, each with one ACTIVITY_ON edge
-    assert_eq!(result.rows.len(), 50);
+    assert_eq!(result.rows().len(), 50);
 }
 
 #[test]
@@ -100,7 +100,7 @@ fn traverse_incoming() {
         .execute("MATCH (i:Item)<-[:ACTIVITY_ON]-(a:Activity) RETURN i, a")
         .unwrap();
     // Same 50 edges, traversed from the other direction
-    assert_eq!(result.rows.len(), 50);
+    assert_eq!(result.rows().len(), 50);
 }
 
 // ── Aggregation ──────────────────────────────────────────────────
@@ -112,8 +112,8 @@ fn count_per_label() {
     let result = session
         .execute("MATCH (n:Item) RETURN count(n) AS cnt")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], grafeo_common::types::Value::Int64(10));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], grafeo_common::types::Value::Int64(10));
 }
 
 // ── Read-only enforcement ───────────────────────────────────────
@@ -159,16 +159,16 @@ fn compact_converts_lpg_to_compact() {
     let persons = session
         .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name")
         .unwrap();
-    assert_eq!(persons.rows.len(), 2);
+    assert_eq!(persons.rows().len(), 2);
 
     let cities = session.execute("MATCH (c:City) RETURN c.name").unwrap();
-    assert_eq!(cities.rows.len(), 1);
+    assert_eq!(cities.rows().len(), 1);
 
     // Verify edge traversal.
     let edges = session
         .execute("MATCH (p:Person)-[:LIVES_IN]->(c:City) RETURN p.name, c.name")
         .unwrap();
-    assert_eq!(edges.rows.len(), 2);
+    assert_eq!(edges.rows().len(), 2);
 
     // Verify write queries fail.
     let write_result = session.execute("INSERT (:Person {name: 'Vincent'})");
@@ -190,21 +190,24 @@ fn compact_preserves_bool_and_string_properties() {
     let result = session
         .execute("MATCH (n:Item) RETURN n.name, n.active ORDER BY n.name")
         .unwrap();
-    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows().len(), 2);
 
     // First row: "alpha", true
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         grafeo_common::types::Value::String(arcstr::literal!("alpha"))
     );
-    assert_eq!(result.rows[0][1], grafeo_common::types::Value::Bool(true));
+    assert_eq!(result.rows()[0][1], grafeo_common::types::Value::Bool(true));
 
     // Second row: "beta", false
     assert_eq!(
-        result.rows[1][0],
+        result.rows()[1][0],
         grafeo_common::types::Value::String(arcstr::literal!("beta"))
     );
-    assert_eq!(result.rows[1][1], grafeo_common::types::Value::Bool(false));
+    assert_eq!(
+        result.rows()[1][1],
+        grafeo_common::types::Value::Bool(false)
+    );
 }
 
 #[test]
@@ -214,5 +217,5 @@ fn compact_empty_database() {
 
     let session = db.session();
     let result = session.execute("MATCH (n) RETURN count(n)").unwrap();
-    assert_eq!(result.rows[0][0], grafeo_common::types::Value::Int64(0));
+    assert_eq!(result.rows()[0][0], grafeo_common::types::Value::Int64(0));
 }

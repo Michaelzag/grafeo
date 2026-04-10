@@ -361,7 +361,7 @@ impl super::GrafeoDB {
         // Flush all sections to .grafeo file (explicit checkpoint)
         #[cfg(feature = "grafeo-file")]
         if let Some(ref fm) = self.file_manager {
-            self.checkpoint_to_file(fm, super::flush::FlushReason::Explicit)?;
+            let _ = self.checkpoint_to_file(fm, super::flush::FlushReason::Explicit)?;
         }
 
         Ok(())

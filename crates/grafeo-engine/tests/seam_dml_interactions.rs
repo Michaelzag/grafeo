@@ -81,7 +81,7 @@ mod delete_edge_cases {
         // Within same transaction, deleted node should not be visible
         let result = session.execute("MATCH (n:Person) RETURN n.name").unwrap();
         assert_eq!(result.row_count(), 1, "Only Gus should remain");
-        assert_eq!(result.rows[0][0], Value::String("Gus".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Gus".into()));
 
         session.execute("COMMIT").unwrap();
     }
@@ -148,7 +148,7 @@ mod set_remove {
             .execute("MATCH (n:Person {age: 30}) RETURN n.name")
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
     }
 
     #[test]
@@ -163,7 +163,7 @@ mod set_remove {
 
         let result = session.execute("MATCH (n:Engineer) RETURN n.name").unwrap();
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
     }
 
     #[test]
@@ -207,7 +207,7 @@ mod set_remove {
             .unwrap();
         assert_eq!(result.row_count(), 1);
         assert_eq!(
-            result.rows[0][0],
+            result.rows()[0][0],
             Value::Null,
             "Removed property should be NULL"
         );
@@ -230,7 +230,7 @@ mod set_remove {
             .unwrap();
         assert_eq!(result.row_count(), 1);
         assert_eq!(
-            result.rows[0][0],
+            result.rows()[0][0],
             Value::Null,
             "Property set to NULL should read as NULL"
         );
@@ -275,7 +275,11 @@ mod set_remove {
             .execute("MATCH (n:Person {name: 'Alix'}) RETURN n.age")
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::Null, "SET should be rolled back");
+        assert_eq!(
+            result.rows()[0][0],
+            Value::Null,
+            "SET should be rolled back"
+        );
     }
 }
 
@@ -294,7 +298,7 @@ mod merge_cases {
 
         let result = session.execute("MATCH (n:Person) RETURN n.name").unwrap();
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
     }
 
     #[test]
@@ -321,7 +325,7 @@ mod merge_cases {
         let result = session
             .execute("MATCH (n:Person {name: 'Alix'}) RETURN n.age")
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::Int64(30));
+        assert_eq!(result.rows()[0][0], Value::Int64(30));
     }
 
     #[test]
@@ -340,7 +344,7 @@ mod merge_cases {
             .execute("MATCH (n:Person {name: 'Alix'}) RETURN n.age")
             .unwrap();
         assert_eq!(
-            result.rows[0][0],
+            result.rows()[0][0],
             Value::Int64(30),
             "ON MATCH SET should update existing"
         );
@@ -372,12 +376,12 @@ mod cross_graph_dml {
         session.execute("USE GRAPH alpha").unwrap();
         let result = session.execute("MATCH (n:Item) RETURN n.name").unwrap();
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::String("widget".into()));
+        assert_eq!(result.rows()[0][0], Value::String("widget".into()));
 
         session.execute("USE GRAPH beta").unwrap();
         let result = session.execute("MATCH (n:Item) RETURN n.name").unwrap();
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::String("gadget".into()));
+        assert_eq!(result.rows()[0][0], Value::String("gadget".into()));
     }
 
     #[test]
@@ -433,7 +437,7 @@ mod cross_graph_dml {
             .execute("MATCH (n:Person {name: 'Alix'}) RETURN n.age")
             .unwrap();
         assert_eq!(
-            result.rows[0][0],
+            result.rows()[0][0],
             Value::Null,
             "Alpha's Alix should not have age set"
         );
@@ -443,7 +447,7 @@ mod cross_graph_dml {
         let result = session
             .execute("MATCH (n:Person {name: 'Alix'}) RETURN n.age")
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::Int64(30));
+        assert_eq!(result.rows()[0][0], Value::Int64(30));
     }
 
     #[test]
@@ -544,10 +548,10 @@ mod insert_edge_cases {
         let result = session
             .execute("MATCH (n:Data) RETURN n.str_val, n.int_val, n.float_val, n.bool_val")
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::String("hello".into()));
-        assert_eq!(result.rows[0][1], Value::Int64(42));
-        assert_eq!(result.rows[0][2], Value::Float64(3.125));
-        assert_eq!(result.rows[0][3], Value::Bool(true));
+        assert_eq!(result.rows()[0][0], Value::String("hello".into()));
+        assert_eq!(result.rows()[0][1], Value::Int64(42));
+        assert_eq!(result.rows()[0][2], Value::Float64(3.125));
+        assert_eq!(result.rows()[0][3], Value::Bool(true));
     }
 }
 
@@ -565,7 +569,7 @@ mod negative_literal_properties {
         session.execute("INSERT (:Point {lat: -6.248})").unwrap();
 
         let result = session.execute("MATCH (n:Point) RETURN n.lat").unwrap();
-        assert_eq!(result.rows[0][0], Value::Float64(-6.248));
+        assert_eq!(result.rows()[0][0], Value::Float64(-6.248));
     }
 
     #[test]
@@ -575,7 +579,7 @@ mod negative_literal_properties {
         session.execute("INSERT (:Floor {level: -3})").unwrap();
 
         let result = session.execute("MATCH (n:Floor) RETURN n.level").unwrap();
-        assert_eq!(result.rows[0][0], Value::Int64(-3));
+        assert_eq!(result.rows()[0][0], Value::Int64(-3));
     }
 
     #[test]
@@ -589,7 +593,7 @@ mod negative_literal_properties {
         let result = session
             .execute("MATCH (n:Point) RETURN n.lat, n.lon")
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::Float64(-6.248));
-        assert_eq!(result.rows[0][1], Value::Float64(106.845));
+        assert_eq!(result.rows()[0][0], Value::Float64(-6.248));
+        assert_eq!(result.rows()[0][1], Value::Float64(106.845));
     }
 }

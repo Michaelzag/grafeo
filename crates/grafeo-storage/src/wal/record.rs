@@ -1,6 +1,6 @@
 //! WAL record types and the [`WalEntry`] trait.
 
-use grafeo_common::types::{EdgeId, NodeId, TransactionId, Value};
+use grafeo_common::types::{EdgeId, EpochId, NodeId, TransactionId, Value};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -24,6 +24,15 @@ pub trait WalEntry: Serialize + DeserializeOwned + Send + Sync + std::fmt::Debug
 
     /// Whether this is a checkpoint record.
     fn is_checkpoint(&self) -> bool;
+
+    /// Whether this is a metadata record (e.g., epoch advance).
+    ///
+    /// Metadata records are not part of any transaction and are always
+    /// included in recovery output. They carry structural information
+    /// used by backup and point-in-time recovery.
+    fn is_metadata(&self) -> bool {
+        false
+    }
 
     /// Creates a checkpoint record for this WAL type.
     fn make_checkpoint(transaction_id: TransactionId) -> Self;
@@ -343,6 +352,18 @@ pub enum WalRecord {
         /// Transaction ID at checkpoint.
         transaction_id: TransactionId,
     },
+
+    // === Metadata ===
+    /// Marks an epoch boundary in the WAL.
+    ///
+    /// Logged after each `TransactionCommit` to record the new epoch value.
+    /// Used by incremental backup to identify WAL segment boundaries and
+    /// by point-in-time recovery to stop replay at a target epoch.
+    /// Recovery treats this as metadata (no store mutation).
+    EpochAdvance {
+        /// The epoch after the commit.
+        epoch: EpochId,
+    },
 }
 
 impl WalEntry for WalRecord {
@@ -360,6 +381,10 @@ impl WalEntry for WalRecord {
 
     fn is_checkpoint(&self) -> bool {
         matches!(self, WalRecord::Checkpoint { .. })
+    }
+
+    fn is_metadata(&self) -> bool {
+        matches!(self, WalRecord::EpochAdvance { .. })
     }
 
     fn make_checkpoint(transaction_id: TransactionId) -> Self {
@@ -933,5 +958,43 @@ mod tests {
             },
             other => panic!("Wrong variant: {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_epoch_advance_roundtrip() {
+        let record = WalRecord::EpochAdvance {
+            epoch: EpochId::new(42),
+        };
+        let parsed = roundtrip(&record);
+        match parsed {
+            WalRecord::EpochAdvance { epoch } => assert_eq!(epoch, EpochId::new(42)),
+            other => panic!("Wrong variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_epoch_advance_is_metadata() {
+        let record = WalRecord::EpochAdvance {
+            epoch: EpochId::new(1),
+        };
+        assert!(!record.requires_sync());
+        assert!(!record.is_commit());
+        assert!(!record.is_abort());
+        assert!(!record.is_checkpoint());
+        assert!(record.is_metadata());
+    }
+
+    #[test]
+    fn test_non_metadata_records() {
+        let commit = WalRecord::TransactionCommit {
+            transaction_id: TransactionId::new(1),
+        };
+        assert!(!commit.is_metadata());
+
+        let create = WalRecord::CreateNode {
+            id: NodeId::new(1),
+            labels: vec![],
+        };
+        assert!(!create.is_metadata());
     }
 }

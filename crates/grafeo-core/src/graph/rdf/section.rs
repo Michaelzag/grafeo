@@ -198,4 +198,123 @@ mod tests {
         let section = RdfStoreSection::new(store);
         assert_eq!(section.section_type(), SectionType::RdfStore);
     }
+
+    #[test]
+    fn rdf_section_version() {
+        let store = Arc::new(RdfStore::new());
+        let section = RdfStoreSection::new(store);
+        assert_eq!(section.version(), RDF_SECTION_VERSION);
+    }
+
+    #[test]
+    fn rdf_section_dirty_tracking() {
+        let store = Arc::new(RdfStore::new());
+        let section = RdfStoreSection::new(store);
+
+        assert!(!section.is_dirty(), "new section should be clean");
+
+        section.mark_dirty();
+        assert!(
+            section.is_dirty(),
+            "section should be dirty after mark_dirty"
+        );
+
+        section.mark_clean();
+        assert!(
+            !section.is_dirty(),
+            "section should be clean after mark_clean"
+        );
+    }
+
+    #[test]
+    fn rdf_section_memory_usage() {
+        let store = Arc::new(RdfStore::new());
+        store.insert(Triple::new(
+            Term::iri("http://example.org/vincent"),
+            Term::iri("http://xmlns.com/foaf/0.1/knows"),
+            Term::iri("http://example.org/jules"),
+        ));
+        let section = RdfStoreSection::new(store);
+        let usage = section.memory_usage();
+        // One triple, ~200 bytes estimate per triple
+        assert_eq!(usage, 200);
+    }
+
+    #[test]
+    fn rdf_section_named_graph_round_trip() {
+        let store = Arc::new(RdfStore::new());
+
+        // Default graph triple
+        store.insert(Triple::new(
+            Term::iri("http://example.org/mia"),
+            Term::iri("http://xmlns.com/foaf/0.1/name"),
+            Term::literal("Mia"),
+        ));
+
+        // Named graph with triples
+        store.create_graph("http://example.org/graph/butch");
+        if let Some(named) = store.graph("http://example.org/graph/butch") {
+            named.insert(Triple::new(
+                Term::iri("http://example.org/butch"),
+                Term::iri("http://xmlns.com/foaf/0.1/name"),
+                Term::literal("Butch"),
+            ));
+            named.insert(Triple::new(
+                Term::iri("http://example.org/butch"),
+                Term::iri("http://xmlns.com/foaf/0.1/knows"),
+                Term::iri("http://example.org/mia"),
+            ));
+        }
+
+        let section = RdfStoreSection::new(Arc::clone(&store));
+        let bytes = section.serialize().expect("serialize named graphs");
+
+        // Deserialize into a fresh store
+        let store2 = Arc::new(RdfStore::new());
+        let mut section2 = RdfStoreSection::new(store2);
+        section2
+            .deserialize(&bytes)
+            .expect("deserialize named graphs");
+
+        // Default graph has 1 triple
+        assert_eq!(section2.store().len(), 1);
+
+        // Named graph should exist with 2 triples
+        let names = section2.store().graph_names();
+        assert_eq!(names.len(), 1);
+        assert_eq!(names[0], "http://example.org/graph/butch");
+
+        let named = section2
+            .store()
+            .graph("http://example.org/graph/butch")
+            .expect("named graph should exist");
+        assert_eq!(named.len(), 2);
+    }
+
+    #[test]
+    fn rdf_section_deserialize_invalid_data() {
+        let store = Arc::new(RdfStore::new());
+        let mut section = RdfStoreSection::new(store);
+        let bad_bytes = &[0xFF, 0xFE, 0xFD, 0x00, 0x01];
+        let result = section.deserialize(bad_bytes);
+        assert!(
+            result.is_err(),
+            "corrupted data should fail deserialization"
+        );
+    }
+
+    #[test]
+    fn rdf_section_empty_store_round_trip() {
+        let store = Arc::new(RdfStore::new());
+        let section = RdfStoreSection::new(Arc::clone(&store));
+        let bytes = section.serialize().expect("serialize empty store");
+
+        let store2 = Arc::new(RdfStore::new());
+        let mut section2 = RdfStoreSection::new(store2);
+        section2
+            .deserialize(&bytes)
+            .expect("deserialize empty store");
+        assert_eq!(section2.store().len(), 0);
+        assert_eq!(section2.memory_usage(), 0);
+    }
 }

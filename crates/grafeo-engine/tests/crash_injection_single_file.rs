@@ -107,7 +107,7 @@ fn crash_during_close_checkpoint_preserves_data_via_sidecar_wal() {
         let session = db.session();
 
         let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
-        let names = extract_strings(&result.rows);
+        let names = extract_strings(&result.rows());
         assert_eq!(
             names,
             vec!["Alix", "Gus"],
@@ -169,7 +169,7 @@ fn crash_during_wal_checkpoint_leaves_db_usable() {
         let session2 = db2.session();
 
         let result = session2.execute("MATCH (c:City) RETURN c.name").unwrap();
-        let names = extract_strings(&result.rows);
+        let names = extract_strings(&result.rows());
         assert_eq!(
             names,
             vec!["Amsterdam", "Berlin"],
@@ -212,7 +212,7 @@ fn crash_after_successful_checkpoint_with_new_writes() {
     let session = db.session();
 
     let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
-    let names = extract_strings(&result.rows);
+    let names = extract_strings(&result.rows());
 
     // Pre-checkpoint data must survive
     assert!(
@@ -321,7 +321,7 @@ fn crash_before_sidecar_wal_removal_recovered_on_reopen() {
         .session()
         .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name")
         .unwrap();
-    let names = extract_strings(&result.rows);
+    let names = extract_strings(&result.rows());
     assert!(
         names.contains(&"Beatrix".to_string()),
         "Beatrix missing after crash"
@@ -393,7 +393,7 @@ fn wal_disabled_checkpoint_preserves_data() {
     let session = db.session();
 
     let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
-    let names = extract_strings(&result.rows);
+    let names = extract_strings(&result.rows());
     assert_eq!(
         names,
         vec!["Alix", "Gus"],
@@ -470,7 +470,7 @@ fn wal_disabled_crash_during_checkpoint_recovers() {
         let session = db.session();
 
         let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
-        let names = extract_strings(&result.rows);
+        let names = extract_strings(&result.rows());
 
         // Round-1 data must survive
         assert!(
@@ -537,7 +537,7 @@ fn wal_disabled_uncommitted_data_lost_on_crash() {
     let session = db.session();
 
     let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
-    let names = extract_strings(&result.rows);
+    let names = extract_strings(&result.rows());
 
     assert!(
         names.contains(&"Butch".to_string()),

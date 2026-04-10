@@ -38,6 +38,12 @@ pub(super) struct FlushContext {
     pub edge_count: u64,
 }
 
+/// Result of a flush operation.
+pub(super) struct FlushResult {
+    /// Number of sections written to the container.
+    pub sections_written: usize,
+}
+
 /// Executes the unified flush: serialize dirty sections, write to container, truncate WAL.
 ///
 /// This is the single write path for all persistence operations.
@@ -52,7 +58,7 @@ pub(super) fn flush(
     context: &FlushContext,
     reason: FlushReason,
     #[cfg(feature = "wal")] wal: Option<&grafeo_storage::wal::LpgWal>,
-) -> Result<()> {
+) -> Result<FlushResult> {
     use grafeo_common::testing::crash::maybe_crash;
 
     maybe_crash("flush:before_serialize");
@@ -70,7 +76,9 @@ pub(super) fn flush(
             // If nothing is dirty on a periodic checkpoint, skip the write entirely.
             // Previous sections remain intact in the container.
             if result.is_empty() {
-                return Ok(());
+                return Ok(FlushResult {
+                    sections_written: 0,
+                });
             }
             result
         }
@@ -83,6 +91,8 @@ pub(super) fn flush(
                 .collect::<Result<Vec<_>>>()?
         }
     };
+
+    let sections_written = targets.len();
 
     maybe_crash("flush:after_serialize");
 
@@ -113,7 +123,7 @@ pub(super) fn flush(
         wal.sync()?;
     }
 
-    Ok(())
+    Ok(FlushResult { sections_written })
 }
 
 /// Builds the flush context from the current database state.

@@ -164,8 +164,9 @@ impl WalRecovery {
                             committed_records.push(record);
                         } else if record.is_abort() {
                             current_tx_records.clear();
-                        } else if record.is_checkpoint() {
-                            current_tx_records.clear();
+                        } else if record.is_checkpoint() || record.is_metadata() {
+                            // Checkpoint and metadata records (e.g. EpochAdvance)
+                            // are not part of any transaction: always include them.
                             committed_records.push(record);
                         } else {
                             current_tx_records.push(record);

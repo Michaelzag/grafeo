@@ -119,7 +119,7 @@ pub fn execute_query_result_with_params(
 /// Convert a QueryResult into rows of string values for comparison.
 pub fn result_to_strings(result: &QueryResult) -> Vec<Vec<String>> {
     result
-        .rows
+        .rows()
         .iter()
         .map(|row| row.iter().map(value_to_string).collect())
         .collect()

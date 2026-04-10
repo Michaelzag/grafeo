@@ -192,7 +192,7 @@ fn nested_and_or_filter_produces_correct_results() {
         .unwrap();
 
     let names: Vec<&str> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[0] {
             Value::String(s) => s.as_str(),
@@ -216,8 +216,8 @@ fn deeply_nested_boolean_logic_not_and_or() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Gus".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Gus".into()));
 }
 
 #[test]
@@ -230,8 +230,8 @@ fn is_null_filter_finds_missing_properties() {
         .execute("MATCH (i:Item) WHERE i.val IS NULL RETURN i.name")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("beta".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("beta".into()));
 }
 
 #[test]
@@ -244,7 +244,7 @@ fn is_not_null_filter_excludes_missing_properties() {
         .unwrap();
 
     let names: Vec<&str> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[0] {
             Value::String(s) => s.as_str(),
@@ -265,8 +265,8 @@ fn int_vs_float_comparison_coercion() {
         .execute("MATCH (n:Person) WHERE n.age = 30.0 RETURN n.name")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
 }
 
 #[test]
@@ -280,7 +280,7 @@ fn int_vs_float_less_than_coercion() {
         .unwrap();
 
     let names: Vec<&str> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[0] {
             Value::String(s) => s.as_str(),
@@ -305,7 +305,7 @@ fn case_when_in_where_clause() {
         .unwrap();
 
     let names: Vec<&str> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[0] {
             Value::String(s) => s.as_str(),
@@ -333,10 +333,10 @@ fn case_with_multiple_when_branches() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 4);
+    assert_eq!(result.rows().len(), 4);
     // Alix=30 -> mid, Gus=25 -> young, Jules=35 -> senior, Vincent=40 -> senior
     let brackets: Vec<&str> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[1] {
             Value::String(s) => s.as_str(),
@@ -364,9 +364,9 @@ fn two_hop_pattern_produces_correct_paths() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows().len(), 2);
     let paths: Vec<(String, String)> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| {
             let b = match &r[0] {
@@ -402,11 +402,11 @@ fn three_hop_chain_traversal() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[0][1], Value::String("Gus".into()));
-    assert_eq!(result.rows[0][2], Value::String("Vincent".into()));
-    assert_eq!(result.rows[0][3], Value::String("Jules".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[0][1], Value::String("Gus".into()));
+    assert_eq!(result.rows()[0][2], Value::String("Vincent".into()));
+    assert_eq!(result.rows()[0][3], Value::String("Jules".into()));
 }
 
 #[test]
@@ -423,9 +423,9 @@ fn optional_match_produces_nulls_for_missing_edges() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Jules".into()));
-    assert_eq!(result.rows[0][1], Value::Null);
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Jules".into()));
+    assert_eq!(result.rows()[0][1], Value::Null);
 }
 
 #[test]
@@ -444,8 +444,8 @@ fn optional_match_mixed_with_regular_match() {
         .unwrap();
 
     // All 4 persons appear, all with NULL managed
-    assert_eq!(result.rows.len(), 4);
-    for row in &result.rows {
+    assert_eq!(result.rows().len(), 4);
+    for row in result.rows() {
         assert_eq!(row[1], Value::Null, "No one manages anyone");
     }
 }
@@ -466,7 +466,7 @@ fn shared_variable_across_match_clauses() {
 
     // Alix, Gus, Vincent all have both KNOWS and WORKS_AT edges
     let names: Vec<&str> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[0] {
             Value::String(s) => s.as_str(),
@@ -495,10 +495,10 @@ fn group_by_on_property_expression() {
         .unwrap();
 
     // Amsterdam=2, Berlin=1, Paris=1
-    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows().len(), 3);
 
     let cities: Vec<(&str, i64)> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| {
             let city = match &r[0] {
@@ -529,9 +529,9 @@ fn having_with_complex_predicate() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Amsterdam".into()));
-    assert_eq!(result.rows[0][1], Value::Int64(2));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Amsterdam".into()));
+    assert_eq!(result.rows()[0][1], Value::Int64(2));
 }
 
 #[test]
@@ -548,10 +548,10 @@ fn aggregate_in_order_by() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows().len(), 3);
     // Amsterdam=2 first, then Berlin=1, Paris=1 alphabetically
-    assert_eq!(result.rows[0][0], Value::String("Amsterdam".into()));
-    assert_eq!(result.rows[0][1], Value::Int64(2));
+    assert_eq!(result.rows()[0][0], Value::String("Amsterdam".into()));
+    assert_eq!(result.rows()[0][1], Value::Int64(2));
 }
 
 #[test]
@@ -566,12 +566,12 @@ fn multiple_aggregates_in_single_query() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Int64(4));
-    assert_eq!(result.rows[0][1], Value::Int64(25));
-    assert_eq!(result.rows[0][2], Value::Int64(40));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Int64(4));
+    assert_eq!(result.rows()[0][1], Value::Int64(25));
+    assert_eq!(result.rows()[0][2], Value::Int64(40));
     // avg(25,30,35,40) = 32.5
-    match &result.rows[0][3] {
+    match &result.rows()[0][3] {
         Value::Float64(v) => assert!((v - 32.5).abs() < 0.01, "expected 32.5, got {v}"),
         other => panic!("expected float, got {other:?}"),
     }
@@ -590,10 +590,10 @@ fn group_by_with_sum_and_collect() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows().len(), 3);
     // Amsterdam: Alix(30) + Jules(35) = 65
-    assert_eq!(result.rows[0][0], Value::String("Amsterdam".into()));
-    assert_eq!(result.rows[0][1], Value::Int64(65));
+    assert_eq!(result.rows()[0][0], Value::String("Amsterdam".into()));
+    assert_eq!(result.rows()[0][1], Value::Int64(65));
 }
 
 // ============================================================================
@@ -613,9 +613,9 @@ fn unwind_with_where_filter() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 2);
-    assert_eq!(result.rows[0][0], Value::Int64(4));
-    assert_eq!(result.rows[1][0], Value::Int64(5));
+    assert_eq!(result.rows().len(), 2);
+    assert_eq!(result.rows()[0][0], Value::Int64(4));
+    assert_eq!(result.rows()[1][0], Value::Int64(5));
 }
 
 #[test]
@@ -632,11 +632,11 @@ fn unwind_into_match_pattern() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 2);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[0][1], Value::Int64(30));
-    assert_eq!(result.rows[1][0], Value::String("Vincent".into()));
-    assert_eq!(result.rows[1][1], Value::Int64(40));
+    assert_eq!(result.rows().len(), 2);
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[0][1], Value::Int64(30));
+    assert_eq!(result.rows()[1][0], Value::String("Vincent".into()));
+    assert_eq!(result.rows()[1][1], Value::Int64(40));
 }
 
 #[test]
@@ -645,7 +645,7 @@ fn unwind_empty_list_produces_no_rows() {
     let session = db.session();
 
     let result = session.execute("UNWIND [] AS x RETURN x").unwrap();
-    assert_eq!(result.rows.len(), 0);
+    assert_eq!(result.rows().len(), 0);
 }
 
 #[test]
@@ -662,11 +662,11 @@ fn unwind_nested_list() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 4);
-    assert_eq!(result.rows[0][0], Value::Int64(1));
-    assert_eq!(result.rows[1][0], Value::Int64(2));
-    assert_eq!(result.rows[2][0], Value::Int64(3));
-    assert_eq!(result.rows[3][0], Value::Int64(4));
+    assert_eq!(result.rows().len(), 4);
+    assert_eq!(result.rows()[0][0], Value::Int64(1));
+    assert_eq!(result.rows()[1][0], Value::Int64(2));
+    assert_eq!(result.rows()[2][0], Value::Int64(3));
+    assert_eq!(result.rows()[3][0], Value::Int64(4));
 }
 
 // ============================================================================
@@ -688,10 +688,10 @@ fn call_subquery_with_outer_variable() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 4);
+    assert_eq!(result.rows().len(), 4);
     // Alix: 2 friends, Gus: 1, Jules: 0, Vincent: 1
     let data: Vec<(&str, i64)> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| {
             let name = match &r[0] {
@@ -726,8 +726,8 @@ fn uncorrelated_call_subquery() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 4);
-    for row in &result.rows {
+    assert_eq!(result.rows().len(), 4);
+    for row in result.rows() {
         assert_eq!(row[1], Value::Int64(4), "total should be 4 for all rows");
     }
 }
@@ -747,14 +747,14 @@ fn call_subquery_aggregation_per_outer_row() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 4);
+    assert_eq!(result.rows().len(), 4);
     // Alix should have 2 friends
-    match &result.rows[0][1] {
+    match &result.rows()[0][1] {
         Value::List(items) => assert_eq!(items.len(), 2, "Alix should have 2 friends"),
         other => panic!("expected list, got {other:?}"),
     }
     // Jules should have 0 friends (empty list)
-    match &result.rows[2][1] {
+    match &result.rows()[2][1] {
         Value::List(items) => assert_eq!(items.len(), 0, "Jules should have 0 friends"),
         other => panic!("expected list, got {other:?}"),
     }
@@ -775,8 +775,8 @@ fn filter_with_arithmetic_expression() {
         .execute("MATCH (n:Person) WHERE n.age * 2 > 70 RETURN n.name")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Vincent".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Vincent".into()));
 }
 
 #[test]
@@ -789,8 +789,8 @@ fn filter_with_string_operations() {
         .execute("MATCH (n:Person) WHERE n.name STARTS WITH 'V' RETURN n.name")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Vincent".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Vincent".into()));
 }
 
 #[test]
@@ -807,7 +807,7 @@ fn filter_with_in_list() {
         .unwrap();
 
     let names: Vec<&str> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[0] {
             Value::String(s) => s.as_str(),
@@ -835,7 +835,7 @@ fn xor_boolean_filter() {
         .unwrap();
 
     let names: Vec<&str> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[0] {
             Value::String(s) => s.as_str(),
@@ -863,7 +863,7 @@ fn return_expression_with_type_function() {
         .unwrap();
 
     let types: Vec<&str> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[0] {
             Value::String(s) => s.as_str(),
@@ -883,8 +883,8 @@ fn return_labels_function() {
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN labels(n) AS lbls")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    match &result.rows[0][0] {
+    assert_eq!(result.rows().len(), 1);
+    match &result.rows()[0][0] {
         Value::List(labels) => {
             assert!(
                 labels.contains(&Value::String("Person".into())),
@@ -905,9 +905,9 @@ fn distinct_on_computed_expression() {
         .execute("MATCH (n:Person) RETURN DISTINCT n.city AS city ORDER BY city")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows().len(), 3);
     let cities: Vec<&str> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[0] {
             Value::String(s) => s.as_str(),
@@ -934,13 +934,13 @@ fn null_safe_aggregation_with_group_by() {
     // Groups: NULL (gamma: val=30), 'x' (alpha: val=10, beta: val=NULL), 'y' (delta: val=20)
     // NULL group should appear (with tag=NULL), SUM should skip nulls
     assert!(
-        result.rows.len() >= 2,
+        result.rows().len() >= 2,
         "Should have at least x and y groups"
     );
 
     // Find the 'x' group
     let x_row = result
-        .rows
+        .rows()
         .iter()
         .find(|r| r[0] == Value::String("x".into()));
     if let Some(row) = x_row {
@@ -966,14 +966,14 @@ fn count_star_vs_count_property_with_nulls() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(4),
         "COUNT(*) counts all rows"
     );
     assert_eq!(
-        result.rows[0][1],
+        result.rows()[0][1],
         Value::Int64(3),
         "COUNT(i.val) skips NULL"
     );
