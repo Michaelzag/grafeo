@@ -888,7 +888,10 @@ jobs:
         run: |
           cargo bench --all-features -p grafeo-common --bench arena_bench -- --save-baseline base --noplot
           cargo bench --all-features -p grafeo-core --bench index_bench -- --save-baseline base --noplot
-          cargo bench --all-features -p grafeo-engine --bench query_bench --bench serialization_bench --bench regression_bench --bench memory_bench -- --save-baseline base --noplot
+          ENGINE_BENCHES="--bench query_bench --bench serialization_bench"
+          [ -f crates/grafeo-engine/benches/regression_bench.rs ] && ENGINE_BENCHES="$ENGINE_BENCHES --bench regression_bench"
+          [ -f crates/grafeo-engine/benches/memory_bench.rs ] && ENGINE_BENCHES="$ENGINE_BENCHES --bench memory_bench"
+          cargo bench --all-features -p grafeo-engine $ENGINE_BENCHES -- --save-baseline base --noplot
 
       - name: Save base memory snapshot
         run: |
@@ -903,7 +906,10 @@ jobs:
         run: |
           cargo bench --all-features -p grafeo-common --bench arena_bench -- --save-baseline pr --noplot
           cargo bench --all-features -p grafeo-core --bench index_bench -- --save-baseline pr --noplot
-          cargo bench --all-features -p grafeo-engine --bench query_bench --bench serialization_bench --bench regression_bench --bench memory_bench -- --save-baseline pr --noplot
+          ENGINE_BENCHES="--bench query_bench --bench serialization_bench"
+          [ -f crates/grafeo-engine/benches/regression_bench.rs ] && ENGINE_BENCHES="$ENGINE_BENCHES --bench regression_bench"
+          [ -f crates/grafeo-engine/benches/memory_bench.rs ] && ENGINE_BENCHES="$ENGINE_BENCHES --bench memory_bench"
+          cargo bench --all-features -p grafeo-engine $ENGINE_BENCHES -- --save-baseline pr --noplot
 
       - name: Compare and comment
         env:
@@ -940,7 +946,10 @@ jobs:
         run: |
           cargo bench --all-features -p grafeo-common --bench arena_bench -- --save-baseline main --noplot
           cargo bench --all-features -p grafeo-core --bench index_bench -- --save-baseline main --noplot
-          cargo bench --all-features -p grafeo-engine --bench query_bench --bench serialization_bench --bench regression_bench --bench memory_bench -- --save-baseline main --noplot
+          ENGINE_BENCHES="--bench query_bench --bench serialization_bench"
+          [ -f crates/grafeo-engine/benches/regression_bench.rs ] && ENGINE_BENCHES="$ENGINE_BENCHES --bench regression_bench"
+          [ -f crates/grafeo-engine/benches/memory_bench.rs ] && ENGINE_BENCHES="$ENGINE_BENCHES --bench memory_bench"
+          cargo bench --all-features -p grafeo-engine $ENGINE_BENCHES -- --save-baseline main --noplot
 
       - name: Save baseline cache
         uses: actions/cache/save@v4
