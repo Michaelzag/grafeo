@@ -266,8 +266,8 @@ impl<'a> StringTableReader<'a> {
             return None;
         }
         let count = u32::from_le_bytes(data[0..4].try_into().ok()?);
-        let offsets_start = 4;
-        let packed_start = offsets_start + (count as usize) * 4;
+        let offsets_start: usize = 4;
+        let packed_start = offsets_start.checked_add((count as usize).checked_mul(4)?)?;
         if data.len() < packed_start {
             return None;
         }
@@ -286,8 +286,8 @@ impl<'a> StringTableReader<'a> {
         let off_pos = self.offsets_start + (index as usize) * 4;
         let rel_offset =
             u32::from_le_bytes(self.data[off_pos..off_pos + 4].try_into().ok()?) as usize;
-        let abs_offset = self.packed_start + rel_offset;
-        if abs_offset + 4 > self.data.len() {
+        let abs_offset = self.packed_start.checked_add(rel_offset)?;
+        if abs_offset.checked_add(4)? > self.data.len() {
             return None;
         }
         let len =
@@ -515,7 +515,7 @@ fn decode_value(data: &[u8], pos: &mut usize, strings: &StringTableReader<'_>) -
             ensure_remaining(data, *pos, 4)?;
             let count = u32::from_le_bytes(data[*pos..*pos + 4].try_into().unwrap()) as usize;
             *pos += 4;
-            let mut items = Vec::with_capacity(count);
+            let mut items = Vec::with_capacity(count.min(data.len()));
             for _ in 0..count {
                 items.push(decode_value(data, pos, strings)?);
             }
@@ -544,8 +544,11 @@ fn decode_value(data: &[u8], pos: &mut usize, strings: &StringTableReader<'_>) -
             ensure_remaining(data, *pos, 4)?;
             let count = u32::from_le_bytes(data[*pos..*pos + 4].try_into().unwrap()) as usize;
             *pos += 4;
-            ensure_remaining(data, *pos, count * 4)?;
-            let mut floats = Vec::with_capacity(count);
+            let byte_len = count
+                .checked_mul(4)
+                .ok_or_else(|| Error::Serialization("vector length overflow".to_string()))?;
+            ensure_remaining(data, *pos, byte_len)?;
+            let mut floats = Vec::with_capacity(count.min(data.len() / 4));
             for _ in 0..count {
                 let f = f32::from_le_bytes(data[*pos..*pos + 4].try_into().unwrap());
                 *pos += 4;
@@ -558,14 +561,14 @@ fn decode_value(data: &[u8], pos: &mut usize, strings: &StringTableReader<'_>) -
             ensure_remaining(data, *pos, 4)?;
             let node_count = u32::from_le_bytes(data[*pos..*pos + 4].try_into().unwrap()) as usize;
             *pos += 4;
-            let mut nodes = Vec::with_capacity(node_count);
+            let mut nodes = Vec::with_capacity(node_count.min(data.len()));
             for _ in 0..node_count {
                 nodes.push(decode_value(data, pos, strings)?);
             }
             ensure_remaining(data, *pos, 4)?;
             let edge_count = u32::from_le_bytes(data[*pos..*pos + 4].try_into().unwrap()) as usize;
             *pos += 4;
-            let mut edges = Vec::with_capacity(edge_count);
+            let mut edges = Vec::with_capacity(edge_count.min(data.len()));
             for _ in 0..edge_count {
                 edges.push(decode_value(data, pos, strings)?);
             }
@@ -579,7 +582,12 @@ fn decode_value(data: &[u8], pos: &mut usize, strings: &StringTableReader<'_>) -
 }
 
 fn ensure_remaining(data: &[u8], pos: usize, need: usize) -> Result<()> {
-    if pos + need > data.len() {
+    let end = pos.checked_add(need).ok_or_else(|| {
+        Error::Serialization(format!(
+            "integer overflow: offset {pos} + need {need} exceeds usize"
+        ))
+    })?;
+    if end > data.len() {
         return Err(Error::Serialization(format!(
             "unexpected end of data: need {} bytes at offset {}, have {}",
             need,
@@ -960,8 +968,8 @@ pub(crate) fn read_blocks(
     let strings = StringTableReader::new(st_data)
         .ok_or_else(|| Error::Serialization("invalid string table".to_string()))?;
 
-    // Read node data
-    let mut nodes = Vec::with_capacity(header.node_count as usize);
+    // Read node data (cap capacity to prevent OOM from untrusted header)
+    let mut nodes = Vec::with_capacity((header.node_count as usize).min(data.len() / 8));
     if let Some(entry) = dir_entries
         .iter()
         .find(|e| e.block_type == BlockType::NodeData as u8)
@@ -980,7 +988,7 @@ pub(crate) fn read_blocks(
     }
 
     // Read edge data
-    let mut edges = Vec::with_capacity(header.edge_count as usize);
+    let mut edges = Vec::with_capacity((header.edge_count as usize).min(data.len() / 28));
     if let Some(entry) = dir_entries
         .iter()
         .find(|e| e.block_type == BlockType::EdgeData as u8)

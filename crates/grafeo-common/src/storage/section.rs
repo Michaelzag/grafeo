@@ -303,7 +303,7 @@ mod tests {
 
         let rdf = SectionType::RdfStore.default_flags();
         assert!(!rdf.required);
-        assert!(!rdf.mmap_able);
+        assert!(rdf.mmap_able);
     }
 
     #[test]
@@ -353,9 +353,9 @@ mod tests {
         // LpgStore is required, RdfStore is not
         assert!(lpg.required);
         assert!(!rdf.required);
-        // Both are not mmap-able
-        assert!(!lpg.mmap_able);
-        assert!(!rdf.mmap_able);
+        // Both are mmap-able (block-based format v2)
+        assert!(lpg.mmap_able);
+        assert!(rdf.mmap_able);
     }
 
     #[test]

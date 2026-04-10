@@ -259,4 +259,233 @@ mod wal_directory {
             "checkpoint.meta should NOT exist for directory-format WAL"
         );
     }
+
+    // ========================================================================
+    // Regression tests for GrafeoDB/grafeo#252: WAL replay on reopen
+    // ========================================================================
+
+    /// Exact reproduction of the #252 bug: data written through sessions/queries
+    /// (not the CRUD API) must survive close/reopen. The original bug was that
+    /// server-style usage (query API, no explicit save()) lost all data.
+    #[test]
+    fn query_mutations_persist_directory_format() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("query_dir");
+
+        {
+            let config = Config::persistent(&path).with_storage_format(StorageFormat::WalDirectory);
+            let db = GrafeoDB::with_config(config).expect("open");
+            let session = db.session();
+            session
+                .execute("INSERT (:Person {name: 'Alix', age: 30})")
+                .expect("insert Alix");
+            session
+                .execute("INSERT (:Person {name: 'Gus', age: 25})")
+                .expect("insert Gus");
+            session
+                .execute(
+                    "MATCH (a:Person {name: 'Alix'}), (b:Person {name: 'Gus'}) \
+                     INSERT (a)-[:KNOWS {since: 2020}]->(b)",
+                )
+                .expect("insert edge");
+            db.close().expect("close");
+        }
+
+        {
+            let config = Config::persistent(&path).with_storage_format(StorageFormat::WalDirectory);
+            let db = GrafeoDB::with_config(config).expect("reopen");
+            assert_eq!(db.node_count(), 2, "query-created nodes should persist");
+            assert_eq!(db.edge_count(), 1, "query-created edge should persist");
+
+            let session = db.session();
+            let result = session
+                .execute("MATCH (n:Person {name: 'Alix'}) RETURN n.age")
+                .unwrap();
+            assert_eq!(result.rows().len(), 1);
+            assert_eq!(
+                result.rows()[0][0],
+                Value::Int64(30),
+                "property should survive WAL replay"
+            );
+
+            let result = session
+                .execute("MATCH ()-[e:KNOWS]->() RETURN e.since")
+                .unwrap();
+            assert_eq!(result.rows().len(), 1);
+            assert_eq!(
+                result.rows()[0][0],
+                Value::Int64(2020),
+                "edge property should survive WAL replay"
+            );
+            db.close().expect("close");
+        }
+    }
+
+    /// Edge and property operations (set, remove, delete) roundtrip through
+    /// the WAL directory format.
+    #[test]
+    fn edge_property_and_delete_roundtrip() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("edgeprops");
+
+        {
+            let config = Config::persistent(&path).with_storage_format(StorageFormat::WalDirectory);
+            let db = GrafeoDB::with_config(config).expect("open");
+
+            let a = db.create_node(&["Person"]);
+            db.set_node_property(a, "name", Value::String("Alix".into()));
+            db.set_node_property(a, "temp", Value::String("remove_me".into()));
+            db.remove_node_property(a, "temp");
+
+            let b = db.create_node(&["Person"]);
+            db.set_node_property(b, "name", Value::String("Gus".into()));
+
+            let c = db.create_node(&["Person"]);
+            db.set_node_property(c, "name", Value::String("Vincent".into()));
+
+            let e1 = db.create_edge(a, b, "KNOWS");
+            db.set_edge_property(e1, "weight", Value::Float64(0.8));
+
+            let e2 = db.create_edge(b, c, "KNOWS");
+
+            // Delete the edge first, then the node (CRUD API does not detach)
+            db.delete_edge(e2);
+            db.delete_node(c);
+
+            db.close().expect("close");
+        }
+
+        {
+            let config = Config::persistent(&path).with_storage_format(StorageFormat::WalDirectory);
+            let db = GrafeoDB::with_config(config).expect("reopen");
+
+            assert_eq!(db.node_count(), 2, "Vincent should be deleted");
+            assert_eq!(db.edge_count(), 1, "only KNOWS(Alix->Gus) should remain");
+
+            let session = db.session();
+
+            // Verify removed property is gone
+            let result = session
+                .execute("MATCH (n:Person {name: 'Alix'}) RETURN n.temp")
+                .unwrap();
+            assert_eq!(result.rows().len(), 1);
+            assert_eq!(
+                result.rows()[0][0],
+                Value::Null,
+                "removed property should stay removed"
+            );
+
+            // Verify edge property survived
+            let result = session
+                .execute("MATCH ()-[e:KNOWS]->() RETURN e.weight")
+                .unwrap();
+            assert_eq!(result.rows().len(), 1);
+            assert_eq!(
+                result.rows()[0][0],
+                Value::Float64(0.8),
+                "edge property should persist"
+            );
+
+            db.close().expect("close");
+        }
+    }
+
+    /// Named graph operations persist through WAL directory format recovery.
+    #[test]
+    fn named_graph_persists_directory_format() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("named_graph_dir");
+
+        {
+            let config = Config::persistent(&path).with_storage_format(StorageFormat::WalDirectory);
+            let db = GrafeoDB::with_config(config).expect("open");
+            let session = db.session();
+
+            session
+                .execute("CREATE GRAPH social")
+                .expect("create graph");
+            session.execute("USE GRAPH social").expect("use graph");
+            session
+                .execute("INSERT (:Friend {name: 'Alix'})")
+                .expect("insert in named graph");
+            session
+                .execute("INSERT (:Friend {name: 'Gus'})")
+                .expect("insert in named graph");
+
+            // Also insert into default graph
+            session.execute("USE GRAPH DEFAULT").expect("use default");
+            session
+                .execute("INSERT (:Root {tag: 'default'})")
+                .expect("insert in default");
+
+            db.close().expect("close");
+        }
+
+        {
+            let config = Config::persistent(&path).with_storage_format(StorageFormat::WalDirectory);
+            let db = GrafeoDB::with_config(config).expect("reopen");
+            let session = db.session();
+
+            // Default graph should have its node
+            let result = session.execute("MATCH (n:Root) RETURN n.tag").unwrap();
+            assert_eq!(result.rows().len(), 1, "default graph node should persist");
+
+            // Named graph should have its nodes
+            session.execute("USE GRAPH social").expect("use graph");
+            let result = session
+                .execute("MATCH (n:Friend) RETURN n.name ORDER BY n.name")
+                .unwrap();
+            assert_eq!(
+                result.rows().len(),
+                2,
+                "named graph nodes should persist across restart"
+            );
+
+            db.close().expect("close");
+        }
+    }
+
+    /// Auto-detect format: when using `Config::persistent(path)` without
+    /// explicit `StorageFormat`, the database should still recover WAL data.
+    /// This matches the exact scenario from the #252 bug report where the
+    /// server uses default config.
+    #[test]
+    fn auto_detect_format_recovery() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("autodetect");
+
+        // Use a directory path (no .grafeo extension) with default config,
+        // which should auto-select WAL directory format.
+        {
+            let config = Config::persistent(&path);
+            let db = GrafeoDB::with_config(config).expect("open");
+            let session = db.session();
+            session
+                .execute("INSERT (:Person {name: 'Alix'})")
+                .expect("insert");
+            session
+                .execute("INSERT (:Person {name: 'Gus'})")
+                .expect("insert");
+
+            // Explicitly do NOT call save(), matching the server scenario
+            db.close().expect("close");
+        }
+
+        {
+            let config = Config::persistent(&path);
+            let db = GrafeoDB::with_config(config).expect("reopen");
+            assert_eq!(
+                db.node_count(),
+                2,
+                "auto-detected format should replay WAL on reopen"
+            );
+
+            let session = db.session();
+            let result = session
+                .execute("MATCH (n:Person) RETURN n.name ORDER BY n.name")
+                .unwrap();
+            assert_eq!(result.rows().len(), 2);
+            db.close().expect("close");
+        }
+    }
 }

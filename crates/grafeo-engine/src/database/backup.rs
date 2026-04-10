@@ -489,8 +489,7 @@ pub(super) fn do_restore_to_epoch(
     let full = manifest
         .segments
         .iter()
-        .filter(|s| s.kind == BackupKind::Full && s.end_epoch <= target_epoch)
-        .next_back()
+        .rfind(|s| s.kind == BackupKind::Full && s.end_epoch <= target_epoch)
         .ok_or_else(|| {
             Error::Internal(format!(
                 "no full backup covers epoch {}",

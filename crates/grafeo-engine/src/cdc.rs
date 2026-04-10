@@ -801,4 +801,116 @@ mod tests {
         assert_eq!(config.max_epochs, Some(1000));
         assert_eq!(config.max_events, Some(100_000));
     }
+
+    #[test]
+    fn test_apply_retention_count_only() {
+        let retention = CdcRetentionConfig {
+            max_epochs: None,
+            max_events: Some(4),
+        };
+        let log = CdcLog::with_retention(retention);
+
+        for epoch in 1..=10 {
+            log.record_create_node(NodeId::new(epoch), EpochId(epoch), None, None);
+        }
+        assert_eq!(log.event_count(), 10);
+
+        // apply_retention with no epoch limit should still prune by count
+        log.apply_retention(EpochId(10));
+        assert!(
+            log.event_count() <= 4,
+            "count-based retention should prune to at most 4 events, got {}",
+            log.event_count()
+        );
+    }
+
+    #[test]
+    fn test_apply_retention_combined_epoch_and_count() {
+        // epoch limit keeps last 5 (epochs 6..=10), count limit keeps 3.
+        // The stricter (count) should win after both passes.
+        let retention = CdcRetentionConfig {
+            max_epochs: Some(5),
+            max_events: Some(3),
+        };
+        let log = CdcLog::with_retention(retention);
+
+        for epoch in 1..=10 {
+            log.record_create_node(NodeId::new(epoch), EpochId(epoch), None, None);
+        }
+        assert_eq!(log.event_count(), 10);
+
+        log.apply_retention(EpochId(10));
+
+        // Epoch pass prunes epochs < 5 (keeps 6..=10 = 5 events).
+        // Count pass then prunes to at most 3.
+        assert!(
+            log.event_count() <= 3,
+            "combined retention should honour the stricter limit, got {}",
+            log.event_count()
+        );
+        // All remaining events should be recent
+        let remaining = log.changes_between(EpochId(0), EpochId(100));
+        assert!(remaining.iter().all(|e| e.epoch >= EpochId(6)));
+    }
+
+    #[test]
+    fn test_prune_before_epoch_zero() {
+        let log = CdcLog::new();
+
+        for epoch in 1..=5 {
+            log.record_create_node(NodeId::new(epoch), EpochId(epoch), None, None);
+        }
+        assert_eq!(log.event_count(), 5);
+
+        // Pruning before epoch 0 should be a no-op: all events have epoch >= 1
+        log.prune_before(EpochId(0));
+        assert_eq!(
+            log.event_count(),
+            5,
+            "prune_before(0) should not remove anything"
+        );
+    }
+
+    #[test]
+    fn test_prune_to_limit_same_epoch() {
+        let retention = CdcRetentionConfig {
+            max_epochs: None,
+            max_events: Some(3),
+        };
+        let log = CdcLog::with_retention(retention);
+
+        // All 10 events share the same epoch: the cutoff epoch equals the
+        // only epoch present, so prune_before removes everything at or below
+        // that epoch. This is by design: epoch-granularity pruning cannot
+        // split events within the same epoch.
+        for i in 1..=10 {
+            log.record_create_node(NodeId::new(i), EpochId(5), None, None);
+        }
+        assert_eq!(log.event_count(), 10);
+
+        log.prune_to_limit();
+
+        // After pruning, the log should have fewer events than before.
+        // With all events at the same epoch, the cutoff removes them all
+        // because prune_before uses a strict < comparison on epoch+1.
+        assert!(
+            log.event_count() < 10,
+            "prune_to_limit should have removed events, got {}",
+            log.event_count()
+        );
+    }
+
+    #[test]
+    fn test_evict_tiny_target_is_noop() {
+        let log = CdcLog::new();
+        for epoch in 1..=10 {
+            log.record_create_node(NodeId::new(epoch), EpochId(epoch), None, None);
+        }
+        assert_eq!(log.event_count(), 10);
+
+        // target_bytes < 256 means events_to_remove rounds to 0, so nothing freed
+        let freed = log.evict(100);
+        assert_eq!(freed, 0, "evict with target < 256 bytes should be a no-op");
+        assert_eq!(log.event_count(), 10);
+    }
 }
