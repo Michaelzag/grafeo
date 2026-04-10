@@ -125,7 +125,10 @@ fn backup_cursor_updated_after_full_backup() {
     let backup_dir = dir.path().join("backups");
 
     let db = GrafeoDB::open(&db_path).expect("open");
-    db.create_node(&["Test"]);
+
+    // Use a session to advance the epoch beyond 0
+    let session = db.session();
+    session.execute("INSERT (:Test {val: 1})").expect("insert");
 
     assert!(
         db.backup_cursor().is_none(),
@@ -137,7 +140,10 @@ fn backup_cursor_updated_after_full_backup() {
     let cursor = db
         .backup_cursor()
         .expect("cursor should exist after backup");
-    assert!(cursor.backed_up_epoch.as_u64() > 0);
+    assert!(
+        cursor.backed_up_epoch.as_u64() > 0,
+        "epoch should be > 0 after session commit"
+    );
 
     db.close().expect("close");
 }
