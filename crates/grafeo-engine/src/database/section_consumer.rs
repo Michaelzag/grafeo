@@ -522,4 +522,70 @@ mod tests {
         assert_eq!(consumer.eviction_priority(), priorities::INDEX_BUFFERS);
         assert!(consumer.can_spill());
     }
+
+    #[test]
+    fn property_index_section_is_index() {
+        let section = Arc::new(FakeSection::new(SectionType::PropertyIndex, 512));
+        let consumer = SectionConsumer::new(section);
+
+        assert_eq!(consumer.name(), "section:PropertyIndex");
+        assert_eq!(consumer.eviction_priority(), priorities::INDEX_BUFFERS);
+        assert_eq!(consumer.region(), MemoryRegion::IndexBuffers);
+        assert!(consumer.can_spill());
+    }
+
+    #[test]
+    fn rdf_store_section_is_data() {
+        let section = Arc::new(FakeSection::new(SectionType::RdfStore, 1024));
+        let consumer = SectionConsumer::new(section);
+
+        assert_eq!(consumer.name(), "section:RdfStore");
+        assert_eq!(consumer.eviction_priority(), priorities::GRAPH_STORAGE);
+        assert_eq!(consumer.region(), MemoryRegion::GraphStorage);
+        assert!(!consumer.can_spill(), "data sections cannot spill");
+    }
+
+    #[test]
+    fn spill_non_mmap_section_returns_not_supported() {
+        // LpgStore is a data section (mmap_able=false), spill should fail
+        let section = Arc::new(FakeSection::new(SectionType::LpgStore, 4096));
+        let consumer = SectionConsumer::new(section);
+
+        assert!(!consumer.can_spill());
+        let result = consumer.spill(2048);
+        match result {
+            Err(SpillError::NotSupported) => {}
+            other => panic!("expected NotSupported, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn zero_memory_section() {
+        let section = Arc::new(FakeSection::new(SectionType::Catalog, 0));
+        let consumer = SectionConsumer::new(section);
+
+        assert_eq!(consumer.memory_usage(), 0);
+        assert_eq!(consumer.evict(1024), 0);
+    }
+
+    #[test]
+    fn section_consumer_name_format() {
+        // Verify all section types produce "section:<Type>" names
+        for section_type in [
+            SectionType::Catalog,
+            SectionType::LpgStore,
+            SectionType::RdfStore,
+            SectionType::VectorStore,
+            SectionType::TextIndex,
+            SectionType::RdfRing,
+            SectionType::PropertyIndex,
+        ] {
+            let section = Arc::new(FakeSection::new(section_type, 100));
+            let consumer = SectionConsumer::new(section);
+            assert!(
+                consumer.name().starts_with("section:"),
+                "name should start with 'section:' for {section_type:?}"
+            );
+        }
+    }
 }

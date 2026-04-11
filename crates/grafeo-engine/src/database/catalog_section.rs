@@ -230,3 +230,116 @@ impl Section for CatalogSection {
         4096
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::catalog::{EdgeTypeDefinition, NodeTypeDefinition, TypedProperty};
+
+    fn make_section() -> CatalogSection {
+        let catalog = Arc::new(Catalog::new());
+        let store = Arc::new(grafeo_core::graph::lpg::LpgStore::new().unwrap());
+        CatalogSection::new(catalog, store, || 42)
+    }
+
+    #[test]
+    fn empty_catalog_roundtrip() {
+        let section = make_section();
+        let bytes = section.serialize().expect("serialize empty catalog");
+        assert!(!bytes.is_empty());
+
+        let catalog2 = Arc::new(Catalog::new());
+        let store2 = Arc::new(grafeo_core::graph::lpg::LpgStore::new().unwrap());
+        let mut section2 = CatalogSection::new(catalog2, store2, || 0);
+        section2
+            .deserialize(&bytes)
+            .expect("deserialize empty catalog");
+    }
+
+    #[test]
+    fn catalog_with_node_types_roundtrip() {
+        let section = make_section();
+        section
+            .catalog
+            .register_or_replace_node_type(NodeTypeDefinition {
+                name: "Person".to_string(),
+                properties: vec![TypedProperty {
+                    name: "name".to_string(),
+                    data_type: crate::catalog::PropertyDataType::String,
+                    nullable: false,
+                    default_value: None,
+                }],
+                constraints: vec![],
+                parent_types: vec![],
+            });
+
+        let bytes = section.serialize().unwrap();
+
+        let catalog2 = Arc::new(Catalog::new());
+        let store2 = Arc::new(grafeo_core::graph::lpg::LpgStore::new().unwrap());
+        let mut section2 = CatalogSection::new(catalog2, store2, || 0);
+        section2.deserialize(&bytes).unwrap();
+
+        let types = section2.catalog.all_node_type_defs();
+        assert_eq!(types.len(), 1);
+        assert_eq!(types[0].name, "Person");
+        assert_eq!(types[0].properties.len(), 1);
+    }
+
+    #[test]
+    fn catalog_with_edge_types_roundtrip() {
+        let section = make_section();
+        section
+            .catalog
+            .register_or_replace_edge_type_def(EdgeTypeDefinition {
+                name: "KNOWS".to_string(),
+                properties: vec![],
+                constraints: vec![],
+                source_node_types: vec![],
+                target_node_types: vec![],
+            });
+
+        let bytes = section.serialize().unwrap();
+
+        let catalog2 = Arc::new(Catalog::new());
+        let store2 = Arc::new(grafeo_core::graph::lpg::LpgStore::new().unwrap());
+        let mut section2 = CatalogSection::new(catalog2, store2, || 0);
+        section2.deserialize(&bytes).unwrap();
+
+        let types = section2.catalog.all_edge_type_defs();
+        assert_eq!(types.len(), 1);
+        assert_eq!(types[0].name, "KNOWS");
+    }
+
+    #[test]
+    fn catalog_section_type_and_version() {
+        let section = make_section();
+        assert_eq!(section.section_type(), SectionType::Catalog);
+        assert_eq!(section.version(), CATALOG_SECTION_VERSION);
+    }
+
+    #[test]
+    fn catalog_dirty_tracking() {
+        let section = make_section();
+        assert!(!section.is_dirty());
+
+        section.mark_dirty();
+        assert!(section.is_dirty());
+
+        section.mark_clean();
+        assert!(!section.is_dirty());
+    }
+
+    #[test]
+    fn catalog_memory_usage() {
+        let section = make_section();
+        assert_eq!(section.memory_usage(), 4096);
+    }
+
+    #[test]
+    fn catalog_deserialize_corrupt_data() {
+        let mut section = make_section();
+        let result = section.deserialize(&[0xFF, 0xFE, 0xFD, 0x00]);
+        assert!(result.is_err(), "corrupt data should fail deserialization");
+    }
+}

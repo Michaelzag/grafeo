@@ -1550,4 +1550,164 @@ mod tests {
         })
         .unwrap();
     }
+
+    #[test]
+    fn test_truncated_header_rejected() {
+        // Header requires at least HEADER_SIZE bytes
+        let result = read_blocks(&[0; 4], &mut |_, _, _, _| Ok(()));
+        assert!(result.is_err(), "truncated data should fail");
+    }
+
+    #[test]
+    fn test_truncated_after_header_rejected() {
+        // Valid magic + version but truncated before directory
+        let mut data = Vec::new();
+        data.extend_from_slice(&LPG_BLOCK_MAGIC);
+        data.extend_from_slice(&2u32.to_le_bytes()); // version
+        // Not enough bytes for the rest of the header
+        let result = read_blocks(&data, &mut |_, _, _, _| Ok(()));
+        assert!(result.is_err(), "truncated header should fail");
+    }
+
+    #[test]
+    fn test_inflated_node_count_does_not_oom() {
+        // Corrupt the node count in the header to u32::MAX.
+        // The reader clamps Vec capacity to data.len() to prevent OOM,
+        // then either errors or gracefully truncates.
+        let nodes = vec![BlockNode {
+            id: NodeId::new(1),
+            labels: vec!["A".to_string()],
+            properties: vec![],
+        }];
+        let mut data = write_blocks(&nodes, &[], &[], 0).unwrap();
+        data[8..12].copy_from_slice(&u32::MAX.to_le_bytes());
+
+        let result = read_blocks(&data, &mut |decoded_nodes, _, _, _| {
+            assert!(decoded_nodes.len() < u32::MAX as usize);
+            Ok(())
+        });
+        // Either error or graceful truncation is acceptable
+        let _ = result;
+    }
+
+    #[test]
+    fn test_inflated_edge_count_does_not_oom() {
+        let edges = vec![BlockEdge {
+            id: EdgeId::new(1),
+            src: NodeId::new(1),
+            dst: NodeId::new(2),
+            edge_type: "E".to_string(),
+            properties: vec![],
+        }];
+        let mut data = write_blocks(&[], &edges, &[], 0).unwrap();
+        data[12..16].copy_from_slice(&u32::MAX.to_le_bytes());
+
+        let result = read_blocks(&data, &mut |_, decoded_edges, _, _| {
+            assert!(decoded_edges.len() < u32::MAX as usize);
+            Ok(())
+        });
+        let _ = result;
+    }
+
+    #[test]
+    fn test_diverse_value_types_round_trip() {
+        use grafeo_common::types::{Date, Time};
+
+        let nodes = vec![BlockNode {
+            id: NodeId::new(1),
+            labels: vec![],
+            properties: vec![
+                (
+                    "bool_val".to_string(),
+                    vec![(EpochId::new(0), Value::Bool(true))],
+                ),
+                (
+                    "float_val".to_string(),
+                    vec![(EpochId::new(0), Value::Float64(1.234))],
+                ),
+                (
+                    "bytes_val".to_string(),
+                    vec![(EpochId::new(0), Value::Bytes(vec![0xDE, 0xAD].into()))],
+                ),
+                ("null_val".to_string(), vec![(EpochId::new(0), Value::Null)]),
+                (
+                    "date_val".to_string(),
+                    vec![(
+                        EpochId::new(0),
+                        Value::Date(Date::from_ymd(2026, 4, 11).unwrap()),
+                    )],
+                ),
+                (
+                    "time_val".to_string(),
+                    vec![(
+                        EpochId::new(0),
+                        Value::Time(Time::from_hms(14, 30, 0).unwrap()),
+                    )],
+                ),
+                (
+                    "list_val".to_string(),
+                    vec![(
+                        EpochId::new(0),
+                        Value::List(vec![Value::Int64(1), Value::Int64(2), Value::Int64(3)].into()),
+                    )],
+                ),
+                (
+                    "vector_val".to_string(),
+                    vec![(EpochId::new(0), Value::Vector(vec![0.1, 0.2, 0.3].into()))],
+                ),
+            ],
+        }];
+
+        let data = write_blocks(&nodes, &[], &[], 0).unwrap();
+
+        read_blocks(&data, &mut |decoded, _, _, _| {
+            assert_eq!(decoded.len(), 1);
+            let props = &decoded[0].properties;
+            assert_eq!(
+                props.len(),
+                8,
+                "all 8 property types should survive roundtrip"
+            );
+
+            // Verify each type decoded correctly
+            let find_prop =
+                |name: &str| -> &Value { &props.iter().find(|(k, _)| k == name).unwrap().1[0].1 };
+            assert_eq!(*find_prop("bool_val"), Value::Bool(true));
+            assert_eq!(*find_prop("float_val"), Value::Float64(1.234));
+            assert_eq!(*find_prop("null_val"), Value::Null);
+            assert!(matches!(find_prop("bytes_val"), Value::Bytes(_)));
+            assert!(matches!(find_prop("date_val"), Value::Date(_)));
+            assert!(matches!(find_prop("time_val"), Value::Time(_)));
+            assert!(matches!(find_prop("list_val"), Value::List(_)));
+            assert!(matches!(find_prop("vector_val"), Value::Vector(_)));
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn test_empty_labels_and_properties() {
+        let nodes = vec![
+            BlockNode {
+                id: NodeId::new(1),
+                labels: vec![],     // no labels
+                properties: vec![], // no properties
+            },
+            BlockNode {
+                id: NodeId::new(2),
+                labels: vec!["A".to_string(), "B".to_string(), "C".to_string()],
+                properties: vec![],
+            },
+        ];
+
+        let data = write_blocks(&nodes, &[], &[], 0).unwrap();
+
+        read_blocks(&data, &mut |decoded, _, _, _| {
+            assert_eq!(decoded.len(), 2);
+            assert!(decoded[0].labels.is_empty());
+            assert_eq!(decoded[1].labels.len(), 3);
+            Ok(())
+        })
+        .unwrap();
+    }
 }

@@ -517,4 +517,113 @@ mod tests {
 
         assert!(overlay.approximate_memory_bytes() > 0);
     }
+
+    #[test]
+    fn test_edge_delete_ignores_property_set() {
+        let overlay = WalOverlay::new();
+        overlay.insert_edge(
+            EdgeId::new(1),
+            NodeId::new(1),
+            NodeId::new(2),
+            "KNOWS".to_string(),
+        );
+        overlay.delete_edge(EdgeId::new(1));
+
+        // Property set on deleted edge should be a no-op
+        overlay.set_edge_property(EdgeId::new(1), "weight".to_string(), Value::Float64(0.5));
+
+        let op = overlay.get_edge(EdgeId::new(1)).unwrap();
+        assert!(op.is_delete(), "delete should persist after property set");
+    }
+
+    #[test]
+    fn test_edge_property_on_base_entity() {
+        let overlay = WalOverlay::new();
+        // Edge 1 exists in base data (not in overlay), set a property
+        overlay.set_edge_property(EdgeId::new(1), "weight".to_string(), Value::Float64(0.9));
+
+        let op = overlay.get_edge(EdgeId::new(1)).unwrap();
+        match op {
+            OverlayOp::Update(edge) => {
+                assert_eq!(edge.properties.get("weight"), Some(&Value::Float64(0.9)));
+            }
+            _ => panic!("expected Update for base edge property change"),
+        }
+    }
+
+    #[test]
+    fn test_delete_base_node_then_property_ignored() {
+        let overlay = WalOverlay::new();
+        // Delete a base node (not previously in overlay)
+        overlay.delete_node(NodeId::new(99));
+        overlay.set_node_property(
+            NodeId::new(99),
+            "name".to_string(),
+            Value::String("ghost".into()),
+        );
+
+        let op = overlay.get_node(NodeId::new(99)).unwrap();
+        assert!(op.is_delete(), "base node delete should persist");
+    }
+
+    #[test]
+    fn test_overlay_default_trait() {
+        let overlay = WalOverlay::default();
+        assert!(overlay.is_empty());
+        assert_eq!(overlay.mutation_count(), 0);
+    }
+
+    #[test]
+    fn test_overlay_op_is_delete() {
+        let insert: OverlayOp<OverlayNode> = OverlayOp::Insert(OverlayNode {
+            labels: vec![],
+            properties: Default::default(),
+        });
+        assert!(!insert.is_delete());
+
+        let delete: OverlayOp<OverlayNode> = OverlayOp::Delete;
+        assert!(delete.is_delete());
+    }
+
+    #[test]
+    fn test_overlay_op_data() {
+        let node = OverlayNode {
+            labels: vec!["Person".to_string()],
+            properties: Default::default(),
+        };
+        let insert = OverlayOp::Insert(node);
+        assert!(insert.data().is_some());
+        assert_eq!(insert.data().unwrap().labels, vec!["Person"]);
+
+        let delete: OverlayOp<OverlayNode> = OverlayOp::Delete;
+        assert!(delete.data().is_none());
+    }
+
+    #[test]
+    fn test_multiple_property_updates_on_same_node() {
+        let overlay = WalOverlay::new();
+        overlay.insert_node(NodeId::new(1), vec![]);
+        overlay.set_node_property(
+            NodeId::new(1),
+            "name".to_string(),
+            Value::String("Alix".into()),
+        );
+        overlay.set_node_property(
+            NodeId::new(1),
+            "name".to_string(),
+            Value::String("Gus".into()),
+        );
+
+        let data = overlay
+            .get_node(NodeId::new(1))
+            .unwrap()
+            .data()
+            .unwrap()
+            .clone();
+        assert_eq!(
+            data.properties.get("name"),
+            Some(&Value::String("Gus".into())),
+            "last property set should win"
+        );
+    }
 }
