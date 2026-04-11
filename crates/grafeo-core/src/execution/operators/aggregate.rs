@@ -21,8 +21,8 @@ use crate::execution::chunk::DataChunkBuilder;
 
 /// State for a single aggregation computation.
 ///
-/// Used by both pull-based ([`HashAggregateOperator`]) and push-based
-/// ([`super::push::aggregate::AggregatePushOperator`]) aggregate operators.
+/// Used by both the pull-based [`HashAggregateOperator`] and the push-based
+/// `AggregatePushOperator`.
 /// Supports all [`AggregateFunction`] variants including Welford's algorithm
 /// for online statistics, Kahan summation, distinct tracking, and bivariate
 /// regression functions.

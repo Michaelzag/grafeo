@@ -12,6 +12,7 @@
 //! the full performance of whichever model you choose.
 
 pub mod lpg;
+pub mod projection;
 pub mod traits;
 
 #[cfg(feature = "compact-store")]
@@ -20,6 +21,7 @@ pub mod compact;
 #[cfg(feature = "triple-store")]
 pub mod rdf;
 
+pub use projection::{GraphProjection, ProjectionSpec};
 pub use traits::{GraphStore, GraphStoreMut, NullGraphStore};
 
 /// Controls which edges to follow during traversal.
