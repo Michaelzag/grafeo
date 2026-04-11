@@ -7,6 +7,7 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 ### Added
 
 - **Role-based access control (M1)**: `Identity`, `Role` (`Admin`, `ReadWrite`, `ReadOnly`), and `StatementKind` types for scoping sessions to specific permission levels. `db.session_with_identity(identity)` creates a session bound to an identity, `db.session_with_role(role)` is a convenience shorthand. Permission checks run after parsing but before execution across all query languages (GQL, Cypher, Gremlin, GraphQL, SQL/PGQ, SPARQL). No credentials or crypto at this layer: the caller is trusted to assign the correct role.
+- **GQL introspection test coverage**: `info()`, `schema()`, `CURRENT_SCHEMA`, `CURRENT_GRAPH` functions verified with 7 declarative spec tests.
 
 ### Changed
 
