@@ -852,7 +852,7 @@ jobs:
     name: Benchmark (PR)
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
-    timeout-minutes: 45
+    timeout-minutes: 60
     permissions:
       pull-requests: write
     steps:
