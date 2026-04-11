@@ -174,9 +174,9 @@ pub struct GrafeoDB {
     /// Whether this database is open in read-only mode.
     /// When true, sessions automatically enforce read-only transactions.
     read_only: bool,
-    /// Named graph projections (virtual subgraphs).
+    /// Named graph projections (virtual subgraphs), shared with sessions.
     projections:
-        RwLock<std::collections::HashMap<String, Arc<grafeo_core::graph::GraphProjection>>>,
+        Arc<RwLock<std::collections::HashMap<String, Arc<grafeo_core::graph::GraphProjection>>>>,
 }
 
 impl GrafeoDB {
@@ -575,7 +575,7 @@ impl GrafeoDB {
             current_graph: RwLock::new(None),
             current_schema: RwLock::new(None),
             read_only: is_read_only,
-            projections: RwLock::new(std::collections::HashMap::new()),
+            projections: Arc::new(RwLock::new(std::collections::HashMap::new())),
         };
 
         // Register storage sections as memory consumers for pressure tracking
@@ -709,7 +709,7 @@ impl GrafeoDB {
             current_graph: RwLock::new(None),
             current_schema: RwLock::new(None),
             read_only: false,
-            projections: RwLock::new(std::collections::HashMap::new()),
+            projections: Arc::new(RwLock::new(std::collections::HashMap::new())),
         })
     }
 
@@ -793,7 +793,7 @@ impl GrafeoDB {
             current_graph: RwLock::new(None),
             current_schema: RwLock::new(None),
             read_only: true,
-            projections: RwLock::new(std::collections::HashMap::new()),
+            projections: Arc::new(RwLock::new(std::collections::HashMap::new())),
         })
     }
 
@@ -1411,6 +1411,8 @@ impl GrafeoDB {
             gc_interval: self.config.gc_interval,
             read_only: self.read_only || force_read_only,
             identity: identity.clone(),
+            #[cfg(feature = "lpg")]
+            projections: Arc::clone(&self.projections),
         };
 
         if let Some(ref ext_read) = self.external_read_store {

@@ -12,6 +12,9 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 - **Gremlin `repeat().times()`/`.emit()`**: parse and execute `repeat(out()).times(n)` for fixed-depth traversal and `repeat(out()).emit()` for all-depths traversal. Maps to the existing `VariableLengthExpand` operator. `until()` predicates, `path()`, `simplePath()`, and `loops()` remain pending.
 - **GraphQL feature verification**: variable substitution (`$name`), directives (`@skip`/`@include`), aggregation (`sum`/`avg`), nested queries (4 levels), and multiple root fields all confirmed working with 29 spec tests.
 - **Graph projection API on GrafeoDB**: `create_projection(name, spec)`, `drop_projection(name)`, `list_projections()`, `projection(name)` for managing named virtual subgraphs at the database level.
+- **GQL projection syntax**: `CREATE PROJECTION name LABELS (...) EDGE_TYPES (...)`, `DROP PROJECTION name`, `SHOW PROJECTIONS` for managing projections via queries.
+- **Projection bindings**: `create_projection`/`drop_projection`/`list_projections` exposed in Python, Node.js, WASM, and C FFI bindings.
+- **CSV/JSON Lines import**: CLI `grafeo import csv`/`grafeo import jsonl` commands, Python `import_csv()`/`import_jsonl()`, Node.js `importCsv()`/`importJsonl()`.
 
 ### Changed
 

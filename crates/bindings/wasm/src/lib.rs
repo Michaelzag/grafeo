@@ -1077,6 +1077,48 @@ impl Database {
     pub fn current_schema(&self) -> Option<String> {
         self.inner.current_schema()
     }
+
+    // ── Graph projections ───────────────────────────────────────────────
+
+    /// Creates a named graph projection. Returns `true` if created, `false`
+    /// if a projection with that name already exists.
+    ///
+    /// A projection is a read-only, filtered view of the default graph.
+    /// Only nodes with matching labels and edges with matching types are visible.
+    ///
+    /// # Errors
+    ///
+    /// This method does not currently return errors.
+    #[wasm_bindgen(js_name = "createProjection")]
+    pub fn create_projection(
+        &self,
+        name: &str,
+        node_labels: Option<Vec<String>>,
+        edge_types: Option<Vec<String>>,
+    ) -> bool {
+        use grafeo_core::graph::ProjectionSpec;
+
+        let mut spec = ProjectionSpec::new();
+        if let Some(labels) = node_labels.filter(|l| !l.is_empty()) {
+            spec = spec.with_node_labels(labels);
+        }
+        if let Some(types) = edge_types.filter(|t| !t.is_empty()) {
+            spec = spec.with_edge_types(types);
+        }
+        self.inner.create_projection(name, spec)
+    }
+
+    /// Drops a named graph projection. Returns `true` if it existed.
+    #[wasm_bindgen(js_name = "dropProjection")]
+    pub fn drop_projection(&self, name: &str) -> bool {
+        self.inner.drop_projection(name)
+    }
+
+    /// Returns the names of all graph projections.
+    #[wasm_bindgen(js_name = "listProjections")]
+    pub fn list_projections(&self) -> Vec<String> {
+        self.inner.list_projections()
+    }
 }
 
 // ---------------------------------------------------------------------------

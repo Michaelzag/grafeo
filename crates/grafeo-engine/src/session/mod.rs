@@ -89,6 +89,13 @@ pub(crate) struct SessionConfig {
     pub read_only: bool,
     /// The identity bound to this session (for permission checks).
     pub identity: crate::auth::Identity,
+    /// Named graph projections shared with the database.
+    #[cfg(feature = "lpg")]
+    pub projections: Arc<
+        parking_lot::RwLock<
+            std::collections::HashMap<String, Arc<grafeo_core::graph::GraphProjection>>,
+        >,
+    >,
 }
 
 /// Your handle to the database - execute queries and manage transactions.
@@ -184,6 +191,13 @@ pub struct Session {
     /// Transaction start time for duration tracking.
     #[cfg(feature = "metrics")]
     tx_start_time: parking_lot::Mutex<Option<Instant>>,
+    /// Named graph projections shared with the database.
+    #[cfg(feature = "lpg")]
+    projections: Arc<
+        parking_lot::RwLock<
+            std::collections::HashMap<String, Arc<grafeo_core::graph::GraphProjection>>,
+        >,
+    >,
 }
 
 /// Per-graph savepoint snapshot, capturing the store state at the time of the savepoint.
@@ -259,6 +273,7 @@ impl Session {
             metrics: None,
             #[cfg(feature = "metrics")]
             tx_start_time: parking_lot::Mutex::new(None),
+            projections: cfg.projections,
         }
     }
 
@@ -367,6 +382,8 @@ impl Session {
             metrics: None,
             #[cfg(feature = "metrics")]
             tx_start_time: parking_lot::Mutex::new(None),
+            #[cfg(feature = "lpg")]
+            projections: cfg.projections,
         })
     }
 
@@ -696,7 +713,10 @@ impl Session {
 
         // Check role-based permission for graph management commands
         match &cmd {
-            SessionCommand::CreateGraph { .. } | SessionCommand::DropGraph { .. } => {
+            SessionCommand::CreateGraph { .. }
+            | SessionCommand::DropGraph { .. }
+            | SessionCommand::CreateProjection { .. }
+            | SessionCommand::DropProjection { .. } => {
                 self.require_permission(crate::auth::StatementKind::Write)?;
             }
             _ => {} // Session state + transaction control: always allowed
@@ -705,7 +725,10 @@ impl Session {
         // Block DDL in read-only transactions (ISO/IEC 39075 Section 8)
         if *self.read_only_tx.lock() {
             match &cmd {
-                SessionCommand::CreateGraph { .. } | SessionCommand::DropGraph { .. } => {
+                SessionCommand::CreateGraph { .. }
+                | SessionCommand::DropGraph { .. }
+                | SessionCommand::CreateProjection { .. }
+                | SessionCommand::DropProjection { .. } => {
                     return Err(Error::Transaction(
                         grafeo_common::utils::error::TransactionError::ReadOnly,
                     ));
@@ -955,6 +978,57 @@ impl Session {
             SessionCommand::ReleaseSavepoint(name) => {
                 self.release_savepoint(&name)?;
                 Ok(QueryResult::status(format!("Savepoint '{name}' released")))
+            }
+            #[cfg(feature = "lpg")]
+            SessionCommand::CreateProjection {
+                name,
+                node_labels,
+                edge_types,
+            } => {
+                use grafeo_core::graph::{GraphProjection, ProjectionSpec};
+                use std::collections::hash_map::Entry;
+
+                let spec = ProjectionSpec::new()
+                    .with_node_labels(node_labels)
+                    .with_edge_types(edge_types);
+
+                let store = Arc::clone(&self.graph_store);
+                let projection = Arc::new(GraphProjection::new(store, spec));
+                let mut projections = self.projections.write();
+                match projections.entry(name.clone()) {
+                    Entry::Occupied(_) => Err(Error::Query(QueryError::new(
+                        QueryErrorKind::Semantic,
+                        format!("Projection '{name}' already exists"),
+                    ))),
+                    Entry::Vacant(e) => {
+                        e.insert(projection);
+                        Ok(QueryResult::status(format!("Projection '{name}' created")))
+                    }
+                }
+            }
+            #[cfg(feature = "lpg")]
+            SessionCommand::DropProjection { name } => {
+                let removed = self.projections.write().remove(&name).is_some();
+                if !removed {
+                    return Err(Error::Query(QueryError::new(
+                        QueryErrorKind::Semantic,
+                        format!("Projection '{name}' does not exist"),
+                    )));
+                }
+                Ok(QueryResult::status(format!("Projection '{name}' dropped")))
+            }
+            #[cfg(feature = "lpg")]
+            SessionCommand::ShowProjections => {
+                let mut names: Vec<String> = self.projections.read().keys().cloned().collect();
+                names.sort();
+                let rows: Vec<Vec<Value>> =
+                    names.into_iter().map(|n| vec![Value::from(n)]).collect();
+                Ok(QueryResult {
+                    columns: vec!["name".to_string()],
+                    column_types: Vec::new(),
+                    rows,
+                    ..QueryResult::empty()
+                })
             }
             #[cfg(not(feature = "lpg"))]
             _ => Err(grafeo_common::utils::error::Error::Internal(

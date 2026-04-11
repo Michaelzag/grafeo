@@ -42,7 +42,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [features]
-default = ["lpg", "gql"]
+default = ["lpg", "gql", "jsonl-import"]
 lpg = ["grafeo-engine/lpg"]
 gql = ["grafeo-engine/gql"]
 cypher = ["grafeo-engine/cypher"]
@@ -58,12 +58,13 @@ text-index = ["grafeo-engine/text-index"]
 hybrid-search = ["grafeo-engine/hybrid-search"]
 cdc = ["grafeo-engine/cdc"]
 arrow-export = ["grafeo-engine/arrow-export"]
+jsonl-import = ["grafeo-engine/jsonl-import"]
 languages = ["gql", "cypher", "sparql", "gremlin", "graphql", "sql-pgq"]
 ai = ["vector-index", "text-index", "hybrid-search", "cdc"]
 storage = ["grafeo-engine/storage"]
 # Named profiles
-embedded = ["lpg", "gql", "ai", "algos", "grafeo-engine/parallel", "grafeo-engine/regex"]
-full = ["lpg", "languages", "ai", "algos", "triple-store"]
+embedded = ["lpg", "gql", "ai", "algos", "jsonl-import", "grafeo-engine/parallel", "grafeo-engine/regex"]
+full = ["lpg", "languages", "ai", "algos", "triple-store", "jsonl-import"]
 
 [dev-dependencies]
 tempfile = "3.27"

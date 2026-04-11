@@ -2496,6 +2496,114 @@ impl PyGrafeoDB {
         Ok(count)
     }
 
+    /// Import a CSV file as graph nodes.
+    ///
+    /// Each row becomes a node with the given label. Column headers are used
+    /// as property names. Returns the number of nodes created.
+    ///
+    /// Example:
+    ///     count = db.import_csv("people.csv", label="Person")
+    #[pyo3(signature = (path, label="Row", headers=true))]
+    fn import_csv(&self, path: &str, label: &str, headers: bool) -> PyResult<u64> {
+        let abs_path = std::path::Path::new(path)
+            .canonicalize()
+            .map_err(|e| pyo3::exceptions::PyFileNotFoundError::new_err(format!("{path}: {e}")))?;
+        let path_str = abs_path.to_string_lossy().replace('\\', "/");
+
+        let header_clause = if headers { " WITH HEADERS" } else { "" };
+
+        // Read column headers to build property mapping
+        let insert_clause = if headers {
+            let columns = read_csv_headers(&abs_path, ',')?;
+            if columns.is_empty() {
+                format!("INSERT (:{label} {{}})")
+            } else {
+                let props = columns
+                    .iter()
+                    .map(|col| format!("{col}: row.{col}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("INSERT (:{label} {{{props}}})")
+            }
+        } else {
+            format!("INSERT (:{label} {{}})")
+        };
+
+        let query =
+            format!("LOAD DATA FROM '{path_str}' FORMAT CSV{header_clause} AS row {insert_clause}");
+
+        let db = self.inner.read();
+        let session = db.session();
+        session.execute(&query).map_err(PyGrafeoError::from)?;
+
+        let count_result = session
+            .execute(&format!("MATCH (n:{label}) RETURN count(n) AS c"))
+            .map_err(PyGrafeoError::from)?;
+
+        let count = count_result
+            .rows()
+            .first()
+            .and_then(|row| row.first())
+            .and_then(|v| match v {
+                grafeo_common::types::Value::Int64(n) => Some(*n as u64),
+                _ => None,
+            })
+            .unwrap_or(0);
+
+        Ok(count)
+    }
+
+    /// Import a JSON Lines file as graph nodes.
+    ///
+    /// Each line must be a valid JSON object. Object keys become property names.
+    /// Returns the number of nodes created.
+    ///
+    /// Example:
+    ///     count = db.import_jsonl("events.jsonl", label="Event")
+    #[pyo3(signature = (path, label="Row"))]
+    fn import_jsonl(&self, path: &str, label: &str) -> PyResult<u64> {
+        let abs_path = std::path::Path::new(path)
+            .canonicalize()
+            .map_err(|e| pyo3::exceptions::PyFileNotFoundError::new_err(format!("{path}: {e}")))?;
+        let path_str = abs_path.to_string_lossy().replace('\\', "/");
+
+        // Read first line to discover JSON keys
+        let keys = read_jsonl_keys(&abs_path)?;
+
+        let insert_clause = if keys.is_empty() {
+            format!("INSERT (:{label} {{}})")
+        } else {
+            let props = keys
+                .iter()
+                .map(|key| format!("{key}: row.{key}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("INSERT (:{label} {{{props}}})")
+        };
+
+        let query = format!("LOAD DATA FROM '{path_str}' FORMAT JSONL AS row {insert_clause}");
+
+        let db = self.inner.read();
+        let session = db.session();
+        session.execute(&query).map_err(PyGrafeoError::from)?;
+
+        let count_result = session
+            .execute(&format!("MATCH (n:{label}) RETURN count(n) AS c"))
+            .map_err(PyGrafeoError::from)?;
+
+        let count = count_result
+            .rows()
+            .first()
+            .and_then(|row| row.first())
+            .and_then(|v| match v {
+                grafeo_common::types::Value::Int64(n) => Some(*n as u64),
+                _ => None,
+            })
+            .unwrap_or(0);
+
+        Ok(count)
+    }
+
     fn __repr__(&self) -> String {
         "GrafeoDB()".to_string()
     }
@@ -2686,6 +2794,53 @@ impl PyGrafeoDB {
     /// Returns a list of all named graph names.
     fn list_graphs(&self) -> Vec<String> {
         self.inner.read().list_graphs()
+    }
+
+    // -----------------------------------------------------------------
+    // Graph projections
+    // -----------------------------------------------------------------
+
+    /// Creates a named graph projection. Returns ``True`` if created, ``False``
+    /// if a projection with that name already exists.
+    ///
+    /// A projection is a read-only, filtered view of the default graph. Only
+    /// nodes with matching labels and edges with matching types are visible.
+    ///
+    /// Args:
+    ///     name: Projection name.
+    ///     node_labels: Node labels to include (empty means all).
+    ///     edge_types: Edge types to include (empty means all).
+    ///
+    /// Example:
+    ///     db.create_projection("social", node_labels=["Person"], edge_types=["KNOWS"])
+    #[pyo3(signature = (name, node_labels=vec![], edge_types=vec![]))]
+    fn create_projection(
+        &self,
+        name: &str,
+        node_labels: Vec<String>,
+        edge_types: Vec<String>,
+    ) -> bool {
+        use grafeo_core::graph::ProjectionSpec;
+
+        let mut spec = ProjectionSpec::new();
+        if !node_labels.is_empty() {
+            spec = spec.with_node_labels(node_labels);
+        }
+        if !edge_types.is_empty() {
+            spec = spec.with_edge_types(edge_types);
+        }
+        self.inner.read().create_projection(name, spec)
+    }
+
+    /// Drops a named graph projection. Returns ``True`` if it existed, ``False``
+    /// otherwise.
+    fn drop_projection(&self, name: &str) -> bool {
+        self.inner.read().drop_projection(name)
+    }
+
+    /// Returns a list of all projection names.
+    fn list_projections(&self) -> Vec<String> {
+        self.inner.read().list_projections()
     }
 
     /// Sets the current graph for subsequent ``execute()`` calls.
@@ -3239,6 +3394,49 @@ fn is_pandas_na(py: Python<'_>, obj: &Bound<'_, PyAny>) -> bool {
         return b;
     }
     false
+}
+
+/// Read CSV headers from the first line of a file.
+fn read_csv_headers(path: &std::path::Path, delimiter: char) -> PyResult<Vec<String>> {
+    use std::io::{BufRead, BufReader};
+    let f = std::fs::File::open(path).map_err(|e| {
+        pyo3::exceptions::PyFileNotFoundError::new_err(format!("{}: {e}", path.display()))
+    })?;
+    let mut reader = BufReader::new(f);
+    let mut header_line = String::new();
+    reader.read_line(&mut header_line).map_err(|e| {
+        pyo3::exceptions::PyIOError::new_err(format!("Failed to read headers: {e}"))
+    })?;
+    Ok(header_line
+        .trim()
+        .split(delimiter)
+        .map(|h| h.trim().trim_matches('"').to_string())
+        .filter(|h| !h.is_empty())
+        .collect())
+}
+
+/// Read JSON keys from the first non-empty line of a JSONL file.
+fn read_jsonl_keys(path: &std::path::Path) -> PyResult<Vec<String>> {
+    use std::io::{BufRead, BufReader};
+    let f = std::fs::File::open(path).map_err(|e| {
+        pyo3::exceptions::PyFileNotFoundError::new_err(format!("{}: {e}", path.display()))
+    })?;
+    let reader = BufReader::new(f);
+    for line in reader.lines() {
+        let line = line.map_err(|e| {
+            pyo3::exceptions::PyIOError::new_err(format!("Failed to read JSONL file: {e}"))
+        })?;
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Ok(obj) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(trimmed)
+        {
+            return Ok(obj.keys().cloned().collect());
+        }
+        break;
+    }
+    Ok(Vec::new())
 }
 
 /// Convert a Value to a NodeId, validating that it's a valid integer.

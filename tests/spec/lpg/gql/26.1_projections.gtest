@@ -1,0 +1,109 @@
+# GQL Graph Projections
+#
+# Covers: CREATE PROJECTION, DROP PROJECTION, SHOW PROJECTIONS.
+
+meta:
+  language: gql
+  model: lpg
+  section: "26.1"
+  title: Graph projections
+  dataset: empty
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # CREATE PROJECTION
+  # ---------------------------------------------------------------------------
+
+  - name: create_projection_basic
+    statements:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:City {name: 'Amsterdam'})"
+      - "CREATE PROJECTION social LABELS (Person, City) EDGE_TYPES (KNOWS)"
+      - "SHOW PROJECTIONS"
+    expect:
+      rows:
+        - [social]
+
+  - name: create_projection_labels_only
+    statements:
+      - "CREATE PROJECTION people LABELS (Person)"
+      - "SHOW PROJECTIONS"
+    expect:
+      rows:
+        - [people]
+
+  - name: create_projection_edge_types_only
+    statements:
+      - "CREATE PROJECTION rels EDGE_TYPES (KNOWS, LIVES_IN)"
+      - "SHOW PROJECTIONS"
+    expect:
+      rows:
+        - [rels]
+
+  - name: create_projection_no_filters
+    statements:
+      - "CREATE PROJECTION everything"
+      - "SHOW PROJECTIONS"
+    expect:
+      rows:
+        - [everything]
+
+  - name: create_projection_duplicate_fails
+    statements:
+      - "CREATE PROJECTION dup"
+      - "CREATE PROJECTION dup"
+    expect:
+      error: dup
+
+  - name: create_multiple_projections
+    statements:
+      - "CREATE PROJECTION alpha LABELS (Person)"
+      - "CREATE PROJECTION beta EDGE_TYPES (KNOWS)"
+      - "SHOW PROJECTIONS"
+    expect:
+      ordered: true
+      rows:
+        - [alpha]
+        - [beta]
+
+  # ---------------------------------------------------------------------------
+  # DROP PROJECTION
+  # ---------------------------------------------------------------------------
+
+  - name: drop_projection_basic
+    statements:
+      - "CREATE PROJECTION temp LABELS (Person)"
+      - "DROP PROJECTION temp"
+      - "SHOW PROJECTIONS"
+    expect:
+      empty: true
+
+  - name: drop_projection_nonexistent_fails
+    statements:
+      - "DROP PROJECTION nonexistent"
+    expect:
+      error: nonexistent
+
+  # ---------------------------------------------------------------------------
+  # SHOW PROJECTIONS
+  # ---------------------------------------------------------------------------
+
+  - name: show_projections_empty
+    statements:
+      - "SHOW PROJECTIONS"
+    expect:
+      empty: true
+
+  - name: show_projections_sorted
+    statements:
+      - "CREATE PROJECTION zeta LABELS (Person)"
+      - "CREATE PROJECTION alpha LABELS (City)"
+      - "CREATE PROJECTION mu EDGE_TYPES (KNOWS)"
+      - "SHOW PROJECTIONS"
+    expect:
+      ordered: true
+      rows:
+        - [alpha]
+        - [mu]
+        - [zeta]

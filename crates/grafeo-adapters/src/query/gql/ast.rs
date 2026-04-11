@@ -116,6 +116,22 @@ pub enum SessionCommand {
     RollbackToSavepoint(String),
     /// `RELEASE SAVEPOINT name`
     ReleaseSavepoint(String),
+    /// `CREATE PROJECTION name LABELS (l1, l2) EDGE_TYPES (e1, e2)`
+    CreateProjection {
+        /// Projection name.
+        name: String,
+        /// Node labels to include (empty = all).
+        node_labels: Vec<String>,
+        /// Edge types to include (empty = all).
+        edge_types: Vec<String>,
+    },
+    /// `DROP PROJECTION name`
+    DropProjection {
+        /// Projection name.
+        name: String,
+    },
+    /// `SHOW PROJECTIONS`
+    ShowProjections,
 }
 
 /// Composite query operation.
