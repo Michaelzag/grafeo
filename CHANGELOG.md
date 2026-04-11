@@ -2,18 +2,13 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
-## [0.5.36] - Unreleased
+## [0.5.36] - 2026-04-11
 
 ### Added
 
-- **Role-based access control (M1)**: `Identity`, `Role` (`Admin`, `ReadWrite`, `ReadOnly`), and `StatementKind` types for scoping sessions to specific permission levels. `db.session_with_identity(identity)` creates a session bound to an identity, `db.session_with_role(role)` is a convenience shorthand. Permission checks run after parsing but before execution across all query languages (GQL, Cypher, Gremlin, GraphQL, SQL/PGQ, SPARQL). No credentials or crypto at this layer: the caller is trusted to assign the correct role.
-- **GQL introspection test coverage**: `info()`, `schema()`, `CURRENT_SCHEMA`, `CURRENT_GRAPH` functions verified with 7 declarative spec tests.
-- **Graph projections**: `ProjectionSpec` and `GraphProjection` in grafeo-core provide read-only, filtered views of a graph store. Filter by node labels and edge types to create virtual subgraphs for algorithms and queries. Implements the full `GraphStore` trait.
+- **Role-based access control**: `Identity`, `Role` (`Admin`, `ReadWrite`, `ReadOnly`), and `StatementKind` types for scoping sessions to specific permission levels. `db.session_with_identity(identity)` creates a session bound to an identity, `db.session_with_role(role)` is a convenience shorthand. Permission checks run after parsing but before execution across all query languages (GQL, Cypher, Gremlin, GraphQL, SQL/PGQ, SPARQL). No credentials or crypto at this layer: the caller is trusted to assign the correct role.
+- **Graph projections**: read-only filtered views of a graph store via `ProjectionSpec` and `GraphProjection`. Filter by node labels and edge types to create virtual subgraphs for algorithms and queries. Manage with `create_projection()`/`drop_projection()`/`list_projections()` in Rust, Python, Node.js, WASM, and C. GQL syntax: `CREATE PROJECTION name LABELS (...) EDGE_TYPES (...)`, `DROP PROJECTION name`, `SHOW PROJECTIONS`.
 - **Gremlin `repeat().times()`/`.emit()`**: parse and execute `repeat(out()).times(n)` for fixed-depth traversal and `repeat(out()).emit()` for all-depths traversal. Maps to the existing `VariableLengthExpand` operator. `until()` predicates, `path()`, `simplePath()`, and `loops()` remain pending.
-- **GraphQL feature verification**: variable substitution (`$name`), directives (`@skip`/`@include`), aggregation (`sum`/`avg`), nested queries (4 levels), and multiple root fields all confirmed working with 29 spec tests.
-- **Graph projection API on GrafeoDB**: `create_projection(name, spec)`, `drop_projection(name)`, `list_projections()`, `projection(name)` for managing named virtual subgraphs at the database level.
-- **GQL projection syntax**: `CREATE PROJECTION name LABELS (...) EDGE_TYPES (...)`, `DROP PROJECTION name`, `SHOW PROJECTIONS` for managing projections via queries.
-- **Projection bindings**: `create_projection`/`drop_projection`/`list_projections` exposed in Python, Node.js, WASM, and C FFI bindings.
 - **CSV/JSON Lines import**: CLI `grafeo import csv`/`grafeo import jsonl` commands, Python `import_csv()`/`import_jsonl()`, Node.js `importCsv()`/`importJsonl()`.
 - **Per-graph access grants**: `Grant` type scopes an identity's access to specific named graphs. `Identity::with_grants([Grant::new("social", Role::ReadWrite)])` restricts access to listed graphs only. `USE GRAPH`, `CREATE GRAPH`, `DROP GRAPH` enforce grants when present. Empty grants = unrestricted (backward compatible).
 
