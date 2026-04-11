@@ -15,6 +15,7 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 - **GQL projection syntax**: `CREATE PROJECTION name LABELS (...) EDGE_TYPES (...)`, `DROP PROJECTION name`, `SHOW PROJECTIONS` for managing projections via queries.
 - **Projection bindings**: `create_projection`/`drop_projection`/`list_projections` exposed in Python, Node.js, WASM, and C FFI bindings.
 - **CSV/JSON Lines import**: CLI `grafeo import csv`/`grafeo import jsonl` commands, Python `import_csv()`/`import_jsonl()`, Node.js `importCsv()`/`importJsonl()`.
+- **Per-graph access grants**: `Grant` type scopes an identity's access to specific named graphs. `Identity::with_grants([Grant::new("social", Role::ReadWrite)])` restricts access to listed graphs only. `USE GRAPH`, `CREATE GRAPH`, `DROP GRAPH` enforce grants when present. Empty grants = unrestricted (backward compatible).
 
 ### Changed
 
