@@ -1,0 +1,182 @@
+# Transaction & Isolation Tests
+#
+# P0 production test coverage: ACID semantics, read-after-write,
+# multi-statement transactions, rollback behavior.
+#
+# Note: the gtest framework runs each setup statement as a separate execute()
+# call with auto-commit. Tests requiring explicit BEGIN/COMMIT across multiple
+# statements are engine-only (see concurrent_sessions.rs, seam_transaction.rs).
+# These tests focus on single-statement auto-commit semantics and query
+# behavior after committed data.
+
+meta:
+  language: gql
+  model: lpg
+  section: "transactions"
+  title: Transactions and Isolation
+  dataset: empty
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # Auto-commit semantics
+  # ---------------------------------------------------------------------------
+
+  - name: autocommit_insert_visible
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+    query: "MATCH (n:Person) RETURN n.name AS name"
+    expect:
+      rows:
+        - [Alix]
+
+  - name: autocommit_multiple_inserts
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:Person {name: 'Gus'})"
+      - "INSERT (:Person {name: 'Vincent'})"
+    query: "MATCH (n:Person) RETURN count(n) AS c"
+    expect:
+      rows:
+        - [3]
+
+  - name: autocommit_insert_then_update
+    setup:
+      - "INSERT (:Person {name: 'Mia', age: 25})"
+      - "MATCH (n:Person {name: 'Mia'}) SET n.age = 28"
+    query: "MATCH (n:Person {name: 'Mia'}) RETURN n.age AS age"
+    expect:
+      rows:
+        - [28]
+
+  - name: autocommit_insert_then_delete
+    setup:
+      - "INSERT (:Person {name: 'Butch'})"
+      - "MATCH (n:Person {name: 'Butch'}) DELETE n"
+    query: "MATCH (n:Person {name: 'Butch'}) RETURN count(n) AS c"
+    expect:
+      rows:
+        - [0]
+
+  # ---------------------------------------------------------------------------
+  # Read-after-write (single auto-commit statement)
+  # ---------------------------------------------------------------------------
+
+  - name: insert_two_then_count
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:Person {name: 'Gus'})"
+    query: "MATCH (n:Person) RETURN count(n) AS c"
+    expect:
+      rows:
+        - [2]
+
+  - name: merge_creates_on_first_use
+    setup:
+      - "MERGE (:Person {name: 'Django'})"
+      - "MERGE (:Person {name: 'Django'})"
+    query: "MATCH (n:Person {name: 'Django'}) RETURN count(n) AS c"
+    expect:
+      rows:
+        - [1]
+
+  - name: detach_delete_removes_edges
+    setup:
+      - "INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})"
+      - "MATCH (n:Person {name: 'Alix'}) DETACH DELETE n"
+    query: "MATCH (n:Person) RETURN n.name AS name"
+    expect:
+      rows:
+        - [Gus]
+
+  # ---------------------------------------------------------------------------
+  # Data type round-trips
+  # ---------------------------------------------------------------------------
+
+  - name: integer_round_trip
+    setup:
+      - "INSERT (:T {v: 42})"
+    query: "MATCH (n:T) RETURN n.v AS v"
+    expect:
+      rows:
+        - [42]
+
+  - name: float_round_trip
+    setup:
+      - "INSERT (:T {v: 3.14})"
+    query: "MATCH (n:T) RETURN n.v AS v"
+    expect:
+      rows:
+        - [3.14]
+
+  - name: string_round_trip
+    setup:
+      - "INSERT (:T {v: 'Amsterdam'})"
+    query: "MATCH (n:T) RETURN n.v AS v"
+    expect:
+      rows:
+        - [Amsterdam]
+
+  - name: boolean_round_trip
+    setup:
+      - "INSERT (:T {v: true})"
+    query: "MATCH (n:T) RETURN n.v AS v"
+    expect:
+      rows:
+        - [true]
+
+  - name: null_property_not_returned
+    setup:
+      - "INSERT (:T {name: 'test'})"
+    query: "MATCH (n:T) RETURN n.missing AS v"
+    expect:
+      rows:
+        - [null]
+
+  - name: list_round_trip
+    setup:
+      - "INSERT (:T {v: [1, 2, 3]})"
+    query: "MATCH (n:T) RETURN n.v AS v"
+    expect:
+      rows:
+        - ["[1, 2, 3]"]
+
+  # ---------------------------------------------------------------------------
+  # Index correctness under mutation
+  # ---------------------------------------------------------------------------
+
+  - name: index_finds_after_insert
+    setup:
+      - "INSERT (:Person {name: 'Alix', age: 30})"
+      - "INSERT (:Person {name: 'Gus', age: 28})"
+    query: "MATCH (n:Person {age: 30}) RETURN n.name AS name"
+    expect:
+      rows:
+        - [Alix]
+
+  - name: index_reflects_update
+    setup:
+      - "INSERT (:Person {name: 'Alix', age: 30})"
+      - "MATCH (n:Person {name: 'Alix'}) SET n.age = 31"
+    query: "MATCH (n:Person {age: 31}) RETURN n.name AS name"
+    expect:
+      rows:
+        - [Alix]
+
+  - name: label_scan_after_add_label
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "MATCH (n:Person {name: 'Alix'}) SET n:Developer"
+    query: "MATCH (n:Developer) RETURN n.name AS name"
+    expect:
+      rows:
+        - [Alix]
+
+  - name: label_scan_after_remove_label
+    setup:
+      - "INSERT (:Person:Developer {name: 'Alix'})"
+      - "MATCH (n:Developer {name: 'Alix'}) REMOVE n:Developer"
+    query: "MATCH (n:Developer) RETURN count(n) AS c"
+    expect:
+      rows:
+        - [0]

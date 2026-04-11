@@ -1,0 +1,72 @@
+# GQL Introspection Functions
+#
+# Grafeo extension: info() and schema() return database metadata.
+# Spec-aligned: CURRENT_SCHEMA, CURRENT_GRAPH resolve session context.
+
+meta:
+  language: gql
+  model: lpg
+  section: "16.13"
+  title: Introspection Functions
+  dataset: empty
+
+tests:
+
+  # --- info() ---
+
+  - name: info returns map
+    query: "RETURN info() AS i"
+    expect:
+      columns: [i]
+      count: 1
+
+  - name: info node_count after inserts
+    setup:
+      - "INSERT (:Person {name: 'Alix'})"
+      - "INSERT (:Person {name: 'Gus'})"
+    query: "RETURN info() AS i"
+    expect:
+      columns: [i]
+      count: 1
+
+  # --- schema() ---
+
+  - name: schema returns map
+    query: "RETURN schema() AS s"
+    expect:
+      columns: [s]
+      count: 1
+
+  # --- CURRENT_SCHEMA ---
+
+  - name: current_schema returns default
+    query: "RETURN CURRENT_SCHEMA AS s"
+    expect:
+      rows:
+        - ["default"]
+
+  - name: current_schema after set
+    setup:
+      - "CREATE SCHEMA test_schema"
+      - "SESSION SET SCHEMA test_schema"
+    query: "RETURN CURRENT_SCHEMA AS s"
+    expect:
+      rows:
+        - ["test_schema"]
+
+  # --- CURRENT_GRAPH ---
+
+  - name: current_graph returns default
+    query: "RETURN CURRENT_GRAPH AS g"
+    expect:
+      rows:
+        - ["default"]
+
+  - name: current_graph after set
+    setup:
+      - "CREATE GRAPH test_graph"
+      - "SESSION SET GRAPH test_graph"
+    query: "RETURN CURRENT_GRAPH AS g"
+    expect:
+      rows:
+        - ["test_graph"]

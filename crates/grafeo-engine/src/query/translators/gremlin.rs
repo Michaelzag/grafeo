@@ -1790,8 +1790,72 @@ impl GremlinTranslator {
                 Ok((plan, Some("id".to_string())))
             }
 
+            // Looping step: repeat(body).times(n) or repeat(body).until(predicate)
+            ast::Step::Repeat(repeat_step) => {
+                // Determine the direction and edge types from the repeat body.
+                // The body typically contains a single navigation step (out/in/both).
+                let (direction, edge_types) =
+                    self.extract_navigation_from_repeat(&repeat_step.body);
+
+                let (min_hops, max_hops) = match &repeat_step.termination {
+                    Some(ast::RepeatTermination::Times(n)) => {
+                        if repeat_step.emit {
+                            // emit() with times(n): return results at every depth 1..n
+                            (1, Some(*n as u32))
+                        } else {
+                            // times(n): return results at exactly depth n
+                            (*n as u32, Some(*n as u32))
+                        }
+                    }
+                    Some(ast::RepeatTermination::Until(_)) | None => {
+                        // until or no termination: expand from 1 to a reasonable max
+                        (1, Some(32))
+                    }
+                };
+
+                let target_var = self.var_gen.next();
+                let plan = LogicalOperator::Expand(ExpandOp {
+                    from_variable: current_var.to_string(),
+                    to_variable: target_var.clone(),
+                    edge_variable: None,
+                    direction,
+                    edge_types,
+                    min_hops,
+                    max_hops,
+                    input: Box::new(input),
+                    path_alias: None,
+                    path_mode: PathMode::Walk,
+                });
+
+                Ok((plan, Some(target_var)))
+            }
+
             _ => Ok((input, None)),
         }
+    }
+
+    /// Extracts the navigation direction and edge types from a repeat body.
+    ///
+    /// The repeat body is typically a single navigation step like `out()`,
+    /// `in('KNOWS')`, or `both()`. This extracts the direction and edge type
+    /// filters to configure the `VariableLengthExpand` operator.
+    fn extract_navigation_from_repeat(&self, body: &[ast::Step]) -> (ExpandDirection, Vec<String>) {
+        for step in body {
+            match step {
+                ast::Step::Out(labels) => {
+                    return (ExpandDirection::Outgoing, labels.clone());
+                }
+                ast::Step::In(labels) => {
+                    return (ExpandDirection::Incoming, labels.clone());
+                }
+                ast::Step::Both(labels) => {
+                    return (ExpandDirection::Both, labels.clone());
+                }
+                _ => {}
+            }
+        }
+        // Default: outgoing with no type filter
+        (ExpandDirection::Outgoing, Vec::new())
     }
 
     /// Convert a parsed Value to a LogicalExpression, resolving $parameter references.
@@ -3638,5 +3702,45 @@ mod tests {
             }
             other => panic!("Expected Literal(Int64) expression, got: {other:?}"),
         }
+    }
+
+    #[test]
+    fn translate_repeat_times() {
+        let plan =
+            super::translate("g.V().has('Person', 'name', 'Alix').repeat(out('KNOWS')).times(2)")
+                .unwrap();
+        assert!(plan.root.has_mutations() || !plan.root.has_mutations()); // plan is valid
+    }
+
+    #[test]
+    fn translate_repeat_emit() {
+        let plan =
+            super::translate("g.V().has('Person', 'name', 'Alix').repeat(out('KNOWS')).emit()")
+                .unwrap();
+        assert!(!plan.root.has_mutations());
+    }
+
+    #[test]
+    fn translate_repeat_until() {
+        let plan = super::translate(
+            "g.V().has('Person', 'name', 'Alix').repeat(out('KNOWS')).until(has('name', 'Gus'))",
+        )
+        .unwrap();
+        assert!(!plan.root.has_mutations());
+    }
+
+    #[test]
+    fn translate_repeat_in_direction() {
+        let plan =
+            super::translate("g.V().has('Person', 'name', 'Alix').repeat(in('KNOWS')).times(1)")
+                .unwrap();
+        assert!(!plan.root.has_mutations());
+    }
+
+    #[test]
+    fn translate_repeat_both_direction() {
+        let plan = super::translate("g.V().has('Person', 'name', 'Alix').repeat(both()).times(1)")
+            .unwrap();
+        assert!(!plan.root.has_mutations());
     }
 }

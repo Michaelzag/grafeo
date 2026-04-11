@@ -174,6 +174,9 @@ pub struct GrafeoDB {
     /// Whether this database is open in read-only mode.
     /// When true, sessions automatically enforce read-only transactions.
     read_only: bool,
+    /// Named graph projections (virtual subgraphs), shared with sessions.
+    projections:
+        Arc<RwLock<std::collections::HashMap<String, Arc<grafeo_core::graph::GraphProjection>>>>,
 }
 
 impl GrafeoDB {
@@ -572,6 +575,7 @@ impl GrafeoDB {
             current_graph: RwLock::new(None),
             current_schema: RwLock::new(None),
             read_only: is_read_only,
+            projections: Arc::new(RwLock::new(std::collections::HashMap::new())),
         };
 
         // Register storage sections as memory consumers for pressure tracking
@@ -705,6 +709,7 @@ impl GrafeoDB {
             current_graph: RwLock::new(None),
             current_schema: RwLock::new(None),
             read_only: false,
+            projections: Arc::new(RwLock::new(std::collections::HashMap::new())),
         })
     }
 
@@ -788,6 +793,7 @@ impl GrafeoDB {
             current_graph: RwLock::new(None),
             current_schema: RwLock::new(None),
             read_only: true,
+            projections: Arc::new(RwLock::new(std::collections::HashMap::new())),
         })
     }
 
@@ -824,6 +830,9 @@ impl GrafeoDB {
         }
         self.read_only = true;
         self.query_cache = Arc::new(QueryCache::default());
+        // Projections hold Arc refs to the old store: clear them so they don't
+        // serve stale data or prevent the old store's memory from being freed.
+        self.projections.write().clear();
 
         Ok(())
     }
@@ -1291,6 +1300,47 @@ impl GrafeoDB {
         self.create_session_inner(None)
     }
 
+    /// Creates a session scoped to the given identity.
+    ///
+    /// The identity determines what operations the session is allowed to
+    /// perform. A [`Role::ReadOnly`](crate::auth::Role::ReadOnly) identity
+    /// creates a read-only session; a [`Role::ReadWrite`](crate::auth::Role::ReadWrite)
+    /// identity allows data mutations but not schema DDL; a
+    /// [`Role::Admin`](crate::auth::Role::Admin) identity has full access.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use grafeo_engine::{GrafeoDB, auth::{Identity, Role}};
+    ///
+    /// let db = GrafeoDB::new_in_memory();
+    /// let identity = Identity::new("app-service", [Role::ReadWrite]);
+    /// let session = db.session_with_identity(identity);
+    /// ```
+    #[must_use]
+    pub fn session_with_identity(&self, identity: crate::auth::Identity) -> Session {
+        let force_read_only = !identity.can_write();
+        self.create_session_inner_full(None, force_read_only, identity)
+    }
+
+    /// Creates a session scoped to a single role.
+    ///
+    /// Convenience shorthand for
+    /// `session_with_identity(Identity::new("anonymous", [role]))`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use grafeo_engine::{GrafeoDB, auth::Role};
+    ///
+    /// let db = GrafeoDB::new_in_memory();
+    /// let reader = db.session_with_role(Role::ReadOnly);
+    /// ```
+    #[must_use]
+    pub fn session_with_role(&self, role: crate::auth::Role) -> Session {
+        self.session_with_identity(crate::auth::Identity::new("anonymous", [role]))
+    }
+
     /// Creates a session with an explicit CDC override.
     ///
     /// When `cdc_enabled` is `true`, mutations in this session are tracked
@@ -1321,9 +1371,15 @@ impl GrafeoDB {
     /// `TransactionError::ReadOnly`. Useful for replication replicas where
     /// the database itself must remain writable (for applying CDC changes)
     /// but client-facing queries must be read-only.
+    ///
+    /// **Deprecated**: Use `session_with_role(Role::ReadOnly)` instead.
+    #[deprecated(
+        since = "0.5.36",
+        note = "use session_with_role(Role::ReadOnly) instead"
+    )]
     #[must_use]
     pub fn session_read_only(&self) -> Session {
-        self.create_session_inner_opts(None, true)
+        self.session_with_role(crate::auth::Role::ReadOnly)
     }
 
     /// Shared session creation logic.
@@ -1332,15 +1388,16 @@ impl GrafeoDB {
     /// `Some`. `None` falls back to the database default.
     #[allow(unused_variables)] // cdc_override unused when cdc feature is off
     fn create_session_inner(&self, cdc_override: Option<bool>) -> Session {
-        self.create_session_inner_opts(cdc_override, false)
+        self.create_session_inner_full(cdc_override, false, crate::auth::Identity::anonymous())
     }
 
     /// Shared session creation with all overrides.
     #[allow(unused_variables)]
-    fn create_session_inner_opts(
+    fn create_session_inner_full(
         &self,
         cdc_override: Option<bool>,
         force_read_only: bool,
+        identity: crate::auth::Identity,
     ) -> Session {
         let session_cfg = || crate::session::SessionConfig {
             transaction_manager: Arc::clone(&self.transaction_manager),
@@ -1353,6 +1410,9 @@ impl GrafeoDB {
             commit_counter: Arc::clone(&self.commit_counter),
             gc_interval: self.config.gc_interval,
             read_only: self.read_only || force_read_only,
+            identity: identity.clone(),
+            #[cfg(feature = "lpg")]
+            projections: Arc::clone(&self.projections),
         };
 
         if let Some(ref ext_read) = self.external_read_store {
@@ -1605,6 +1665,66 @@ impl GrafeoDB {
     #[must_use]
     pub fn list_graphs(&self) -> Vec<String> {
         self.lpg_store().graph_names()
+    }
+
+    // === Graph Projections ===
+
+    /// Creates a named graph projection (virtual subgraph).
+    ///
+    /// The projection filters the graph store to only include nodes with the
+    /// specified labels and edges with the specified types. Returns `true` if
+    /// created, `false` if a projection with that name already exists.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use grafeo_engine::GrafeoDB;
+    /// use grafeo_core::graph::ProjectionSpec;
+    ///
+    /// let db = GrafeoDB::new_in_memory();
+    /// let spec = ProjectionSpec::new()
+    ///     .with_node_labels(["Person", "City"])
+    ///     .with_edge_types(["LIVES_IN"]);
+    /// assert!(db.create_projection("social", spec));
+    /// ```
+    pub fn create_projection(
+        &self,
+        name: impl Into<String>,
+        spec: grafeo_core::graph::ProjectionSpec,
+    ) -> bool {
+        use grafeo_core::graph::GraphProjection;
+        use std::collections::hash_map::Entry;
+
+        let store = self.graph_store();
+        let projection = Arc::new(GraphProjection::new(store, spec));
+        let mut projections = self.projections.write();
+        match projections.entry(name.into()) {
+            Entry::Occupied(_) => false,
+            Entry::Vacant(e) => {
+                e.insert(projection);
+                true
+            }
+        }
+    }
+
+    /// Drops a named graph projection. Returns `true` if it existed.
+    pub fn drop_projection(&self, name: &str) -> bool {
+        self.projections.write().remove(name).is_some()
+    }
+
+    /// Returns the names of all graph projections.
+    #[must_use]
+    pub fn list_projections(&self) -> Vec<String> {
+        self.projections.read().keys().cloned().collect()
+    }
+
+    /// Returns a named projection as a [`GraphStore`] trait object.
+    #[must_use]
+    pub fn projection(&self, name: &str) -> Option<Arc<dyn GraphStore>> {
+        self.projections
+            .read()
+            .get(name)
+            .map(|p| Arc::clone(p) as Arc<dyn GraphStore>)
     }
 
     /// Returns the graph store as a trait object.
@@ -3391,6 +3511,7 @@ mod tests {
     // =========================================================================
 
     #[test]
+    #[allow(deprecated)]
     fn test_session_read_only() {
         let db = GrafeoDB::new_in_memory();
         db.create_node(&["Person"]);

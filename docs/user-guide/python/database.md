@@ -123,6 +123,85 @@ schema = db.schema()
 db.validate()
 ```
 
+## Named Graphs and Schemas
+
+Manage multiple named graphs and schemas within a single database:
+
+```python
+# Create and switch between named graphs
+db.create_graph("social")
+db.create_graph("work")
+db.set_graph("social")
+print(db.current_graph())  # 'social'
+print(db.list_graphs())    # ['social', 'work']
+db.reset_graph()           # Back to default graph
+db.drop_graph("work")
+
+# Schema management
+db.set_schema("v1")
+print(db.current_schema())  # 'v1'
+db.reset_schema()           # Back to default schema
+```
+
+## Graph Projections
+
+Create filtered virtual views of your graph for algorithms or scoped queries:
+
+```python
+# Create a projection with specific labels and edge types
+db.create_projection("people",
+    node_labels=["Person"],
+    edge_types=["KNOWS", "WORKS_WITH"]
+)
+
+print(db.list_projections())  # ['people']
+db.drop_projection("people")
+```
+
+## Data Import
+
+Import CSV and JSON Lines files directly as graph nodes:
+
+```python
+# CSV import (each row becomes a node with the given label)
+count = db.import_csv("users.csv", "Person", headers=True)
+print(f"Imported {count} nodes")
+
+# JSON Lines import (each line is a JSON object)
+count = db.import_jsonl("events.jsonl", "Event")
+```
+
+## Change Data Capture
+
+Control CDC on a per-transaction basis:
+
+```python
+# Enable CDC for a specific transaction
+with db.begin_transaction_with_cdc(True) as tx:
+    tx.execute("INSERT (:Person {name: 'Alix'})")
+    tx.commit()
+    # CDC events are captured for this transaction
+
+# Disable CDC for bulk operations
+with db.begin_transaction_with_cdc(False) as tx:
+    tx.execute("INSERT (:Temp {data: 'scratch'})")
+    tx.commit()
+    # No CDC events generated
+```
+
+## Backup and Restore
+
+```python
+# Full backup
+db.backup_full("/backups/full")
+
+# Incremental backup (WAL records since last backup)
+db.backup_incremental("/backups/incr")
+
+# Restore to a specific epoch
+grafeo.GrafeoDB.restore_to_epoch("/backups/full", epoch=100, output_path="./restored")
+```
+
 ## Persistence
 
 ```python

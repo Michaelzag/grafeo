@@ -337,7 +337,18 @@ impl<'a> Parser<'a> {
                         )))
                     }
                     "ALTER" => self.parse_alter(),
-                    "SHOW" => self.parse_show().map(Statement::Schema),
+                    "SHOW" => {
+                        // Check for SHOW PROJECTIONS (session command, not schema)
+                        if self.peek_kind() == TokenKind::Identifier
+                            && self.peek_text_upper() == "PROJECTIONS"
+                        {
+                            self.advance(); // consume SHOW
+                            self.advance(); // consume PROJECTIONS
+                            Ok(Statement::SessionCommand(SessionCommand::ShowProjections))
+                        } else {
+                            self.parse_show().map(Statement::Schema)
+                        }
+                    }
                     "LOAD" => self.parse_query().map(Statement::Query),
                     "SELECT" => {
                         self.advance(); // consume SELECT
@@ -5017,6 +5028,12 @@ impl<'a> Parser<'a> {
     /// Handles: CREATE [OR REPLACE] NODE TYPE, EDGE TYPE, GRAPH TYPE, VECTOR INDEX,
     /// INDEX, CONSTRAINT, SCHEMA, and CREATE [PROPERTY] GRAPH.
     fn parse_create_dispatch(&mut self) -> Result<Statement> {
+        // Check: is this CREATE PROJECTION <name> (session command)?
+        if self.peek_kind() == TokenKind::Identifier && self.peek_text_upper() == "PROJECTION" {
+            return self
+                .parse_create_projection()
+                .map(Statement::SessionCommand);
+        }
         // Check: is this CREATE [PROPERTY] GRAPH <name> (session command)?
         // We need to distinguish from CREATE GRAPH TYPE (schema DDL).
         // Peek: if next is GRAPH/PROPERTY and the token after that is NOT TYPE, it's an instance.
@@ -5562,6 +5579,22 @@ impl<'a> Parser<'a> {
                 Ok(Statement::Schema(SchemaStatement::DropSchema {
                     name,
                     if_exists,
+                }))
+            }
+            _ if self.is_identifier()
+                && self
+                    .get_identifier_name()
+                    .eq_ignore_ascii_case("PROJECTION") =>
+            {
+                // DROP PROJECTION name
+                self.advance(); // consume PROJECTION
+                if !self.is_identifier() {
+                    return Err(self.error("Expected projection name"));
+                }
+                let name = self.get_identifier_name();
+                self.advance();
+                Ok(Statement::SessionCommand(SessionCommand::DropProjection {
+                    name,
                 }))
             }
             _ if self.is_identifier()
@@ -6399,6 +6432,76 @@ impl<'a> Parser<'a> {
             copy_of,
             open,
         })
+    }
+
+    /// Parses `CREATE PROJECTION <name> [LABELS (l1, l2, ...)] [EDGE_TYPES (e1, e2, ...)]`.
+    fn parse_create_projection(&mut self) -> Result<SessionCommand> {
+        self.expect(TokenKind::Create)?;
+
+        // Consume PROJECTION keyword
+        if !self.is_identifier()
+            || !self
+                .get_identifier_name()
+                .eq_ignore_ascii_case("PROJECTION")
+        {
+            return Err(self.error("Expected PROJECTION after CREATE"));
+        }
+        self.advance();
+
+        // Parse projection name
+        if !self.is_identifier() {
+            return Err(self.error("Expected projection name"));
+        }
+        let name = self.get_identifier_name();
+        self.advance();
+
+        // Optional LABELS (l1, l2, ...)
+        let node_labels =
+            if self.is_identifier() && self.get_identifier_name().eq_ignore_ascii_case("LABELS") {
+                self.advance();
+                self.parse_parenthesized_identifier_list()?
+            } else {
+                Vec::new()
+            };
+
+        // Optional EDGE_TYPES (e1, e2, ...)
+        let edge_types = if self.is_identifier()
+            && self
+                .get_identifier_name()
+                .eq_ignore_ascii_case("EDGE_TYPES")
+        {
+            self.advance();
+            self.parse_parenthesized_identifier_list()?
+        } else {
+            Vec::new()
+        };
+
+        Ok(SessionCommand::CreateProjection {
+            name,
+            node_labels,
+            edge_types,
+        })
+    }
+
+    /// Parses a parenthesized, comma-separated list of identifiers: `(A, B, C)`.
+    fn parse_parenthesized_identifier_list(&mut self) -> Result<Vec<String>> {
+        self.expect(TokenKind::LParen)?;
+        let mut items = Vec::new();
+        if self.current.kind != TokenKind::RParen {
+            loop {
+                if !self.is_identifier() && !self.is_label_or_type_name() {
+                    return Err(self.error("Expected identifier in list"));
+                }
+                items.push(self.get_identifier_name());
+                self.advance();
+                if self.current.kind != TokenKind::Comma {
+                    break;
+                }
+                self.advance(); // consume comma
+            }
+        }
+        self.expect(TokenKind::RParen)?;
+        Ok(items)
     }
 
     /// Parses `DROP [PROPERTY] GRAPH [IF EXISTS] <name>`.

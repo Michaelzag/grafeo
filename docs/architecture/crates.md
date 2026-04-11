@@ -16,6 +16,7 @@ Grafeo is organized into core library crates and language binding crates.
 graph BT
     COMMON[grafeo-common]
     CORE[grafeo-core]
+    STORAGE[grafeo-storage]
     ADAPTERS[grafeo-adapters]
     ENGINE[grafeo-engine]
     GRAFEO[grafeo]
@@ -29,10 +30,12 @@ graph BT
     CLI[grafeo-cli]
 
     CORE --> COMMON
+    STORAGE --> COMMON
     ADAPTERS --> COMMON
     ADAPTERS --> CORE
     ENGINE --> COMMON
     ENGINE --> CORE
+    ENGINE --> STORAGE
     ENGINE --> ADAPTERS
     GRAFEO --> ENGINE
     COMMON_BIND --> ENGINE
@@ -90,20 +93,37 @@ use grafeo_core::index::HashIndex;
 use grafeo_core::execution::DataChunk;
 ```
 
+## grafeo-storage
+
+Persistence I/O: section-based `.grafeo` container format, WAL management and crash safety. Sibling to `grafeo-core` (both depend only on `grafeo-common`, not on each other).
+
+| Module | Purpose |
+|--------|---------|
+| `container/` | Section-based `.grafeo` file format with checksummed, independently addressable sections |
+| `wal/` | Write-ahead log: append, replay, truncation, backup cursor |
+| `mmap/` | Memory-mapped section reads via `memmap2` |
+
+```rust
+use grafeo_storage::container::Container;
+use grafeo_storage::wal::WalManager;
+```
+
 ## grafeo-adapters
 
-External interfaces and adapters.
+Query language parsers and external interfaces.
 
 | Module | Purpose |
 |--------|---------|
 | `query/gql/` | GQL parser (lexer, parser, AST) |
 | `query/cypher/` | Cypher compatibility layer |
-| `storage/` | Storage backends (memory, WAL) |
+| `query/sparql/` | SPARQL parser |
+| `query/gremlin/` | Gremlin parser |
+| `query/graphql/` | GraphQL parser |
+| `query/sql_pgq/` | SQL/PGQ parser |
 | `plugins/` | Plugin system |
 
 ```rust
 use grafeo_adapters::query::gql::Parser;
-use grafeo_adapters::storage::wal::WalManager;
 ```
 
 ## grafeo-engine

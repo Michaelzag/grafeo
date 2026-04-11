@@ -21,7 +21,7 @@ grafeo = { version = "0.5", features = ["metrics"] }
 ```
 
 !!! note
-    The `metrics` feature is included in the `embedded`, `server` and `full` profiles, so it is enabled by default for most use cases.
+    The `metrics` feature is included in the `enterprise` profile. For other profiles, add it explicitly with `features = ["metrics"]`.
 
 ### Retrieving a Snapshot
 
@@ -366,7 +366,7 @@ grafeo = { version = "0.5", features = ["cdc"] }
 ```
 
 !!! note
-    The `cdc` feature is included in the `ai`, `embedded`, `server` and `full` profiles, so it is enabled by default for most use cases.
+    The `cdc` feature is included in the `ai`, `server`, and `full` profiles. For other profiles, add it explicitly with `features = ["cdc"]`.
 
 ### Change Events
 

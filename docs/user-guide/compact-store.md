@@ -178,8 +178,8 @@ CompactStore requires the `compact-store` feature flag, which is included by def
 
 | Profile | Includes `compact-store` |
 |---------|--------------------------|
-| `embedded` | Yes (Python, Node.js, C) |
-| `browser` | Yes (WASM) |
-| `server` | Yes (via `full`) |
+| `lpg` | Yes (Python, Node.js, C) |
+| `edge` | Yes (WASM) |
+| `enterprise` | Yes |
 
 For custom builds: `cargo build --features compact-store`.

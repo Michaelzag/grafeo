@@ -140,6 +140,18 @@ pub enum TokenKind {
     /// The `choose()` conditional branching step.
     Choose,
 
+    // Looping steps
+    /// The `repeat()` loop step.
+    Repeat,
+    /// The `until()` loop termination predicate.
+    Until,
+    /// The `times()` fixed loop count.
+    Times,
+    /// The `emit()` intermediate result emission.
+    Emit,
+    /// The `loops()` loop counter access.
+    Loops,
+
     // Side effect steps
     /// The `as()` step-label alias.
     As,
@@ -482,6 +494,11 @@ impl<'a> Lexer<'a> {
             "optional" => TokenKind::Optional,
             "union" => TokenKind::Union,
             "choose" => TokenKind::Choose,
+            "repeat" => TokenKind::Repeat,
+            "until" => TokenKind::Until,
+            "times" => TokenKind::Times,
+            "emit" => TokenKind::Emit,
+            "loops" => TokenKind::Loops,
             "as" | "as_" => TokenKind::As,
             "sideEffect" => TokenKind::SideEffect,
             "aggregate" => TokenKind::Aggregate,

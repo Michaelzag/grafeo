@@ -291,7 +291,7 @@ Choose the query language that fits the project:
     ```yaml
     # pubspec.yaml
     dependencies:
-      grafeo: ^0.5.35
+      grafeo: ^0.5.36
     ```
 
 === "WASM"

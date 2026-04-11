@@ -199,21 +199,21 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Limit => {
                 self.expect(TokenKind::LParen)?;
-                let n = self.parse_integer()? as usize;
+                let n = self.parse_non_negative_integer("limit")?;
                 self.expect(TokenKind::RParen)?;
                 Ok(Step::Limit(n))
             }
             TokenKind::Skip => {
                 self.expect(TokenKind::LParen)?;
-                let n = self.parse_integer()? as usize;
+                let n = self.parse_non_negative_integer("skip")?;
                 self.expect(TokenKind::RParen)?;
                 Ok(Step::Skip(n))
             }
             TokenKind::Range => {
                 self.expect(TokenKind::LParen)?;
-                let start = self.parse_integer()? as usize;
+                let start = self.parse_non_negative_integer("range")?;
                 self.expect(TokenKind::Comma)?;
-                let end = self.parse_integer()? as usize;
+                let end = self.parse_non_negative_integer("range")?;
                 self.expect(TokenKind::RParen)?;
                 Ok(Step::Range(start, end))
             }
@@ -486,8 +486,71 @@ impl<'a> Parser<'a> {
                 Ok(Step::SideEffect(steps))
             }
 
+            // Looping steps
+            TokenKind::Repeat => {
+                self.expect(TokenKind::LParen)?;
+                let body = self.parse_inner_steps()?;
+                self.expect(TokenKind::RParen)?;
+                let mut repeat = RepeatStep {
+                    body,
+                    termination: None,
+                    emit: false,
+                };
+                // Consume .times()/.until()/.emit() modifiers at any nesting level
+                self.parse_repeat_modifiers(&mut repeat)?;
+                Ok(Step::Repeat(repeat))
+            }
+
             _ => Err(self.error(&format!("Unknown step: {:?}", token.kind))),
         }
+    }
+
+    /// Consumes `.times()`, `.until()`, and `.emit()` modifiers that follow a `repeat()` step.
+    fn parse_repeat_modifiers(&mut self, repeat: &mut RepeatStep) -> Result<()> {
+        while self.check(TokenKind::Dot) {
+            let saved = self.position;
+            self.advance(); // consume '.'
+            match self.current_kind().cloned() {
+                Some(TokenKind::Times) => {
+                    self.advance(); // consume 'times'
+                    self.expect(TokenKind::LParen)?;
+                    let n = self.parse_non_negative_integer("times")?;
+                    self.expect(TokenKind::RParen)?;
+                    repeat.termination = Some(RepeatTermination::Times(n));
+                }
+                Some(TokenKind::Until) => {
+                    self.advance(); // consume 'until'
+                    self.expect(TokenKind::LParen)?;
+                    let until_steps = self.parse_inner_steps()?;
+                    self.expect(TokenKind::RParen)?;
+                    repeat.termination = Some(RepeatTermination::Until(until_steps));
+                }
+                Some(TokenKind::Emit) => {
+                    self.advance(); // consume 'emit'
+                    self.expect(TokenKind::LParen)?;
+                    self.expect(TokenKind::RParen)?;
+                    repeat.emit = true;
+                }
+                _ => {
+                    // Not a repeat modifier, backtrack
+                    self.position = saved;
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Parses an integer and validates it is non-negative, returning it as `usize`.
+    fn parse_non_negative_integer(&mut self, context: &str) -> Result<usize> {
+        let n = self.parse_integer()?;
+        if n < 0 {
+            return Err(self.error(&format!(
+                "{context}() requires a non-negative integer, got {n}"
+            )));
+        }
+        #[allow(clippy::cast_sign_loss)]
+        Ok(n as usize)
     }
 
     fn parse_has_args(&mut self) -> Result<HasStep> {
@@ -1685,5 +1748,79 @@ mod tests {
     fn test_parse_garbage_input_fails() {
         let result = Parser::new("@#$%^&*").parse();
         assert!(result.is_err(), "Garbage input should fail");
+    }
+
+    #[test]
+    fn test_parse_repeat_times() {
+        let stmt = Parser::new("g.V().repeat(out('KNOWS')).times(3)")
+            .parse()
+            .unwrap();
+        assert_eq!(stmt.steps.len(), 1);
+        if let Step::Repeat(ref r) = stmt.steps[0] {
+            assert_eq!(r.body.len(), 1);
+            assert!(matches!(r.termination, Some(RepeatTermination::Times(3))));
+            assert!(!r.emit);
+        } else {
+            panic!("Expected Repeat step");
+        }
+    }
+
+    #[test]
+    fn test_parse_repeat_until() {
+        let stmt = Parser::new("g.V().repeat(out()).until(has('name', 'Gus'))")
+            .parse()
+            .unwrap();
+        if let Step::Repeat(ref r) = stmt.steps[0] {
+            assert!(matches!(r.termination, Some(RepeatTermination::Until(_))));
+        } else {
+            panic!("Expected Repeat step");
+        }
+    }
+
+    #[test]
+    fn test_parse_repeat_emit() {
+        let stmt = Parser::new("g.V().repeat(out()).emit().times(2)")
+            .parse()
+            .unwrap();
+        if let Step::Repeat(ref r) = stmt.steps[0] {
+            assert!(r.emit);
+            assert!(matches!(r.termination, Some(RepeatTermination::Times(2))));
+        } else {
+            panic!("Expected Repeat step");
+        }
+    }
+
+    #[test]
+    fn test_parse_repeat_no_termination() {
+        let stmt = Parser::new("g.V().repeat(out()).emit()").parse().unwrap();
+        if let Step::Repeat(ref r) = stmt.steps[0] {
+            assert!(r.emit);
+            assert!(r.termination.is_none());
+        } else {
+            panic!("Expected Repeat step");
+        }
+    }
+
+    #[test]
+    fn test_parse_repeat_negative_times_fails() {
+        let result = Parser::new("g.V().repeat(out()).times(-1)").parse();
+        assert!(result.is_err(), "Negative times should fail");
+    }
+
+    #[test]
+    fn test_parse_repeat_in_union() {
+        let stmt = Parser::new("g.V().union(repeat(out()).times(2), repeat(in()).times(1))")
+            .parse()
+            .unwrap();
+        if let Step::Union(ref branches) = stmt.steps[0] {
+            assert_eq!(branches.len(), 2);
+            if let Step::Repeat(ref r) = branches[0][0] {
+                assert!(matches!(r.termination, Some(RepeatTermination::Times(2))));
+            } else {
+                panic!("Expected Repeat in first branch");
+            }
+        } else {
+            panic!("Expected Union step");
+        }
     }
 }

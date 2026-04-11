@@ -84,6 +84,52 @@ from grafeo import IsolationLevel
 with db.begin_transaction(IsolationLevel.SERIALIZABLE) as tx:
     tx.execute("MATCH (n:Person) SET n.verified = true")
     tx.commit()
+
+# Per-transaction CDC override
+with db.begin_transaction_with_cdc(True) as tx:
+    tx.execute("INSERT (:AuditedEvent {action: 'login'})")
+    tx.commit()
+```
+
+### Named Graphs and Schemas
+
+```python
+db.create_graph("social")
+db.set_graph("social")
+print(db.list_graphs())       # ['social']
+print(db.current_graph())     # 'social'
+db.reset_graph()
+db.drop_graph("social")
+
+db.set_schema("v1")
+print(db.current_schema())    # 'v1'
+db.reset_schema()
+```
+
+### Graph Projections
+
+```python
+db.create_projection("people", {
+    "node_labels": ["Person"],
+    "edge_types": ["KNOWS"]
+})
+print(db.list_projections())  # ['people']
+db.drop_projection("people")
+```
+
+### Data Import
+
+```python
+count = db.import_csv("users.csv", "Person", headers=True)
+count = db.import_jsonl("events.jsonl", "Event")
+```
+
+### Backup and Restore
+
+```python
+db.backup_full("/backups/full")
+db.backup_incremental("/backups/incr")
+GrafeoDB.restore_to_epoch("/backups/full", epoch=100, output_path="./restored")
 ```
 
 ### QueryResult
@@ -122,6 +168,11 @@ results = db.vector_search("Document", "embedding", query_vector, k=10)
 - ACID transactions with configurable isolation levels
 - HNSW vector similarity search
 - Property indexes for fast lookups
+- Named graph and schema management
+- Graph projections (filtered virtual views)
+- CSV and JSON Lines import
+- Incremental backup and restore
+- Per-transaction CDC control
 - Async support via `asyncio`
 - Type stubs included
 

@@ -2,6 +2,33 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
+## [0.5.36] - 2026-04-11
+
+### Added
+
+- **Role-based access control**: `Identity`, `Role` (`Admin`, `ReadWrite`, `ReadOnly`), and `StatementKind` types for scoping sessions to specific permission levels. `db.session_with_identity(identity)` creates a session bound to an identity, `db.session_with_role(role)` is a convenience shorthand. Permission checks run after parsing but before execution across all query languages (GQL, Cypher, Gremlin, GraphQL, SQL/PGQ, SPARQL). No credentials or crypto at this layer: the caller is trusted to assign the correct role.
+- **Graph projections**: read-only filtered views of a graph store via `ProjectionSpec` and `GraphProjection`. Filter by node labels and edge types to create virtual subgraphs for algorithms and queries. Manage with `create_projection()`/`drop_projection()`/`list_projections()` in Rust, Python, Node.js, WASM, and C. GQL syntax: `CREATE PROJECTION name LABELS (...) EDGE_TYPES (...)`, `DROP PROJECTION name`, `SHOW PROJECTIONS`.
+- **Gremlin `repeat().times()`/`.emit()`**: parse and execute `repeat(out()).times(n)` for fixed-depth traversal and `repeat(out()).emit()` for all-depths traversal. Maps to the existing `VariableLengthExpand` operator. `until()` predicates, `path()`, `simplePath()`, and `loops()` remain pending.
+- **CSV/JSON Lines import**: CLI `grafeo import csv`/`grafeo import jsonl` commands, Python `import_csv()`/`import_jsonl()`, Node.js `importCsv()`/`importJsonl()`.
+- **Per-graph access grants**: `Grant` type scopes an identity's access to specific named graphs. `Identity::with_grants([Grant::new("social", Role::ReadWrite)])` restricts access to listed graphs only. `USE GRAPH`, `CREATE GRAPH`, `DROP GRAPH` enforce grants when present. Empty grants = unrestricted (backward compatible).
+
+### Changed
+
+- **Unified aggregate accumulator**: push-based aggregate operator now uses the same `AggregateState` as the pull-based operator, gaining support for all 30+ aggregate functions (COLLECT, LAST, STDEV, percentiles, regression, etc.) that previously returned NULL in push mode.
+- **`session_read_only()` deprecated**: use `session_with_role(Role::ReadOnly)` instead. The old method remains as an alias.
+
+### Fixed
+
+- **Release workflow missing `grafeo-storage`**: the crate publish sequence now includes `grafeo-storage` before `grafeo-engine`, fixing cascading publish failures.
+- **Permission bypass in parameterized queries**: `_with_params` methods used a text heuristic to gate write permissions, which had false negatives for languages like GraphQL. Restricted identities now use plan-based mutation detection.
+- **Projection `neighbors()` ignored edge-type filter**: neighbors connected via excluded edge types were incorrectly returned.
+- **Projection `edge_type()` leaked hidden edges**: edges whose endpoints were excluded by label filtering could still have their type queried.
+- **Spill serialization dropped DISTINCT semantics**: DISTINCT aggregate variants are now serialized via finalized-value fallback to avoid corrupting results after reload.
+- **Gremlin `times()` accepted negative values**: negative loop counts silently wrapped to huge values, now returns a parse error.
+- **Gremlin nested repeat modifiers**: `.times()`/`.until()`/`.emit()` now work inside `union()`, `coalesce()`, and other nested traversals.
+- **Projections retained stale store after `compact()`**: `compact()` now clears all projections to prevent stale data and memory leaks.
+- **`rand` RUSTSEC-2026-0097**: updated to 0.10.1.
+
 ## [0.5.35] - 2026-04-11
 
 Breaking: `QueryResult.rows` is now private (use `rows()`/`into_rows()`), all public enums are `#[non_exhaustive]` (add `_ =>` arms), old feature profiles (`embedded`, `browser`, `server`, `full`) are deprecated in favor of persona-based profiles (`lpg`, `rdf`, `analytics`, `ai`, `edge`, `enterprise`) and the on-disk storage format changed from bincode blobs to block-based sections (databases created with 0.5.34 or earlier must be re-created).

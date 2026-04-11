@@ -16,17 +16,79 @@ Grafeo is an embedded database without built-in authentication. Security depends
 
 Grafeo is designed as an **embedded library**, not a network-accessible server:
 
-- **No authentication** - Anyone with access to the application can access the database
+- **Role-based access control** - Sessions can be scoped to `Admin`, `ReadWrite` or `ReadOnly` roles
+- **Per-graph grants** - Identities can be restricted to specific named graphs
+- **No built-in authentication** - The caller is trusted to assign roles; no credentials or crypto at this layer
 - **No network protocol** - No TCP/HTTP ports to secure
 - **No encryption at rest** - Database files are not encrypted
-- **File-based access control** - Security relies on filesystem permissions
+- **File-based access control** - Database files rely on filesystem permissions
 
 This model is appropriate for:
 
 - Single-user applications
 - Microservices with internal graph state
 - Data science environments
-- Applications that implement their own access control
+- Multi-tenant applications that assign roles based on their own authentication
+
+---
+
+## Role-Based Access Control
+
+Grafeo provides session-level role-based access control (RBAC). Each session can be scoped to a role that restricts which operations are allowed. Permission checks run after parsing but before execution, across all query languages.
+
+### Roles
+
+| Role | Reads | Writes | Schema DDL |
+|------|-------|--------|------------|
+| `Admin` | Yes | Yes | Yes |
+| `ReadWrite` | Yes | Yes | No |
+| `ReadOnly` | Yes | No | No |
+
+### Creating Role-Scoped Sessions (Rust)
+
+```rust
+use grafeo::{GrafeoDB, auth::{Identity, Role, Grant}};
+
+let db = GrafeoDB::new_in_memory();
+
+// Convenience: session with a specific role
+let reader = db.session_with_role(Role::ReadOnly);
+
+// Full control: session with an identity
+let identity = Identity::new("api-user", [Role::ReadWrite]);
+let writer = db.session_with_identity(identity);
+```
+
+### Per-Graph Access Grants
+
+Identities can be restricted to specific named graphs. When grants are present, only the listed graphs are accessible. Empty grants means unrestricted access (backward compatible).
+
+```rust
+use grafeo::auth::{Identity, Role, Grant};
+
+let identity = Identity::new("analyst", [Role::ReadWrite])
+    .with_grants([
+        Grant::new("social", Role::ReadWrite),
+        Grant::new("public", Role::ReadOnly),
+    ]);
+
+let session = db.session_with_identity(identity);
+// This session can write to "social", read from "public", and nothing else
+```
+
+### GQL Syntax
+
+Graph projections and named graph operations respect grants:
+
+```sql
+-- These are enforced when the session has grants:
+USE GRAPH social;
+CREATE GRAPH analytics;
+DROP GRAPH old_data;
+```
+
+!!! note "No credentials at this layer"
+    Grafeo does not handle authentication (passwords, tokens, certificates). The caller is trusted to assign the correct role. Use your application's auth layer to map users to Grafeo identities.
 
 ---
 
@@ -308,6 +370,8 @@ scp backup.db.gpg backup-server:/backups/
 
 Before deploying:
 
+- [ ] Sessions use appropriate roles (`ReadOnly` for read paths, `ReadWrite` for mutations)
+- [ ] Per-graph grants restrict multi-tenant access where needed
 - [ ] Database files have restricted permissions (700 or 600)
 - [ ] All queries use parameterization (no string interpolation)
 - [ ] Input validation on all user-provided data

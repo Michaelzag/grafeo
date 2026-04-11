@@ -114,6 +114,10 @@ enum Commands {
     #[command(subcommand)]
     Data(DataCommands),
 
+    /// Import CSV or JSON Lines files as graph nodes
+    #[command(subcommand)]
+    Import(ImportCommands),
+
     /// Manage Write-Ahead Log
     #[command(subcommand)]
     Wal(WalCommands),
@@ -305,6 +309,46 @@ enum DataCommands {
     },
 }
 
+/// Import subcommands.
+#[derive(Subcommand)]
+enum ImportCommands {
+    /// Import a CSV file as graph nodes
+    Csv {
+        /// Path to the CSV file
+        file: PathBuf,
+
+        /// Path to the database
+        #[arg(long)]
+        path: PathBuf,
+
+        /// First row contains column headers
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        headers: bool,
+
+        /// Column separator character (default: comma)
+        #[arg(long)]
+        separator: Option<String>,
+
+        /// Label to assign to created nodes
+        #[arg(long, default_value = "Row")]
+        label: String,
+    },
+
+    /// Import a JSON Lines file as graph nodes
+    Jsonl {
+        /// Path to the JSONL file
+        file: PathBuf,
+
+        /// Path to the database
+        #[arg(long)]
+        path: PathBuf,
+
+        /// Label to assign to created nodes
+        #[arg(long, default_value = "Row")]
+        label: String,
+    },
+}
+
 /// WAL management commands.
 #[derive(Subcommand)]
 enum WalCommands {
@@ -374,6 +418,7 @@ fn main() {
         Commands::Index(cmd) => commands::index::run(cmd, cli.format, cli.quiet),
         Commands::Backup(cmd) => commands::backup::run(cmd, cli.format, cli.quiet),
         Commands::Data(cmd) => commands::data::run(cmd, cli.format, cli.quiet),
+        Commands::Import(cmd) => commands::import::run(cmd, cli.format, cli.quiet),
         Commands::Wal(cmd) => commands::wal::run(cmd, cli.format, cli.quiet),
         Commands::Compact { path, dry_run } => {
             commands::compact::run(&path, dry_run, cli.format, cli.quiet)

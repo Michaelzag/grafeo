@@ -2038,6 +2038,118 @@ pub extern "C" fn grafeo_compact(db: *mut GrafeoDatabase) -> GrafeoStatus {
 }
 
 // =========================================================================
+// Graph Projections
+// =========================================================================
+
+/// Creates a named graph projection. Returns `true` if created, `false` if a
+/// projection with that name already exists.
+///
+/// `node_labels` and `edge_types` are arrays of null-terminated UTF-8 strings.
+/// Pass null with a count of 0 to include all nodes/edges.
+///
+/// # Safety
+/// `db` must be a valid pointer returned by `grafeo_open*`. `name` must be a
+/// valid null-terminated UTF-8 string. `node_labels` (if non-null) must point
+/// to `num_labels` valid null-terminated UTF-8 string pointers. Same for
+/// `edge_types` / `num_types`.
+#[unsafe(no_mangle)]
+pub extern "C" fn grafeo_create_projection(
+    db: *mut GrafeoDatabase,
+    name: *const c_char,
+    node_labels: *const *const c_char,
+    num_labels: usize,
+    edge_types: *const *const c_char,
+    num_types: usize,
+) -> bool {
+    use grafeo_core::graph::ProjectionSpec;
+
+    if db.is_null() || name.is_null() {
+        set_last_error("Null pointer argument");
+        return false;
+    }
+    // SAFETY: Caller guarantees valid pointers.
+    let db = unsafe { &*db };
+    let Ok(name_str) = str_from_ptr(name) else {
+        return false;
+    };
+
+    let mut spec = ProjectionSpec::new();
+
+    // Reject null pointer with non-zero count (caller error)
+    if node_labels.is_null() && num_labels > 0 {
+        return false;
+    }
+    if edge_types.is_null() && num_types > 0 {
+        return false;
+    }
+
+    if !node_labels.is_null() && num_labels > 0 {
+        let mut labels = Vec::with_capacity(num_labels);
+        for i in 0..num_labels {
+            // SAFETY: Caller guarantees node_labels[0..num_labels] are valid.
+            let ptr = unsafe { *node_labels.add(i) };
+            let Ok(s) = str_from_ptr(ptr) else {
+                return false;
+            };
+            labels.push(s.to_owned());
+        }
+        spec = spec.with_node_labels(labels);
+    }
+
+    if !edge_types.is_null() && num_types > 0 {
+        let mut types = Vec::with_capacity(num_types);
+        for i in 0..num_types {
+            // SAFETY: Caller guarantees edge_types[0..num_types] are valid.
+            let ptr = unsafe { *edge_types.add(i) };
+            let Ok(s) = str_from_ptr(ptr) else {
+                return false;
+            };
+            types.push(s.to_owned());
+        }
+        spec = spec.with_edge_types(types);
+    }
+
+    db.inner.read().create_projection(name_str, spec)
+}
+
+/// Drops a named graph projection. Returns `true` if it existed.
+///
+/// # Safety
+/// `db` must be a valid pointer returned by `grafeo_open*`. `name` must be a
+/// valid null-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub extern "C" fn grafeo_drop_projection(db: *mut GrafeoDatabase, name: *const c_char) -> bool {
+    if db.is_null() || name.is_null() {
+        set_last_error("Null pointer argument");
+        return false;
+    }
+    // SAFETY: Caller guarantees valid pointers.
+    let db = unsafe { &*db };
+    let Ok(name_str) = str_from_ptr(name) else {
+        return false;
+    };
+    db.inner.read().drop_projection(name_str)
+}
+
+/// Returns the names of all graph projections as a JSON array string.
+/// Caller must free with `grafeo_free_string`.
+///
+/// # Safety
+/// `db` must be a valid pointer returned by `grafeo_open*`.
+#[unsafe(no_mangle)]
+pub extern "C" fn grafeo_list_projections(db: *mut GrafeoDatabase) -> *mut c_char {
+    if db.is_null() {
+        set_last_error("Null database pointer");
+        return std::ptr::null_mut();
+    }
+    // SAFETY: Caller guarantees valid pointer.
+    let db = unsafe { &*db };
+    let names = db.inner.read().list_projections();
+    let json = serde_json::to_string(&names).unwrap_or_default();
+    CString::new(json).map_or(std::ptr::null_mut(), CString::into_raw)
+}
+
+// =========================================================================
 // Memory Management
 // =========================================================================
 

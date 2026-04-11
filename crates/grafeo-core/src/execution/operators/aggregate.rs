@@ -20,8 +20,15 @@ use crate::execution::DataChunk;
 use crate::execution::chunk::DataChunkBuilder;
 
 /// State for a single aggregation computation.
+///
+/// Used by both the pull-based [`HashAggregateOperator`] and the push-based
+/// `AggregatePushOperator`.
+/// Supports all [`AggregateFunction`] variants including Welford's algorithm
+/// for online statistics, Kahan summation, distinct tracking, and bivariate
+/// regression functions.
 #[derive(Debug, Clone)]
-pub(crate) enum AggregateState {
+#[allow(missing_docs)]
+pub enum AggregateState {
     /// Count state.
     Count(i64),
     /// Count distinct state (count, seen values).
@@ -79,11 +86,15 @@ pub(crate) enum AggregateState {
         m2_y: f64,
         c_xy: f64,
     },
+    /// Immutable finalized value restored from spill. Ignores further updates
+    /// so that reloaded groups that were serialized via the FINALIZED fallback
+    /// do not silently corrupt their result when more rows arrive.
+    Frozen(Value),
 }
 
 impl AggregateState {
     /// Creates initial state for an aggregation function.
-    pub(crate) fn new(
+    pub fn new(
         function: AggregateFunction,
         distinct: bool,
         percentile: Option<f64>,
@@ -174,7 +185,10 @@ impl AggregateState {
     }
 
     /// Updates the state with a new value.
-    pub(crate) fn update(&mut self, value: Option<Value>) {
+    ///
+    /// For `COUNT(*)`, pass `None` to count all rows. For column-specific
+    /// aggregates, pass `Some(value)` (nulls are skipped by most functions).
+    pub fn update(&mut self, value: Option<Value>) {
         match self {
             AggregateState::Count(count) => {
                 *count += 1;
@@ -368,6 +382,7 @@ impl AggregateState {
                 // Bivariate functions require two values; use update_bivariate() instead.
                 // Single-value update is a no-op for bivariate state.
             }
+            AggregateState::Frozen(_) => {}
         }
     }
 
@@ -375,7 +390,7 @@ impl AggregateState {
     ///
     /// Uses the two-variable Welford online algorithm for numerically stable computation
     /// of covariance and related statistics. Skips the update if either value is null.
-    fn update_bivariate(&mut self, y_val: Option<Value>, x_val: Option<Value>) {
+    pub fn update_bivariate(&mut self, y_val: Option<Value>, x_val: Option<Value>) {
         if let AggregateState::Bivariate {
             count,
             mean_x,
@@ -406,7 +421,7 @@ impl AggregateState {
     }
 
     /// Finalizes the state and returns the result value.
-    pub(crate) fn finalize(&self) -> Value {
+    pub fn finalize(&self) -> Value {
         match self {
             AggregateState::Count(count) | AggregateState::CountDistinct(count, _) => {
                 Value::Int64(*count)
@@ -512,6 +527,7 @@ impl AggregateState {
             }
             // SAMPLE: return the first non-null value seen
             AggregateState::Sample(sample) => sample.clone().unwrap_or(Value::Null),
+            AggregateState::Frozen(val) => val.clone(),
             // Binary set functions: dispatch on kind
             AggregateState::Bivariate {
                 kind,

@@ -73,6 +73,21 @@ g.V().has('name', 'Gus').in('KNOWS')
 g.V().has('name', 'Alix').out('KNOWS').out('KNOWS')
 ```
 
+### Repeated Traversals
+
+```gremlin
+// Fixed-depth traversal: exactly 3 hops out
+g.V().has('name', 'Alix').repeat(out('KNOWS')).times(3)
+
+// All-depths traversal: emit at every depth
+g.V().has('name', 'Alix').repeat(out('KNOWS')).emit()
+```
+
+`repeat().times(n)` maps to variable-length expansion with a fixed depth. `repeat().emit()` returns intermediate results at every depth. Both work inside `union()`, `coalesce()` and other nested traversals.
+
+!!! note "Pending steps"
+    `until()` predicates, `path()`, `simplePath()` and `loops()` are not yet supported.
+
 ### Getting Properties
 
 ```gremlin
@@ -148,6 +163,11 @@ let result = db.execute_gremlin("g.V().hasLabel('Person')").unwrap();
 - `both(label?)` - Traverse both directions
 - `outE(label?)` - Get outgoing edges
 - `inE(label?)` - Get incoming edges
+
+### Repetition Steps
+- `repeat(traversal)` - Execute a traversal repeatedly
+- `.times(n)` - Repeat exactly n times (fixed-depth expansion)
+- `.emit()` - Emit results at every depth (all-depths expansion)
 
 ### Property Steps
 - `values(key)` - Get property values

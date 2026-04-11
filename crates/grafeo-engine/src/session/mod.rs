@@ -87,6 +87,15 @@ pub(crate) struct SessionConfig {
     pub gc_interval: usize,
     /// When true, the session permanently blocks all mutations.
     pub read_only: bool,
+    /// The identity bound to this session (for permission checks).
+    pub identity: crate::auth::Identity,
+    /// Named graph projections shared with the database.
+    #[cfg(feature = "lpg")]
+    pub projections: Arc<
+        parking_lot::RwLock<
+            std::collections::HashMap<String, Arc<grafeo_core::graph::GraphProjection>>,
+        >,
+    >,
 }
 
 /// Your handle to the database - execute queries and manage transactions.
@@ -120,6 +129,8 @@ pub struct Session {
     /// Whether the database itself is read-only (set at open time, never changes).
     /// When true, `read_only_tx` is always true regardless of transaction flags.
     db_read_only: bool,
+    /// The identity bound to this session (determines permission level).
+    identity: crate::auth::Identity,
     /// Whether the session is in auto-commit mode.
     auto_commit: bool,
     /// Adaptive execution configuration.
@@ -180,6 +191,13 @@ pub struct Session {
     /// Transaction start time for duration tracking.
     #[cfg(feature = "metrics")]
     tx_start_time: parking_lot::Mutex<Option<Instant>>,
+    /// Named graph projections shared with the database.
+    #[cfg(feature = "lpg")]
+    projections: Arc<
+        parking_lot::RwLock<
+            std::collections::HashMap<String, Arc<grafeo_core::graph::GraphProjection>>,
+        >,
+    >,
 }
 
 /// Per-graph savepoint snapshot, capturing the store state at the time of the savepoint.
@@ -225,6 +243,7 @@ impl Session {
             current_transaction: parking_lot::Mutex::new(None),
             read_only_tx: parking_lot::Mutex::new(cfg.read_only),
             db_read_only: cfg.read_only,
+            identity: cfg.identity,
             auto_commit: true,
             adaptive_config: cfg.adaptive_config,
             factorized_execution: cfg.factorized_execution,
@@ -254,6 +273,7 @@ impl Session {
             metrics: None,
             #[cfg(feature = "metrics")]
             tx_start_time: parking_lot::Mutex::new(None),
+            projections: cfg.projections,
         }
     }
 
@@ -332,6 +352,7 @@ impl Session {
             current_transaction: parking_lot::Mutex::new(None),
             read_only_tx: parking_lot::Mutex::new(cfg.read_only),
             db_read_only: cfg.read_only,
+            identity: cfg.identity,
             auto_commit: true,
             adaptive_config: cfg.adaptive_config,
             factorized_execution: cfg.factorized_execution,
@@ -361,6 +382,8 @@ impl Session {
             metrics: None,
             #[cfg(feature = "metrics")]
             tx_start_time: parking_lot::Mutex::new(None),
+            #[cfg(feature = "lpg")]
+            projections: cfg.projections,
         })
     }
 
@@ -368,6 +391,12 @@ impl Session {
     #[must_use]
     pub fn graph_model(&self) -> GraphModel {
         self.graph_model
+    }
+
+    /// Returns the identity bound to this session.
+    #[must_use]
+    pub fn identity(&self) -> &crate::auth::Identity {
+        &self.identity
     }
 
     // === Session State Management ===
@@ -660,6 +689,17 @@ impl Session {
         Ok(())
     }
 
+    /// Checks that the session's identity is permitted to execute the given
+    /// statement kind. Returns an error if the role is insufficient.
+    fn require_permission(&self, kind: crate::auth::StatementKind) -> Result<()> {
+        crate::auth::check_permission(&self.identity, kind).map_err(|denied| {
+            grafeo_common::utils::error::Error::Query(grafeo_common::utils::error::QueryError::new(
+                grafeo_common::utils::error::QueryErrorKind::Semantic,
+                denied.to_string(),
+            ))
+        })
+    }
+
     /// Executes a session or transaction command, returning an empty result.
     #[cfg(feature = "gql")]
     fn execute_session_command(
@@ -671,10 +711,46 @@ impl Session {
         use grafeo_adapters::query::gql::ast::TransactionIsolationLevel;
         use grafeo_common::utils::error::{Error, QueryError, QueryErrorKind};
 
+        // Check role-based permission for graph management commands
+        match &cmd {
+            SessionCommand::CreateGraph { .. }
+            | SessionCommand::DropGraph { .. }
+            | SessionCommand::CreateProjection { .. }
+            | SessionCommand::DropProjection { .. } => {
+                self.require_permission(crate::auth::StatementKind::Write)?;
+            }
+            _ => {} // Session state + transaction control: always allowed
+        }
+
+        // Check per-graph grants for graph-scoped commands
+        if self.identity.has_grants() {
+            match &cmd {
+                SessionCommand::CreateGraph { name, .. }
+                | SessionCommand::DropGraph { name, .. } => {
+                    if !self
+                        .identity
+                        .can_access_graph(name, crate::auth::Role::ReadWrite)
+                    {
+                        return Err(Error::Query(QueryError::new(
+                            QueryErrorKind::Semantic,
+                            format!(
+                                "permission denied: no grant for graph '{name}' (user: {})",
+                                self.identity.user_id()
+                            ),
+                        )));
+                    }
+                }
+                _ => {}
+            }
+        }
+
         // Block DDL in read-only transactions (ISO/IEC 39075 Section 8)
         if *self.read_only_tx.lock() {
             match &cmd {
-                SessionCommand::CreateGraph { .. } | SessionCommand::DropGraph { .. } => {
+                SessionCommand::CreateGraph { .. }
+                | SessionCommand::DropGraph { .. }
+                | SessionCommand::CreateProjection { .. }
+                | SessionCommand::DropProjection { .. } => {
                     return Err(Error::Transaction(
                         grafeo_common::utils::error::TransactionError::ReadOnly,
                     ));
@@ -798,6 +874,21 @@ impl Session {
             }
             #[cfg(feature = "lpg")]
             SessionCommand::UseGraph(name) => {
+                // Check per-graph grant before switching
+                if self.identity.has_grants()
+                    && !name.eq_ignore_ascii_case("default")
+                    && !self
+                        .identity
+                        .can_access_graph(&name, crate::auth::Role::ReadOnly)
+                {
+                    return Err(Error::Query(QueryError::new(
+                        QueryErrorKind::Semantic,
+                        format!(
+                            "permission denied: no grant for graph '{name}' (user: {})",
+                            self.identity.user_id()
+                        ),
+                    )));
+                }
                 // Verify graph exists (resolve within current schema)
                 let effective_key = self.effective_graph_key(&name);
                 if !name.eq_ignore_ascii_case("default")
@@ -816,6 +907,21 @@ impl Session {
             #[cfg(feature = "lpg")]
             SessionCommand::SessionSetGraph(name) => {
                 // ISO/IEC 39075 Section 7.1 GR2: set session graph (resolved within current schema)
+                // Check per-graph grant before switching (same as USE GRAPH)
+                if self.identity.has_grants()
+                    && !name.eq_ignore_ascii_case("default")
+                    && !self
+                        .identity
+                        .can_access_graph(&name, crate::auth::Role::ReadOnly)
+                {
+                    return Err(Error::Query(QueryError::new(
+                        QueryErrorKind::Semantic,
+                        format!(
+                            "permission denied: no grant for graph '{name}' (user: {})",
+                            self.identity.user_id()
+                        ),
+                    )));
+                }
                 let effective_key = self.effective_graph_key(&name);
                 if !name.eq_ignore_ascii_case("default")
                     && self.store.graph(&effective_key).is_none()
@@ -924,6 +1030,57 @@ impl Session {
             SessionCommand::ReleaseSavepoint(name) => {
                 self.release_savepoint(&name)?;
                 Ok(QueryResult::status(format!("Savepoint '{name}' released")))
+            }
+            #[cfg(feature = "lpg")]
+            SessionCommand::CreateProjection {
+                name,
+                node_labels,
+                edge_types,
+            } => {
+                use grafeo_core::graph::{GraphProjection, ProjectionSpec};
+                use std::collections::hash_map::Entry;
+
+                let spec = ProjectionSpec::new()
+                    .with_node_labels(node_labels)
+                    .with_edge_types(edge_types);
+
+                let store = self.active_store();
+                let projection = Arc::new(GraphProjection::new(store, spec));
+                let mut projections = self.projections.write();
+                match projections.entry(name.clone()) {
+                    Entry::Occupied(_) => Err(Error::Query(QueryError::new(
+                        QueryErrorKind::Semantic,
+                        format!("Projection '{name}' already exists"),
+                    ))),
+                    Entry::Vacant(e) => {
+                        e.insert(projection);
+                        Ok(QueryResult::status(format!("Projection '{name}' created")))
+                    }
+                }
+            }
+            #[cfg(feature = "lpg")]
+            SessionCommand::DropProjection { name } => {
+                let removed = self.projections.write().remove(&name).is_some();
+                if !removed {
+                    return Err(Error::Query(QueryError::new(
+                        QueryErrorKind::Semantic,
+                        format!("Projection '{name}' does not exist"),
+                    )));
+                }
+                Ok(QueryResult::status(format!("Projection '{name}' dropped")))
+            }
+            #[cfg(feature = "lpg")]
+            SessionCommand::ShowProjections => {
+                let mut names: Vec<String> = self.projections.read().keys().cloned().collect();
+                names.sort();
+                let rows: Vec<Vec<Value>> =
+                    names.into_iter().map(|n| vec![Value::from(n)]).collect();
+                Ok(QueryResult {
+                    columns: vec!["name".to_string()],
+                    column_types: Vec::new(),
+                    rows,
+                    ..QueryResult::empty()
+                })
             }
             #[cfg(not(feature = "lpg"))]
             _ => Err(grafeo_common::utils::error::Error::Internal(
@@ -2364,7 +2521,8 @@ impl Session {
             }
             #[cfg(feature = "lpg")]
             gql::GqlTranslationResult::SchemaCommand(cmd) => {
-                // All DDL is a write operation
+                // All DDL requires Admin role
+                self.require_permission(crate::auth::StatementKind::Admin)?;
                 if *self.read_only_tx.lock() {
                     return Err(grafeo_common::utils::error::Error::Transaction(
                         grafeo_common::utils::error::TransactionError::ReadOnly,
@@ -2373,6 +2531,10 @@ impl Session {
                 return self.execute_schema_command(cmd);
             }
             gql::GqlTranslationResult::Plan(plan) => {
+                // Check role-based permission before read-only transaction check
+                if plan.root.has_mutations() {
+                    self.require_permission(crate::auth::StatementKind::Write)?;
+                }
                 // Block mutations in read-only transactions
                 if *self.read_only_tx.lock() && plan.root.has_mutations() {
                     return Err(grafeo_common::utils::error::Error::Transaction(
@@ -2564,7 +2726,25 @@ impl Session {
 
         use crate::query::processor::{QueryLanguage, QueryProcessor};
 
-        let has_mutations = Self::query_looks_like_mutation(query);
+        // Reject writes if the identity lacks permission. Parse the query
+        // to determine mutation status reliably (the text heuristic has false
+        // negatives that could bypass authorization).
+        let has_mutations = if self.identity.can_write() {
+            // Fast path: identity can write, use heuristic for auto-commit only
+            Self::query_looks_like_mutation(query)
+        } else {
+            // Restricted identity: parse to check mutations reliably
+            use crate::query::translators::gql;
+            match gql::translate(query) {
+                Ok(plan) if plan.root.has_mutations() => {
+                    self.require_permission(crate::auth::StatementKind::Write)?;
+                    true
+                }
+                Ok(_) => false,
+                // Parse error: let the processor handle it below
+                Err(_) => Self::query_looks_like_mutation(query),
+            }
+        };
         let active = self.active_store();
 
         self.with_auto_commit(has_mutations, || {
@@ -2637,6 +2817,7 @@ impl Session {
                 use grafeo_common::utils::error::{
                     Error as GrafeoError, QueryError, QueryErrorKind,
                 };
+                self.require_permission(crate::auth::StatementKind::Admin)?;
                 if *self.read_only_tx.lock() {
                     return Err(GrafeoError::Query(QueryError::new(
                         QueryErrorKind::Semantic,
@@ -2692,6 +2873,11 @@ impl Session {
 
             plan
         };
+
+        // Check role-based permission for mutations
+        if optimized_plan.root.has_mutations() {
+            self.require_permission(crate::auth::StatementKind::Write)?;
+        }
 
         // Resolve the active store for query execution
         let active = self.active_store();
@@ -2813,6 +2999,9 @@ impl Session {
         let optimized_plan = optimizer.optimize(logical_plan)?;
 
         let has_mutations = optimized_plan.root.has_mutations();
+        if has_mutations {
+            self.require_permission(crate::auth::StatementKind::Write)?;
+        }
 
         let result = self.with_auto_commit(has_mutations, || {
             // Get transaction context for MVCC visibility
@@ -2852,27 +3041,42 @@ impl Session {
         query: &str,
         params: std::collections::HashMap<String, Value>,
     ) -> Result<QueryResult> {
-        use crate::query::processor::{QueryLanguage, QueryProcessor};
+        use crate::query::{
+            Executor, binder::Binder, optimizer::Optimizer, processor::substitute_params,
+            translators::gremlin,
+        };
 
         #[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
         let start_time = Instant::now();
 
-        let has_mutations = Self::query_looks_like_mutation(query);
+        // Parse and translate the query to a logical plan
+        let mut logical_plan = gremlin::translate(query)?;
+
+        // Substitute parameters
+        substitute_params(&mut logical_plan, &params)?;
+
+        // Semantic validation
+        let mut binder = Binder::new();
+        let _binding_context = binder.bind(&logical_plan)?;
+
+        // Optimize the plan
         let active = self.active_store();
+        let optimizer = Optimizer::from_graph_store(&*active);
+        let optimized_plan = optimizer.optimize(logical_plan)?;
+
+        let has_mutations = optimized_plan.root.has_mutations();
+        if has_mutations {
+            self.require_permission(crate::auth::StatementKind::Write)?;
+        }
 
         let result = self.with_auto_commit(has_mutations, || {
             let (viewing_epoch, transaction_id) = self.get_transaction_context();
-            let processor = QueryProcessor::for_stores_with_transaction(
-                Arc::clone(&active),
-                self.active_write_store(),
-                Arc::clone(&self.transaction_manager),
-            )?;
-            let processor = if let Some(transaction_id) = transaction_id {
-                processor.with_transaction_context(viewing_epoch, transaction_id)
-            } else {
-                processor
-            };
-            processor.process(query, QueryLanguage::Gremlin, Some(&params))
+            let planner =
+                self.create_planner_for_store(Arc::clone(&active), viewing_epoch, transaction_id);
+            let mut physical_plan = planner.plan(&optimized_plan)?;
+            let executor = Executor::with_columns(physical_plan.columns.clone())
+                .with_deadline(self.query_deadline());
+            executor.execute(physical_plan.operator.as_mut())
         });
 
         #[cfg(feature = "metrics")]
@@ -2935,6 +3139,9 @@ impl Session {
         let optimizer = Optimizer::from_graph_store(&*active);
         let optimized_plan = optimizer.optimize(logical_plan)?;
         let has_mutations = optimized_plan.root.has_mutations();
+        if has_mutations {
+            self.require_permission(crate::auth::StatementKind::Write)?;
+        }
 
         let result = self.with_auto_commit(has_mutations, || {
             let (viewing_epoch, transaction_id) = self.get_transaction_context();
@@ -2969,27 +3176,48 @@ impl Session {
         query: &str,
         params: std::collections::HashMap<String, Value>,
     ) -> Result<QueryResult> {
-        use crate::query::processor::{QueryLanguage, QueryProcessor};
+        use crate::query::{
+            Executor, binder::Binder, optimizer::Optimizer, processor::substitute_params,
+            translators::graphql,
+        };
 
         #[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
         let start_time = Instant::now();
 
-        let has_mutations = Self::query_looks_like_mutation(query);
+        // Parse and translate the query to a logical plan
+        let mut logical_plan = graphql::translate(query)?;
+
+        // Merge default params with caller-supplied params
+        if !logical_plan.default_params.is_empty() {
+            let mut merged = logical_plan.default_params.clone();
+            merged.extend(params.iter().map(|(k, v)| (k.clone(), v.clone())));
+            substitute_params(&mut logical_plan, &merged)?;
+        } else {
+            substitute_params(&mut logical_plan, &params)?;
+        }
+
+        // Semantic validation
+        let mut binder = Binder::new();
+        let _binding_context = binder.bind(&logical_plan)?;
+
+        // Optimize the plan
         let active = self.active_store();
+        let optimizer = Optimizer::from_graph_store(&*active);
+        let optimized_plan = optimizer.optimize(logical_plan)?;
+
+        let has_mutations = optimized_plan.root.has_mutations();
+        if has_mutations {
+            self.require_permission(crate::auth::StatementKind::Write)?;
+        }
 
         let result = self.with_auto_commit(has_mutations, || {
             let (viewing_epoch, transaction_id) = self.get_transaction_context();
-            let processor = QueryProcessor::for_stores_with_transaction(
-                Arc::clone(&active),
-                self.active_write_store(),
-                Arc::clone(&self.transaction_manager),
-            )?;
-            let processor = if let Some(transaction_id) = transaction_id {
-                processor.with_transaction_context(viewing_epoch, transaction_id)
-            } else {
-                processor
-            };
-            processor.process(query, QueryLanguage::GraphQL, Some(&params))
+            let planner =
+                self.create_planner_for_store(Arc::clone(&active), viewing_epoch, transaction_id);
+            let mut physical_plan = planner.plan(&optimized_plan)?;
+            let executor = Executor::with_columns(physical_plan.columns.clone())
+                .with_deadline(self.query_deadline());
+            executor.execute(physical_plan.operator.as_mut())
         });
 
         #[cfg(feature = "metrics")]
@@ -3043,6 +3271,7 @@ impl Session {
 
         // Handle DDL statements directly (they don't go through the query pipeline)
         if let LogicalOperator::CreatePropertyGraph(ref cpg) = logical_plan.root {
+            self.require_permission(crate::auth::StatementKind::Admin)?;
             return Ok(QueryResult {
                 columns: vec!["status".into()],
                 column_types: vec![grafeo_common::types::LogicalType::String],
@@ -3075,6 +3304,9 @@ impl Session {
 
         let active = self.active_store();
         let has_mutations = optimized_plan.root.has_mutations();
+        if has_mutations {
+            self.require_permission(crate::auth::StatementKind::Write)?;
+        }
 
         let result = self.with_auto_commit(has_mutations, || {
             let (viewing_epoch, transaction_id) = self.get_transaction_context();
@@ -3114,7 +3346,22 @@ impl Session {
         #[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
         let start_time = Instant::now();
 
-        let has_mutations = Self::query_looks_like_mutation(query);
+        let has_mutations = if self.identity.can_write() {
+            Self::query_looks_like_mutation(query)
+        } else {
+            use crate::query::translators::sql_pgq;
+            match sql_pgq::translate(query) {
+                Ok(plan) if plan.root.has_mutations() => {
+                    self.require_permission(crate::auth::StatementKind::Write)?;
+                    true
+                }
+                Ok(_) => false,
+                Err(_) => Self::query_looks_like_mutation(query),
+            }
+        };
+        if has_mutations {
+            self.require_permission(crate::auth::StatementKind::Write)?;
+        }
         let active = self.active_store();
 
         let result = self.with_auto_commit(has_mutations, || {
@@ -3179,7 +3426,19 @@ impl Session {
                     #[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
                     let start_time = Instant::now();
 
-                    let has_mutations = Self::query_looks_like_mutation(query);
+                    let has_mutations = if self.identity.can_write() {
+                        Self::query_looks_like_mutation(query)
+                    } else {
+                        use crate::query::translators::cypher;
+                        match cypher::translate(query) {
+                            Ok(plan) if plan.root.has_mutations() => {
+                                self.require_permission(crate::auth::StatementKind::Write)?;
+                                true
+                            }
+                            Ok(_) => false,
+                            Err(_) => Self::query_looks_like_mutation(query),
+                        }
+                    };
                     let active = self.active_store();
                     let result = self.with_auto_commit(has_mutations, || {
                         let processor = QueryProcessor::for_stores_with_transaction(

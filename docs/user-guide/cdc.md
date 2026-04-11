@@ -145,10 +145,10 @@ to avoid this overhead.
 
 ## Feature flag
 
-CDC requires the `cdc` feature flag at compile time. The `embedded` and `full`
-profiles include it. The `browser` (WASM) profile does not.
+CDC requires the `cdc` feature flag at compile time. The `lpg`, `ai` and `enterprise`
+profiles include it. The `edge` (WASM) profile does not.
 
 ```toml
 [dependencies]
-grafeo = { version = "0.5", features = ["embedded"] }  # includes cdc
+grafeo = { version = "0.5", features = ["ai"] }  # includes cdc
 ```

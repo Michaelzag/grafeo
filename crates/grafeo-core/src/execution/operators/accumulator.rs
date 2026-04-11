@@ -1,7 +1,11 @@
 //! Shared accumulator types for both pull-based and push-based aggregate operators.
 //!
 //! Provides the canonical definitions of [`AggregateFunction`], [`AggregateExpr`],
-//! and [`HashableValue`] used by both `aggregate.rs` (pull) and `push/aggregate.rs`.
+//! [`AggregateState`], and [`HashableValue`] used by both `aggregate.rs` (pull)
+//! and `push/aggregate.rs`.
+
+// Re-export AggregateState so both pull and push operators import from one place.
+pub use super::aggregate::AggregateState;
 
 use grafeo_common::types::Value;
 

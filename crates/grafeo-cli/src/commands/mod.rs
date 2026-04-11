@@ -8,6 +8,7 @@ use grafeo_engine::GrafeoDB;
 pub mod backup;
 pub mod compact;
 pub mod data;
+pub mod import;
 pub mod index;
 pub mod info;
 pub mod init;

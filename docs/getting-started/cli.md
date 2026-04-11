@@ -97,16 +97,16 @@ grafeo shell ./mydb
 ```
 
 ```
-Grafeo 0.5.35 - Lpg mode, 42 nodes, 87 edges
+Grafeo 0.5.36 - Lpg mode, 42 nodes, 87 edges
 Type :help for commands, :quit to exit.
 
 grafeo> MATCH (n:Person) RETURN n.name, n.age
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”
-â”‚ n.name   â”‚ n.age â”‚
-â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¼â”€â”€â”€â”€â”€â”€â”€â”¤
-â”‚ "Alix"  â”‚ 30    â”‚
-â”‚ "Gus"    â”‚ 25    â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”˜
++----------+-------+
+| n.name   | n.age |
++----------+-------+
+| "Alix"   | 30    |
+| "Gus"    | 25    |
++----------+-------+
 2 rows (0.8ms)
 
 grafeo> :begin
@@ -169,15 +169,38 @@ grafeo index stats ./mydb
 ### Backup & Restore
 
 ```bash
+# Snapshot backup (single file)
 grafeo backup create ./mydb -o backup.grafeo
 grafeo backup restore backup.grafeo ./restored --force
+
+# Incremental backup (WAL-based, for production use)
+grafeo backup full ./mydb -o /backups/full
+grafeo backup incremental ./mydb -o /backups/incr
+grafeo backup status /backups/full
+grafeo backup restore-to-epoch /backups/full ./restored --epoch 100
 ```
 
-### Data Export & Import
+### Data Import
 
 ```bash
+# Import CSV as graph nodes
+grafeo import csv ./mydb data.csv --label Person
+grafeo import csv ./mydb data.csv --label Person --no-headers --separator ';'
+
+# Import JSON Lines as graph nodes
+grafeo import jsonl ./mydb events.jsonl --label Event
+```
+
+### Data Export
+
+```bash
+# Native dump/load
 grafeo data dump ./mydb -o ./export/
 grafeo data load ./export/ ./newdb
+
+# Graph interchange formats
+grafeo data dump ./mydb -o graph.gexf --export-format gexf
+grafeo data dump ./mydb -o graph.graphml --export-format graphml
 ```
 
 ### WAL Management
@@ -208,7 +231,7 @@ grafeo completions powershell >> $PROFILE
 
 ```bash
 $ grafeo version
-grafeo 0.5.35
+grafeo 0.5.36
 
 Build:
   rustc:    1.91.1
