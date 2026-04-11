@@ -357,25 +357,35 @@ fn serialize_group_state(state: &GroupState, w: &mut dyn Write) -> std::io::Resu
     w.write_all(&(state.accumulators.len() as u64).to_le_bytes())?;
     for acc in &state.accumulators {
         match acc {
-            AggregateState::Count(n) | AggregateState::CountDistinct(n, _) => {
+            AggregateState::Count(n) => {
                 w.write_all(&[spill_tag::COUNT])?;
                 w.write_all(&n.to_le_bytes())?;
             }
-            AggregateState::SumInt(sum, count) | AggregateState::SumIntDistinct(sum, count, _) => {
+            AggregateState::SumInt(sum, count) => {
                 w.write_all(&[spill_tag::SUM_INT])?;
                 w.write_all(&sum.to_le_bytes())?;
                 w.write_all(&count.to_le_bytes())?;
             }
-            AggregateState::SumFloat(sum, _comp, count)
-            | AggregateState::SumFloatDistinct(sum, _comp, count, _) => {
+            AggregateState::SumFloat(sum, _comp, count) => {
                 w.write_all(&[spill_tag::SUM_FLOAT])?;
                 w.write_all(&sum.to_le_bytes())?;
                 w.write_all(&count.to_le_bytes())?;
             }
-            AggregateState::Avg(sum, count) | AggregateState::AvgDistinct(sum, count, _) => {
+            AggregateState::Avg(sum, count) => {
                 w.write_all(&[spill_tag::AVG])?;
                 w.write_all(&sum.to_le_bytes())?;
                 w.write_all(&count.to_le_bytes())?;
+            }
+            // DISTINCT variants track a HashSet that can't be serialized compactly.
+            // Serialize as finalized to avoid dropping distinct semantics.
+            AggregateState::CountDistinct(..)
+            | AggregateState::SumIntDistinct(..)
+            | AggregateState::SumFloatDistinct(..)
+            | AggregateState::AvgDistinct(..)
+            | AggregateState::CollectDistinct(..)
+            | AggregateState::GroupConcatDistinct(..) => {
+                w.write_all(&[spill_tag::FINALIZED])?;
+                serialize_value(&acc.finalize(), w)?;
             }
             AggregateState::Min(val) => {
                 w.write_all(&[spill_tag::MIN])?;
@@ -393,7 +403,7 @@ fn serialize_group_state(state: &GroupState, w: &mut dyn Write) -> std::io::Resu
                 w.write_all(&[spill_tag::LAST])?;
                 serialize_value(&val.clone().unwrap_or(Value::Null), w)?;
             }
-            AggregateState::Collect(list) | AggregateState::CollectDistinct(list, _) => {
+            AggregateState::Collect(list) => {
                 w.write_all(&[spill_tag::COLLECT])?;
                 w.write_all(&(list.len() as u64).to_le_bytes())?;
                 for val in list {

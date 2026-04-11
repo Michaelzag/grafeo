@@ -104,7 +104,7 @@ mimalloc = "0.1"
 
 # Vector index support
 ordered-float = "5"
-rand = "0.10"
+rand = "0.10.1"
 
 [workspace.lints.rust]
 unsafe_code = "warn"

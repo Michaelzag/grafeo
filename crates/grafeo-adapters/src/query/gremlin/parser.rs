@@ -1749,4 +1749,78 @@ mod tests {
         let result = Parser::new("@#$%^&*").parse();
         assert!(result.is_err(), "Garbage input should fail");
     }
+
+    #[test]
+    fn test_parse_repeat_times() {
+        let stmt = Parser::new("g.V().repeat(out('KNOWS')).times(3)")
+            .parse()
+            .unwrap();
+        assert_eq!(stmt.steps.len(), 1);
+        if let Step::Repeat(ref r) = stmt.steps[0] {
+            assert_eq!(r.body.len(), 1);
+            assert!(matches!(r.termination, Some(RepeatTermination::Times(3))));
+            assert!(!r.emit);
+        } else {
+            panic!("Expected Repeat step");
+        }
+    }
+
+    #[test]
+    fn test_parse_repeat_until() {
+        let stmt = Parser::new("g.V().repeat(out()).until(has('name', 'Gus'))")
+            .parse()
+            .unwrap();
+        if let Step::Repeat(ref r) = stmt.steps[0] {
+            assert!(matches!(r.termination, Some(RepeatTermination::Until(_))));
+        } else {
+            panic!("Expected Repeat step");
+        }
+    }
+
+    #[test]
+    fn test_parse_repeat_emit() {
+        let stmt = Parser::new("g.V().repeat(out()).emit().times(2)")
+            .parse()
+            .unwrap();
+        if let Step::Repeat(ref r) = stmt.steps[0] {
+            assert!(r.emit);
+            assert!(matches!(r.termination, Some(RepeatTermination::Times(2))));
+        } else {
+            panic!("Expected Repeat step");
+        }
+    }
+
+    #[test]
+    fn test_parse_repeat_no_termination() {
+        let stmt = Parser::new("g.V().repeat(out()).emit()").parse().unwrap();
+        if let Step::Repeat(ref r) = stmt.steps[0] {
+            assert!(r.emit);
+            assert!(r.termination.is_none());
+        } else {
+            panic!("Expected Repeat step");
+        }
+    }
+
+    #[test]
+    fn test_parse_repeat_negative_times_fails() {
+        let result = Parser::new("g.V().repeat(out()).times(-1)").parse();
+        assert!(result.is_err(), "Negative times should fail");
+    }
+
+    #[test]
+    fn test_parse_repeat_in_union() {
+        let stmt = Parser::new("g.V().union(repeat(out()).times(2), repeat(in()).times(1))")
+            .parse()
+            .unwrap();
+        if let Step::Union(ref branches) = stmt.steps[0] {
+            assert_eq!(branches.len(), 2);
+            if let Step::Repeat(ref r) = branches[0][0] {
+                assert!(matches!(r.termination, Some(RepeatTermination::Times(2))));
+            } else {
+                panic!("Expected Repeat in first branch");
+            }
+        } else {
+            panic!("Expected Union step");
+        }
+    }
 }

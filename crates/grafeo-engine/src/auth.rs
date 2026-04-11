@@ -351,4 +351,94 @@ mod tests {
         let id = Identity::new("app-service", [Role::ReadWrite]);
         assert_eq!(id.to_string(), "app-service");
     }
+
+    #[test]
+    fn identity_with_multiple_roles() {
+        let id = Identity::new("alix", [Role::ReadOnly, Role::ReadWrite]);
+        assert!(id.can_read());
+        assert!(id.can_write());
+        assert!(!id.can_admin());
+        assert!(id.has_role(Role::ReadOnly));
+        assert!(id.has_role(Role::ReadWrite));
+        assert!(!id.has_role(Role::Admin));
+        assert_eq!(id.roles().len(), 2);
+    }
+
+    #[test]
+    fn identity_with_all_roles() {
+        let id = Identity::new("gus", [Role::ReadOnly, Role::ReadWrite, Role::Admin]);
+        assert!(id.can_read());
+        assert!(id.can_write());
+        assert!(id.can_admin());
+        assert_eq!(id.roles().len(), 3);
+    }
+
+    #[test]
+    fn permission_denied_error_message_contains_user_and_role() {
+        let id = Identity::new("alix", [Role::ReadOnly]);
+        let err = check_permission(&id, StatementKind::Write).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("alix"), "error should contain user id");
+        assert!(
+            msg.contains("ReadWrite"),
+            "error should contain required role"
+        );
+        assert!(msg.contains("write"), "error should contain operation kind");
+    }
+
+    #[test]
+    fn permission_denied_admin_error_message() {
+        let id = Identity::new("gus", [Role::ReadOnly]);
+        let err = check_permission(&id, StatementKind::Admin).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("gus"));
+        assert!(msg.contains("Admin"));
+        assert!(msg.contains("admin"));
+    }
+
+    #[test]
+    fn check_permission_denies_read_for_no_roles() {
+        let id = Identity::new("nobody", std::iter::empty::<Role>());
+        let err = check_permission(&id, StatementKind::Read).unwrap_err();
+        assert_eq!(err.required, Role::ReadOnly);
+        assert_eq!(err.operation, StatementKind::Read);
+        assert!(err.to_string().contains("nobody"));
+    }
+
+    #[test]
+    fn check_permission_allows_read_for_readonly() {
+        let id = Identity::new("alix", [Role::ReadOnly]);
+        assert!(check_permission(&id, StatementKind::Read).is_ok());
+    }
+
+    #[test]
+    fn check_permission_allows_admin_for_admin() {
+        let id = Identity::new("gus", [Role::Admin]);
+        assert!(check_permission(&id, StatementKind::Admin).is_ok());
+    }
+
+    #[test]
+    fn check_permission_allows_write_for_readwrite() {
+        let id = Identity::new("alix", [Role::ReadWrite]);
+        assert!(check_permission(&id, StatementKind::Write).is_ok());
+    }
+
+    #[test]
+    fn statement_kind_display() {
+        assert_eq!(StatementKind::Read.to_string(), "read");
+        assert_eq!(StatementKind::Write.to_string(), "write");
+        assert_eq!(StatementKind::Admin.to_string(), "admin");
+        assert_eq!(
+            StatementKind::Transaction.to_string(),
+            "transaction control"
+        );
+    }
+
+    #[test]
+    fn permission_denied_is_std_error() {
+        let id = Identity::new("alix", [Role::ReadOnly]);
+        let err = check_permission(&id, StatementKind::Write).unwrap_err();
+        // Verify PermissionDenied implements std::error::Error
+        let _: &dyn std::error::Error = &err;
+    }
 }
