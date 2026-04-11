@@ -1482,6 +1482,17 @@ pub enum TripleComponent {
     BlankNode(String),
 }
 
+impl TripleComponent {
+    /// Returns the variable name if this component is a `Variable`, or `None`.
+    #[must_use]
+    pub fn as_variable(&self) -> Option<&str> {
+        match self {
+            Self::Variable(v) => Some(v),
+            _ => None,
+        }
+    }
+}
+
 /// Union of multiple result sets.
 #[derive(Debug, Clone)]
 pub struct UnionOp {

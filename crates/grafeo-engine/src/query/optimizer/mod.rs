@@ -676,6 +676,19 @@ impl Optimizer {
                 relations.push((expand.to_variable.clone(), op.clone()));
                 true
             }
+            #[cfg(feature = "triple-store")]
+            LogicalOperator::TripleScan(scan) => {
+                // Use the first variable found as the relation name
+                let name = scan
+                    .subject
+                    .as_variable()
+                    .or_else(|| scan.predicate.as_variable())
+                    .or_else(|| scan.object.as_variable())
+                    .unwrap_or("tp")
+                    .to_string();
+                relations.push((name, op.clone()));
+                true
+            }
             _ => false,
         }
     }

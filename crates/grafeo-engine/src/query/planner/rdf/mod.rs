@@ -138,12 +138,25 @@ pub struct RdfPlanner {
     /// Whether the query uses LANG()/LANGMATCHES()/DATATYPE() functions.
     /// When false, companion columns are not emitted, saving ~66% scan overhead.
     needs_companion_columns: std::cell::Cell<bool>,
+    /// Term dictionary for dictionary-encoded triple scans. When present,
+    /// `plan_triple_scan()` emits Int64 term IDs instead of strings, and a
+    /// `DictResolveOperator` at the result boundary converts them back.
+    dictionary: Option<Arc<grafeo_core::graph::rdf::TermDictionary>>,
+    /// Column names that carry dictionary-encoded Int64 term IDs.
+    /// Populated by `plan_triple_scan()`, consumed by `plan()` for resolution.
+    encoded_columns: std::cell::RefCell<std::collections::HashSet<String>>,
 }
 
 impl RdfPlanner {
     /// Creates a new RDF planner with the given store.
     #[must_use]
     pub fn new(store: Arc<RdfStore>) -> Self {
+        // Build the term dictionary eagerly so plan_triple_scan() can use it.
+        let dictionary = if !store.is_empty() {
+            Some(store.get_or_build_dictionary())
+        } else {
+            None
+        };
         Self {
             store,
             chunk_size: DEFAULT_CHUNK_SIZE,
@@ -151,6 +164,8 @@ impl RdfPlanner {
             profiling: std::cell::Cell::new(false),
             profile_entries: std::cell::RefCell::new(Vec::new()),
             needs_companion_columns: std::cell::Cell::new(false),
+            dictionary,
+            encoded_columns: std::cell::RefCell::new(std::collections::HashSet::new()),
             #[cfg(feature = "wal")]
             wal: None,
             #[cfg(feature = "cdc")]
@@ -205,7 +220,28 @@ impl RdfPlanner {
         self.needs_companion_columns
             .set(uses_lang_or_datatype(&logical_plan.root));
 
-        let (operator, columns, _types) = self.plan_operator(&logical_plan.root)?;
+        let (mut operator, columns, _types) = self.plan_operator(&logical_plan.root)?;
+
+        // Resolve dictionary-encoded columns back to strings at the result boundary.
+        if let Some(ref dict) = self.dictionary {
+            let encoded = self.encoded_columns.borrow();
+            if !encoded.is_empty() {
+                let encoded_indices: Vec<usize> = columns
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, name)| encoded.contains(*name))
+                    .map(|(i, _)| i)
+                    .collect();
+                if !encoded_indices.is_empty() {
+                    operator = Box::new(DictResolveOperator::new(
+                        operator,
+                        Arc::clone(dict),
+                        encoded_indices,
+                    ));
+                }
+            }
+        }
+
         // Strip internal companion columns (__lang_<var>, __datatype_<var>)
         // from the output. They are used by LANG()/LANGMATCHES()/DATATYPE()
         // during evaluation but should never appear in query results.
@@ -368,7 +404,7 @@ impl RdfPlanner {
         };
 
         // Create the lazy scanning operator
-        let operator = Box::new(RdfTripleScanOperator::new(
+        let scan_op = RdfTripleScanOperator::new(
             Arc::clone(&self.store),
             pattern,
             output_mask,
@@ -380,10 +416,18 @@ impl RdfPlanner {
             },
             emit_companion_columns,
             emit_datatype_column,
-        ));
+        );
+
+        // Dictionary encoding is available but not yet automatically enabled for
+        // all queries. The infrastructure (TermDictionary, DictResolveOperator) is
+        // in place for use by the Ring Index planner (Phase 4) and WCOJ joins.
+        // Automatic activation requires detecting whether downstream operators
+        // (FILTER, BIND, ORDER BY) inspect string content, which is deferred.
+        let _ = &self.dictionary; // suppress unused warning
+        let _ = &self.encoded_columns;
 
         let types = vec![LogicalType::String; columns.len()];
-        Ok((operator, columns, types))
+        Ok((Box::new(scan_op), columns, types))
     }
 
     /// Builds a TriplePattern from a TripleScanOp.
@@ -729,6 +773,13 @@ impl RdfPlanner {
         &self,
         agg: &AggregateOp,
     ) -> Result<(Box<dyn Operator>, Vec<String>, Vec<LogicalType>)> {
+        // COUNT(*) fast-path: when the aggregate is a single COUNT(*) with no
+        // GROUP BY, no DISTINCT, no HAVING, and the input is a fully-unbound
+        // TripleScan, short-circuit to store.len() in O(1).
+        if let Some(result) = self.try_count_fast_path(agg) {
+            return Ok(result);
+        }
+
         use grafeo_core::execution::operators::AggregateExpr as PhysicalAggregateExpr;
 
         let (mut input_op, input_columns, input_types) = self.plan_operator(&agg.input)?;
@@ -891,6 +942,115 @@ impl RdfPlanner {
         }
 
         Ok((operator, output_columns, output_schema))
+    }
+
+    /// Detects COUNT(*) over a TripleScan and returns the count directly when possible.
+    ///
+    /// Supported patterns (no GROUP BY, no DISTINCT, no HAVING):
+    /// - `COUNT(*) WHERE { ?s ?p ?o }`: fully unbound, returns `store.len()`
+    /// - `COUNT(*) WHERE { ?s <pred> ?o }`: predicate-bound, returns per-predicate count
+    /// - `COUNT(*) WHERE { GRAPH <g> { ?s ?p ?o } }`: per-graph count
+    fn try_count_fast_path(
+        &self,
+        agg: &AggregateOp,
+    ) -> Option<(Box<dyn Operator>, Vec<String>, Vec<LogicalType>)> {
+        // Must be: no GROUP BY, no HAVING, exactly one aggregate
+        if !agg.group_by.is_empty() || agg.having.is_some() || agg.aggregates.len() != 1 {
+            return None;
+        }
+
+        let agg_expr = &agg.aggregates[0];
+
+        // Must be COUNT(*): Count function, no expression (not COUNT(?x)), no DISTINCT
+        if agg_expr.function != LogicalAggregateFunction::Count
+            || agg_expr.expression.is_some()
+            || agg_expr.distinct
+        {
+            return None;
+        }
+
+        // Input must be a simple TripleScan (no chained input)
+        let scan = Self::find_simple_triple_scan(&agg.input)?;
+
+        // No dataset restriction (FROM / FROM NAMED)
+        if scan.dataset.is_some() {
+            return None;
+        }
+
+        let count = self.count_for_scan(scan)?;
+
+        let alias = agg_expr
+            .alias
+            .clone()
+            .unwrap_or_else(|| "count(*)".to_string());
+
+        Some(Self::make_constant_int64(count, alias))
+    }
+
+    /// Resolves the count for a simple triple scan pattern, or returns `None`
+    /// if the pattern is too complex for a fast-path.
+    fn count_for_scan(&self, scan: &TripleScanOp) -> Option<i64> {
+        let s_var = scan.subject.as_variable().is_some();
+        let p_var = scan.predicate.as_variable().is_some();
+        let o_var = scan.object.as_variable().is_some();
+
+        // Per-graph count: GRAPH <iri> { ?s ?p ?o }
+        if let Some(graph) = &scan.graph {
+            if s_var
+                && p_var
+                && o_var
+                && let TripleComponent::Iri(graph_iri) = graph
+            {
+                let ng = self.store.graph(graph_iri)?;
+                return Some(ng.len() as i64);
+            }
+            return None;
+        }
+
+        // Fully unbound: ?s ?p ?o
+        if s_var && p_var && o_var {
+            return Some(self.store.len() as i64);
+        }
+
+        // Predicate-bound: ?s <pred> ?o
+        if s_var && !p_var && o_var {
+            if let TripleComponent::Iri(pred_iri) = &scan.predicate {
+                let stats = self.store.get_or_collect_statistics();
+                if let Some(pred_stats) = stats.get_predicate(pred_iri) {
+                    return Some(pred_stats.triple_count as i64);
+                }
+            }
+            return None;
+        }
+
+        // Not a fast-path pattern
+        None
+    }
+
+    /// Creates a constant Int64 single-row result.
+    fn make_constant_int64(
+        value: i64,
+        column_name: String,
+    ) -> (Box<dyn Operator>, Vec<String>, Vec<LogicalType>) {
+        let mut chunk = DataChunk::with_capacity(&[LogicalType::Int64], 1);
+        chunk
+            .column_mut(0)
+            .expect("just created")
+            .push_value(Value::Int64(value));
+        chunk.set_count(1);
+        let operator = Box::new(ConstantOperator::new(chunk));
+        (operator, vec![column_name], vec![LogicalType::Int64])
+    }
+
+    /// Walks through the input operator to find a simple TripleScan (no chained input).
+    ///
+    /// Sees through Project operators.
+    fn find_simple_triple_scan(op: &LogicalOperator) -> Option<&TripleScanOp> {
+        match op {
+            LogicalOperator::TripleScan(scan) if scan.input.is_none() => Some(scan),
+            LogicalOperator::Project(proj) => Self::find_simple_triple_scan(&proj.input),
+            _ => None,
+        }
     }
 
     /// Plans a JOIN operator using HashJoin.
@@ -2769,6 +2929,133 @@ struct GraphContext {
     dataset: Option<DatasetRestriction>,
 }
 
+/// Operator that produces a single pre-computed `DataChunk` and then stops.
+///
+/// Used for fast-path results such as `COUNT(*)` short-circuits where the
+/// answer is known without scanning the data.
+struct ConstantOperator {
+    chunk: Option<DataChunk>,
+}
+
+impl ConstantOperator {
+    fn new(chunk: DataChunk) -> Self {
+        Self { chunk: Some(chunk) }
+    }
+}
+
+impl Operator for ConstantOperator {
+    fn next(&mut self) -> grafeo_core::execution::operators::OperatorResult {
+        Ok(self.chunk.take())
+    }
+
+    fn reset(&mut self) {
+        // Cannot reset: the chunk was consumed. This is fine for single-use
+        // fast-path results.
+    }
+
+    fn name(&self) -> &'static str {
+        "Constant"
+    }
+}
+
+/// Resolves dictionary-encoded Int64 term IDs back to String values.
+///
+/// Placed at the result boundary (just before output) so that all intermediate
+/// operators (joins, aggregates, sorts) work with compact Int64 keys.
+struct DictResolveOperator {
+    input: Box<dyn Operator>,
+    dictionary: Arc<grafeo_core::graph::rdf::TermDictionary>,
+    /// Column indices that carry encoded term IDs and need resolution.
+    encoded_col_indices: Vec<usize>,
+}
+
+impl DictResolveOperator {
+    fn new(
+        input: Box<dyn Operator>,
+        dictionary: Arc<grafeo_core::graph::rdf::TermDictionary>,
+        encoded_col_indices: Vec<usize>,
+    ) -> Self {
+        Self {
+            input,
+            dictionary,
+            encoded_col_indices,
+        }
+    }
+}
+
+impl Operator for DictResolveOperator {
+    fn next(&mut self) -> grafeo_core::execution::operators::OperatorResult {
+        let Some(chunk) = self.input.next()? else {
+            return Ok(None);
+        };
+
+        if self.encoded_col_indices.is_empty() {
+            return Ok(Some(chunk));
+        }
+
+        let row_count = chunk.row_count();
+        let col_count = chunk.column_count();
+
+        // Build output schema: replace Int64 encoded columns with String
+        let mut schema = Vec::with_capacity(col_count);
+        for col_idx in 0..col_count {
+            if self.encoded_col_indices.contains(&col_idx) {
+                schema.push(LogicalType::String);
+            } else if let Some(col) = chunk.column(col_idx) {
+                schema.push(col.data_type().clone());
+            } else {
+                schema.push(LogicalType::String);
+            }
+        }
+
+        let mut out = DataChunk::with_capacity(&schema, row_count);
+
+        for row in 0..row_count {
+            for col_idx in 0..col_count {
+                let Some(in_col) = chunk.column(col_idx) else {
+                    continue;
+                };
+                let Some(out_col) = out.column_mut(col_idx) else {
+                    continue;
+                };
+
+                if self.encoded_col_indices.contains(&col_idx) {
+                    // Resolve term ID to string
+                    if in_col.is_null(row) {
+                        out_col.push_value(Value::Null);
+                    } else if let Some(term_id) = in_col.get_int64(row) {
+                        if let Some(term) = self.dictionary.get_term(term_id as u32) {
+                            out_col.push_string(term_to_string(term));
+                        } else {
+                            out_col.push_value(Value::Null);
+                        }
+                    } else {
+                        out_col.push_value(Value::Null);
+                    }
+                } else {
+                    // Pass through non-encoded columns
+                    if let Some(val) = in_col.get_value(row) {
+                        out_col.push_value(val);
+                    } else {
+                        out_col.push_value(Value::Null);
+                    }
+                }
+            }
+        }
+
+        out.set_count(row_count);
+        Ok(Some(out))
+    }
+
+    fn reset(&mut self) {
+        self.input.reset();
+    }
+
+    fn name(&self) -> &'static str {
+        "DictResolve"
+    }
+}
+
 /// Lazy triple scan operator that processes triples in chunks.
 ///
 /// This operator queries the RDF store and emits results in DataChunks
@@ -2792,6 +3079,9 @@ struct RdfTripleScanOperator {
     triples: Option<Vec<(Option<String>, Arc<Triple>)>>,
     /// Current position in the triples.
     position: usize,
+    /// Optional term dictionary for dictionary-encoded output. When present,
+    /// S/P/O variable columns emit Int64 term IDs instead of String values.
+    dictionary: Option<Arc<grafeo_core::graph::rdf::TermDictionary>>,
 }
 
 impl RdfTripleScanOperator {
@@ -2814,7 +3104,18 @@ impl RdfTripleScanOperator {
             chunk_size,
             triples: None,
             position: 0,
+            dictionary: None,
         }
+    }
+
+    /// Enables dictionary-encoded output for S/P/O columns.
+    ///
+    /// Infrastructure for Phase 4 (Ring Index) which will automatically enable
+    /// dictionary encoding when the Ring provides native integer-keyed iteration.
+    #[allow(dead_code)]
+    fn with_dictionary(mut self, dict: Arc<grafeo_core::graph::rdf::TermDictionary>) -> Self {
+        self.dictionary = Some(dict);
+        self
     }
 
     /// Lazily load matching triples on first access.
@@ -2917,6 +3218,33 @@ impl RdfTripleScanOperator {
             base
         }
     }
+
+    /// Builds the output schema. In dictionary mode, S/P/O variable columns
+    /// are Int64 (term IDs), companion and graph columns remain String.
+    fn build_output_schema(&self, col_count: usize, dict_mode: bool) -> Vec<LogicalType> {
+        if !dict_mode {
+            return vec![LogicalType::String; col_count];
+        }
+        let mut schema = Vec::with_capacity(col_count);
+        // S, P, O variable columns get Int64
+        for i in 0..3 {
+            if self.output_mask[i] {
+                schema.push(LogicalType::Int64);
+            }
+        }
+        // Companion columns (lang, datatype) are always String
+        if self.output_mask[2] && self.emit_companion_columns {
+            schema.push(LogicalType::String); // lang
+            if self.emit_datatype_column {
+                schema.push(LogicalType::String); // datatype
+            }
+        }
+        // Graph column is always String
+        if self.output_mask[3] {
+            schema.push(LogicalType::String);
+        }
+        schema
+    }
 }
 
 impl Operator for RdfTripleScanOperator {
@@ -2936,8 +3264,9 @@ impl Operator for RdfTripleScanOperator {
         let batch_size = end - self.position;
         let col_count = self.output_column_count();
 
-        // Create output schema (all String for RDF)
-        let schema: Vec<LogicalType> = (0..col_count).map(|_| LogicalType::String).collect();
+        // Create output schema: Int64 for dictionary-encoded S/P/O, String otherwise
+        let dict_mode = self.dictionary.is_some();
+        let schema: Vec<LogicalType> = self.build_output_schema(col_count, dict_mode);
         let mut chunk = DataChunk::with_capacity(&schema, batch_size);
 
         // Fill the chunk
@@ -2948,25 +3277,49 @@ impl Operator for RdfTripleScanOperator {
             if self.output_mask[0] {
                 // Subject
                 if let Some(col) = chunk.column_mut(col_idx) {
-                    col.push_string(term_to_string(triple.subject()));
+                    if let Some(ref dict) = self.dictionary {
+                        if let Some(id) = dict.get_id(triple.subject()) {
+                            col.push_value(Value::Int64(i64::from(id)));
+                        } else {
+                            col.push_value(Value::Null);
+                        }
+                    } else {
+                        col.push_string(term_to_string(triple.subject()));
+                    }
                 }
                 col_idx += 1;
             }
             if self.output_mask[1] {
                 // Predicate
                 if let Some(col) = chunk.column_mut(col_idx) {
-                    col.push_string(term_to_string(triple.predicate()));
+                    if let Some(ref dict) = self.dictionary {
+                        if let Some(id) = dict.get_id(triple.predicate()) {
+                            col.push_value(Value::Int64(i64::from(id)));
+                        } else {
+                            col.push_value(Value::Null);
+                        }
+                    } else {
+                        col.push_string(term_to_string(triple.predicate()));
+                    }
                 }
                 col_idx += 1;
             }
             if self.output_mask[2] {
-                // Object
+                // Object: dictionary encoding applies here too
                 if let Some(col) = chunk.column_mut(col_idx) {
-                    push_term_value(col, triple.object());
+                    if let Some(ref dict) = self.dictionary {
+                        if let Some(id) = dict.get_id(triple.object()) {
+                            col.push_value(Value::Int64(i64::from(id)));
+                        } else {
+                            col.push_value(Value::Null);
+                        }
+                    } else {
+                        push_term_value(col, triple.object());
+                    }
                 }
                 col_idx += 1;
 
-                // Companion language-tag and datatype columns
+                // Companion language-tag and datatype columns (always String)
                 if self.emit_companion_columns {
                     if let Some(col) = chunk.column_mut(col_idx) {
                         let lang_tag = match triple.object() {
@@ -2990,7 +3343,7 @@ impl Operator for RdfTripleScanOperator {
                 }
             }
             if self.output_mask[3] {
-                // Graph
+                // Graph (always String)
                 if let Some(col) = chunk.column_mut(col_idx) {
                     match graph_name {
                         Some(name) => col.push_string(name.clone()),

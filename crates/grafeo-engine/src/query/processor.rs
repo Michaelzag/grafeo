@@ -497,8 +497,12 @@ impl QueryProcessor {
         let mut binder = Binder::new();
         let _binding_context = binder.bind(&logical_plan)?;
 
-        // 3. Optimize the plan
-        let optimized_plan = self.optimizer.optimize(logical_plan)?;
+        // 3. Optimize the plan (use RDF statistics for cost-based optimization)
+        let rdf_optimizer = {
+            let stats = rdf_store.get_or_collect_statistics();
+            Optimizer::from_rdf_statistics((*stats).clone())
+        };
+        let optimized_plan = rdf_optimizer.optimize(logical_plan)?;
 
         // 3a. EXPLAIN: return the optimized plan tree without executing
         if optimized_plan.explain {

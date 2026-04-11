@@ -6,9 +6,9 @@ use super::common::{wrap_distinct, wrap_filter, wrap_limit, wrap_skip, wrap_sort
 use crate::query::plan::{
     AddGraphOp, AggregateExpr, AggregateFunction, AggregateOp, AntiJoinOp, BinaryOp, BindOp,
     ClearGraphOp, CopyGraphOp, CreateGraphOp, DatasetRestriction, DeleteTripleOp, DropGraphOp,
-    InsertTripleOp, JoinOp, JoinType, LeftJoinOp, LoadGraphOp, LogicalExpression, LogicalOperator,
-    LogicalPlan, ModifyOp, MoveGraphOp, ProjectOp, Projection, SortKey, SortOrder, TripleComponent,
-    TripleScanOp, TripleTemplate, UnaryOp, UnionOp,
+    InsertTripleOp, JoinCondition, JoinOp, JoinType, LeftJoinOp, LoadGraphOp, LogicalExpression,
+    LogicalOperator, LogicalPlan, ModifyOp, MoveGraphOp, ProjectOp, Projection, SortKey, SortOrder,
+    TripleComponent, TripleScanOp, TripleTemplate, UnaryOp, UnionOp,
 };
 use grafeo_adapters::query::sparql::{self, ast};
 use grafeo_common::types::Value;
@@ -1529,13 +1529,96 @@ impl SparqlTranslator {
             return left;
         }
 
-        // For basic patterns, use inner join on shared variables
+        // Collect output variables from each side and build explicit join
+        // conditions for shared variables. This enables the DPccp optimizer
+        // to reorder SPARQL triple patterns by selectivity.
+        let left_vars = Self::collect_operator_variables(&left);
+        let right_vars = Self::collect_operator_variables(&right);
+
+        let mut conditions = Vec::new();
+        for var in &left_vars {
+            if right_vars.contains(var) {
+                conditions.push(JoinCondition {
+                    left: LogicalExpression::Variable(var.clone()),
+                    right: LogicalExpression::Variable(var.clone()),
+                });
+            }
+        }
+
         LogicalOperator::Join(JoinOp {
             left: Box::new(left),
             right: Box::new(right),
             join_type: JoinType::Inner,
-            conditions: vec![], // Shared variables are implicit join conditions
+            conditions,
         })
+    }
+
+    /// Collects all variable names produced by an operator subtree.
+    ///
+    /// Walks `TripleScan`, `Join`, `LeftJoin`, `Union`, `Filter`, `Bind`,
+    /// and `Project` operators to gather the set of variable names that
+    /// appear in the output.
+    fn collect_operator_variables(op: &LogicalOperator) -> Vec<String> {
+        let mut vars = Vec::new();
+        Self::collect_variables_recursive(op, &mut vars);
+        vars
+    }
+
+    fn collect_variables_recursive(op: &LogicalOperator, vars: &mut Vec<String>) {
+        match op {
+            LogicalOperator::TripleScan(scan) => {
+                if let TripleComponent::Variable(v) = &scan.subject
+                    && !vars.contains(v)
+                {
+                    vars.push(v.clone());
+                }
+                if let TripleComponent::Variable(v) = &scan.predicate
+                    && !vars.contains(v)
+                {
+                    vars.push(v.clone());
+                }
+                if let TripleComponent::Variable(v) = &scan.object
+                    && !vars.contains(v)
+                {
+                    vars.push(v.clone());
+                }
+                if let Some(TripleComponent::Variable(v)) = &scan.graph
+                    && !vars.contains(v)
+                {
+                    vars.push(v.clone());
+                }
+                if let Some(input) = &scan.input {
+                    Self::collect_variables_recursive(input, vars);
+                }
+            }
+            LogicalOperator::Join(join) => {
+                Self::collect_variables_recursive(&join.left, vars);
+                Self::collect_variables_recursive(&join.right, vars);
+            }
+            LogicalOperator::LeftJoin(join) => {
+                Self::collect_variables_recursive(&join.left, vars);
+                Self::collect_variables_recursive(&join.right, vars);
+            }
+            LogicalOperator::Union(union) => {
+                // Union outputs variables from both branches
+                for input in &union.inputs {
+                    Self::collect_variables_recursive(input, vars);
+                }
+            }
+            LogicalOperator::Filter(filter) => {
+                Self::collect_variables_recursive(&filter.input, vars);
+            }
+            LogicalOperator::Bind(bind) => {
+                Self::collect_variables_recursive(&bind.input, vars);
+                if !vars.contains(&bind.variable) {
+                    vars.push(bind.variable.clone());
+                }
+            }
+            LogicalOperator::Project(proj) => {
+                Self::collect_variables_recursive(&proj.input, vars);
+            }
+            _ => {}
+        }
     }
 
     fn resolve_iri(&self, iri: &ast::Iri) -> String {

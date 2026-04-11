@@ -84,6 +84,8 @@ pub struct RdfStore {
     named_graphs: RwLock<HashMap<String, Arc<RdfStore>>>,
     /// Cached RDF statistics for query optimization. Invalidated on any mutation.
     statistics_cache: RwLock<Option<Arc<crate::statistics::RdfStatistics>>>,
+    /// Cached term dictionary for dictionary-encoded triple scans. Invalidated on any mutation.
+    dictionary_cache: RwLock<Option<Arc<super::dictionary::TermDictionary>>>,
 }
 
 impl RdfStore {
@@ -129,6 +131,7 @@ impl RdfStore {
             tx_buffer: RwLock::new(TransactionBuffer::default()),
             named_graphs: RwLock::new(HashMap::new()),
             statistics_cache: RwLock::new(None),
+            dictionary_cache: RwLock::new(None),
             config,
         }
     }
@@ -603,9 +606,45 @@ impl RdfStore {
         stats
     }
 
-    /// Invalidates the cached RDF statistics. Called after any mutation.
+    /// Invalidates the cached RDF statistics and term dictionary. Called after any mutation.
     fn invalidate_statistics_cache(&self) {
         *self.statistics_cache.write() = None;
+        *self.dictionary_cache.write() = None;
+    }
+
+    /// Returns a cached term dictionary, building it on first call.
+    ///
+    /// The dictionary maps each unique `Term` in the store to a compact `u32` ID.
+    /// It is invalidated by any mutation (insert, delete, bulk load).
+    #[must_use]
+    pub fn get_or_build_dictionary(&self) -> Arc<super::dictionary::TermDictionary> {
+        // Fast path: return cached dictionary
+        {
+            let cache = self.dictionary_cache.read();
+            if let Some(dict) = cache.as_ref() {
+                return Arc::clone(dict);
+            }
+        }
+
+        // Slow path: build dictionary from all triples
+        let triples = self.triples.read();
+        let mut dict =
+            super::dictionary::TermDictionary::with_capacity(triples.len().saturating_mul(3));
+        for triple in triples.iter() {
+            dict.get_or_insert(triple.subject());
+            dict.get_or_insert(triple.predicate());
+            dict.get_or_insert(triple.object());
+        }
+
+        let dict = Arc::new(dict);
+        *self.dictionary_cache.write() = Some(Arc::clone(&dict));
+        dict
+    }
+
+    /// Returns the cached term dictionary if it exists, without building it.
+    #[must_use]
+    pub fn term_dictionary(&self) -> Option<Arc<super::dictionary::TermDictionary>> {
+        self.dictionary_cache.read().clone()
     }
 
     // =========================================================================

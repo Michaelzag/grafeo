@@ -1233,4 +1233,143 @@ mod tests {
             .unwrap();
         assert_eq!(r.row_count(), 1, "!BOUND(?age) should match only Vincent");
     }
+
+    // ====================================================================
+    // COUNT(*) Fast-Path (0.5.37 - Optimizer Foundation)
+    // ====================================================================
+
+    #[test]
+    fn count_star_fully_unbound() {
+        let db = rdf_db();
+        insert_foaf_data(&db);
+        // 15 triples in the foaf data
+        let r = db
+            .execute_sparql("SELECT (COUNT(*) AS ?cnt) WHERE { ?s ?p ?o }")
+            .unwrap();
+        assert_eq!(r.row_count(), 1);
+        let count = r.rows()[0][0].as_int64().unwrap();
+        assert_eq!(count, 15);
+    }
+
+    #[test]
+    fn count_star_predicate_bound() {
+        let db = rdf_db();
+        insert_foaf_data(&db);
+        let r = db
+            .execute_sparql(
+                "SELECT (COUNT(*) AS ?cnt) WHERE { ?s <http://xmlns.com/foaf/0.1/knows> ?o }",
+            )
+            .unwrap();
+        assert_eq!(r.row_count(), 1);
+        let count = r.rows()[0][0].as_int64().unwrap();
+        assert_eq!(count, 2, "alix knows gus, gus knows alix");
+    }
+
+    #[test]
+    fn count_star_with_group_by_not_fast_path() {
+        let db = rdf_db();
+        insert_foaf_data(&db);
+        // GROUP BY prevents fast-path, should still work via normal aggregate
+        let r = db
+            .execute_sparql(
+                r#"SELECT ?s (COUNT(*) AS ?cnt) WHERE { ?s ?p ?o } GROUP BY ?s ORDER BY ?s"#,
+            )
+            .unwrap();
+        // Each subject should have its own count
+        assert!(r.row_count() > 1, "GROUP BY should produce multiple rows");
+    }
+
+    #[test]
+    fn count_star_with_distinct_not_fast_path() {
+        let db = rdf_db();
+        insert_foaf_data(&db);
+        // DISTINCT prevents fast-path, should still work
+        let r = db
+            .execute_sparql("SELECT (COUNT(DISTINCT ?s) AS ?cnt) WHERE { ?s ?p ?o }")
+            .unwrap();
+        assert_eq!(r.row_count(), 1);
+        let count = r.rows()[0][0].as_int64().unwrap();
+        // Unique subjects: alix, gus, vincent, amsterdam
+        assert!(count > 0);
+    }
+
+    #[test]
+    fn count_star_per_named_graph() {
+        let db = rdf_db();
+        db.execute_sparql(
+            r#"INSERT DATA {
+                GRAPH <http://ex.org/g1> {
+                    <http://ex.org/alix> <http://xmlns.com/foaf/0.1/name> "Alix" .
+                    <http://ex.org/gus> <http://xmlns.com/foaf/0.1/name> "Gus" .
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let r = db
+            .execute_sparql(
+                "SELECT (COUNT(*) AS ?cnt) WHERE { GRAPH <http://ex.org/g1> { ?s ?p ?o } }",
+            )
+            .unwrap();
+        assert_eq!(r.row_count(), 1);
+        let count = r.rows()[0][0].as_int64().unwrap();
+        assert_eq!(count, 2);
+    }
+
+    // ====================================================================
+    // Optimizer: Join Conditions + TripleScan in DPccp (0.5.37)
+    // ====================================================================
+
+    #[test]
+    fn two_hop_join_produces_correct_results() {
+        let db = rdf_db();
+        insert_foaf_data(&db);
+        // Two-hop: ?a knows ?b, ?b has name ?name
+        let r = db
+            .execute_sparql(
+                r#"SELECT ?a ?name WHERE {
+                    ?a <http://xmlns.com/foaf/0.1/knows> ?b .
+                    ?b <http://xmlns.com/foaf/0.1/name> ?name .
+                }"#,
+            )
+            .unwrap();
+        // alix knows gus (name "Gus"), gus knows alix (name "Alix")
+        assert_eq!(r.row_count(), 2);
+    }
+
+    #[test]
+    fn three_hop_join_produces_correct_results() {
+        let db = rdf_db();
+        insert_foaf_data(&db);
+        // Three-hop: ?a knows ?b, ?b knows ?c, ?c has name ?name
+        let r = db
+            .execute_sparql(
+                r#"SELECT ?a ?name WHERE {
+                    ?a <http://xmlns.com/foaf/0.1/knows> ?b .
+                    ?b <http://xmlns.com/foaf/0.1/knows> ?c .
+                    ?c <http://xmlns.com/foaf/0.1/name> ?name .
+                }"#,
+            )
+            .unwrap();
+        // alix->gus->alix (name "Alix"), gus->alix->gus (name "Gus")
+        assert_eq!(r.row_count(), 2);
+    }
+
+    #[test]
+    fn selective_predicate_join_correct() {
+        let db = rdf_db();
+        insert_foaf_data(&db);
+        // Join with selective predicate: livesIn (2 triples) + name (4 triples)
+        let r = db
+            .execute_sparql(
+                r#"SELECT ?name ?city WHERE {
+                    ?s <http://ex.org/livesIn> ?c .
+                    ?s <http://xmlns.com/foaf/0.1/name> ?name .
+                    ?c <http://xmlns.com/foaf/0.1/name> ?city .
+                }"#,
+            )
+            .unwrap();
+        // alix livesIn amsterdam, gus livesIn amsterdam
+        assert_eq!(r.row_count(), 2);
+    }
 }

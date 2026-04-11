@@ -34,6 +34,7 @@
 //! }
 //! ```
 
+mod dictionary;
 mod graph_store_adapter;
 pub mod nquads;
 pub mod section;
@@ -43,6 +44,7 @@ mod term;
 mod triple;
 pub mod turtle;
 
+pub use dictionary::TermDictionary;
 pub use graph_store_adapter::RdfGraphStoreAdapter;
 pub use section::RdfStoreSection;
 pub use sink::{BatchInsertSink, CountSink, TripleSink, VecSink};
