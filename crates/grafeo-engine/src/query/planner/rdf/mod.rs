@@ -1044,6 +1044,13 @@ impl RdfPlanner {
             return Some(self.store.len() as i64);
         }
 
+        // Ring Index: use ring.count() for any partially-bound pattern (O(log sigma))
+        #[cfg(feature = "ring-index")]
+        if let Some(ring) = self.store.ring() {
+            let pattern = self.build_triple_pattern(scan);
+            return Some(ring.count(&pattern) as i64);
+        }
+
         // Predicate-bound: ?s <pred> ?o
         if s_var && !p_var && o_var {
             if let TripleComponent::Iri(pred_iri) = &scan.predicate {
@@ -1148,10 +1155,9 @@ impl RdfPlanner {
         Ok((op, cols, left_types))
     }
 
-    /// Plans a multi-way join as cascading pairwise hash joins.
-    ///
-    /// Sorts inputs by estimated cardinality (smallest first) to minimize
-    /// intermediate result sizes, then folds them left-to-right.
+    /// Plans a multi-way join. When the Ring Index is available and all inputs
+    /// are TripleScans, uses LeapfrogRing (WCOJ) for worst-case optimal joins.
+    /// Otherwise falls back to cascading pairwise hash joins.
     fn plan_multi_way_join(
         &self,
         mwj: &crate::query::plan::MultiWayJoinOp,
@@ -1162,6 +1168,12 @@ impl RdfPlanner {
             return Err(Error::Internal(
                 "MultiWayJoin requires at least one input".to_string(),
             ));
+        }
+
+        // Try Ring-backed LeapfrogRing (WCOJ) when all inputs are TripleScans
+        #[cfg(feature = "ring-index")]
+        if let Some(result) = self.try_leapfrog_ring(mwj) {
+            return result;
         }
 
         // Plan all inputs and estimate cardinalities
@@ -1197,6 +1209,56 @@ impl RdfPlanner {
         }
 
         Ok((current_op, current_cols, current_types))
+    }
+
+    /// Attempts to plan a multi-way join using LeapfrogRing (WCOJ).
+    ///
+    /// Returns `Some(Ok(...))` when the Ring is available and all inputs are
+    /// simple TripleScans, `None` to fall back to cascading hash joins.
+    #[cfg(feature = "ring-index")]
+    fn try_leapfrog_ring(
+        &self,
+        mwj: &crate::query::plan::MultiWayJoinOp,
+    ) -> Option<Result<(Box<dyn Operator>, Vec<String>, Vec<LogicalType>)>> {
+        use grafeo_core::index::ring::AnnotatedPattern;
+
+        let ring = self.store.ring()?;
+
+        // All inputs must be simple TripleScans (no chained input, no graph context)
+        let mut annotated = Vec::new();
+        let mut all_vars: Vec<String> = Vec::new();
+        for input in &mwj.inputs {
+            let LogicalOperator::TripleScan(scan) = input else {
+                return None;
+            };
+            if scan.input.is_some() || scan.graph.is_some() || scan.dataset.is_some() {
+                return None;
+            }
+            let pattern = self.build_triple_pattern(scan);
+            let ap = AnnotatedPattern {
+                pattern,
+                subject_var: scan.subject.as_variable().map(str::to_string),
+                predicate_var: scan.predicate.as_variable().map(str::to_string),
+                object_var: scan.object.as_variable().map(str::to_string),
+            };
+            // Collect output variables in order
+            for v in [&ap.subject_var, &ap.predicate_var, &ap.object_var]
+                .into_iter()
+                .flatten()
+            {
+                if !all_vars.contains(v) {
+                    all_vars.push(v.clone());
+                }
+            }
+            annotated.push(ap);
+        }
+
+        // Build output columns and types
+        let columns = all_vars.clone();
+        let types = vec![LogicalType::String; columns.len()];
+
+        let operator = Box::new(RdfLeapfrogOperator::new(ring, annotated, columns.clone()));
+        Some(Ok((operator, columns, types)))
     }
 
     /// Plans a UNION operator.
@@ -2961,6 +3023,117 @@ struct GraphContext {
     dataset: Option<DatasetRestriction>,
 }
 
+/// LeapfrogRing WCOJ operator for Ring-backed multi-way joins.
+///
+/// Wraps `LeapfrogRing::with_variables()` and converts each join result
+/// (Vec<Triple>) into a `DataChunk` with the appropriate variable columns.
+#[cfg(feature = "ring-index")]
+struct RdfLeapfrogOperator {
+    ring: Arc<grafeo_core::index::ring::TripleRing>,
+    annotated_patterns: Vec<grafeo_core::index::ring::AnnotatedPattern>,
+    /// Output column names (deduplicated variables).
+    output_columns: Vec<String>,
+    /// Buffered results from the LeapfrogRing iterator.
+    results: Vec<Vec<Triple>>,
+    /// Current position in results buffer.
+    position: usize,
+    /// Whether the leapfrog join has been executed.
+    executed: bool,
+}
+
+#[cfg(feature = "ring-index")]
+impl RdfLeapfrogOperator {
+    fn new(
+        ring: Arc<grafeo_core::index::ring::TripleRing>,
+        annotated_patterns: Vec<grafeo_core::index::ring::AnnotatedPattern>,
+        output_columns: Vec<String>,
+    ) -> Self {
+        Self {
+            ring,
+            annotated_patterns,
+            output_columns,
+            results: Vec::new(),
+            position: 0,
+            executed: false,
+        }
+    }
+
+    fn execute_join(&mut self) {
+        if self.executed {
+            return;
+        }
+        self.executed = true;
+
+        let join = grafeo_core::index::ring::LeapfrogRing::with_variables(
+            &self.ring,
+            self.annotated_patterns.clone(),
+        );
+        self.results = join.collect();
+    }
+
+    /// Extracts the value for a variable from a set of matched triples.
+    fn resolve_variable(&self, var: &str, matched_triples: &[Triple]) -> Option<String> {
+        for (i, ap) in self.annotated_patterns.iter().enumerate() {
+            if let Some(triple) = matched_triples.get(i) {
+                if ap.subject_var.as_deref() == Some(var) {
+                    return Some(term_to_string(triple.subject()));
+                }
+                if ap.predicate_var.as_deref() == Some(var) {
+                    return Some(term_to_string(triple.predicate()));
+                }
+                if ap.object_var.as_deref() == Some(var) {
+                    return Some(term_to_string(triple.object()));
+                }
+            }
+        }
+        None
+    }
+}
+
+#[cfg(feature = "ring-index")]
+impl Operator for RdfLeapfrogOperator {
+    fn next(&mut self) -> grafeo_core::execution::operators::OperatorResult {
+        self.execute_join();
+
+        if self.position >= self.results.len() {
+            return Ok(None);
+        }
+
+        let end = (self.position + DEFAULT_CHUNK_SIZE).min(self.results.len());
+        let batch_size = end - self.position;
+        let col_count = self.output_columns.len();
+
+        let schema = vec![LogicalType::String; col_count];
+        let mut chunk = DataChunk::with_capacity(&schema, batch_size);
+
+        for i in self.position..end {
+            let matched = &self.results[i];
+            for (col_idx, var_name) in self.output_columns.iter().enumerate() {
+                if let Some(col) = chunk.column_mut(col_idx) {
+                    if let Some(val) = self.resolve_variable(var_name, matched) {
+                        col.push_string(val);
+                    } else {
+                        col.push_value(Value::Null);
+                    }
+                }
+            }
+        }
+
+        chunk.set_count(batch_size);
+        self.position = end;
+        Ok(Some(chunk))
+    }
+
+    fn reset(&mut self) {
+        self.position = 0;
+        // Keep results cached
+    }
+
+    fn name(&self) -> &'static str {
+        "RdfLeapfrog"
+    }
+}
+
 /// CONSTRUCT operator: instantiates triple templates from variable bindings.
 ///
 /// For each input row, substitutes variables in each template triple to produce
@@ -3344,12 +3517,30 @@ impl RdfTripleScanOperator {
                         Vec::new()
                     }
                 } else {
-                    // No dataset restriction: use actual default graph
-                    self.store
-                        .find(&self.pattern)
-                        .into_iter()
-                        .map(|t| (None, t))
-                        .collect()
+                    // No dataset restriction: use actual default graph.
+                    // Prefer Ring Index when available (O(log sigma) access).
+                    #[cfg(feature = "ring-index")]
+                    {
+                        if let Some(ring) = self.store.ring() {
+                            ring.find(&self.pattern)
+                                .map(|t| (None, Arc::new(t)))
+                                .collect()
+                        } else {
+                            self.store
+                                .find(&self.pattern)
+                                .into_iter()
+                                .map(|t| (None, t))
+                                .collect()
+                        }
+                    }
+                    #[cfg(not(feature = "ring-index"))]
+                    {
+                        self.store
+                            .find(&self.pattern)
+                            .into_iter()
+                            .map(|t| (None, t))
+                            .collect()
+                    }
                 }
             });
         }

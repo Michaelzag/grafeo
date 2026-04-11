@@ -50,7 +50,7 @@ const SELECT_SAMPLE_RATE: usize = 4096;
 /// // Find position of 50th 1-bit (0-indexed)
 /// assert_eq!(sbv.select1(49), Some(245));
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SuccinctBitVector {
     /// Underlying bit storage.
     inner: BitVector,

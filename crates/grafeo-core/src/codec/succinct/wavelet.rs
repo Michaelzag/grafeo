@@ -40,7 +40,7 @@ use super::rank_select::SuccinctBitVector;
 ///
 /// Supports sequences of u64 symbols. Internally builds a binary tree
 /// of bitvectors, one level per bit of the alphabet encoding.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WaveletTree {
     /// Bitvectors at each level of the tree.
     /// Level 0 is the root, level h-1 is the leaves.

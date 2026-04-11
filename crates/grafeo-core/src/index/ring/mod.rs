@@ -49,6 +49,6 @@ mod leapfrog;
 mod permutation;
 mod triple_ring;
 
-pub use leapfrog::{LeapfrogRing, RingIterator};
+pub use leapfrog::{AnnotatedPattern, LeapfrogRing, RingIterator};
 pub use permutation::SuccinctPermutation;
 pub use triple_ring::TripleRing;

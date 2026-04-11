@@ -46,7 +46,7 @@ crossbeam = "0.8"
 rayon = "1"
 
 # Data structures
-hashbrown = "0.16"
+hashbrown = { version = "0.16", features = ["serde"] }
 smallvec = "1"
 bumpalo = "3"
 indexmap = "2"

@@ -12,7 +12,7 @@
 ///
 /// Stores both forward and inverse mappings for O(1) access.
 /// Uses 2n * 32 bits = 8n bytes for n elements.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SuccinctPermutation {
     /// The number of elements in the permutation.
     n: usize,

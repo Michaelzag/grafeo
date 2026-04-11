@@ -11,7 +11,7 @@ use hashbrown::HashMap;
 use std::sync::Arc;
 
 /// Term dictionary mapping terms to compact integer IDs.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct TermDictionary {
     /// Term to ID mapping.
     term_to_id: HashMap<Arc<Term>, u32, foldhash::fast::RandomState>,
@@ -107,7 +107,7 @@ struct CompactTriple {
 /// - Term dictionary for string → ID mapping
 /// - Wavelet trees for each triple component
 /// - Succinct permutations for navigating between orderings
-#[derive(Debug)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TripleRing {
     /// Term dictionary.
     dict: TermDictionary,
@@ -406,6 +406,52 @@ impl TripleRing {
         let spo_to_osp = self.spo_to_osp.size_bytes();
 
         base + dict + subjects + predicates + objects + spo_to_pos + spo_to_osp
+    }
+
+    /// Serializes the Ring to a writer using bincode.
+    ///
+    /// The output contains the complete state: term dictionary, wavelet trees,
+    /// and permutations. Use [`TripleRing::load`] to restore.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error if writing fails or bincode encoding fails.
+    pub fn save(&self, mut writer: impl std::io::Write) -> std::io::Result<()> {
+        bincode::serde::encode_into_std_write(self, &mut writer, bincode::config::standard())
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Deserializes a Ring from a reader.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error if reading fails or the data is malformed.
+    pub fn load(mut reader: impl std::io::Read) -> std::io::Result<Self> {
+        bincode::serde::decode_from_std_read(&mut reader, bincode::config::standard())
+            .map_err(|e| std::io::Error::other(e.to_string()))
+    }
+
+    /// Saves the Ring to a file path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error if the file cannot be created or writing fails.
+    pub fn save_to_file(&self, path: impl AsRef<std::path::Path>) -> std::io::Result<()> {
+        let file = std::fs::File::create(path)?;
+        let writer = std::io::BufWriter::new(file);
+        self.save(writer)
+    }
+
+    /// Loads a Ring from a file path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error if the file cannot be opened or the data is malformed.
+    pub fn load_from_file(path: impl AsRef<std::path::Path>) -> std::io::Result<Self> {
+        let file = std::fs::File::open(path)?;
+        let reader = std::io::BufReader::new(file);
+        Self::load(reader)
     }
 }
 
@@ -919,5 +965,79 @@ mod tests {
         // Find on empty ring
         let results: Vec<Triple> = ring.find(&TriplePattern::any()).collect();
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_serialization_roundtrip() {
+        let triples = vec![
+            Triple::new(
+                Term::iri("http://ex.org/alix"),
+                Term::iri("http://xmlns.com/foaf/0.1/name"),
+                Term::literal("Alix"),
+            ),
+            Triple::new(
+                Term::iri("http://ex.org/gus"),
+                Term::iri("http://xmlns.com/foaf/0.1/name"),
+                Term::literal("Gus"),
+            ),
+            Triple::new(
+                Term::iri("http://ex.org/alix"),
+                Term::iri("http://xmlns.com/foaf/0.1/knows"),
+                Term::iri("http://ex.org/gus"),
+            ),
+        ];
+
+        let ring = TripleRing::from_triples(triples.into_iter());
+        assert_eq!(ring.len(), 3);
+
+        // Save to buffer
+        let mut buf = Vec::new();
+        ring.save(&mut buf).expect("save should succeed");
+        assert!(!buf.is_empty());
+
+        // Load from buffer
+        let loaded = TripleRing::load(&buf[..]).expect("load should succeed");
+        assert_eq!(loaded.len(), ring.len());
+        assert_eq!(loaded.num_terms(), ring.num_terms());
+
+        // Verify all triples round-trip
+        let original: Vec<Triple> = ring.find(&TriplePattern::any()).collect();
+        let restored: Vec<Triple> = loaded.find(&TriplePattern::any()).collect();
+        assert_eq!(original.len(), restored.len());
+
+        // Verify count operations work on loaded ring
+        let name_pattern = TriplePattern {
+            subject: None,
+            predicate: Some(Term::iri("http://xmlns.com/foaf/0.1/name")),
+            object: None,
+        };
+        assert_eq!(loaded.count(&name_pattern), 2);
+    }
+
+    #[test]
+    fn test_save_load_file() {
+        let triples = vec![
+            Triple::new(
+                Term::iri("http://ex.org/a"),
+                Term::iri("http://ex.org/p"),
+                Term::iri("http://ex.org/b"),
+            ),
+            Triple::new(
+                Term::iri("http://ex.org/b"),
+                Term::iri("http://ex.org/p"),
+                Term::iri("http://ex.org/c"),
+            ),
+        ];
+
+        let ring = TripleRing::from_triples(triples.into_iter());
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("test.ring");
+
+        ring.save_to_file(&path).expect("save_to_file");
+        let loaded = TripleRing::load_from_file(&path).expect("load_from_file");
+
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded.count(&TriplePattern::any()), 2);
     }
 }

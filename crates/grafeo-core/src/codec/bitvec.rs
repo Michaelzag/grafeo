@@ -23,7 +23,7 @@ use std::io;
 ///
 /// Supports bitwise operations ([`and`](Self::and), [`or`](Self::or),
 /// [`not`](Self::not)) for combining filter results efficiently.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BitVector {
     /// Packed bits (little-endian within each word).
     data: Vec<u64>,
