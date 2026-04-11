@@ -223,6 +223,7 @@ jobs:
 
           publish_crate grafeo-common
           publish_crate grafeo-core
+          publish_crate grafeo-storage
           publish_crate grafeo-adapters
           publish_crate grafeo-engine
           publish_crate grafeo
