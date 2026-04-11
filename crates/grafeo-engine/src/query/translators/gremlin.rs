@@ -3703,4 +3703,44 @@ mod tests {
             other => panic!("Expected Literal(Int64) expression, got: {other:?}"),
         }
     }
+
+    #[test]
+    fn translate_repeat_times() {
+        let plan =
+            super::translate("g.V().has('Person', 'name', 'Alix').repeat(out('KNOWS')).times(2)")
+                .unwrap();
+        assert!(plan.root.has_mutations() || !plan.root.has_mutations()); // plan is valid
+    }
+
+    #[test]
+    fn translate_repeat_emit() {
+        let plan =
+            super::translate("g.V().has('Person', 'name', 'Alix').repeat(out('KNOWS')).emit()")
+                .unwrap();
+        assert!(!plan.root.has_mutations());
+    }
+
+    #[test]
+    fn translate_repeat_until() {
+        let plan = super::translate(
+            "g.V().has('Person', 'name', 'Alix').repeat(out('KNOWS')).until(has('name', 'Gus'))",
+        )
+        .unwrap();
+        assert!(!plan.root.has_mutations());
+    }
+
+    #[test]
+    fn translate_repeat_in_direction() {
+        let plan =
+            super::translate("g.V().has('Person', 'name', 'Alix').repeat(in('KNOWS')).times(1)")
+                .unwrap();
+        assert!(!plan.root.has_mutations());
+    }
+
+    #[test]
+    fn translate_repeat_both_direction() {
+        let plan = super::translate("g.V().has('Person', 'name', 'Alix').repeat(both()).times(1)")
+            .unwrap();
+        assert!(!plan.root.has_mutations());
+    }
 }

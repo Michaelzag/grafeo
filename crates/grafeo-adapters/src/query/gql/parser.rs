@@ -6489,7 +6489,7 @@ impl<'a> Parser<'a> {
         let mut items = Vec::new();
         if self.current.kind != TokenKind::RParen {
             loop {
-                if !self.is_identifier() {
+                if !self.is_identifier() && !self.is_label_or_type_name() {
                     return Err(self.error("Expected identifier in list"));
                 }
                 items.push(self.get_identifier_name());

@@ -321,8 +321,8 @@ enum ImportCommands {
         #[arg(long)]
         path: PathBuf,
 
-        /// First row contains column headers (default: true)
-        #[arg(long, default_value = "true")]
+        /// First row contains column headers
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         headers: bool,
 
         /// Column separator character (default: comma)

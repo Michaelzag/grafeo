@@ -275,3 +275,126 @@ fn sparql_insert_with_readonly_fails() {
         "Error should mention permission denial, got: {err_msg}"
     );
 }
+
+// ── SPARQL permission checks on RDF-model database ─────────────
+
+#[cfg(feature = "sparql")]
+#[test]
+fn sparql_select_on_rdf_database_with_readonly_succeeds() {
+    use grafeo_engine::config::{Config, GraphModel};
+
+    let db = GrafeoDB::with_config(Config::in_memory().with_graph_model(GraphModel::Rdf)).unwrap();
+
+    // Seed triples via admin session
+    let admin = db.session();
+    admin
+        .execute_sparql(
+            "INSERT DATA { <http://example.org/alix> <http://example.org/name> \"Alix\" . }",
+        )
+        .unwrap();
+
+    let session = db.session_with_role(Role::ReadOnly);
+    let result = session.execute_sparql("SELECT ?s ?o WHERE { ?s <http://example.org/name> ?o }");
+    assert!(
+        result.is_ok(),
+        "ReadOnly should execute SPARQL SELECT on RDF database: {:?}",
+        result.err()
+    );
+}
+
+#[cfg(feature = "sparql")]
+#[test]
+fn sparql_insert_on_rdf_database_with_readonly_fails() {
+    use grafeo_engine::config::{Config, GraphModel};
+
+    let db = GrafeoDB::with_config(Config::in_memory().with_graph_model(GraphModel::Rdf)).unwrap();
+    let session = db.session_with_role(Role::ReadOnly);
+
+    let result = session.execute_sparql(
+        "INSERT DATA { <http://example.org/gus> <http://example.org/name> \"Gus\" . }",
+    );
+    assert!(
+        result.is_err(),
+        "ReadOnly should not execute SPARQL INSERT on RDF database"
+    );
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("permission denied") || err_msg.contains("read-only"),
+        "Error should mention permission denial, got: {err_msg}"
+    );
+}
+
+// ── GQL with_params permission checks (restricted identity path) ─
+
+#[cfg(feature = "gql")]
+#[test]
+fn gql_with_params_read_with_readonly_succeeds() {
+    let db = GrafeoDB::new_in_memory();
+
+    // Seed data with admin session
+    let admin = db.session();
+    admin.execute("INSERT (:Person {name: 'Alix'})").unwrap();
+
+    let session = db.session_with_role(Role::ReadOnly);
+    let params = std::collections::HashMap::from([(
+        "name".to_string(),
+        grafeo_common::types::Value::from("Alix"),
+    )]);
+
+    let result = session.execute_with_params(
+        "MATCH (p:Person) WHERE p.name = $name RETURN p.name",
+        params,
+    );
+    assert!(
+        result.is_ok(),
+        "ReadOnly should execute parameterized GQL reads: {:?}",
+        result.err()
+    );
+}
+
+#[cfg(feature = "gql")]
+#[test]
+fn gql_with_params_write_with_readonly_fails() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session_with_role(Role::ReadOnly);
+    let params = std::collections::HashMap::from([(
+        "name".to_string(),
+        grafeo_common::types::Value::from("Vincent"),
+    )]);
+
+    let result = session.execute_with_params("INSERT (:Person {name: $name})", params);
+    assert!(
+        result.is_err(),
+        "ReadOnly should reject parameterized GQL writes"
+    );
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("permission denied") || err_msg.contains("read-only"),
+        "Error should mention permission denial, got: {err_msg}"
+    );
+}
+
+// ── Cypher via execute_language with restricted identity ────────
+
+#[cfg(feature = "cypher")]
+#[test]
+fn cypher_execute_language_write_with_readonly_fails() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session_with_role(Role::ReadOnly);
+    let params = std::collections::HashMap::from([(
+        "name".to_string(),
+        grafeo_common::types::Value::from("Jules"),
+    )]);
+
+    let result =
+        session.execute_language("CREATE (n:Person {name: $name})", "cypher", Some(params));
+    assert!(
+        result.is_err(),
+        "ReadOnly should reject Cypher writes via execute_language"
+    );
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("permission denied") || err_msg.contains("read-only"),
+        "Error should mention permission denial, got: {err_msg}"
+    );
+}

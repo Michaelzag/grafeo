@@ -2508,7 +2508,8 @@ impl PyGrafeoDB {
         let abs_path = std::path::Path::new(path)
             .canonicalize()
             .map_err(|e| pyo3::exceptions::PyFileNotFoundError::new_err(format!("{path}: {e}")))?;
-        let path_str = abs_path.to_string_lossy().replace('\\', "/");
+        let path_str = escape_gql_string(&abs_path.to_string_lossy().replace('\\', "/"));
+        let safe_label = sanitize_gql_identifier(label);
 
         let header_clause = if headers { " WITH HEADERS" } else { "" };
 
@@ -2516,17 +2517,20 @@ impl PyGrafeoDB {
         let insert_clause = if headers {
             let columns = read_csv_headers(&abs_path, ',')?;
             if columns.is_empty() {
-                format!("INSERT (:{label} {{}})")
+                format!("INSERT (:{safe_label} {{}})")
             } else {
                 let props = columns
                     .iter()
-                    .map(|col| format!("{col}: row.{col}"))
+                    .map(|col| {
+                        let safe = sanitize_gql_identifier(col);
+                        format!("{safe}: row.{safe}")
+                    })
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("INSERT (:{label} {{{props}}})")
+                format!("INSERT (:{safe_label} {{{props}}})")
             }
         } else {
-            format!("INSERT (:{label} {{}})")
+            format!("INSERT (:{safe_label} {{}})")
         };
 
         let query =
@@ -2534,23 +2538,14 @@ impl PyGrafeoDB {
 
         let db = self.inner.read();
         let session = db.session();
+
+        let before_count = count_nodes_with_label(&session, &safe_label);
+
         session.execute(&query).map_err(PyGrafeoError::from)?;
 
-        let count_result = session
-            .execute(&format!("MATCH (n:{label}) RETURN count(n) AS c"))
-            .map_err(PyGrafeoError::from)?;
+        let count = count_nodes_with_label(&session, &safe_label) - before_count;
 
-        let count = count_result
-            .rows()
-            .first()
-            .and_then(|row| row.first())
-            .and_then(|v| match v {
-                grafeo_common::types::Value::Int64(n) => Some(*n as u64),
-                _ => None,
-            })
-            .unwrap_or(0);
-
-        Ok(count)
+        Ok(count.max(0) as u64)
     }
 
     /// Import a JSON Lines file as graph nodes.
@@ -2565,43 +2560,38 @@ impl PyGrafeoDB {
         let abs_path = std::path::Path::new(path)
             .canonicalize()
             .map_err(|e| pyo3::exceptions::PyFileNotFoundError::new_err(format!("{path}: {e}")))?;
-        let path_str = abs_path.to_string_lossy().replace('\\', "/");
+        let path_str = escape_gql_string(&abs_path.to_string_lossy().replace('\\', "/"));
+        let safe_label = sanitize_gql_identifier(label);
 
         // Read first line to discover JSON keys
         let keys = read_jsonl_keys(&abs_path)?;
 
         let insert_clause = if keys.is_empty() {
-            format!("INSERT (:{label} {{}})")
+            format!("INSERT (:{safe_label} {{}})")
         } else {
             let props = keys
                 .iter()
-                .map(|key| format!("{key}: row.{key}"))
+                .map(|key| {
+                    let safe = sanitize_gql_identifier(key);
+                    format!("{safe}: row.{safe}")
+                })
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("INSERT (:{label} {{{props}}})")
+            format!("INSERT (:{safe_label} {{{props}}})")
         };
 
         let query = format!("LOAD DATA FROM '{path_str}' FORMAT JSONL AS row {insert_clause}");
 
         let db = self.inner.read();
         let session = db.session();
+
+        let before_count = count_nodes_with_label(&session, &safe_label);
+
         session.execute(&query).map_err(PyGrafeoError::from)?;
 
-        let count_result = session
-            .execute(&format!("MATCH (n:{label}) RETURN count(n) AS c"))
-            .map_err(PyGrafeoError::from)?;
+        let count = count_nodes_with_label(&session, &safe_label) - before_count;
 
-        let count = count_result
-            .rows()
-            .first()
-            .and_then(|row| row.first())
-            .and_then(|v| match v {
-                grafeo_common::types::Value::Int64(n) => Some(*n as u64),
-                _ => None,
-            })
-            .unwrap_or(0);
-
-        Ok(count)
+        Ok(count.max(0) as u64)
     }
 
     fn __repr__(&self) -> String {
@@ -3397,6 +3387,46 @@ fn is_pandas_na(py: Python<'_>, obj: &Bound<'_, PyAny>) -> bool {
 }
 
 /// Read CSV headers from the first line of a file.
+/// Escape single quotes in a string for embedding in a GQL string literal.
+fn escape_gql_string(s: &str) -> String {
+    s.replace('\'', "\\'")
+}
+
+/// Sanitize a name for use as a GQL identifier.
+fn sanitize_gql_identifier(name: &str) -> String {
+    let sanitized: String = name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if sanitized.is_empty() {
+        "_col".to_string()
+    } else if sanitized.starts_with(|c: char| c.is_ascii_digit()) {
+        format!("_{sanitized}")
+    } else {
+        sanitized
+    }
+}
+
+/// Count nodes with a given label.
+fn count_nodes_with_label(session: &grafeo_engine::Session, label: &str) -> i64 {
+    session
+        .execute(&format!("MATCH (n:{label}) RETURN count(n) AS c"))
+        .ok()
+        .and_then(|r| r.rows().first().cloned())
+        .and_then(|row| row.first().cloned())
+        .and_then(|v| match v {
+            grafeo_common::types::Value::Int64(n) => Some(n),
+            _ => None,
+        })
+        .unwrap_or(0)
+}
+
 fn read_csv_headers(path: &std::path::Path, delimiter: char) -> PyResult<Vec<String>> {
     use std::io::{BufRead, BufReader};
     let f = std::fs::File::open(path).map_err(|e| {

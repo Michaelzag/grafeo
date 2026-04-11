@@ -1029,7 +1029,7 @@ impl Session {
                     .with_node_labels(node_labels)
                     .with_edge_types(edge_types);
 
-                let store = Arc::clone(&self.graph_store);
+                let store = self.active_store();
                 let projection = Arc::new(GraphProjection::new(store, spec));
                 let mut projections = self.projections.write();
                 match projections.entry(name.clone()) {

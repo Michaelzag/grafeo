@@ -1197,13 +1197,13 @@ impl JsGrafeoDB {
         let db = self.inner.clone();
         tokio::task::spawn_blocking(move || {
             let opts = options.unwrap_or_default();
-            let label = opts.label.unwrap_or_else(|| "Row".to_string());
+            let label = sanitize_gql_identifier(&opts.label.unwrap_or_else(|| "Row".to_string()));
             let headers = opts.headers.unwrap_or(true);
 
             let abs_path = std::path::Path::new(&path)
                 .canonicalize()
                 .map_err(|e| NodeGrafeoError::Database(format!("{path}: {e}")))?;
-            let path_str = abs_path.to_string_lossy().replace('\\', "/");
+            let path_str = escape_gql_string(&abs_path.to_string_lossy().replace('\\', "/"));
 
             let header_clause = if headers { " WITH HEADERS" } else { "" };
 
@@ -1215,7 +1215,10 @@ impl JsGrafeoDB {
                 } else {
                     let props = columns
                         .iter()
-                        .map(|col| format!("{col}: row.{col}"))
+                        .map(|col| {
+                            let safe = sanitize_gql_identifier(col);
+                            format!("{safe}: row.{safe}")
+                        })
                         .collect::<Vec<_>>()
                         .join(", ");
                     format!("INSERT (:{label} {{{props}}})")
@@ -1230,21 +1233,12 @@ impl JsGrafeoDB {
 
             let db = db.read();
             let session = db.session();
+
+            let before_count = count_nodes(&session, &label);
+
             session.execute(&query).map_err(NodeGrafeoError::from)?;
 
-            let count_result = session
-                .execute(&format!("MATCH (n:{label}) RETURN count(n) AS c"))
-                .map_err(NodeGrafeoError::from)?;
-
-            let count = count_result
-                .rows()
-                .first()
-                .and_then(|row| row.first())
-                .and_then(|v| match v {
-                    Value::Int64(n) => Some(*n),
-                    _ => None,
-                })
-                .unwrap_or(0);
+            let count = count_nodes(&session, &label) - before_count;
 
             Ok(count)
         })
@@ -1265,12 +1259,12 @@ impl JsGrafeoDB {
         let db = self.inner.clone();
         tokio::task::spawn_blocking(move || {
             let opts = options.unwrap_or_default();
-            let label = opts.label.unwrap_or_else(|| "Row".to_string());
+            let label = sanitize_gql_identifier(&opts.label.unwrap_or_else(|| "Row".to_string()));
 
             let abs_path = std::path::Path::new(&path)
                 .canonicalize()
                 .map_err(|e| NodeGrafeoError::Database(format!("{path}: {e}")))?;
-            let path_str = abs_path.to_string_lossy().replace('\\', "/");
+            let path_str = escape_gql_string(&abs_path.to_string_lossy().replace('\\', "/"));
 
             let keys =
                 read_jsonl_keys(&abs_path).map_err(|e| NodeGrafeoError::Database(e.clone()))?;
@@ -1280,7 +1274,10 @@ impl JsGrafeoDB {
             } else {
                 let props = keys
                     .iter()
-                    .map(|key| format!("{key}: row.{key}"))
+                    .map(|key| {
+                        let safe = sanitize_gql_identifier(key);
+                        format!("{safe}: row.{safe}")
+                    })
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("INSERT (:{label} {{{props}}})")
@@ -1290,21 +1287,12 @@ impl JsGrafeoDB {
 
             let db = db.read();
             let session = db.session();
+
+            let before_count = count_nodes(&session, &label);
+
             session.execute(&query).map_err(NodeGrafeoError::from)?;
 
-            let count_result = session
-                .execute(&format!("MATCH (n:{label}) RETURN count(n) AS c"))
-                .map_err(NodeGrafeoError::from)?;
-
-            let count = count_result
-                .rows()
-                .first()
-                .and_then(|row| row.first())
-                .and_then(|v| match v {
-                    Value::Int64(n) => Some(*n),
-                    _ => None,
-                })
-                .unwrap_or(0);
+            let count = count_nodes(&session, &label) - before_count;
 
             Ok(count)
         })
@@ -1349,6 +1337,46 @@ fn read_csv_headers(
         .map(|h| h.trim().trim_matches('"').to_string())
         .filter(|h| !h.is_empty())
         .collect())
+}
+
+/// Escape single quotes in a string for embedding in a GQL string literal.
+fn escape_gql_string(s: &str) -> String {
+    s.replace('\'', "\\'")
+}
+
+/// Sanitize a name for use as a GQL identifier.
+fn sanitize_gql_identifier(name: &str) -> String {
+    let sanitized: String = name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if sanitized.is_empty() {
+        "_col".to_string()
+    } else if sanitized.starts_with(|c: char| c.is_ascii_digit()) {
+        format!("_{sanitized}")
+    } else {
+        sanitized
+    }
+}
+
+/// Count nodes with a given label.
+fn count_nodes(session: &grafeo_engine::Session, label: &str) -> i64 {
+    session
+        .execute(&format!("MATCH (n:{label}) RETURN count(n) AS c"))
+        .ok()
+        .and_then(|r| r.rows().first().cloned())
+        .and_then(|row| row.first().cloned())
+        .and_then(|v| match v {
+            Value::Int64(n) => Some(n),
+            _ => None,
+        })
+        .unwrap_or(0)
 }
 
 /// Read JSON keys from the first non-empty line of a JSONL file.
