@@ -2,6 +2,20 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
+## [0.5.36] - Unreleased
+
+### Added
+
+- **Role-based access control (M1)**: `Identity`, `Role` (`Admin`, `ReadWrite`, `ReadOnly`), and `StatementKind` types for scoping sessions to specific permission levels. `db.session_with_identity(identity)` creates a session bound to an identity, `db.session_with_role(role)` is a convenience shorthand. Permission checks run after parsing but before execution across all query languages (GQL, Cypher, Gremlin, GraphQL, SQL/PGQ, SPARQL). No credentials or crypto at this layer: the caller is trusted to assign the correct role.
+
+### Changed
+
+- **`session_read_only()` deprecated**: use `session_with_role(Role::ReadOnly)` instead. The old method remains as an alias.
+
+### Fixed
+
+- **Release workflow missing `grafeo-storage`**: the crate publish sequence now includes `grafeo-storage` before `grafeo-engine`, fixing cascading publish failures.
+
 ## [0.5.35] - 2026-04-11
 
 Breaking: `QueryResult.rows` is now private (use `rows()`/`into_rows()`), all public enums are `#[non_exhaustive]` (add `_ =>` arms), old feature profiles (`embedded`, `browser`, `server`, `full`) are deprecated in favor of persona-based profiles (`lpg`, `rdf`, `analytics`, `ai`, `edge`, `enterprise`) and the on-disk storage format changed from bincode blobs to block-based sections (databases created with 0.5.34 or earlier must be re-created).
