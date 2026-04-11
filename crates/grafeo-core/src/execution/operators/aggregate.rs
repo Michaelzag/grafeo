@@ -20,8 +20,15 @@ use crate::execution::DataChunk;
 use crate::execution::chunk::DataChunkBuilder;
 
 /// State for a single aggregation computation.
+///
+/// Used by both pull-based ([`HashAggregateOperator`]) and push-based
+/// ([`super::push::aggregate::AggregatePushOperator`]) aggregate operators.
+/// Supports all [`AggregateFunction`] variants including Welford's algorithm
+/// for online statistics, Kahan summation, distinct tracking, and bivariate
+/// regression functions.
 #[derive(Debug, Clone)]
-pub(crate) enum AggregateState {
+#[allow(missing_docs)]
+pub enum AggregateState {
     /// Count state.
     Count(i64),
     /// Count distinct state (count, seen values).
@@ -83,7 +90,7 @@ pub(crate) enum AggregateState {
 
 impl AggregateState {
     /// Creates initial state for an aggregation function.
-    pub(crate) fn new(
+    pub fn new(
         function: AggregateFunction,
         distinct: bool,
         percentile: Option<f64>,
@@ -174,7 +181,10 @@ impl AggregateState {
     }
 
     /// Updates the state with a new value.
-    pub(crate) fn update(&mut self, value: Option<Value>) {
+    ///
+    /// For `COUNT(*)`, pass `None` to count all rows. For column-specific
+    /// aggregates, pass `Some(value)` (nulls are skipped by most functions).
+    pub fn update(&mut self, value: Option<Value>) {
         match self {
             AggregateState::Count(count) => {
                 *count += 1;
@@ -406,7 +416,7 @@ impl AggregateState {
     }
 
     /// Finalizes the state and returns the result value.
-    pub(crate) fn finalize(&self) -> Value {
+    pub fn finalize(&self) -> Value {
         match self {
             AggregateState::Count(count) | AggregateState::CountDistinct(count, _) => {
                 Value::Int64(*count)
