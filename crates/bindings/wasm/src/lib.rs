@@ -1096,7 +1096,7 @@ impl Database {
         node_labels: Option<Vec<String>>,
         edge_types: Option<Vec<String>>,
     ) -> bool {
-        use grafeo_core::graph::ProjectionSpec;
+        use grafeo_engine::ProjectionSpec;
 
         let mut spec = ProjectionSpec::new();
         if let Some(labels) = node_labels.filter(|l| !l.is_empty()) {
