@@ -98,7 +98,7 @@ impl Session {
         let optimizer = Optimizer::from_graph_store(&*active);
         let optimized_plan = optimizer.optimize(logical_plan)?;
 
-        if optimized_plan.root.has_mutations() {
+        if !self.identity.can_admin() && optimized_plan.root.has_mutations() {
             self.require_permission(crate::auth::StatementKind::Write)?;
         }
 
@@ -158,7 +158,7 @@ impl Session {
         let optimized_plan = optimizer.optimize(logical_plan)?;
 
         // Check role-based permission for mutations
-        if optimized_plan.root.has_mutations() {
+        if !self.identity.can_admin() && optimized_plan.root.has_mutations() {
             self.require_permission(crate::auth::StatementKind::Write)?;
         }
 
@@ -212,8 +212,8 @@ impl Session {
         let optimizer = Optimizer::from_rdf_statistics((*rdf_stats).clone());
         let optimized_plan = optimizer.optimize(logical_plan)?;
 
-        // Check role-based permission for mutations
-        if optimized_plan.root.has_mutations() {
+        // Check role-based permission for mutations (skip tree walk for admin)
+        if !self.identity.can_admin() && optimized_plan.root.has_mutations() {
             self.require_permission(crate::auth::StatementKind::Write)?;
         }
 
@@ -274,8 +274,8 @@ impl Session {
         let optimizer = Optimizer::from_rdf_statistics((*rdf_stats).clone());
         let optimized_plan = optimizer.optimize(logical_plan)?;
 
-        // Check role-based permission for mutations
-        if optimized_plan.root.has_mutations() {
+        // Check role-based permission for mutations (skip tree walk for admin)
+        if !self.identity.can_admin() && optimized_plan.root.has_mutations() {
             self.require_permission(crate::auth::StatementKind::Write)?;
         }
 
