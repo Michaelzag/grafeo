@@ -1372,4 +1372,113 @@ mod tests {
         // alix livesIn amsterdam, gus livesIn amsterdam
         assert_eq!(r.row_count(), 2);
     }
+
+    // ====================================================================
+    // Phase 3: SPARQL Spec Compliance (0.5.37)
+    // ====================================================================
+
+    #[test]
+    fn bind_typed_literal_integer() {
+        let db = rdf_db();
+        insert_foaf_data(&db);
+        let r = db
+            .execute_sparql(
+                r#"PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+                SELECT ?x WHERE {
+                    ?s <http://xmlns.com/foaf/0.1/name> "Alix" .
+                    BIND("42"^^xsd:integer AS ?x)
+                }"#,
+            )
+            .unwrap();
+        assert_eq!(r.row_count(), 1);
+        let val = &r.rows()[0][0];
+        // Should be integer 42, not empty string
+        assert!(
+            val.as_int64() == Some(42) || val.to_string() == "42",
+            "expected 42, got: {val:?}"
+        );
+    }
+
+    #[test]
+    fn bind_typed_literal_double() {
+        let db = rdf_db();
+        insert_foaf_data(&db);
+        let r = db
+            .execute_sparql(
+                r#"PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+                SELECT ?x WHERE {
+                    ?s <http://xmlns.com/foaf/0.1/name> "Alix" .
+                    BIND("3.14"^^xsd:double AS ?x)
+                }"#,
+            )
+            .unwrap();
+        assert_eq!(r.row_count(), 1);
+        let val = &r.rows()[0][0];
+        assert!(
+            val.to_string().starts_with("3.14"),
+            "expected 3.14, got: {val:?}"
+        );
+    }
+
+    #[test]
+    fn filter_equality_pushdown_into_scan() {
+        let db = rdf_db();
+        insert_foaf_data(&db);
+        // FILTER(?name = "Alix") should be pushed into the TripleScan
+        // so only matching triples are scanned (index lookup, not full scan + filter)
+        let r = db
+            .execute_sparql(
+                r#"SELECT ?s WHERE {
+                    ?s <http://xmlns.com/foaf/0.1/name> ?name .
+                    FILTER(?name = "Alix")
+                }"#,
+            )
+            .unwrap();
+        assert_eq!(r.row_count(), 1);
+        assert!(r.rows()[0][0].to_string().contains("alix"));
+    }
+
+    #[test]
+    fn filter_equality_on_predicate() {
+        let db = rdf_db();
+        insert_foaf_data(&db);
+        // FILTER on a predicate variable
+        let r = db
+            .execute_sparql(
+                r#"SELECT ?s ?o WHERE {
+                    ?s ?p ?o .
+                    FILTER(?p = <http://xmlns.com/foaf/0.1/name>)
+                }"#,
+            )
+            .unwrap();
+        // 4 names: Alix, Gus, Vincent, Amsterdam
+        assert_eq!(r.row_count(), 4);
+    }
+
+    #[test]
+    fn describe_without_where_clause() {
+        let db = rdf_db();
+        insert_foaf_data(&db);
+        // DESCRIBE <iri> without WHERE should return CBD for that resource
+        let r = db.execute_sparql("DESCRIBE <http://ex.org/alix>").unwrap();
+        // alix has 5 triples: type, name, age, knows, mbox
+        assert!(
+            r.row_count() >= 5,
+            "DESCRIBE without WHERE should return triples, got {} rows",
+            r.row_count()
+        );
+    }
+
+    #[test]
+    fn select_reduced_deduplicates() {
+        let db = rdf_db();
+        insert_foaf_data(&db);
+        let r = db
+            .execute_sparql(
+                "SELECT REDUCED ?type WHERE { ?s <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> ?type }",
+            )
+            .unwrap();
+        // Two distinct types: Person, City (REDUCED may deduplicate like DISTINCT)
+        assert_eq!(r.row_count(), 2);
+    }
 }

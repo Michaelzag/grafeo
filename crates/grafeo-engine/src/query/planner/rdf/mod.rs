@@ -23,10 +23,10 @@ use grafeo_core::graph::rdf::{Literal, RdfStore, Term, Triple, TriplePattern};
 
 use crate::query::plan::{
     AddGraphOp, AggregateFunction as LogicalAggregateFunction, AggregateOp, AntiJoinOp, BindOp,
-    ClearGraphOp, CopyGraphOp, CreateGraphOp, DatasetRestriction, DeleteTripleOp, DistinctOp,
-    DropGraphOp, FilterOp, InsertTripleOp, LeftJoinOp, LimitOp, LogicalExpression, LogicalOperator,
-    LogicalPlan, ModifyOp, MoveGraphOp, SkipOp, SortOp, TripleComponent, TripleScanOp,
-    TripleTemplate,
+    ClearGraphOp, ConstructOp, CopyGraphOp, CreateGraphOp, DatasetRestriction, DeleteTripleOp,
+    DistinctOp, DropGraphOp, FilterOp, InsertTripleOp, LeftJoinOp, LimitOp, LogicalExpression,
+    LogicalOperator, LogicalPlan, ModifyOp, MoveGraphOp, SkipOp, SortOp, TripleComponent,
+    TripleScanOp, TripleTemplate,
 };
 use crate::query::planner::{PhysicalPlan, convert_aggregate_function, convert_filter_expression};
 
@@ -333,6 +333,7 @@ impl RdfPlanner {
             LogicalOperator::MoveGraph(move_op) => self.plan_move_graph(move_op),
             LogicalOperator::AddGraph(add) => self.plan_add_graph(add),
             LogicalOperator::Bind(bind) => self.plan_bind(bind),
+            LogicalOperator::Construct(construct) => self.plan_construct(construct),
             LogicalOperator::MultiWayJoin(mwj) => self.plan_multi_way_join(mwj),
             LogicalOperator::Empty => {
                 let op: Box<dyn Operator> = Box::new(SingleRowOperator::new());
@@ -766,6 +767,37 @@ impl RdfPlanner {
             variable_columns,
         ));
         Ok((operator, output_columns, input_types))
+    }
+
+    /// Plans a CONSTRUCT operator.
+    ///
+    /// Evaluates the WHERE clause, then for each row substitutes variable
+    /// bindings into the template to produce (subject, predicate, object) rows.
+    fn plan_construct(
+        &self,
+        construct: &ConstructOp,
+    ) -> Result<(Box<dyn Operator>, Vec<String>, Vec<LogicalType>)> {
+        let (input_op, input_columns, _input_types) = self.plan_operator(&construct.input)?;
+
+        let variable_columns: HashMap<String, usize> = input_columns
+            .iter()
+            .enumerate()
+            .map(|(i, name)| (name.clone(), i))
+            .collect();
+
+        let operator = Box::new(ConstructOperator::new(
+            input_op,
+            construct.templates.clone(),
+            variable_columns,
+        ));
+
+        let columns = vec![
+            "subject".to_string(),
+            "predicate".to_string(),
+            "object".to_string(),
+        ];
+        let types = vec![LogicalType::String; 3];
+        Ok((operator, columns, types))
     }
 
     /// Plans an AGGREGATE operator.
@@ -2927,6 +2959,120 @@ struct GraphContext {
     scan_all_graphs: bool,
     /// SPARQL dataset restriction from FROM / FROM NAMED clauses.
     dataset: Option<DatasetRestriction>,
+}
+
+/// CONSTRUCT operator: instantiates triple templates from variable bindings.
+///
+/// For each input row, substitutes variables in each template triple to produce
+/// (subject, predicate, object) output rows. Skips template triples where a
+/// variable has no binding (unbound variables produce no triple).
+struct ConstructOperator {
+    input: Box<dyn Operator>,
+    templates: Vec<TripleTemplate>,
+    variable_columns: HashMap<String, usize>,
+}
+
+impl ConstructOperator {
+    fn new(
+        input: Box<dyn Operator>,
+        templates: Vec<TripleTemplate>,
+        variable_columns: HashMap<String, usize>,
+    ) -> Self {
+        Self {
+            input,
+            templates,
+            variable_columns,
+        }
+    }
+
+    /// Resolves a `TripleComponent` to a string using the current row bindings.
+    fn resolve_component(
+        &self,
+        component: &TripleComponent,
+        chunk: &DataChunk,
+        row: usize,
+    ) -> Option<String> {
+        match component {
+            TripleComponent::Variable(name) => {
+                let col_idx = *self.variable_columns.get(name)?;
+                let col = chunk.column(col_idx)?;
+                let val = col.get_value(row)?;
+                if val.is_null() {
+                    None
+                } else {
+                    Some(val.to_string())
+                }
+            }
+            TripleComponent::Iri(iri) => Some(iri.clone()),
+            TripleComponent::Literal(val) => Some(val.to_string()),
+            TripleComponent::LangLiteral { value, lang } => Some(format!("\"{value}\"@{lang}")),
+            TripleComponent::BlankNode(label) => Some(format!("_:{label}")),
+        }
+    }
+}
+
+impl Operator for ConstructOperator {
+    fn next(&mut self) -> grafeo_core::execution::operators::OperatorResult {
+        loop {
+            let Some(input_chunk) = self.input.next()? else {
+                return Ok(None);
+            };
+
+            let row_count = input_chunk.row_count();
+            if row_count == 0 {
+                continue;
+            }
+
+            // Each input row can produce up to templates.len() output rows
+            let max_output = row_count * self.templates.len();
+            let schema = vec![LogicalType::String; 3];
+            let mut output = DataChunk::with_capacity(&schema, max_output);
+            let mut actual_count = 0;
+
+            for row in 0..row_count {
+                for template in &self.templates {
+                    let Some(subject) =
+                        self.resolve_component(&template.subject, &input_chunk, row)
+                    else {
+                        continue;
+                    };
+                    let Some(predicate) =
+                        self.resolve_component(&template.predicate, &input_chunk, row)
+                    else {
+                        continue;
+                    };
+                    let Some(object) = self.resolve_component(&template.object, &input_chunk, row)
+                    else {
+                        continue;
+                    };
+
+                    if let Some(col) = output.column_mut(0) {
+                        col.push_string(subject);
+                    }
+                    if let Some(col) = output.column_mut(1) {
+                        col.push_string(predicate);
+                    }
+                    if let Some(col) = output.column_mut(2) {
+                        col.push_string(object);
+                    }
+                    actual_count += 1;
+                }
+            }
+
+            if actual_count > 0 {
+                output.set_count(actual_count);
+                return Ok(Some(output));
+            }
+        }
+    }
+
+    fn reset(&mut self) {
+        self.input.reset();
+    }
+
+    fn name(&self) -> &'static str {
+        "Construct"
+    }
 }
 
 /// Operator that produces a single pre-computed `DataChunk` and then stops.

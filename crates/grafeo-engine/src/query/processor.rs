@@ -924,6 +924,10 @@ fn substitute_in_operator(op: &mut LogicalOperator, params: &QueryParams) -> Res
         LogicalOperator::CallProcedure(_) => {}
         // LoadData: file path is a literal, no parameter substitution needed
         LogicalOperator::LoadData(_) => {}
+        // Construct: template uses variables, substitute in the WHERE input
+        LogicalOperator::Construct(construct) => {
+            substitute_in_operator(&mut construct.input, params)?;
+        }
     }
     Ok(())
 }

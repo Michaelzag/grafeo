@@ -5,10 +5,10 @@
 use super::common::{wrap_distinct, wrap_filter, wrap_limit, wrap_skip, wrap_sort};
 use crate::query::plan::{
     AddGraphOp, AggregateExpr, AggregateFunction, AggregateOp, AntiJoinOp, BinaryOp, BindOp,
-    ClearGraphOp, CopyGraphOp, CreateGraphOp, DatasetRestriction, DeleteTripleOp, DropGraphOp,
-    InsertTripleOp, JoinCondition, JoinOp, JoinType, LeftJoinOp, LoadGraphOp, LogicalExpression,
-    LogicalOperator, LogicalPlan, ModifyOp, MoveGraphOp, ProjectOp, Projection, SortKey, SortOrder,
-    TripleComponent, TripleScanOp, TripleTemplate, UnaryOp, UnionOp,
+    ClearGraphOp, ConstructOp, CopyGraphOp, CreateGraphOp, DatasetRestriction, DeleteTripleOp,
+    DropGraphOp, InsertTripleOp, JoinCondition, JoinOp, JoinType, LeftJoinOp, LoadGraphOp,
+    LogicalExpression, LogicalOperator, LogicalPlan, ModifyOp, MoveGraphOp, ProjectOp, Projection,
+    SortKey, SortOrder, TripleComponent, TripleScanOp, TripleTemplate, UnaryOp, UnionOp,
 };
 use grafeo_adapters::query::sparql::{self, ast};
 use grafeo_common::types::Value;
@@ -173,8 +173,13 @@ impl SparqlTranslator {
             plan = wrap_sort(plan, keys);
         }
 
-        // Apply DISTINCT/REDUCED (after projection, before OFFSET/LIMIT)
-        if select.modifier == ast::SelectModifier::Distinct {
+        // Apply DISTINCT/REDUCED (after projection, before OFFSET/LIMIT).
+        // REDUCED is treated identically to DISTINCT: the spec allows an
+        // implementation to eliminate all, some, or no duplicates.
+        if matches!(
+            select.modifier,
+            ast::SelectModifier::Distinct | ast::SelectModifier::Reduced
+        ) {
             plan = wrap_distinct(plan);
         }
 
@@ -211,21 +216,43 @@ impl SparqlTranslator {
         // Apply dataset restriction from FROM / FROM NAMED clauses
         self.dataset = self.translate_dataset_clause(&construct.dataset);
 
-        // For CONSTRUCT, we need to evaluate the WHERE pattern and then
-        // produce triples according to the template
-        let plan = self.translate_graph_pattern(&construct.where_clause)?;
+        // Evaluate the WHERE pattern to produce variable bindings
+        let mut plan = self.translate_graph_pattern(&construct.where_clause)?;
 
         // Clear dataset after translating the WHERE clause
         self.dataset = None;
 
-        // Apply solution modifiers
-        let mut plan = plan;
+        // Apply solution modifiers to the WHERE output
         if let Some(limit) = construct.solution_modifiers.limit {
             plan = wrap_limit(plan, limit as usize);
         }
 
-        // The template will be processed at execution time
-        Ok(LogicalPlan::new(plan))
+        // Translate template triples: substitute variable bindings from WHERE
+        let mut templates = Vec::new();
+        for tp in &construct.template {
+            let subject = self.translate_triple_term(&tp.subject)?;
+            // CONSTRUCT templates use simple predicates (IRIs/variables), not paths
+            let predicate = match &tp.predicate {
+                ast::PropertyPath::Predicate(iri) => TripleComponent::Iri(self.resolve_iri(iri)),
+                ast::PropertyPath::Variable(name) => TripleComponent::Variable(name.clone()),
+                ast::PropertyPath::RdfType => TripleComponent::Iri(
+                    "http://www.w3.org/1999/02/22-rdf-syntax-ns#type".to_string(),
+                ),
+                _ => continue, // Skip complex property paths in templates
+            };
+            let object = self.translate_triple_term(&tp.object)?;
+            templates.push(TripleTemplate {
+                subject,
+                predicate,
+                object,
+                graph: None,
+            });
+        }
+
+        Ok(LogicalPlan::new(LogicalOperator::Construct(ConstructOp {
+            templates,
+            input: Box::new(plan),
+        })))
     }
 
     fn translate_describe(&mut self, describe: &ast::DescribeQuery) -> Result<LogicalPlan> {
@@ -1293,8 +1320,9 @@ impl SparqlTranslator {
     fn translate_unary_op(&self, op: ast::UnaryOperator) -> UnaryOp {
         match op {
             ast::UnaryOperator::Not => UnaryOp::Not,
-            // Plus is handled as a no-op at the call site; this arm is unreachable
-            ast::UnaryOperator::Plus => UnaryOp::Not,
+            ast::UnaryOperator::Plus => {
+                unreachable!("unary plus is handled as a no-op at the call site")
+            }
             ast::UnaryOperator::Minus => UnaryOp::Neg,
         }
     }
