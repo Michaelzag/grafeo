@@ -45,6 +45,7 @@ impl Session {
             current_transaction: parking_lot::Mutex::new(None),
             read_only_tx: parking_lot::Mutex::new(cfg.read_only),
             db_read_only: cfg.read_only,
+            identity: cfg.identity,
             auto_commit: true,
             adaptive_config: cfg.adaptive_config,
             factorized_execution: cfg.factorized_execution,
@@ -96,6 +97,10 @@ impl Session {
         let optimizer = Optimizer::from_graph_store(&*active);
         let optimized_plan = optimizer.optimize(logical_plan)?;
 
+        if optimized_plan.root.has_mutations() {
+            self.require_permission(crate::auth::StatementKind::Write)?;
+        }
+
         let planner = RdfPlanner::new(Arc::clone(&self.rdf_store))
             .with_transaction_id(*self.current_transaction.lock());
         #[cfg(feature = "wal")]
@@ -138,6 +143,9 @@ impl Session {
         let start_time = Instant::now();
 
         let has_mutations = Self::query_looks_like_mutation(query);
+        if has_mutations {
+            self.require_permission(crate::auth::StatementKind::Write)?;
+        }
         let active = self.active_store();
 
         let result = self.with_auto_commit(has_mutations, || {
@@ -185,6 +193,11 @@ impl Session {
         let rdf_stats = self.rdf_store.get_or_collect_statistics();
         let optimizer = Optimizer::from_rdf_statistics((*rdf_stats).clone());
         let optimized_plan = optimizer.optimize(logical_plan)?;
+
+        // Check role-based permission for mutations
+        if optimized_plan.root.has_mutations() {
+            self.require_permission(crate::auth::StatementKind::Write)?;
+        }
 
         // EXPLAIN: return the logical plan tree without executing
         if optimized_plan.explain {
@@ -242,6 +255,11 @@ impl Session {
         let rdf_stats = self.rdf_store.get_or_collect_statistics();
         let optimizer = Optimizer::from_rdf_statistics((*rdf_stats).clone());
         let optimized_plan = optimizer.optimize(logical_plan)?;
+
+        // Check role-based permission for mutations
+        if optimized_plan.root.has_mutations() {
+            self.require_permission(crate::auth::StatementKind::Write)?;
+        }
 
         // EXPLAIN: return the logical plan tree without executing
         if optimized_plan.explain {

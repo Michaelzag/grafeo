@@ -22,6 +22,7 @@
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub mod admin;
+pub mod auth;
 pub mod catalog;
 #[cfg(feature = "cdc")]
 pub mod cdc;
@@ -45,6 +46,7 @@ pub use admin::{
     DumpMetadata, IndexInfo, LpgSchemaInfo, RdfSchemaInfo, SchemaInfo, ValidationError,
     ValidationResult, ValidationWarning, WalStatus,
 };
+pub use auth::{Identity, Role, StatementKind};
 pub use catalog::{Catalog, CatalogError, IndexDefinition, IndexType};
 pub use config::{AccessMode, Config, ConfigError, DurabilityMode, GraphModel};
 pub use database::GrafeoDB;
