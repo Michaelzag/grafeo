@@ -1715,12 +1715,8 @@ mod tests {
             AggregateState::Frozen(_)
         ));
 
-        restored
-            .accumulators[0]
-            .update(Some(Value::Float64(100.0)));
-        restored
-            .accumulators[0]
-            .update(Some(Value::Float64(200.0)));
+        restored.accumulators[0].update(Some(Value::Float64(100.0)));
+        restored.accumulators[0].update(Some(Value::Float64(200.0)));
 
         assert_eq!(restored.accumulators[0].finalize(), expected);
     }
