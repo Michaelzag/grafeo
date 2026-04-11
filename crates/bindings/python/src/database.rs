@@ -2225,14 +2225,19 @@ impl PyGrafeoDB {
         let db = self.inner.read();
         let store = db.store();
 
-        // Collect all nodes and discover property keys
+        // Collect all nodes and discover property keys.
+        // Skip properties whose names collide with structural columns
+        // to prevent silent overwrites (GrafeoDB/grafeo#254).
+        const RESERVED_NODE_COLS: &[&str] = &["id", "labels"];
         let nodes: Vec<_> = store.all_nodes().collect();
         let mut prop_keys: Vec<String> = Vec::new();
         let mut prop_key_set = std::collections::HashSet::new();
         for node in &nodes {
             for (key, _) in node.properties.iter() {
                 let key_str = key.as_str().to_owned();
-                if prop_key_set.insert(key_str.clone()) {
+                if prop_key_set.insert(key_str.clone())
+                    && !RESERVED_NODE_COLS.contains(&key_str.as_str())
+                {
                     prop_keys.push(key_str);
                 }
             }
@@ -2296,14 +2301,19 @@ impl PyGrafeoDB {
         let db = self.inner.read();
         let store = db.store();
 
-        // Collect all edges and discover property keys
+        // Collect all edges and discover property keys.
+        // Skip properties whose names collide with structural columns
+        // to prevent silent overwrites (GrafeoDB/grafeo#254).
+        const RESERVED_EDGE_COLS: &[&str] = &["id", "source", "target", "type"];
         let edges: Vec<_> = store.all_edges().collect();
         let mut prop_keys: Vec<String> = Vec::new();
         let mut prop_key_set = std::collections::HashSet::new();
         for edge in &edges {
             for (key, _) in edge.properties.iter() {
                 let key_str = key.as_str().to_owned();
-                if prop_key_set.insert(key_str.clone()) {
+                if prop_key_set.insert(key_str.clone())
+                    && !RESERVED_EDGE_COLS.contains(&key_str.as_str())
+                {
                     prop_keys.push(key_str);
                 }
             }
