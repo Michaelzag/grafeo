@@ -35,6 +35,7 @@ class Meta:
     dataset: str = "empty"
     requires: List[str] = field(default_factory=list)
     tags: List[str] = field(default_factory=list)
+    iso: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -58,6 +59,7 @@ class TestCase:
     params: Dict[str, object] = field(default_factory=dict)
     tags: List[str] = field(default_factory=list)
     requires: List[str] = field(default_factory=list)
+    iso: List[str] = field(default_factory=list)
     skip: Optional[str] = None
     expect: Expect = field(default_factory=Expect)
     variants: Dict[str, str] = field(default_factory=dict)
@@ -123,6 +125,7 @@ def _parse_meta_dict(d: dict) -> Meta:
     m.dataset = str(d.get("dataset", "empty"))
     m.requires = _as_string_list(d.get("requires", []))
     m.tags = _as_string_list(d.get("tags", []))
+    m.iso = _as_string_list(d.get("iso", []))
     return m
 
 
@@ -134,6 +137,7 @@ def _parse_test_dict(d: dict) -> TestCase:
         tc.skip = str(tc.skip)
     tc.tags = _as_string_list(d.get("tags", []))
     tc.requires = _as_string_list(d.get("requires", []))
+    tc.iso = _as_string_list(d.get("iso", []))
 
     # query: may be a string or a multi-line block
     q = d.get("query")
@@ -260,6 +264,8 @@ def _lb_parse_meta(lines: List[str], idx: int) -> tuple:
             meta.requires = _lb_parse_yaml_list(value)
         elif key == "tags":
             meta.tags = _lb_parse_yaml_list(value)
+        elif key == "iso":
+            meta.iso = _lb_parse_yaml_list(value)
         idx += 1
     return meta, idx
 
@@ -322,6 +328,9 @@ def _lb_parse_single_test(lines: List[str], idx: int) -> tuple:
             idx += 1
         elif key == "requires":
             tc.requires = _lb_parse_yaml_list(value)
+            idx += 1
+        elif key == "iso":
+            tc.iso = _lb_parse_yaml_list(value)
             idx += 1
         elif key == "params":
             idx += 1

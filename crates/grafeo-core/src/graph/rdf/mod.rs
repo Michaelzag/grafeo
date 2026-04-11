@@ -36,6 +36,7 @@
 
 mod graph_store_adapter;
 pub mod nquads;
+pub mod section;
 pub mod sink;
 mod store;
 mod term;
@@ -43,6 +44,7 @@ mod triple;
 pub mod turtle;
 
 pub use graph_store_adapter::RdfGraphStoreAdapter;
+pub use section::RdfStoreSection;
 pub use sink::{BatchInsertSink, CountSink, TripleSink, VecSink};
 pub use store::{BulkLoadResult, NTriplesError, RdfStore, RdfStoreConfig};
 pub use term::{BlankNode, Iri, Literal, Term};

@@ -92,8 +92,12 @@ mod config;
 mod hnsw;
 #[cfg(feature = "vector-index")]
 mod quantized_hnsw;
+#[cfg(feature = "vector-index")]
+pub mod section;
 
-pub use accessor::{PropertyVectorAccessor, VectorAccessor};
+pub use accessor::{
+    PropertyVectorAccessor, SpillableVectorAccessor, VectorAccessor, VectorAccessorKind,
+};
 pub use distance::{
     DistanceMetric, compute_distance, cosine_distance, cosine_similarity, dot_product,
     euclidean_distance, euclidean_distance_squared, l2_norm, manhattan_distance, normalize,
@@ -112,6 +116,8 @@ pub use config::HnswConfig;
 pub use hnsw::HnswIndex;
 #[cfg(feature = "vector-index")]
 pub use quantized_hnsw::QuantizedHnswIndex;
+#[cfg(feature = "vector-index")]
+pub use section::VectorStoreSection;
 
 use grafeo_common::types::NodeId;
 

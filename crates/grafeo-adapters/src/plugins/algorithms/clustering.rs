@@ -12,7 +12,7 @@ use grafeo_common::utils::error::Result;
 use grafeo_common::utils::hash::{FxHashMap, FxHashSet};
 use grafeo_core::graph::Direction;
 use grafeo_core::graph::GraphStore;
-#[cfg(test)]
+#[cfg(all(test, feature = "lpg"))]
 use grafeo_core::graph::lpg::LpgStore;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
@@ -693,7 +693,7 @@ impl ParallelGraphAlgorithm for ClusteringCoefficientAlgorithm {
 // Tests
 // ============================================================================
 
-#[cfg(test)]
+#[cfg(all(test, feature = "lpg"))]
 mod tests {
     use super::*;
 
@@ -1109,7 +1109,7 @@ mod tests {
 
     // ---- Cross-model: RDF adapter produces same results as LPG ----
 
-    #[cfg(feature = "rdf")]
+    #[cfg(feature = "triple-store")]
     #[test]
     fn test_triangle_count_rdf_matches_lpg() {
         use grafeo_core::graph::rdf::{RdfGraphStoreAdapter, RdfStore, Term, Triple};
@@ -1145,7 +1145,7 @@ mod tests {
         assert_eq!(rdf_triangles, 4);
     }
 
-    #[cfg(feature = "rdf")]
+    #[cfg(feature = "triple-store")]
     #[test]
     fn test_clustering_coefficient_rdf_matches_lpg() {
         use grafeo_core::graph::rdf::{RdfGraphStoreAdapter, RdfStore, Term, Triple};

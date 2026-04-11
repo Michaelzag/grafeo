@@ -460,7 +460,7 @@ impl Operator for VectorJoinOperator {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "lpg"))]
 mod tests {
     use super::*;
     use crate::execution::operators::single_row::NodeListOperator;

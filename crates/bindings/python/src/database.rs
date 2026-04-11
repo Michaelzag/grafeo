@@ -212,17 +212,20 @@ impl PyGrafeoDB {
         } else {
             None
         };
-        let result = db
+        let mut result = db
             .execute_language(query, language, param_map)
             .map_err(PyGrafeoError::from)?;
         let (nodes, edges) = extract_entities(&result, &db);
+        let columns = std::mem::take(&mut result.columns);
+        let exec_time = result.execution_time_ms;
+        let scanned = result.rows_scanned;
         Ok(PyQueryResult::with_metrics(
-            result.columns,
-            result.rows,
+            columns,
+            result.into_rows(),
             nodes,
             edges,
-            result.execution_time_ms,
-            result.rows_scanned,
+            exec_time,
+            scanned,
         ))
     }
 }
@@ -330,7 +333,7 @@ impl PyGrafeoDB {
         } else {
             None
         };
-        let result = session
+        let mut result = session
             .execute_at_epoch_with_params(
                 query,
                 grafeo_common::types::EpochId::new(epoch),
@@ -338,13 +341,16 @@ impl PyGrafeoDB {
             )
             .map_err(PyGrafeoError::from)?;
         let (nodes, edges) = extract_entities(&result, &db);
+        let columns = std::mem::take(&mut result.columns);
+        let exec_time = result.execution_time_ms;
+        let scanned = result.rows_scanned;
         Ok(PyQueryResult::with_metrics(
-            result.columns,
-            result.rows,
+            columns,
+            result.into_rows(),
             nodes,
             edges,
-            result.execution_time_ms,
-            result.rows_scanned,
+            exec_time,
+            scanned,
         ))
     }
 
@@ -416,7 +422,7 @@ impl PyGrafeoDB {
         future_into_py(py, async move {
             // Perform the query execution in the async context
             // We use spawn_blocking since the actual db.execute is synchronous
-            let result = tokio::task::spawn_blocking(move || {
+            let mut result = tokio::task::spawn_blocking(move || {
                 let db = db.read();
                 if let Some(params) = param_map {
                     db.execute_with_params(&query, params)
@@ -431,10 +437,12 @@ impl PyGrafeoDB {
             // Create PyQueryResult from the result
             // Note: We can't call extract_entities here because we don't have
             // Python references in the async context. We return raw data.
+            let columns = std::mem::take(&mut result.columns);
+            let column_types = std::mem::take(&mut result.column_types);
             Ok(AsyncQueryResult {
-                columns: result.columns,
-                rows: result.rows,
-                column_types: result.column_types,
+                columns,
+                rows: result.into_rows(),
+                column_types,
             })
         })
     }
@@ -1998,6 +2006,49 @@ impl PyGrafeoDB {
         Ok(())
     }
 
+    /// Creates a full backup of the database.
+    ///
+    /// Checkpoints the database, copies the container file to the backup directory,
+    /// and creates a backup manifest.
+    ///
+    /// Example:
+    ///     db = GrafeoDB("./mydb.grafeo")
+    ///     db.backup_full("./backups/mydb")
+    fn backup_full(&self, backup_dir: String) -> PyResult<()> {
+        let db = self.inner.read();
+        db.backup_full(std::path::Path::new(&backup_dir))
+            .map_err(PyGrafeoError::from)?;
+        Ok(())
+    }
+
+    /// Creates an incremental backup (WAL records since last backup).
+    ///
+    /// Requires a prior full backup in the backup directory.
+    ///
+    /// Example:
+    ///     db.backup_incremental("./backups/mydb")
+    fn backup_incremental(&self, backup_dir: String) -> PyResult<()> {
+        let db = self.inner.read();
+        db.backup_incremental(std::path::Path::new(&backup_dir))
+            .map_err(PyGrafeoError::from)?;
+        Ok(())
+    }
+
+    /// Restores a database to a specific epoch from a backup chain.
+    ///
+    /// Example:
+    ///     GrafeoDB.restore_to_epoch("./backups/mydb", 500, "./restored.grafeo")
+    #[staticmethod]
+    fn restore_to_epoch(backup_dir: String, epoch: u64, output_path: String) -> PyResult<()> {
+        grafeo_engine::GrafeoDB::restore_to_epoch(
+            std::path::Path::new(&backup_dir),
+            grafeo_common::types::EpochId::new(epoch),
+            std::path::Path::new(&output_path),
+        )
+        .map_err(PyGrafeoError::from)?;
+        Ok(())
+    }
+
     /// Creates an in-memory copy of this database.
     ///
     /// Returns a new database that is completely independent.
@@ -2174,14 +2225,19 @@ impl PyGrafeoDB {
         let db = self.inner.read();
         let store = db.store();
 
-        // Collect all nodes and discover property keys
+        // Collect all nodes and discover property keys.
+        // Skip properties whose names collide with structural columns
+        // to prevent silent overwrites (GrafeoDB/grafeo#254).
+        const RESERVED_NODE_COLS: &[&str] = &["id", "labels"];
         let nodes: Vec<_> = store.all_nodes().collect();
         let mut prop_keys: Vec<String> = Vec::new();
         let mut prop_key_set = std::collections::HashSet::new();
         for node in &nodes {
             for (key, _) in node.properties.iter() {
                 let key_str = key.as_str().to_owned();
-                if prop_key_set.insert(key_str.clone()) {
+                if prop_key_set.insert(key_str.clone())
+                    && !RESERVED_NODE_COLS.contains(&key_str.as_str())
+                {
                     prop_keys.push(key_str);
                 }
             }
@@ -2245,14 +2301,19 @@ impl PyGrafeoDB {
         let db = self.inner.read();
         let store = db.store();
 
-        // Collect all edges and discover property keys
+        // Collect all edges and discover property keys.
+        // Skip properties whose names collide with structural columns
+        // to prevent silent overwrites (GrafeoDB/grafeo#254).
+        const RESERVED_EDGE_COLS: &[&str] = &["id", "source", "target", "type"];
         let edges: Vec<_> = store.all_edges().collect();
         let mut prop_keys: Vec<String> = Vec::new();
         let mut prop_key_set = std::collections::HashSet::new();
         for edge in &edges {
             for (key, _) in edge.properties.iter() {
                 let key_str = key.as_str().to_owned();
-                if prop_key_set.insert(key_str.clone()) {
+                if prop_key_set.insert(key_str.clone())
+                    && !RESERVED_EDGE_COLS.contains(&key_str.as_str())
+                {
                     prop_keys.push(key_str);
                 }
             }
@@ -2713,17 +2774,20 @@ impl PyTransaction {
         } else {
             None
         };
-        let result = session
+        let mut result = session
             .execute_language(query, language, param_map)
             .map_err(PyGrafeoError::from)?;
         let (nodes, edges) = extract_entities(&result, &db);
+        let columns = std::mem::take(&mut result.columns);
+        let exec_time = result.execution_time_ms;
+        let scanned = result.rows_scanned;
         Ok(PyQueryResult::with_metrics(
-            result.columns,
-            result.rows,
+            columns,
+            result.into_rows(),
             nodes,
             edges,
-            result.execution_time_ms,
-            result.rows_scanned,
+            exec_time,
+            scanned,
         ))
     }
 

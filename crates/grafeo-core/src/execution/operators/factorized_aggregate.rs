@@ -22,6 +22,7 @@ use grafeo_common::types::{LogicalType, Value};
 
 /// Types of aggregates that can be computed on factorized data.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum FactorizedAggregate {
     /// COUNT(*) - total logical row count.
     Count,

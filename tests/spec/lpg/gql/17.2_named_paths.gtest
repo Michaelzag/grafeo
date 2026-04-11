@@ -9,6 +9,7 @@ meta:
   section: "17.2"
   title: Named paths
   dataset: empty
+  iso: [G004, GF04, GV55]
 
 tests:
 

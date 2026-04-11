@@ -6,6 +6,7 @@ meta:
   section: "14.10"
   title: ORDER BY, LIMIT, SKIP, FETCH
   dataset: social_network
+  iso: [GQ12, GQ13, GA03]
 
 tests:
 

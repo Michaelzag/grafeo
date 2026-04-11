@@ -29,6 +29,8 @@ pub mod config;
 pub mod database;
 #[cfg(feature = "embed")]
 pub mod embedding;
+pub mod execution;
+pub mod export;
 pub mod memory_usage;
 #[cfg(feature = "metrics")]
 pub mod metrics;
@@ -51,4 +53,5 @@ pub use memory_usage::MemoryUsage;
 #[cfg(feature = "metrics")]
 pub use metrics::{MetricsRegistry, MetricsSnapshot};
 pub use session::Session;
+#[cfg(feature = "lpg")]
 pub use transaction::{CommitInfo, PreparedCommit};

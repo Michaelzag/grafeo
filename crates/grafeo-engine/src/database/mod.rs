@@ -11,27 +11,44 @@
 //! - `persistence` - Save, load, snapshots, iteration
 //! - `admin` - Stats, introspection, diagnostics, CDC
 
+#[cfg(feature = "lpg")]
 mod admin;
-#[cfg(feature = "async-storage")]
+#[cfg(feature = "arrow-export")]
+pub mod arrow;
+#[cfg(all(feature = "async-storage", feature = "lpg"))]
 mod async_ops;
-#[cfg(feature = "async-storage")]
+#[cfg(all(feature = "async-storage", feature = "lpg"))]
 pub(crate) mod async_wal_store;
+#[cfg(all(feature = "wal", feature = "grafeo-file"))]
+pub mod backup;
+#[cfg(feature = "lpg")]
+pub(crate) mod catalog_section;
 #[cfg(feature = "cdc")]
 pub(crate) mod cdc_store;
+#[cfg(all(feature = "grafeo-file", feature = "lpg"))]
+mod checkpoint_timer;
+#[cfg(feature = "lpg")]
 mod crud;
 #[cfg(feature = "embed")]
 mod embed;
+#[cfg(feature = "grafeo-file")]
+pub(crate) mod flush;
+#[cfg(feature = "lpg")]
 mod import;
+#[cfg(feature = "lpg")]
 mod index;
+#[cfg(feature = "lpg")]
 mod persistence;
 mod query;
-#[cfg(feature = "rdf")]
+#[cfg(feature = "triple-store")]
 mod rdf_ops;
+#[cfg(feature = "lpg")]
 mod search;
-#[cfg(feature = "wal")]
+pub(crate) mod section_consumer;
+#[cfg(all(feature = "wal", feature = "lpg"))]
 pub(crate) mod wal_store;
 
-use grafeo_common::grafeo_error;
+use grafeo_common::{grafeo_error, grafeo_warn};
 #[cfg(feature = "wal")]
 use std::path::Path;
 use std::sync::Arc;
@@ -39,18 +56,19 @@ use std::sync::atomic::AtomicUsize;
 
 use parking_lot::RwLock;
 
-#[cfg(feature = "grafeo-file")]
-use grafeo_adapters::storage::file::GrafeoFileManager;
-#[cfg(feature = "wal")]
-use grafeo_adapters::storage::wal::{
-    DurabilityMode as WalDurabilityMode, LpgWal, WalConfig, WalRecord, WalRecovery,
-};
 use grafeo_common::memory::buffer::{BufferManager, BufferManagerConfig};
 use grafeo_common::utils::error::{Error, QueryError, QueryErrorKind, Result};
+#[cfg(feature = "lpg")]
 use grafeo_core::graph::lpg::LpgStore;
-#[cfg(feature = "rdf")]
+#[cfg(feature = "triple-store")]
 use grafeo_core::graph::rdf::RdfStore;
 use grafeo_core::graph::{GraphStore, GraphStoreMut};
+#[cfg(feature = "grafeo-file")]
+use grafeo_storage::file::GrafeoFileManager;
+#[cfg(all(feature = "wal", feature = "lpg"))]
+use grafeo_storage::wal::WalRecovery;
+#[cfg(feature = "wal")]
+use grafeo_storage::wal::{DurabilityMode as WalDurabilityMode, LpgWal, WalConfig, WalRecord};
 
 use crate::catalog::Catalog;
 use crate::config::Config;
@@ -84,11 +102,12 @@ pub struct GrafeoDB {
     /// Database configuration.
     pub(super) config: Config,
     /// The underlying graph store (None when using an external store).
+    #[cfg(feature = "lpg")]
     pub(super) store: Option<Arc<LpgStore>>,
     /// Schema and metadata catalog shared across sessions.
     pub(super) catalog: Arc<Catalog>,
     /// RDF triple store (if RDF feature is enabled).
-    #[cfg(feature = "rdf")]
+    #[cfg(feature = "triple-store")]
     pub(super) rdf_store: Arc<RdfStore>,
     /// Transaction manager.
     pub(super) transaction_manager: Arc<TransactionManager>,
@@ -121,6 +140,20 @@ pub struct GrafeoDB {
     /// Single-file database manager (when using `.grafeo` format).
     #[cfg(feature = "grafeo-file")]
     pub(super) file_manager: Option<Arc<GrafeoFileManager>>,
+    /// Periodic checkpoint timer (when `checkpoint_interval` is configured).
+    /// Wrapped in Mutex because `close()` takes `&self` but needs to stop the timer.
+    #[cfg(all(feature = "grafeo-file", feature = "lpg"))]
+    checkpoint_timer: parking_lot::Mutex<Option<checkpoint_timer::CheckpointTimer>>,
+    /// Shared registry of spilled vector storages.
+    /// Used by the search path to create `SpillableVectorAccessor` instances.
+    #[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
+    vector_spill_storages: Option<
+        Arc<
+            parking_lot::RwLock<
+                std::collections::HashMap<String, Arc<grafeo_core::index::vector::MmapStorage>>,
+            >,
+        >,
+    >,
     /// External read-only graph store (when using with_store() or with_read_store()).
     /// When set, sessions route queries through this store instead of the built-in LpgStore.
     pub(super) external_read_store: Option<Arc<dyn GraphStore>>,
@@ -151,6 +184,7 @@ impl GrafeoDB {
     /// Panics if the database was created with [`with_store()`](Self::with_store) or
     /// [`with_read_store()`](Self::with_read_store), which use an external store
     /// instead of the built-in LPG store.
+    #[cfg(feature = "lpg")]
     fn lpg_store(&self) -> &Arc<LpgStore> {
         self.store.as_ref().expect(
             "no built-in LpgStore: this GrafeoDB was created with an external store \
@@ -271,8 +305,9 @@ impl GrafeoDB {
             .validate()
             .map_err(|e| grafeo_common::utils::error::Error::Internal(e.to_string()))?;
 
+        #[cfg(feature = "lpg")]
         let store = Arc::new(LpgStore::new()?);
-        #[cfg(feature = "rdf")]
+        #[cfg(feature = "triple-store")]
         let rdf_store = Arc::new(RdfStore::new());
         let transaction_manager = Arc::new(TransactionManager::new());
 
@@ -281,10 +316,13 @@ impl GrafeoDB {
             budget: config.memory_limit.unwrap_or_else(|| {
                 (BufferManagerConfig::detect_system_memory() as f64 * 0.75) as usize
             }),
-            spill_path: config
-                .spill_path
-                .clone()
-                .or_else(|| config.path.as_ref().map(|p| p.join("spill"))),
+            spill_path: config.spill_path.clone().or_else(|| {
+                config.path.as_ref().and_then(|p| {
+                    let parent = p.parent()?;
+                    let name = p.file_name()?.to_str()?;
+                    Some(parent.join(format!("{name}.spill")))
+                })
+            }),
             ..BufferManagerConfig::default()
         };
         let buffer_manager = BufferManager::new(buffer_config);
@@ -301,15 +339,28 @@ impl GrafeoDB {
             if let Some(ref db_path) = config.path {
                 if db_path.exists() && db_path.is_file() {
                     let fm = GrafeoFileManager::open_read_only(db_path)?;
-                    let snapshot_data = fm.read_snapshot()?;
-                    if !snapshot_data.is_empty() {
-                        Self::apply_snapshot_data(
+                    // Try v2 section-based format first
+                    #[cfg(feature = "lpg")]
+                    if fm.read_section_directory()?.is_some() {
+                        Self::load_from_sections(
+                            &fm,
                             &store,
                             &catalog,
-                            #[cfg(feature = "rdf")]
+                            #[cfg(feature = "triple-store")]
                             &rdf_store,
-                            &snapshot_data,
                         )?;
+                    } else {
+                        // Fall back to v1 blob format
+                        let snapshot_data = fm.read_snapshot()?;
+                        if !snapshot_data.is_empty() {
+                            Self::apply_snapshot_data(
+                                &store,
+                                &catalog,
+                                #[cfg(feature = "triple-store")]
+                                &rdf_store,
+                                &snapshot_data,
+                            )?;
+                        }
                     }
                     Some(Arc::new(fm))
                 } else {
@@ -341,27 +392,38 @@ impl GrafeoDB {
                     )));
                 };
 
-                // Load snapshot data from the file
-                let snapshot_data = fm.read_snapshot()?;
-                if !snapshot_data.is_empty() {
-                    Self::apply_snapshot_data(
+                // Load data: try v2 section-based format, fall back to v1 blob
+                #[cfg(feature = "lpg")]
+                if fm.read_section_directory()?.is_some() {
+                    Self::load_from_sections(
+                        &fm,
                         &store,
                         &catalog,
-                        #[cfg(feature = "rdf")]
+                        #[cfg(feature = "triple-store")]
                         &rdf_store,
-                        &snapshot_data,
                     )?;
+                } else {
+                    let snapshot_data = fm.read_snapshot()?;
+                    if !snapshot_data.is_empty() {
+                        Self::apply_snapshot_data(
+                            &store,
+                            &catalog,
+                            #[cfg(feature = "triple-store")]
+                            &rdf_store,
+                            &snapshot_data,
+                        )?;
+                    }
                 }
 
                 // Recover sidecar WAL if WAL is enabled and a sidecar exists
-                #[cfg(feature = "wal")]
+                #[cfg(all(feature = "wal", feature = "lpg"))]
                 if config.wal_enabled && fm.has_sidecar_wal() {
                     let recovery = WalRecovery::new(fm.sidecar_wal_path());
                     let records = recovery.recover()?;
                     Self::apply_wal_records(
                         &store,
                         &catalog,
-                        #[cfg(feature = "rdf")]
+                        #[cfg(feature = "triple-store")]
                         &rdf_store,
                         &records,
                     )?;
@@ -401,18 +463,19 @@ impl GrafeoDB {
                 };
 
                 // For legacy WAL directory format, check if WAL exists and recover
-                #[cfg(feature = "grafeo-file")]
+                #[cfg(all(feature = "lpg", feature = "grafeo-file"))]
                 let is_single_file = file_manager.is_some();
-                #[cfg(not(feature = "grafeo-file"))]
+                #[cfg(all(feature = "lpg", not(feature = "grafeo-file")))]
                 let is_single_file = false;
 
+                #[cfg(feature = "lpg")]
                 if !is_single_file && wal_path.exists() {
                     let recovery = WalRecovery::new(&wal_path);
                     let records = recovery.recover()?;
                     Self::apply_wal_records(
                         &store,
                         &catalog,
-                        #[cfg(feature = "rdf")]
+                        #[cfg(feature = "triple-store")]
                         &rdf_store,
                         &records,
                     )?;
@@ -451,17 +514,35 @@ impl GrafeoDB {
 
         // After all snapshot/WAL recovery, sync TransactionManager epoch
         // with the store so queries use the correct viewing epoch.
-        #[cfg(feature = "temporal")]
+        #[cfg(all(feature = "temporal", feature = "lpg"))]
         transaction_manager.sync_epoch(store.current_epoch());
 
         #[cfg(feature = "cdc")]
         let cdc_enabled_val = config.cdc_enabled;
+        #[cfg(feature = "cdc")]
+        let cdc_retention = config.cdc_retention.clone();
 
-        Ok(Self {
+        // Clone Arcs for the checkpoint timer before moving originals into the struct.
+        // The timer captures its own references and runs in a background thread.
+        #[cfg(all(feature = "grafeo-file", feature = "lpg"))]
+        let checkpoint_interval = config.checkpoint_interval;
+        #[cfg(all(feature = "grafeo-file", feature = "lpg"))]
+        let timer_store = Arc::clone(&store);
+        #[cfg(all(feature = "grafeo-file", feature = "lpg"))]
+        let timer_catalog = Arc::clone(&catalog);
+        #[cfg(all(feature = "grafeo-file", feature = "lpg"))]
+        let timer_tm = Arc::clone(&transaction_manager);
+        #[cfg(all(feature = "grafeo-file", feature = "lpg", feature = "triple-store"))]
+        let timer_rdf = Arc::clone(&rdf_store);
+        #[cfg(all(feature = "grafeo-file", feature = "lpg", feature = "wal"))]
+        let timer_wal = wal.clone();
+
+        let mut db = Self {
             config,
+            #[cfg(feature = "lpg")]
             store: Some(store),
             catalog,
-            #[cfg(feature = "rdf")]
+            #[cfg(feature = "triple-store")]
             rdf_store,
             transaction_manager,
             buffer_manager,
@@ -473,13 +554,17 @@ impl GrafeoDB {
             commit_counter: Arc::new(AtomicUsize::new(0)),
             is_open: RwLock::new(true),
             #[cfg(feature = "cdc")]
-            cdc_log: Arc::new(crate::cdc::CdcLog::new()),
+            cdc_log: Arc::new(crate::cdc::CdcLog::with_retention(cdc_retention)),
             #[cfg(feature = "cdc")]
             cdc_enabled: std::sync::atomic::AtomicBool::new(cdc_enabled_val),
             #[cfg(feature = "embed")]
             embedding_models: RwLock::new(hashbrown::HashMap::new()),
             #[cfg(feature = "grafeo-file")]
             file_manager,
+            #[cfg(all(feature = "grafeo-file", feature = "lpg"))]
+            checkpoint_timer: parking_lot::Mutex::new(None),
+            #[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
+            vector_spill_storages: None,
             external_read_store: None,
             external_write_store: None,
             #[cfg(feature = "metrics")]
@@ -487,7 +572,53 @@ impl GrafeoDB {
             current_graph: RwLock::new(None),
             current_schema: RwLock::new(None),
             read_only: is_read_only,
-        })
+        };
+
+        // Register storage sections as memory consumers for pressure tracking
+        db.register_section_consumers();
+
+        // Start periodic checkpoint timer if configured
+        #[cfg(all(feature = "grafeo-file", feature = "lpg"))]
+        if let (Some(interval), Some(fm)) = (checkpoint_interval, &db.file_manager)
+            && !is_read_only
+        {
+            *db.checkpoint_timer.lock() = Some(checkpoint_timer::CheckpointTimer::start(
+                interval,
+                Arc::clone(fm),
+                timer_store,
+                timer_catalog,
+                timer_tm,
+                #[cfg(feature = "triple-store")]
+                timer_rdf,
+                #[cfg(feature = "wal")]
+                timer_wal,
+            ));
+        }
+
+        // Discover existing spill files from a previous session.
+        // If vectors were spilled before close, the spill files persist on disk
+        // and need to be re-mapped so search can read from them.
+        #[cfg(all(
+            feature = "lpg",
+            feature = "vector-index",
+            feature = "mmap",
+            not(feature = "temporal")
+        ))]
+        db.restore_spill_files();
+
+        // If VectorStore is configured as ForceDisk, immediately spill embeddings.
+        // This must happen after register_section_consumers() which creates the consumer.
+        #[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
+        if db
+            .config
+            .section_configs
+            .get(&grafeo_common::storage::SectionType::VectorStore)
+            .is_some_and(|c| c.tier == grafeo_common::storage::TierOverride::ForceDisk)
+        {
+            db.buffer_manager.spill_all();
+        }
+
+        Ok(db)
     }
 
     /// Creates a database backed by a custom [`GraphStoreMut`] implementation.
@@ -541,9 +672,10 @@ impl GrafeoDB {
 
         Ok(Self {
             config,
+            #[cfg(feature = "lpg")]
             store: None,
             catalog: Arc::new(Catalog::new()),
-            #[cfg(feature = "rdf")]
+            #[cfg(feature = "triple-store")]
             rdf_store: Arc::new(RdfStore::new()),
             transaction_manager,
             buffer_manager,
@@ -562,6 +694,10 @@ impl GrafeoDB {
             embedding_models: RwLock::new(hashbrown::HashMap::new()),
             #[cfg(feature = "grafeo-file")]
             file_manager: None,
+            #[cfg(all(feature = "grafeo-file", feature = "lpg"))]
+            checkpoint_timer: parking_lot::Mutex::new(None),
+            #[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
+            vector_spill_storages: None,
             external_read_store: Some(Arc::clone(&store) as Arc<dyn GraphStore>),
             external_write_store: Some(store),
             #[cfg(feature = "metrics")]
@@ -619,9 +755,10 @@ impl GrafeoDB {
 
         Ok(Self {
             config,
+            #[cfg(feature = "lpg")]
             store: None,
             catalog: Arc::new(Catalog::new()),
-            #[cfg(feature = "rdf")]
+            #[cfg(feature = "triple-store")]
             rdf_store: Arc::new(RdfStore::new()),
             transaction_manager,
             buffer_manager,
@@ -640,6 +777,10 @@ impl GrafeoDB {
             embedding_models: RwLock::new(hashbrown::HashMap::new()),
             #[cfg(feature = "grafeo-file")]
             file_manager: None,
+            #[cfg(all(feature = "grafeo-file", feature = "lpg"))]
+            checkpoint_timer: parking_lot::Mutex::new(None),
+            #[cfg(all(feature = "vector-index", feature = "mmap", not(feature = "temporal")))]
+            vector_spill_storages: None,
             external_read_store: Some(store),
             external_write_store: None,
             #[cfg(feature = "metrics")]
@@ -677,7 +818,10 @@ impl GrafeoDB {
 
         self.external_read_store = Some(Arc::new(compact) as Arc<dyn GraphStore>);
         self.external_write_store = None;
-        self.store = None;
+        #[cfg(feature = "lpg")]
+        {
+            self.store = None;
+        }
         self.read_only = true;
         self.query_cache = Arc::new(QueryCache::default());
 
@@ -689,11 +833,11 @@ impl GrafeoDB {
     /// Data mutation records are routed through a graph cursor that tracks
     /// `SwitchGraph` context markers, replaying mutations into the correct
     /// named graph (or the default graph when cursor is `None`).
-    #[cfg(feature = "wal")]
+    #[cfg(all(feature = "wal", feature = "lpg"))]
     fn apply_wal_records(
         store: &Arc<LpgStore>,
         catalog: &Catalog,
-        #[cfg(feature = "rdf")] rdf_store: &Arc<RdfStore>,
+        #[cfg(feature = "triple-store")] rdf_store: &Arc<RdfStore>,
         records: &[WalRecord],
     ) -> Result<()> {
         use crate::catalog::{
@@ -951,7 +1095,7 @@ impl GrafeoDB {
                 }
 
                 // --- RDF triple replay ---
-                #[cfg(feature = "rdf")]
+                #[cfg(feature = "triple-store")]
                 WalRecord::InsertRdfTriple { .. }
                 | WalRecord::DeleteRdfTriple { .. }
                 | WalRecord::ClearRdfGraph { .. }
@@ -959,7 +1103,7 @@ impl GrafeoDB {
                 | WalRecord::DropRdfGraph { .. } => {
                     rdf_ops::replay_rdf_wal_record(rdf_store, record);
                 }
-                #[cfg(not(feature = "rdf"))]
+                #[cfg(not(feature = "triple-store"))]
                 WalRecord::InsertRdfTriple { .. }
                 | WalRecord::DeleteRdfTriple { .. }
                 | WalRecord::ClearRdfGraph { .. }
@@ -978,6 +1122,10 @@ impl GrafeoDB {
                 WalRecord::TransactionAbort { .. } | WalRecord::Checkpoint { .. } => {
                     // Transaction control records don't need replay action
                     // (recovery already filtered to only committed transactions)
+                }
+                WalRecord::EpochAdvance { .. } => {
+                    // Metadata record: no store mutation needed.
+                    // Used by incremental backup and point-in-time recovery.
                 }
             }
         }
@@ -1004,8 +1152,7 @@ impl GrafeoDB {
                     if let Ok(mut f) = std::fs::File::open(path) {
                         use std::io::Read;
                         let mut magic = [0u8; 4];
-                        if f.read_exact(&mut magic).is_ok()
-                            && magic == grafeo_adapters::storage::file::MAGIC
+                        if f.read_exact(&mut magic).is_ok() && magic == grafeo_storage::file::MAGIC
                         {
                             return true;
                         }
@@ -1023,20 +1170,93 @@ impl GrafeoDB {
     }
 
     /// Applies snapshot data (from a `.grafeo` file) to restore the store and catalog.
-    #[cfg(feature = "grafeo-file")]
+    ///
+    /// Supports both v1 (monolithic blob) and v2 (section-based) formats.
+    #[cfg(all(feature = "grafeo-file", feature = "lpg"))]
     fn apply_snapshot_data(
         store: &Arc<LpgStore>,
         catalog: &Arc<crate::catalog::Catalog>,
-        #[cfg(feature = "rdf")] rdf_store: &Arc<RdfStore>,
+        #[cfg(feature = "triple-store")] rdf_store: &Arc<RdfStore>,
         data: &[u8],
     ) -> Result<()> {
+        // v1 blob format: pass through to legacy loader
         persistence::load_snapshot_into_store(
             store,
             catalog,
-            #[cfg(feature = "rdf")]
+            #[cfg(feature = "triple-store")]
             rdf_store,
             data,
         )
+    }
+
+    /// Loads from a section-based `.grafeo` file (v2 format).
+    ///
+    /// Reads the section directory, then deserializes each section independently.
+    #[cfg(all(feature = "grafeo-file", feature = "lpg"))]
+    fn load_from_sections(
+        fm: &GrafeoFileManager,
+        store: &Arc<LpgStore>,
+        catalog: &Arc<crate::catalog::Catalog>,
+        #[cfg(feature = "triple-store")] rdf_store: &Arc<RdfStore>,
+    ) -> Result<()> {
+        use grafeo_common::storage::{Section, SectionType};
+
+        let dir = fm.read_section_directory()?.ok_or_else(|| {
+            grafeo_common::utils::error::Error::Internal(
+                "expected v2 section directory but found none".to_string(),
+            )
+        })?;
+
+        // Load catalog section first (schema defs needed before data)
+        if let Some(entry) = dir.find(SectionType::Catalog) {
+            let data = fm.read_section_data(entry)?;
+            let tm = Arc::new(crate::transaction::TransactionManager::new());
+            let mut section = catalog_section::CatalogSection::new(
+                Arc::clone(catalog),
+                Arc::clone(store),
+                move || tm.current_epoch().as_u64(),
+            );
+            section.deserialize(&data)?;
+        }
+
+        // Load LPG store
+        if let Some(entry) = dir.find(SectionType::LpgStore) {
+            let data = fm.read_section_data(entry)?;
+            let mut section = grafeo_core::graph::lpg::LpgStoreSection::new(Arc::clone(store));
+            section.deserialize(&data)?;
+        }
+
+        // Load RDF store
+        #[cfg(feature = "triple-store")]
+        if let Some(entry) = dir.find(SectionType::RdfStore) {
+            let data = fm.read_section_data(entry)?;
+            let mut section = grafeo_core::graph::rdf::RdfStoreSection::new(Arc::clone(rdf_store));
+            section.deserialize(&data)?;
+        }
+
+        // Restore HNSW topology (if vector indexes exist in both catalog and section)
+        #[cfg(feature = "vector-index")]
+        if let Some(entry) = dir.find(SectionType::VectorStore) {
+            let data = fm.read_section_data(entry)?;
+            let indexes = store.vector_index_entries();
+            if !indexes.is_empty() {
+                let mut section = grafeo_core::index::vector::VectorStoreSection::new(indexes);
+                section.deserialize(&data)?;
+            }
+        }
+
+        // Restore BM25 postings (if text indexes exist in both catalog and section)
+        #[cfg(feature = "text-index")]
+        if let Some(entry) = dir.find(SectionType::TextIndex) {
+            let data = fm.read_section_data(entry)?;
+            let indexes = store.text_index_entries();
+            if !indexes.is_empty() {
+                let mut section = grafeo_core::index::text::TextIndexSection::new(indexes);
+                section.deserialize(&data)?;
+            }
+        }
+
+        Ok(())
     }
 
     // =========================================================================
@@ -1144,16 +1364,20 @@ impl GrafeoDB {
             .expect("arena allocation for external store session");
         }
 
-        #[cfg(feature = "rdf")]
+        #[cfg(all(feature = "lpg", feature = "triple-store"))]
         let mut session = Session::with_rdf_store_and_adaptive(
             Arc::clone(self.lpg_store()),
             Arc::clone(&self.rdf_store),
             session_cfg(),
         );
-        #[cfg(not(feature = "rdf"))]
+        #[cfg(all(feature = "lpg", not(feature = "triple-store")))]
         let mut session = Session::with_adaptive(Arc::clone(self.lpg_store()), session_cfg());
+        #[cfg(not(feature = "lpg"))]
+        let mut session =
+            Session::with_external_store(self.graph_store(), self.graph_store_mut(), session_cfg())
+                .expect("session creation for non-lpg build");
 
-        #[cfg(feature = "wal")]
+        #[cfg(all(feature = "wal", feature = "lpg"))]
         if let Some(ref wal) = self.wal {
             session.set_wal(Arc::clone(wal), Arc::clone(&self.wal_graph_context));
         }
@@ -1212,6 +1436,7 @@ impl GrafeoDB {
     ///
     /// Returns an error if the named graph does not exist.
     pub fn set_current_graph(&self, name: Option<&str>) -> Result<()> {
+        #[cfg(feature = "lpg")]
         if let Some(name) = name
             && !name.eq_ignore_ascii_case("default")
             && let Some(store) = &self.store
@@ -1335,25 +1560,10 @@ impl GrafeoDB {
     ///
     /// For code that only needs read/write graph operations, prefer
     /// [`graph_store()`](Self::graph_store) which returns the trait interface.
+    #[cfg(feature = "lpg")]
     #[must_use]
     pub fn store(&self) -> &Arc<LpgStore> {
         self.lpg_store()
-    }
-
-    /// Returns the LPG store for the currently active graph.
-    ///
-    /// If [`current_graph`](Self::current_graph) is `None` or `"default"`, returns
-    /// the default store. Otherwise looks up the named graph in the root store.
-    /// Falls back to the default store if the named graph does not exist.
-    #[allow(dead_code)] // Reserved for future graph-aware CRUD methods
-    fn active_store(&self) -> Arc<LpgStore> {
-        let store = self.lpg_store();
-        let graph_name = self.current_graph.read().clone();
-        match graph_name {
-            None => Arc::clone(store),
-            Some(ref name) if name.eq_ignore_ascii_case("default") => Arc::clone(store),
-            Some(ref name) => store.graph(name).unwrap_or_else(|| Arc::clone(store)),
-        }
     }
 
     // === Named Graph Management ===
@@ -1363,6 +1573,7 @@ impl GrafeoDB {
     /// # Errors
     ///
     /// Returns an error if arena allocation fails.
+    #[cfg(feature = "lpg")]
     pub fn create_graph(&self, name: &str) -> Result<bool> {
         Ok(self.lpg_store().create_graph(name)?)
     }
@@ -1371,6 +1582,7 @@ impl GrafeoDB {
     ///
     /// If the dropped graph was the active graph context, the context is reset
     /// to the default graph.
+    #[cfg(feature = "lpg")]
     pub fn drop_graph(&self, name: &str) -> bool {
         let Some(store) = &self.store else {
             return false;
@@ -1389,6 +1601,7 @@ impl GrafeoDB {
     }
 
     /// Returns all named graph names.
+    #[cfg(feature = "lpg")]
     #[must_use]
     pub fn list_graphs(&self) -> Vec<String> {
         self.lpg_store().graph_names()
@@ -1407,7 +1620,12 @@ impl GrafeoDB {
         if let Some(ref ext_read) = self.external_read_store {
             Arc::clone(ext_read)
         } else {
-            Arc::clone(self.lpg_store()) as Arc<dyn GraphStore>
+            #[cfg(feature = "lpg")]
+            {
+                Arc::clone(self.lpg_store()) as Arc<dyn GraphStore>
+            }
+            #[cfg(not(feature = "lpg"))]
+            unreachable!("no graph store available: enable the `lpg` feature or use with_store()")
         }
     }
 
@@ -1420,7 +1638,14 @@ impl GrafeoDB {
         if self.external_read_store.is_some() {
             self.external_write_store.as_ref().map(Arc::clone)
         } else {
-            Some(Arc::clone(self.lpg_store()) as Arc<dyn GraphStoreMut>)
+            #[cfg(feature = "lpg")]
+            {
+                Some(Arc::clone(self.lpg_store()) as Arc<dyn GraphStoreMut>)
+            }
+            #[cfg(not(feature = "lpg"))]
+            {
+                None
+            }
         }
     }
 
@@ -1428,11 +1653,23 @@ impl GrafeoDB {
     ///
     /// Determines the minimum epoch required by active transactions and prunes
     /// version chains older than that threshold. Also cleans up completed
-    /// transaction metadata in the transaction manager.
+    /// transaction metadata in the transaction manager, and prunes the CDC
+    /// event log according to its retention policy.
     pub fn gc(&self) {
-        let min_epoch = self.transaction_manager.min_active_epoch();
-        self.lpg_store().gc_versions(min_epoch);
+        #[cfg(feature = "lpg")]
+        let current_epoch = {
+            let min_epoch = self.transaction_manager.min_active_epoch();
+            self.lpg_store().gc_versions(min_epoch);
+            self.transaction_manager.current_epoch()
+        };
         self.transaction_manager.gc();
+
+        // Prune CDC events based on retention config (epoch + count limits)
+        #[cfg(feature = "cdc")]
+        if self.cdc_enabled.load(std::sync::atomic::Ordering::Relaxed) {
+            #[cfg(feature = "lpg")]
+            self.cdc_log.apply_retention(current_epoch);
+        }
     }
 
     /// Returns the buffer manager for memory-aware operations.
@@ -1475,6 +1712,15 @@ impl GrafeoDB {
             return Ok(());
         }
 
+        // Stop the periodic checkpoint timer first, even for read-only databases.
+        // compact() can switch a writable DB to read-only after the timer started,
+        // so the timer must be stopped before any early return to avoid racing
+        // with the closed file manager.
+        #[cfg(all(feature = "grafeo-file", feature = "lpg"))]
+        if let Some(mut timer) = self.checkpoint_timer.lock().take() {
+            timer.stop();
+        }
+
         // Read-only databases: just release the shared lock, no checkpointing
         if self.read_only {
             #[cfg(feature = "grafeo-file")]
@@ -1500,7 +1746,31 @@ impl GrafeoDB {
             if let Some(ref wal) = self.wal {
                 wal.sync()?;
             }
-            self.checkpoint_to_file(fm)?;
+            let flush_result = self.checkpoint_to_file(fm, flush::FlushReason::Explicit)?;
+
+            // Safety check: if WAL has records but the checkpoint was a no-op
+            // (zero sections written), the container file may not contain the
+            // latest data. This can happen when sections are not marked dirty
+            // despite mutations going through the WAL. Force-dirty all sections
+            // and retry before removing the sidecar.
+            #[cfg(feature = "wal")]
+            let flush_result = if flush_result.sections_written == 0 {
+                if let Some(ref wal) = self.wal {
+                    if wal.record_count() > 0 {
+                        grafeo_warn!(
+                            "WAL has {} records but checkpoint wrote 0 sections; retrying with forced flush",
+                            wal.record_count()
+                        );
+                        self.checkpoint_to_file(fm, flush::FlushReason::Explicit)?
+                    } else {
+                        flush_result
+                    }
+                } else {
+                    flush_result
+                }
+            } else {
+                flush_result
+            };
 
             // Release WAL file handles before removing sidecar directory.
             // On Windows, open handles prevent directory deletion.
@@ -1509,11 +1779,25 @@ impl GrafeoDB {
                 wal.close_active_log();
             }
 
-            {
-                use grafeo_core::testing::crash::maybe_crash;
-                maybe_crash("close:before_remove_sidecar_wal");
+            // Only remove the sidecar WAL after verifying the checkpoint wrote
+            // data to the container. If nothing was written and the WAL had
+            // records, keep the sidecar so the next open can recover from it.
+            #[cfg(feature = "wal")]
+            let has_wal_records = self.wal.as_ref().is_some_and(|wal| wal.record_count() > 0);
+            #[cfg(not(feature = "wal"))]
+            let has_wal_records = false;
+
+            if flush_result.sections_written > 0 || !has_wal_records {
+                {
+                    use grafeo_common::testing::crash::maybe_crash;
+                    maybe_crash("close:before_remove_sidecar_wal");
+                }
+                fm.remove_sidecar_wal()?;
+            } else {
+                grafeo_warn!(
+                    "keeping sidecar WAL for recovery: checkpoint wrote 0 sections but WAL has records"
+                );
             }
-            fm.remove_sidecar_wal()?;
             fm.close()?;
         }
 
@@ -1558,37 +1842,323 @@ impl GrafeoDB {
         Ok(())
     }
 
-    /// Writes the current database snapshot to the `.grafeo` file.
+    /// Registers storage sections as [`MemoryConsumer`]s with the BufferManager.
+    ///
+    /// Each section reports its memory usage to the buffer manager, enabling
+    /// accurate pressure tracking. Called once after database construction.
+    fn register_section_consumers(&mut self) {
+        #[cfg(feature = "lpg")]
+        let store_ref = self.store.as_ref();
+        #[cfg(not(feature = "lpg"))]
+        // LPG store section
+        #[cfg(feature = "lpg")]
+        if let Some(store) = store_ref {
+            let lpg = grafeo_core::graph::lpg::LpgStoreSection::new(Arc::clone(store));
+            self.buffer_manager.register_consumer(Arc::new(
+                section_consumer::SectionConsumer::new(Arc::new(lpg)),
+            ));
+        }
+
+        // RDF store: only when data exists
+        #[cfg(feature = "triple-store")]
+        if !self.rdf_store.is_empty() || self.rdf_store.graph_count() > 0 {
+            let rdf = grafeo_core::graph::rdf::RdfStoreSection::new(Arc::clone(&self.rdf_store));
+            self.buffer_manager.register_consumer(Arc::new(
+                section_consumer::SectionConsumer::new(Arc::new(rdf)),
+            ));
+        }
+
+        // Vector indexes: dynamic consumer that re-queries the store on each
+        // memory_usage() call, so dropped indexes are freed and new ones tracked.
+        #[cfg(all(
+            feature = "lpg",
+            feature = "vector-index",
+            feature = "mmap",
+            not(feature = "temporal")
+        ))]
+        if let Some(store) = store_ref {
+            let spill_path = self.buffer_manager.config().spill_path.clone();
+            let consumer = Arc::new(section_consumer::VectorIndexConsumer::new(
+                store, spill_path,
+            ));
+            // Share the spill registry with the search path
+            self.vector_spill_storages = Some(Arc::clone(consumer.spilled_storages()));
+            self.buffer_manager.register_consumer(consumer);
+        }
+
+        // Text indexes: same dynamic approach as vector indexes.
+        #[cfg(all(feature = "lpg", feature = "text-index"))]
+        if let Some(store) = store_ref {
+            self.buffer_manager
+                .register_consumer(Arc::new(section_consumer::TextIndexConsumer::new(store)));
+        }
+
+        // CDC log: register as memory consumer so the buffer manager can
+        // prune events under memory pressure.
+        #[cfg(feature = "cdc")]
+        self.buffer_manager.register_consumer(
+            Arc::clone(&self.cdc_log) as Arc<dyn grafeo_common::memory::MemoryConsumer>
+        );
+    }
+
+    /// Discovers and re-opens spill files from a previous session.
+    ///
+    /// When the database was closed with spilled vector embeddings, the
+    /// `vectors_*.bin` files persist in the spill directory. This method
+    /// scans for them, opens each as `MmapStorage`, and registers them
+    /// in the `vector_spill_storages` map so search can read from them.
+    #[cfg(all(
+        feature = "lpg",
+        feature = "vector-index",
+        feature = "mmap",
+        not(feature = "temporal")
+    ))]
+    fn restore_spill_files(&mut self) {
+        use grafeo_core::index::vector::MmapStorage;
+
+        let spill_dir = match self.buffer_manager.config().spill_path {
+            Some(ref path) => path.clone(),
+            None => return,
+        };
+
+        if !spill_dir.exists() {
+            return;
+        }
+
+        let spill_map = match self.vector_spill_storages {
+            Some(ref map) => Arc::clone(map),
+            None => return,
+        };
+
+        let Ok(entries) = std::fs::read_dir(&spill_dir) else {
+            return;
+        };
+
+        let Some(ref store) = self.store else {
+            return;
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let file_name = match path.file_name().and_then(|n| n.to_str()) {
+                Some(name) => name.to_string(),
+                None => continue,
+            };
+
+            // Match pattern: vectors_{key}.bin where key is percent-encoded
+            if !file_name.starts_with("vectors_")
+                || !std::path::Path::new(&file_name)
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("bin"))
+            {
+                continue;
+            }
+
+            // Extract and decode key: "vectors_Label%3Aembedding.bin" -> "Label:embedding"
+            let key_part = &file_name["vectors_".len()..file_name.len() - ".bin".len()];
+
+            // Percent-decode: %3A -> ':', %25 -> '%'
+            let key = key_part.replace("%3A", ":").replace("%25", "%");
+
+            // Key must contain ':' (label:property format)
+            if !key.contains(':') {
+                // Legacy file with old encoding, skip (will be re-created on next spill)
+                continue;
+            }
+
+            // Only restore if the corresponding vector index exists
+            if store.get_vector_index_by_key(&key).is_none() {
+                // Stale spill file (index was dropped), clean it up
+                let _ = std::fs::remove_file(&path);
+                continue;
+            }
+
+            // Open the MmapStorage
+            match MmapStorage::open(&path) {
+                Ok(mmap_storage) => {
+                    // Mark the property column as spilled so get() returns None
+                    let property = key.split(':').nth(1).unwrap_or("");
+                    let prop_key = grafeo_common::types::PropertyKey::new(property);
+                    store.node_properties_mark_spilled(&prop_key);
+
+                    spill_map.write().insert(key, Arc::new(mmap_storage));
+                }
+                Err(e) => {
+                    eprintln!("failed to restore spill file {}: {e}", path.display());
+                    // Remove corrupt spill file
+                    let _ = std::fs::remove_file(&path);
+                }
+            }
+        }
+    }
+
+    /// Builds section objects for the current database state.
+    #[cfg(feature = "grafeo-file")]
+    fn build_sections(&self) -> Vec<Box<dyn grafeo_common::storage::Section>> {
+        let mut sections: Vec<Box<dyn grafeo_common::storage::Section>> = Vec::new();
+
+        // LPG sections: store, catalog, vector indexes, text indexes
+        #[cfg(feature = "lpg")]
+        if let Some(store) = self.store.as_ref() {
+            let lpg = grafeo_core::graph::lpg::LpgStoreSection::new(Arc::clone(store));
+
+            let catalog = catalog_section::CatalogSection::new(
+                Arc::clone(&self.catalog),
+                Arc::clone(store),
+                {
+                    let tm = Arc::clone(&self.transaction_manager);
+                    move || tm.current_epoch().as_u64()
+                },
+            );
+
+            sections.push(Box::new(catalog));
+            sections.push(Box::new(lpg));
+
+            // Vector indexes: persist HNSW topology to avoid rebuild on load
+            #[cfg(feature = "vector-index")]
+            {
+                let indexes = store.vector_index_entries();
+                if !indexes.is_empty() {
+                    let vector = grafeo_core::index::vector::VectorStoreSection::new(indexes);
+                    sections.push(Box::new(vector));
+                }
+            }
+
+            // Text indexes: persist BM25 postings to avoid rebuild on load
+            #[cfg(feature = "text-index")]
+            {
+                let indexes = store.text_index_entries();
+                if !indexes.is_empty() {
+                    let text = grafeo_core::index::text::TextIndexSection::new(indexes);
+                    sections.push(Box::new(text));
+                }
+            }
+        }
+
+        #[cfg(feature = "triple-store")]
+        if !self.rdf_store.is_empty() || self.rdf_store.graph_count() > 0 {
+            let rdf = grafeo_core::graph::rdf::RdfStoreSection::new(Arc::clone(&self.rdf_store));
+            sections.push(Box::new(rdf));
+        }
+
+        sections
+    }
+
+    // =========================================================================
+    // Backup API
+    // =========================================================================
+
+    /// Creates a full backup of the database in the given directory.
+    ///
+    /// Checkpoints the database, copies the `.grafeo` file, and creates a
+    /// backup manifest. Subsequent incremental backups will use this as the
+    /// base.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database has no file manager or I/O fails.
+    #[cfg(all(feature = "wal", feature = "grafeo-file", feature = "lpg"))]
+    pub fn backup_full(&self, backup_dir: &std::path::Path) -> Result<backup::BackupSegment> {
+        let fm = self
+            .file_manager
+            .as_ref()
+            .ok_or_else(|| Error::Internal("backup requires a persistent database".to_string()))?;
+
+        // Checkpoint first to ensure the container has latest data
+        let _ = self.checkpoint_to_file(fm, flush::FlushReason::Explicit)?;
+
+        let current_epoch = self.transaction_manager.current_epoch();
+        backup::do_backup_full(backup_dir, fm.path(), self.wal.as_deref(), current_epoch)
+    }
+
+    /// Creates an incremental backup containing WAL records since the last backup.
+    ///
+    /// Requires a prior full backup in the backup directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no full backup exists, or if the WAL has no new records.
+    #[cfg(all(feature = "wal", feature = "grafeo-file", feature = "lpg"))]
+    pub fn backup_incremental(
+        &self,
+        backup_dir: &std::path::Path,
+    ) -> Result<backup::BackupSegment> {
+        let wal = self
+            .wal
+            .as_ref()
+            .ok_or_else(|| Error::Internal("incremental backup requires WAL".to_string()))?;
+
+        let current_epoch = self.transaction_manager.current_epoch();
+        backup::do_backup_incremental(backup_dir, wal, current_epoch)
+    }
+
+    /// Returns the backup manifest for a backup directory, if one exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the manifest file exists but cannot be parsed.
+    #[cfg(all(feature = "wal", feature = "grafeo-file"))]
+    pub fn read_backup_manifest(
+        backup_dir: &std::path::Path,
+    ) -> Result<Option<backup::BackupManifest>> {
+        backup::read_manifest(backup_dir)
+    }
+
+    /// Returns the current backup cursor (last backed-up position), if any.
+    #[cfg(all(feature = "wal", feature = "grafeo-file"))]
+    #[must_use]
+    pub fn backup_cursor(&self) -> Option<backup::BackupCursor> {
+        self.wal
+            .as_ref()
+            .and_then(|wal| backup::read_backup_cursor(wal.dir()).ok().flatten())
+    }
+
+    /// Restores a database from a backup chain to a specific epoch.
+    ///
+    /// Copies the full backup to `output_path`, then replays incremental
+    /// WAL segments up to `target_epoch`. The restored database can be
+    /// opened with [`GrafeoDB::open`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the backup chain does not cover the target epoch,
+    /// segment checksums fail, or I/O fails.
+    #[cfg(all(feature = "wal", feature = "grafeo-file"))]
+    pub fn restore_to_epoch(
+        backup_dir: &std::path::Path,
+        target_epoch: grafeo_common::types::EpochId,
+        output_path: &std::path::Path,
+    ) -> Result<()> {
+        backup::do_restore_to_epoch(backup_dir, target_epoch, output_path)
+    }
+
+    /// Writes the current database state to the `.grafeo` file using the unified flush.
     ///
     /// Does NOT remove the sidecar WAL: callers that want to clean up
     /// the sidecar (e.g. `close()`) should call `fm.remove_sidecar_wal()`
     /// separately after this returns.
     #[cfg(feature = "grafeo-file")]
-    fn checkpoint_to_file(&self, fm: &GrafeoFileManager) -> Result<()> {
-        use grafeo_core::testing::crash::maybe_crash;
+    fn checkpoint_to_file(
+        &self,
+        fm: &GrafeoFileManager,
+        reason: flush::FlushReason,
+    ) -> Result<flush::FlushResult> {
+        let sections = self.build_sections();
+        let section_refs: Vec<&dyn grafeo_common::storage::Section> =
+            sections.iter().map(|s| s.as_ref()).collect();
+        #[cfg(feature = "lpg")]
+        let context = flush::build_context(self.lpg_store(), &self.transaction_manager);
+        #[cfg(not(feature = "lpg"))]
+        let context = flush::build_context_minimal(&self.transaction_manager);
 
-        maybe_crash("checkpoint_to_file:before_export");
-        let snapshot_data = self.export_snapshot()?;
-        maybe_crash("checkpoint_to_file:after_export");
-
-        let epoch = self.lpg_store().current_epoch();
-        let transaction_id = self
-            .transaction_manager
-            .last_assigned_transaction_id()
-            .map_or(0, |t| t.0);
-        let node_count = self.lpg_store().node_count() as u64;
-        let edge_count = self.lpg_store().edge_count() as u64;
-
-        fm.write_snapshot(
-            &snapshot_data,
-            epoch.0,
-            transaction_id,
-            node_count,
-            edge_count,
-        )?;
-
-        maybe_crash("checkpoint_to_file:after_write_snapshot");
-        Ok(())
+        flush::flush(
+            fm,
+            &section_refs,
+            &context,
+            reason,
+            #[cfg(feature = "wal")]
+            self.wal.as_deref(),
+        )
     }
 
     /// Returns the file manager if using single-file format.
@@ -1607,6 +2177,7 @@ impl Drop for GrafeoDB {
     }
 }
 
+#[cfg(feature = "lpg")]
 impl crate::admin::AdminService for GrafeoDB {
     fn info(&self) -> crate::admin::DatabaseInfo {
         self.info()
@@ -1669,7 +2240,10 @@ pub struct QueryResult {
     /// Column types - useful for distinguishing NodeId/EdgeId from plain integers.
     pub column_types: Vec<grafeo_common::types::LogicalType>,
     /// The actual result rows.
-    pub rows: Vec<Vec<grafeo_common::types::Value>>,
+    ///
+    /// Use [`rows()`](Self::rows) for borrowed access or
+    /// [`into_rows()`](Self::into_rows) to take ownership.
+    pub(crate) rows: Vec<Vec<grafeo_common::types::Value>>,
     /// Query execution time in milliseconds (if timing was enabled).
     pub execution_time_ms: Option<f64>,
     /// Number of rows scanned during query execution (estimate).
@@ -1741,6 +2315,26 @@ impl QueryResult {
         }
     }
 
+    /// Creates a query result with pre-populated rows.
+    #[must_use]
+    pub fn from_rows(columns: Vec<String>, rows: Vec<Vec<grafeo_common::types::Value>>) -> Self {
+        let len = columns.len();
+        Self {
+            columns,
+            column_types: vec![grafeo_common::types::LogicalType::Any; len],
+            rows,
+            execution_time_ms: None,
+            rows_scanned: None,
+            status_message: None,
+            gql_status: grafeo_common::utils::GqlStatus::SUCCESS,
+        }
+    }
+
+    /// Appends a row to this result.
+    pub fn push_row(&mut self, row: Vec<grafeo_common::types::Value>) {
+        self.rows.push(row);
+    }
+
     /// Sets the execution metrics on this result.
     pub fn with_metrics(mut self, execution_time_ms: f64, rows_scanned: u64) -> Self {
         self.execution_time_ms = Some(execution_time_ms);
@@ -1795,9 +2389,58 @@ impl QueryResult {
         T::from_value(&self.rows[0][0])
     }
 
+    /// Returns a slice of all result rows.
+    #[must_use]
+    pub fn rows(&self) -> &[Vec<grafeo_common::types::Value>] {
+        &self.rows
+    }
+
+    /// Takes ownership of all result rows.
+    #[must_use]
+    pub fn into_rows(self) -> Vec<Vec<grafeo_common::types::Value>> {
+        self.rows
+    }
+
     /// Returns an iterator over the rows.
     pub fn iter(&self) -> impl Iterator<Item = &Vec<grafeo_common::types::Value>> {
         self.rows.iter()
+    }
+
+    /// Converts this query result to an Arrow [`RecordBatch`](arrow_array::RecordBatch).
+    ///
+    /// Each column in the result becomes an Arrow array. Type mapping:
+    /// - `Int64` / `Float64` / `Bool` / `String` / `Bytes`: direct Arrow equivalents
+    /// - `Timestamp` / `ZonedDatetime`: `Timestamp(Microsecond, UTC)`
+    /// - `Date`: `Date32`, `Time`: `Time64(Nanosecond)`
+    /// - `Vector`: `FixedSizeList(Float32, dim)`
+    /// - `Duration` / `List` / `Map` / `Path`: serialized as `Utf8`
+    ///
+    /// Heterogeneous columns (mixed types) fall back to `Utf8`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ArrowExportError`](arrow::ArrowExportError) if Arrow array construction fails.
+    #[cfg(feature = "arrow-export")]
+    pub fn to_record_batch(
+        &self,
+    ) -> std::result::Result<arrow_array::RecordBatch, arrow::ArrowExportError> {
+        arrow::query_result_to_record_batch(&self.columns, &self.column_types, &self.rows)
+    }
+
+    /// Serializes this query result as Arrow IPC stream bytes.
+    ///
+    /// The returned bytes can be read by any Arrow implementation:
+    /// - Python: `pyarrow.ipc.open_stream(buf).read_all()`
+    /// - Polars: `pl.read_ipc(buf)`
+    /// - Node.js: `apache-arrow` `RecordBatchStreamReader`
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ArrowExportError`](arrow::ArrowExportError) on conversion or serialization failure.
+    #[cfg(feature = "arrow-export")]
+    pub fn to_arrow_ipc(&self) -> std::result::Result<Vec<u8>, arrow::ArrowExportError> {
+        let batch = self.to_record_batch()?;
+        arrow::record_batch_to_ipc_stream(&batch)
     }
 }
 
@@ -2365,5 +3008,522 @@ mod tests {
         assert_eq!(result.rows.len(), 1);
 
         session.commit().unwrap();
+    }
+
+    // =========================================================================
+    // QueryResult tests
+    // =========================================================================
+
+    #[test]
+    fn test_query_result_empty() {
+        let result = QueryResult::empty();
+        assert!(result.is_empty());
+        assert_eq!(result.row_count(), 0);
+        assert_eq!(result.column_count(), 0);
+        assert!(result.execution_time_ms().is_none());
+        assert!(result.rows_scanned().is_none());
+        assert!(result.status_message.is_none());
+    }
+
+    #[test]
+    fn test_query_result_status() {
+        let result = QueryResult::status("Created node type 'Person'");
+        assert!(result.is_empty());
+        assert_eq!(result.column_count(), 0);
+        assert_eq!(
+            result.status_message.as_deref(),
+            Some("Created node type 'Person'")
+        );
+    }
+
+    #[test]
+    fn test_query_result_new_with_columns() {
+        let result = QueryResult::new(vec!["name".into(), "age".into()]);
+        assert_eq!(result.column_count(), 2);
+        assert_eq!(result.row_count(), 0);
+        assert!(result.is_empty());
+        // Column types should default to Any
+        assert_eq!(
+            result.column_types,
+            vec![
+                grafeo_common::types::LogicalType::Any,
+                grafeo_common::types::LogicalType::Any
+            ]
+        );
+    }
+
+    #[test]
+    fn test_query_result_with_types() {
+        use grafeo_common::types::LogicalType;
+        let result = QueryResult::with_types(
+            vec!["name".into(), "age".into()],
+            vec![LogicalType::String, LogicalType::Int64],
+        );
+        assert_eq!(result.column_count(), 2);
+        assert_eq!(result.column_types[0], LogicalType::String);
+        assert_eq!(result.column_types[1], LogicalType::Int64);
+    }
+
+    #[test]
+    fn test_query_result_with_metrics() {
+        let result = QueryResult::new(vec!["x".into()]).with_metrics(42.5, 100);
+        assert_eq!(result.execution_time_ms(), Some(42.5));
+        assert_eq!(result.rows_scanned(), Some(100));
+    }
+
+    #[test]
+    fn test_query_result_scalar_success() {
+        use grafeo_common::types::Value;
+        let mut result = QueryResult::new(vec!["count".into()]);
+        result.rows.push(vec![Value::Int64(42)]);
+
+        let val: i64 = result.scalar().unwrap();
+        assert_eq!(val, 42);
+    }
+
+    #[test]
+    fn test_query_result_scalar_wrong_shape() {
+        use grafeo_common::types::Value;
+        // Multiple rows
+        let mut result = QueryResult::new(vec!["x".into()]);
+        result.rows.push(vec![Value::Int64(1)]);
+        result.rows.push(vec![Value::Int64(2)]);
+        assert!(result.scalar::<i64>().is_err());
+
+        // Multiple columns
+        let mut result2 = QueryResult::new(vec!["a".into(), "b".into()]);
+        result2.rows.push(vec![Value::Int64(1), Value::Int64(2)]);
+        assert!(result2.scalar::<i64>().is_err());
+
+        // Empty
+        let result3 = QueryResult::new(vec!["x".into()]);
+        assert!(result3.scalar::<i64>().is_err());
+    }
+
+    #[test]
+    fn test_query_result_iter() {
+        use grafeo_common::types::Value;
+        let mut result = QueryResult::new(vec!["x".into()]);
+        result.rows.push(vec![Value::Int64(1)]);
+        result.rows.push(vec![Value::Int64(2)]);
+
+        let collected: Vec<_> = result.iter().collect();
+        assert_eq!(collected.len(), 2);
+    }
+
+    #[test]
+    fn test_query_result_display() {
+        use grafeo_common::types::Value;
+        let mut result = QueryResult::new(vec!["name".into()]);
+        result.rows.push(vec![Value::from("Alix")]);
+        let display = result.to_string();
+        assert!(display.contains("name"));
+        assert!(display.contains("Alix"));
+    }
+
+    // =========================================================================
+    // FromValue error paths
+    // =========================================================================
+
+    #[test]
+    fn test_from_value_i64_type_mismatch() {
+        use grafeo_common::types::Value;
+        let val = Value::from("not a number");
+        assert!(i64::from_value(&val).is_err());
+    }
+
+    #[test]
+    fn test_from_value_f64_type_mismatch() {
+        use grafeo_common::types::Value;
+        let val = Value::from("not a float");
+        assert!(f64::from_value(&val).is_err());
+    }
+
+    #[test]
+    fn test_from_value_string_type_mismatch() {
+        use grafeo_common::types::Value;
+        let val = Value::Int64(42);
+        assert!(String::from_value(&val).is_err());
+    }
+
+    #[test]
+    fn test_from_value_bool_type_mismatch() {
+        use grafeo_common::types::Value;
+        let val = Value::Int64(1);
+        assert!(bool::from_value(&val).is_err());
+    }
+
+    #[test]
+    fn test_from_value_all_success() {
+        use grafeo_common::types::Value;
+        assert_eq!(i64::from_value(&Value::Int64(99)).unwrap(), 99);
+        assert!((f64::from_value(&Value::Float64(2.72)).unwrap() - 2.72).abs() < f64::EPSILON);
+        assert_eq!(String::from_value(&Value::from("hello")).unwrap(), "hello");
+        assert!(bool::from_value(&Value::Bool(true)).unwrap());
+    }
+
+    // =========================================================================
+    // GrafeoDB accessor tests
+    // =========================================================================
+
+    #[test]
+    fn test_database_is_read_only_false_by_default() {
+        let db = GrafeoDB::new_in_memory();
+        assert!(!db.is_read_only());
+    }
+
+    #[test]
+    fn test_database_graph_model() {
+        let db = GrafeoDB::new_in_memory();
+        assert_eq!(db.graph_model(), crate::config::GraphModel::Lpg);
+    }
+
+    #[test]
+    fn test_database_memory_limit_none_by_default() {
+        let db = GrafeoDB::new_in_memory();
+        assert!(db.memory_limit().is_none());
+    }
+
+    #[test]
+    fn test_database_memory_limit_custom() {
+        let config = Config::in_memory().with_memory_limit(128 * 1024 * 1024);
+        let db = GrafeoDB::with_config(config).unwrap();
+        assert_eq!(db.memory_limit(), Some(128 * 1024 * 1024));
+    }
+
+    #[test]
+    fn test_database_adaptive_config() {
+        let db = GrafeoDB::new_in_memory();
+        let adaptive = db.adaptive_config();
+        assert!(adaptive.enabled);
+        assert!((adaptive.threshold - 3.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_database_buffer_manager() {
+        let db = GrafeoDB::new_in_memory();
+        let _bm = db.buffer_manager();
+        // Just verify it doesn't panic
+    }
+
+    #[test]
+    fn test_database_query_cache() {
+        let db = GrafeoDB::new_in_memory();
+        let _qc = db.query_cache();
+    }
+
+    #[test]
+    fn test_database_clear_plan_cache() {
+        let db = GrafeoDB::new_in_memory();
+        // Execute a query to populate the cache
+        #[cfg(feature = "gql")]
+        {
+            let _ = db.execute("MATCH (n) RETURN count(n)");
+        }
+        db.clear_plan_cache();
+        // No panic means success
+    }
+
+    #[test]
+    fn test_database_gc() {
+        let db = GrafeoDB::new_in_memory();
+        db.create_node(&["Person"]);
+        db.gc();
+        // Verify no panic, node still accessible
+        assert_eq!(db.node_count(), 1);
+    }
+
+    // =========================================================================
+    // Named graph management
+    // =========================================================================
+
+    #[test]
+    fn test_create_and_list_graphs() {
+        let db = GrafeoDB::new_in_memory();
+        let created = db.create_graph("social").unwrap();
+        assert!(created);
+
+        // Creating same graph again returns false
+        let created_again = db.create_graph("social").unwrap();
+        assert!(!created_again);
+
+        let names = db.list_graphs();
+        assert!(names.contains(&"social".to_string()));
+    }
+
+    #[test]
+    fn test_drop_graph() {
+        let db = GrafeoDB::new_in_memory();
+        db.create_graph("temp").unwrap();
+        assert!(db.drop_graph("temp"));
+        assert!(!db.drop_graph("temp")); // Already dropped
+    }
+
+    #[test]
+    fn test_drop_graph_resets_current_graph() {
+        let db = GrafeoDB::new_in_memory();
+        db.create_graph("active").unwrap();
+        db.set_current_graph(Some("active")).unwrap();
+        assert_eq!(db.current_graph(), Some("active".to_string()));
+
+        db.drop_graph("active");
+        assert_eq!(db.current_graph(), None);
+    }
+
+    // =========================================================================
+    // Current graph / schema context
+    // =========================================================================
+
+    #[test]
+    fn test_current_graph_default_none() {
+        let db = GrafeoDB::new_in_memory();
+        assert_eq!(db.current_graph(), None);
+    }
+
+    #[test]
+    fn test_set_current_graph_valid() {
+        let db = GrafeoDB::new_in_memory();
+        db.create_graph("social").unwrap();
+        db.set_current_graph(Some("social")).unwrap();
+        assert_eq!(db.current_graph(), Some("social".to_string()));
+    }
+
+    #[test]
+    fn test_set_current_graph_nonexistent() {
+        let db = GrafeoDB::new_in_memory();
+        let result = db.set_current_graph(Some("nonexistent"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_set_current_graph_none_resets() {
+        let db = GrafeoDB::new_in_memory();
+        db.create_graph("social").unwrap();
+        db.set_current_graph(Some("social")).unwrap();
+        db.set_current_graph(None).unwrap();
+        assert_eq!(db.current_graph(), None);
+    }
+
+    #[test]
+    fn test_set_current_graph_default_keyword() {
+        let db = GrafeoDB::new_in_memory();
+        // "default" is a special case that always succeeds
+        db.set_current_graph(Some("default")).unwrap();
+        assert_eq!(db.current_graph(), Some("default".to_string()));
+    }
+
+    #[test]
+    fn test_current_schema_default_none() {
+        let db = GrafeoDB::new_in_memory();
+        assert_eq!(db.current_schema(), None);
+    }
+
+    #[test]
+    fn test_set_current_schema_nonexistent() {
+        let db = GrafeoDB::new_in_memory();
+        let result = db.set_current_schema(Some("nonexistent"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_set_current_schema_none_resets() {
+        let db = GrafeoDB::new_in_memory();
+        db.set_current_schema(None).unwrap();
+        assert_eq!(db.current_schema(), None);
+    }
+
+    // =========================================================================
+    // graph_store / graph_store_mut
+    // =========================================================================
+
+    #[test]
+    fn test_graph_store_returns_lpg_by_default() {
+        let db = GrafeoDB::new_in_memory();
+        db.create_node(&["Person"]);
+        let store = db.graph_store();
+        assert_eq!(store.node_count(), 1);
+    }
+
+    #[test]
+    fn test_graph_store_mut_returns_some_by_default() {
+        let db = GrafeoDB::new_in_memory();
+        assert!(db.graph_store_mut().is_some());
+    }
+
+    #[test]
+    fn test_with_read_store() {
+        use grafeo_core::graph::lpg::LpgStore;
+
+        let store = Arc::new(LpgStore::new().unwrap());
+        store.create_node(&["Person"]);
+
+        let read_store = Arc::clone(&store) as Arc<dyn GraphStore>;
+        let db = GrafeoDB::with_read_store(read_store, Config::in_memory()).unwrap();
+
+        assert!(db.is_read_only());
+        assert!(db.graph_store_mut().is_none());
+
+        // Read queries should work
+        let gs = db.graph_store();
+        assert_eq!(gs.node_count(), 1);
+    }
+
+    #[test]
+    fn test_with_store_graph_store_methods() {
+        use grafeo_core::graph::lpg::LpgStore;
+
+        let store = Arc::new(LpgStore::new().unwrap());
+        store.create_node(&["Person"]);
+
+        let db = GrafeoDB::with_store(
+            Arc::clone(&store) as Arc<dyn GraphStoreMut>,
+            Config::in_memory(),
+        )
+        .unwrap();
+
+        assert!(!db.is_read_only());
+        assert!(db.graph_store_mut().is_some());
+        assert_eq!(db.graph_store().node_count(), 1);
+    }
+
+    // =========================================================================
+    // session_read_only
+    // =========================================================================
+
+    #[test]
+    fn test_session_read_only() {
+        let db = GrafeoDB::new_in_memory();
+        db.create_node(&["Person"]);
+
+        let session = db.session_read_only();
+        // Read queries should work
+        #[cfg(feature = "gql")]
+        {
+            let result = session.execute("MATCH (n) RETURN count(n)").unwrap();
+            assert_eq!(result.rows.len(), 1);
+        }
+    }
+
+    // =========================================================================
+    // close on in-memory database
+    // =========================================================================
+
+    #[test]
+    fn test_close_in_memory_database() {
+        let db = GrafeoDB::new_in_memory();
+        db.create_node(&["Person"]);
+        assert!(db.close().is_ok());
+        // Second close should also be fine (idempotent)
+        assert!(db.close().is_ok());
+    }
+
+    // =========================================================================
+    // with_config validation failure
+    // =========================================================================
+
+    #[test]
+    fn test_with_config_invalid_config_zero_threads() {
+        let config = Config::in_memory().with_threads(0);
+        let result = GrafeoDB::with_config(config);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_with_config_invalid_config_zero_memory_limit() {
+        let config = Config::in_memory().with_memory_limit(0);
+        let result = GrafeoDB::with_config(config);
+        assert!(result.is_err());
+    }
+
+    // =========================================================================
+    // StorageFormat display (for config.rs coverage)
+    // =========================================================================
+
+    #[test]
+    fn test_storage_format_display() {
+        use crate::config::StorageFormat;
+        assert_eq!(StorageFormat::Auto.to_string(), "auto");
+        assert_eq!(StorageFormat::WalDirectory.to_string(), "wal-directory");
+        assert_eq!(StorageFormat::SingleFile.to_string(), "single-file");
+    }
+
+    #[test]
+    fn test_storage_format_default() {
+        use crate::config::StorageFormat;
+        assert_eq!(StorageFormat::default(), StorageFormat::Auto);
+    }
+
+    #[test]
+    fn test_config_with_storage_format() {
+        use crate::config::StorageFormat;
+        let config = Config::in_memory().with_storage_format(StorageFormat::SingleFile);
+        assert_eq!(config.storage_format, StorageFormat::SingleFile);
+    }
+
+    // =========================================================================
+    // Config CDC
+    // =========================================================================
+
+    #[test]
+    fn test_config_with_cdc() {
+        let config = Config::in_memory().with_cdc();
+        assert!(config.cdc_enabled);
+    }
+
+    #[test]
+    fn test_config_cdc_default_false() {
+        let config = Config::in_memory();
+        assert!(!config.cdc_enabled);
+    }
+
+    // =========================================================================
+    // ConfigError as std::error::Error
+    // =========================================================================
+
+    #[test]
+    fn test_config_error_is_error_trait() {
+        use crate::config::ConfigError;
+        let err: Box<dyn std::error::Error> = Box::new(ConfigError::ZeroMemoryLimit);
+        assert!(err.source().is_none());
+    }
+
+    // =========================================================================
+    // Metrics tests
+    // =========================================================================
+
+    #[cfg(feature = "metrics")]
+    #[test]
+    fn test_metrics_prometheus_output() {
+        let db = GrafeoDB::new_in_memory();
+        let prom = db.metrics_prometheus();
+        // Should contain at least some metric names
+        assert!(!prom.is_empty());
+    }
+
+    #[cfg(feature = "metrics")]
+    #[test]
+    fn test_reset_metrics() {
+        let db = GrafeoDB::new_in_memory();
+        // Execute something to generate metrics
+        let _session = db.session();
+        db.reset_metrics();
+        let snap = db.metrics();
+        assert_eq!(snap.query_count, 0);
+    }
+
+    // =========================================================================
+    // drop_graph on external store
+    // =========================================================================
+
+    #[test]
+    fn test_drop_graph_on_external_store() {
+        use grafeo_core::graph::lpg::LpgStore;
+
+        let store = Arc::new(LpgStore::new().unwrap());
+        let read_store = Arc::clone(&store) as Arc<dyn GraphStore>;
+        let db = GrafeoDB::with_read_store(read_store, Config::in_memory()).unwrap();
+
+        // drop_graph with external store (no built-in store) returns false
+        assert!(!db.drop_graph("anything"));
     }
 }

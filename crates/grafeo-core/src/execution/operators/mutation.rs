@@ -156,6 +156,7 @@ pub struct CreateNodeOperator {
 
 /// Source for a property value.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum PropertySource {
     /// Get value from an input column.
     Column(usize),
@@ -1583,7 +1584,7 @@ impl Operator for SetPropertyOperator {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "lpg"))]
 mod tests {
     use super::*;
     use crate::execution::DataChunk;

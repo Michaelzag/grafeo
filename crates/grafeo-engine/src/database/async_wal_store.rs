@@ -10,11 +10,11 @@
 
 use std::sync::Arc;
 
-use grafeo_adapters::storage::wal::{AsyncLpgWal, WalRecord};
 use grafeo_common::types::{EdgeId, NodeId, Value};
 use grafeo_common::utils::error::Result;
 use grafeo_core::graph::lpg::LpgStore;
 use grafeo_core::graph::{Direction, GraphStore};
+use grafeo_storage::wal::{AsyncLpgWal, WalRecord};
 
 /// An async [`GraphStoreMut`](grafeo_core::graph::GraphStoreMut) decorator
 /// that logs mutations to an [`AsyncLpgWal`] before applying them to the
@@ -323,8 +323,8 @@ impl AsyncWalGraphStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use grafeo_adapters::storage::wal::AsyncTypedWal;
     use grafeo_common::types::PropertyKey;
+    use grafeo_storage::wal::AsyncTypedWal;
 
     async fn setup() -> (AsyncWalGraphStore, Arc<AsyncLpgWal>) {
         let dir = tempfile::tempdir().unwrap();

@@ -44,8 +44,8 @@ fn test_wrapped_aggregate_count_gt_zero() {
     let r = s
         .execute("MATCH (d:Data) RETURN count(d) > 0 AS has_data")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::Bool(true));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::Bool(true));
 }
 
 #[test]
@@ -55,9 +55,9 @@ fn test_wrapped_aggregate_sum_minus_literal() {
     let r = s
         .execute("MATCH (d:Data) RETURN sum(d.score) - 10 AS adjusted")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows().len(), 1);
     // sum(10+20+30+40+50) - 10 = 140
-    assert_eq!(r.rows[0][0], Value::Int64(140));
+    assert_eq!(r.rows()[0][0], Value::Int64(140));
 }
 
 #[test]
@@ -67,8 +67,8 @@ fn test_wrapped_aggregate_not_count() {
     let r = s
         .execute("MATCH (d:Data) RETURN NOT (count(d) > 100) AS few")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::Bool(true));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::Bool(true));
 }
 
 // ---------------------------------------------------------------------------
@@ -82,11 +82,11 @@ fn test_group_concat_default_separator() {
     let r = s
         .execute("MATCH (d:Data) RETURN group_concat(d.name) AS names")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    if let Value::String(names) = &r.rows[0][0] {
+    assert_eq!(r.rows().len(), 1);
+    if let Value::String(names) = &r.rows()[0][0] {
         assert_eq!(names.split(' ').count(), 5);
     } else {
-        panic!("expected string, got {:?}", r.rows[0][0]);
+        panic!("expected string, got {:?}", r.rows()[0][0]);
     }
 }
 
@@ -97,12 +97,12 @@ fn test_group_concat_custom_separator() {
     let r = s
         .execute("MATCH (d:Data) RETURN group_concat(d.name, ';') AS names")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    if let Value::String(names) = &r.rows[0][0] {
+    assert_eq!(r.rows().len(), 1);
+    if let Value::String(names) = &r.rows()[0][0] {
         assert!(names.contains(';'), "expected semicolons: {names}");
         assert_eq!(names.split(';').count(), 5);
     } else {
-        panic!("expected string, got {:?}", r.rows[0][0]);
+        panic!("expected string, got {:?}", r.rows()[0][0]);
     }
 }
 
@@ -113,11 +113,11 @@ fn test_listagg_default_comma() {
     let r = s
         .execute("MATCH (d:Data) RETURN listagg(d.name) AS names")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    if let Value::String(names) = &r.rows[0][0] {
+    assert_eq!(r.rows().len(), 1);
+    if let Value::String(names) = &r.rows()[0][0] {
         assert!(names.contains(','), "expected commas: {names}");
     } else {
-        panic!("expected string, got {:?}", r.rows[0][0]);
+        panic!("expected string, got {:?}", r.rows()[0][0]);
     }
 }
 
@@ -132,14 +132,14 @@ fn test_sample_returns_one_value() {
     let r = s
         .execute("MATCH (d:Data) RETURN sample(d.name) AS picked")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    if let Value::String(name) = &r.rows[0][0] {
+    assert_eq!(r.rows().len(), 1);
+    if let Value::String(name) = &r.rows()[0][0] {
         assert!(
             ["Alix", "Gus", "Vincent", "Jules", "Mia"].contains(&name.as_str()),
             "unexpected: {name}"
         );
     } else {
-        panic!("expected string, got {:?}", r.rows[0][0]);
+        panic!("expected string, got {:?}", r.rows()[0][0]);
     }
 }
 
@@ -154,11 +154,11 @@ fn test_collect_to_list() {
     let r = s
         .execute("MATCH (d:Data) RETURN collect(d.score) AS scores")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    if let Value::List(items) = &r.rows[0][0] {
+    assert_eq!(r.rows().len(), 1);
+    if let Value::List(items) = &r.rows()[0][0] {
         assert_eq!(items.len(), 5);
     } else {
-        panic!("expected list, got {:?}", r.rows[0][0]);
+        panic!("expected list, got {:?}", r.rows()[0][0]);
     }
 }
 
@@ -174,9 +174,9 @@ fn test_percentile_disc_with_integer_param() {
     let r = s
         .execute("MATCH (d:Data) RETURN percentile_disc(d.score, 1) AS p100")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows().len(), 1);
     // May return Float64 or Int64 depending on implementation
-    match &r.rows[0][0] {
+    match &r.rows()[0][0] {
         Value::Int64(v) => assert_eq!(*v, 50),
         Value::Float64(v) => assert!((*v - 50.0).abs() < 0.01),
         other => panic!("expected numeric, got {other:?}"),
@@ -190,8 +190,8 @@ fn test_percentile_cont_zero() {
     let r = s
         .execute("MATCH (d:Data) RETURN percentile_cont(d.score, 0) AS p0")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    match &r.rows[0][0] {
+    assert_eq!(r.rows().len(), 1);
+    match &r.rows()[0][0] {
         Value::Float64(v) => assert!((*v - 10.0).abs() < 0.01),
         Value::Int64(v) => assert_eq!(*v, 10),
         other => panic!("expected numeric, got {other:?}"),
@@ -209,11 +209,11 @@ fn test_stdev_and_stdevp() {
     let r = s
         .execute("MATCH (d:Data) RETURN stdev(d.score) AS s, stdevp(d.score) AS sp")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    if let Value::Float64(s) = r.rows[0][0] {
+    assert_eq!(r.rows().len(), 1);
+    if let Value::Float64(s) = r.rows()[0][0] {
         assert!(s > 0.0);
     }
-    if let Value::Float64(sp) = r.rows[0][1] {
+    if let Value::Float64(sp) = r.rows()[0][1] {
         assert!(sp > 0.0);
     }
 }
@@ -225,8 +225,8 @@ fn test_variance_and_variance_pop() {
     let r = s
         .execute("MATCH (d:Data) RETURN variance(d.score) AS v, var_pop(d.score) AS vp")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    if let Value::Float64(v) = r.rows[0][0] {
+    assert_eq!(r.rows().len(), 1);
+    if let Value::Float64(v) = r.rows()[0][0] {
         assert!(v > 0.0);
     }
 }
@@ -261,10 +261,10 @@ fn test_mixed_aggregates_with_group_by() {
              RETURN p.city AS city, count(p) AS cnt, min(p.score) AS lo, max(p.score) AS hi",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 2);
+    assert_eq!(r.rows().len(), 2);
     // Both groups should have count=2
-    assert_eq!(r.rows[0][1], Value::Int64(2));
-    assert_eq!(r.rows[1][1], Value::Int64(2));
+    assert_eq!(r.rows()[0][1], Value::Int64(2));
+    assert_eq!(r.rows()[1][1], Value::Int64(2));
 }
 
 // ---------------------------------------------------------------------------
@@ -293,11 +293,11 @@ fn test_order_by_alias_after_aggregation() {
     let r = session
         .execute("MATCH (p:Person) RETURN p.city AS city, count(p) AS cnt ORDER BY city")
         .unwrap();
-    assert_eq!(r.rows.len(), 3);
+    assert_eq!(r.rows().len(), 3);
     // Sorted ascending by city: Amsterdam, Berlin, Paris
-    assert_eq!(r.rows[0][0], Value::String("Amsterdam".into()));
-    assert_eq!(r.rows[1][0], Value::String("Berlin".into()));
-    assert_eq!(r.rows[2][0], Value::String("Paris".into()));
+    assert_eq!(r.rows()[0][0], Value::String("Amsterdam".into()));
+    assert_eq!(r.rows()[1][0], Value::String("Berlin".into()));
+    assert_eq!(r.rows()[2][0], Value::String("Paris".into()));
 }
 
 #[test]
@@ -322,13 +322,13 @@ fn test_order_by_aggregate_alias_desc() {
     let r = session
         .execute("MATCH (p:Person) RETURN p.city AS city, count(p) AS cnt ORDER BY cnt DESC")
         .unwrap();
-    assert_eq!(r.rows.len(), 3);
+    assert_eq!(r.rows().len(), 3);
     // DESC by cnt: Amsterdam(2) and Berlin(2) first, Paris(1) last
-    assert_eq!(r.rows[0][1], Value::Int64(2));
-    assert_eq!(r.rows[1][1], Value::Int64(2));
-    assert_eq!(r.rows[2][1], Value::Int64(1));
+    assert_eq!(r.rows()[0][1], Value::Int64(2));
+    assert_eq!(r.rows()[1][1], Value::Int64(2));
+    assert_eq!(r.rows()[2][1], Value::Int64(1));
     // Paris must be last
-    assert_eq!(r.rows[2][0], Value::String("Paris".into()));
+    assert_eq!(r.rows()[2][0], Value::String("Paris".into()));
 }
 
 // ---------------------------------------------------------------------------
@@ -343,9 +343,9 @@ fn test_nullif_expression() {
         .execute("MATCH (d:Data) RETURN nullif(d.score, 10) AS v ORDER BY d.x")
         .unwrap();
     // First person (score=10) should get NULL
-    assert_eq!(r.rows[0][0], Value::Null);
+    assert_eq!(r.rows()[0][0], Value::Null);
     // Second person (score=20) should keep 20
-    assert_eq!(r.rows[1][0], Value::Int64(20));
+    assert_eq!(r.rows()[1][0], Value::Int64(20));
 }
 
 // ---------------------------------------------------------------------------
@@ -362,7 +362,7 @@ fn test_list_predicate_all() {
     let r = s
         .execute("MATCH (f:Flag) WHERE all(x IN [2, 4, 6] WHERE x % 2 = 0) RETURN f.v AS v")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows().len(), 1);
 }
 
 #[test]
@@ -373,7 +373,7 @@ fn test_list_predicate_any() {
     let r = s
         .execute("MATCH (f:Flag) WHERE any(x IN [1, 2, 3] WHERE x > 2) RETURN f.v AS v")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows().len(), 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -388,8 +388,8 @@ fn test_wrapped_aggregate_literal_plus_count() {
     let r = s
         .execute("MATCH (d:Data) RETURN 100 + count(d) AS total")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::Int64(105));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::Int64(105));
 }
 
 // ---------------------------------------------------------------------------
@@ -406,7 +406,7 @@ fn test_count_distinct() {
     let r = session
         .execute("MATCH (c:City) RETURN count(DISTINCT c.name) AS unique_cities")
         .unwrap();
-    assert_eq!(r.rows[0][0], Value::Int64(3));
+    assert_eq!(r.rows()[0][0], Value::Int64(3));
 }
 
 #[test]
@@ -420,7 +420,7 @@ fn test_count_expression_non_null() {
     let r = session
         .execute("MATCH (i:Item) RETURN count(i.val) AS cnt")
         .unwrap();
-    assert_eq!(r.rows[0][0], Value::Int64(2));
+    assert_eq!(r.rows()[0][0], Value::Int64(2));
 }
 
 // ===========================================================================
@@ -455,11 +455,15 @@ fn test_having_filters_groups() {
         )
         .unwrap();
     // Only Amsterdam (2) and Berlin (2) qualify; Paris (1) is filtered out
-    assert_eq!(r.rows.len(), 2, "HAVING should filter groups with cnt <= 1");
-    assert_eq!(r.rows[0][0], Value::String("Amsterdam".into()));
-    assert_eq!(r.rows[0][1], Value::Int64(2));
-    assert_eq!(r.rows[1][0], Value::String("Berlin".into()));
-    assert_eq!(r.rows[1][1], Value::Int64(2));
+    assert_eq!(
+        r.rows().len(),
+        2,
+        "HAVING should filter groups with cnt <= 1"
+    );
+    assert_eq!(r.rows()[0][0], Value::String("Amsterdam".into()));
+    assert_eq!(r.rows()[0][1], Value::Int64(2));
+    assert_eq!(r.rows()[1][0], Value::String("Berlin".into()));
+    assert_eq!(r.rows()[1][1], Value::Int64(2));
 }
 
 #[test]
@@ -477,7 +481,7 @@ fn test_having_no_matching_groups() {
         )
         .unwrap();
     // All groups have cnt=1, none pass HAVING cnt > 10
-    assert_eq!(r.rows.len(), 0, "No groups should pass HAVING cnt > 10");
+    assert_eq!(r.rows().len(), 0, "No groups should pass HAVING cnt > 10");
 }
 
 #[test]
@@ -510,9 +514,13 @@ fn test_having_with_sum_aggregate() {
         .unwrap();
     // Engineering: 170, Sales: 110, Marketing: 70
     // Only Engineering and Sales qualify
-    assert_eq!(r.rows.len(), 2, "Only depts with total > 100 should appear");
-    assert_eq!(r.rows[0][0], Value::String("Engineering".into()));
-    assert_eq!(r.rows[1][0], Value::String("Sales".into()));
+    assert_eq!(
+        r.rows().len(),
+        2,
+        "Only depts with total > 100 should appear"
+    );
+    assert_eq!(r.rows()[0][0], Value::String("Engineering".into()));
+    assert_eq!(r.rows()[1][0], Value::String("Sales".into()));
 }
 
 // ============================================================================
@@ -527,8 +535,12 @@ fn count_on_empty_result_returns_zero() {
         .execute("MATCH (n:NonExistent) RETURN count(n) AS cnt")
         .unwrap();
     // Global COUNT on empty input should return one row with 0
-    assert_eq!(r.rows.len(), 1, "Global COUNT should always return one row");
-    assert_eq!(r.rows[0][0], Value::Int64(0));
+    assert_eq!(
+        r.rows().len(),
+        1,
+        "Global COUNT should always return one row"
+    );
+    assert_eq!(r.rows()[0][0], Value::Int64(0));
 }
 
 #[test]
@@ -538,8 +550,8 @@ fn sum_on_empty_result_returns_null() {
     let r = session
         .execute("MATCH (n:NonExistent) RETURN sum(n.x) AS total")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::Null);
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::Null);
 }
 
 #[test]
@@ -549,8 +561,8 @@ fn avg_on_empty_result_returns_null() {
     let r = session
         .execute("MATCH (n:NonExistent) RETURN avg(n.x) AS average")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::Null);
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::Null);
 }
 
 #[test]
@@ -560,9 +572,9 @@ fn min_max_on_empty_result_returns_null() {
     let r = session
         .execute("MATCH (n:NonExistent) RETURN min(n.x) AS lo, max(n.x) AS hi")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::Null);
-    assert_eq!(r.rows[0][1], Value::Null);
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::Null);
+    assert_eq!(r.rows()[0][1], Value::Null);
 }
 
 // ===========================================================================
@@ -581,8 +593,8 @@ fn test_case_wrapping_aggregate() {
              RETURN CASE WHEN count(d) > 3 THEN 'many' ELSE 'few' END AS label",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::String("many".into()));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::String("many".into()));
 }
 
 #[test]
@@ -596,8 +608,8 @@ fn test_case_wrapping_aggregate_else_branch() {
              RETURN CASE WHEN sum(d.score) > 9999 THEN 'huge' ELSE 'normal' END AS label",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::String("normal".into()));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::String("normal".into()));
 }
 
 #[test]
@@ -611,8 +623,8 @@ fn test_case_aggregate_in_then_branch() {
              RETURN CASE WHEN true THEN count(d) ELSE 0 END AS cnt",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::Int64(5));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::Int64(5));
 }
 
 // ===========================================================================
@@ -628,9 +640,9 @@ fn test_non_aggregate_function_wrapping_aggregate() {
     let r = s
         .execute("MATCH (d:Data) RETURN abs(sum(d.score)) AS total")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows().len(), 1);
     // sum(10+20+30+40+50) = 150
-    assert_eq!(r.rows[0][0], Value::Int64(150));
+    assert_eq!(r.rows()[0][0], Value::Int64(150));
 }
 
 #[test]
@@ -640,8 +652,8 @@ fn test_tostring_wrapping_count() {
     let r = s
         .execute("MATCH (d:Data) RETURN toString(count(d)) AS cnt_str")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::String("5".into()));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::String("5".into()));
 }
 
 // ===========================================================================
@@ -656,8 +668,8 @@ fn test_covar_samp_empty_returns_null() {
     let r = s
         .execute("MATCH (p:NonExistent) RETURN COVAR_SAMP(p.y, p.x) AS cov")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::Null);
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::Null);
 }
 
 #[test]
@@ -667,8 +679,8 @@ fn test_corr_empty_returns_null() {
     let r = s
         .execute("MATCH (p:NonExistent) RETURN CORR(p.y, p.x) AS r")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::Null);
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::Null);
 }
 
 #[test]
@@ -678,8 +690,8 @@ fn test_regr_slope_empty_returns_null() {
     let r = s
         .execute("MATCH (p:NonExistent) RETURN REGR_SLOPE(p.y, p.x) AS slope")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::Null);
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::Null);
 }
 
 #[test]
@@ -689,8 +701,8 @@ fn test_regr_intercept_empty_returns_null() {
     let r = s
         .execute("MATCH (p:NonExistent) RETURN REGR_INTERCEPT(p.y, p.x) AS intercept")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::Null);
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::Null);
 }
 
 #[test]
@@ -700,8 +712,8 @@ fn test_regr_r2_empty_returns_null() {
     let r = s
         .execute("MATCH (p:NonExistent) RETURN REGR_R2(p.y, p.x) AS r2")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::Null);
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::Null);
 }
 
 #[test]
@@ -714,10 +726,10 @@ fn test_regr_sxx_syy_sxy_empty_returns_null() {
              RETURN REGR_SXX(p.y, p.x) AS sxx, REGR_SYY(p.y, p.x) AS syy, REGR_SXY(p.y, p.x) AS sxy",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::Null);
-    assert_eq!(r.rows[0][1], Value::Null);
-    assert_eq!(r.rows[0][2], Value::Null);
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::Null);
+    assert_eq!(r.rows()[0][1], Value::Null);
+    assert_eq!(r.rows()[0][2], Value::Null);
 }
 
 #[test]
@@ -730,9 +742,9 @@ fn test_regr_avgx_avgy_empty_returns_null() {
              RETURN REGR_AVGX(p.y, p.x) AS ax, REGR_AVGY(p.y, p.x) AS ay",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::Null);
-    assert_eq!(r.rows[0][1], Value::Null);
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::Null);
+    assert_eq!(r.rows()[0][1], Value::Null);
 }
 
 #[test]
@@ -742,9 +754,9 @@ fn test_regr_count_empty_returns_zero() {
     let r = s
         .execute("MATCH (p:NonExistent) RETURN REGR_COUNT(p.y, p.x) AS cnt")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows().len(), 1);
     // REGR_COUNT returns the count of non-null pairs (0 for empty set)
-    assert_eq!(r.rows[0][0], Value::Int64(0));
+    assert_eq!(r.rows()[0][0], Value::Int64(0));
 }
 
 // ===========================================================================
@@ -762,8 +774,8 @@ fn test_group_concat_distinct() {
     let r = session
         .execute("MATCH (c:City) RETURN group_concat(DISTINCT c.name) AS names")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    if let Value::String(names) = &r.rows[0][0] {
+    assert_eq!(r.rows().len(), 1);
+    if let Value::String(names) = &r.rows()[0][0] {
         // Should have exactly 3 unique cities
         assert_eq!(
             names.split(' ').count(),
@@ -771,7 +783,7 @@ fn test_group_concat_distinct() {
             "expected 3 unique cities: {names}"
         );
     } else {
-        panic!("expected string, got {:?}", r.rows[0][0]);
+        panic!("expected string, got {:?}", r.rows()[0][0]);
     }
 }
 
@@ -785,15 +797,15 @@ fn test_group_concat_distinct_with_separator() {
     let r = session
         .execute("MATCH (c:City) RETURN group_concat(DISTINCT c.name, '|') AS names")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    if let Value::String(names) = &r.rows[0][0] {
+    assert_eq!(r.rows().len(), 1);
+    if let Value::String(names) = &r.rows()[0][0] {
         assert_eq!(
             names.split('|').count(),
             3,
             "expected 3 unique cities: {names}"
         );
     } else {
-        panic!("expected string, got {:?}", r.rows[0][0]);
+        panic!("expected string, got {:?}", r.rows()[0][0]);
     }
 }
 
@@ -815,9 +827,9 @@ fn test_sum_distinct_mixed_int_float() {
     let r = session
         .execute("MATCH (n:Val) RETURN sum(DISTINCT n.v) AS total")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows().len(), 1);
     // 10 + 20.5 = 30.5 (converted to float when float encountered)
-    match &r.rows[0][0] {
+    match &r.rows()[0][0] {
         Value::Float64(f) => assert!((*f - 30.5).abs() < 0.01, "expected 30.5, got {f}"),
         other => panic!("expected Float64, got {other:?}"),
     }
@@ -836,9 +848,9 @@ fn test_wrapped_two_aggregates_in_binary() {
     let r = s
         .execute("MATCH (d:Data) RETURN sum(d.score) + count(d) AS combo")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows().len(), 1);
     // sum = 150, count = 5 -> 155
-    assert_eq!(r.rows[0][0], Value::Int64(155));
+    assert_eq!(r.rows()[0][0], Value::Int64(155));
 }
 
 #[test]
@@ -849,9 +861,9 @@ fn test_wrapped_aggregate_multiply() {
     let r = s
         .execute("MATCH (d:Data) RETURN avg(d.score) * 2 AS doubled")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows().len(), 1);
     // avg(10,20,30,40,50) = 30.0, * 2 = 60.0
-    match &r.rows[0][0] {
+    match &r.rows()[0][0] {
         Value::Float64(f) => assert!((*f - 60.0).abs() < 0.01, "expected 60.0, got {f}"),
         Value::Int64(v) => assert_eq!(*v, 60),
         other => panic!("expected numeric, got {other:?}"),
@@ -874,9 +886,9 @@ fn test_covar_samp_single_row_returns_null() {
     let r = s
         .execute("MATCH (p:Point) RETURN COVAR_SAMP(p.y, p.x) AS cov")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows().len(), 1);
     // Sample covariance needs n >= 2
-    assert_eq!(r.rows[0][0], Value::Null);
+    assert_eq!(r.rows()[0][0], Value::Null);
 }
 
 #[test]
@@ -890,9 +902,9 @@ fn test_covar_pop_single_row_returns_zero() {
     let r = s
         .execute("MATCH (p:Point) RETURN COVAR_POP(p.y, p.x) AS cov")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows().len(), 1);
     // Population covariance with n=1: c_xy/1 = 0/1 = 0.0
-    match &r.rows[0][0] {
+    match &r.rows()[0][0] {
         Value::Float64(f) => assert!(f.abs() < 1e-10, "expected 0.0, got {f}"),
         other => panic!("expected Float64, got {other:?}"),
     }
@@ -922,13 +934,13 @@ fn test_optional_match_with_count_aggregate() {
              ORDER BY name",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 2);
+    assert_eq!(r.rows().len(), 2);
     // Alix knows Gus
-    assert_eq!(r.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(r.rows[0][1], Value::Int64(1));
+    assert_eq!(r.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(r.rows()[0][1], Value::Int64(1));
     // Gus knows nobody
-    assert_eq!(r.rows[1][0], Value::String("Gus".into()));
-    assert_eq!(r.rows[1][1], Value::Int64(0));
+    assert_eq!(r.rows()[1][0], Value::String("Gus".into()));
+    assert_eq!(r.rows()[1][1], Value::Int64(0));
 }
 
 // ===========================================================================
@@ -948,8 +960,8 @@ fn test_percentile_cont_interpolation() {
     let r = s
         .execute("MATCH (i:Item) RETURN percentile_cont(i.v, 0.5) AS median")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    match &r.rows[0][0] {
+    assert_eq!(r.rows().len(), 1);
+    match &r.rows()[0][0] {
         Value::Float64(f) => assert!((*f - 25.0).abs() < 0.01, "expected 25.0, got {f}"),
         other => panic!("expected Float64, got {other:?}"),
     }
@@ -966,8 +978,8 @@ fn test_percentile_cont_at_boundary() {
     let r = s
         .execute("MATCH (i:Item) RETURN percentile_cont(i.v, 0.25) AS p25")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    match &r.rows[0][0] {
+    assert_eq!(r.rows().len(), 1);
+    match &r.rows()[0][0] {
         Value::Float64(f) => assert!((*f - 20.0).abs() < 0.01, "expected 20.0, got {f}"),
         other => panic!("expected Float64, got {other:?}"),
     }
@@ -985,8 +997,8 @@ fn test_wrapped_aggregate_unary_negation() {
     let r = s
         .execute("MATCH (d:Data) RETURN -(count(d)) AS neg")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::Int64(-5));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::Int64(-5));
 }
 
 // ===========================================================================
@@ -1004,8 +1016,8 @@ fn test_collect_distinct() {
     let r = s
         .execute("MATCH (c:City) RETURN collect(DISTINCT c.name) AS names")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    if let Value::List(items) = &r.rows[0][0] {
+    assert_eq!(r.rows().len(), 1);
+    if let Value::List(items) = &r.rows()[0][0] {
         assert_eq!(
             items.len(),
             3,
@@ -1013,7 +1025,7 @@ fn test_collect_distinct() {
             items.len()
         );
     } else {
-        panic!("expected list, got {:?}", r.rows[0][0]);
+        panic!("expected list, got {:?}", r.rows()[0][0]);
     }
 }
 
@@ -1033,8 +1045,8 @@ fn test_avg_distinct() {
     let r = s
         .execute("MATCH (n:Val) RETURN avg(DISTINCT n.v) AS a")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    match &r.rows[0][0] {
+    assert_eq!(r.rows().len(), 1);
+    match &r.rows()[0][0] {
         Value::Float64(f) => assert!((*f - 20.0).abs() < 0.01, "expected 20.0, got {f}"),
         other => panic!("expected Float64, got {other:?}"),
     }

@@ -1,0 +1,68 @@
+# Per-benchmark performance regression thresholds for CI.
+#
+# Categories use fnmatch-style glob patterns to match Criterion benchmark names.
+# A benchmark matching multiple categories uses the first match.
+#
+# - threshold_pct: maximum allowed regression percentage before flagging
+# - fail_ci: whether exceeding the threshold fails the CI build
+#
+# Start with fail_ci = false to establish baselines, then flip to true
+# once historical data confirms thresholds are realistic.
+
+[defaults]
+threshold_pct = 15
+fail_ci = false
+
+[categories.core]
+threshold_pct = 8
+fail_ci = false
+benchmarks = [
+    "epoch_arena_*",
+    "bump_*",
+    "object_pool_*",
+    "adjacency_*",
+    "hash_index_*",
+    "distance/*",
+    "scalar_quantization/*",
+    "product_quantization/*",
+    "brute_force_*",
+    "hnsw_*",
+]
+
+[categories.query]
+threshold_pct = 12
+fail_ci = false
+benchmarks = [
+    "query_*",
+    "rdf_*",
+    "regression_repeat_*",
+    "regression_edge_filter_*",
+]
+
+[categories.multihop]
+threshold_pct = 15
+fail_ci = false
+benchmarks = [
+    "regression_1hop_*",
+    "regression_2hop_*",
+    "regression_3hop_*",
+    "regression_fan_out_*",
+]
+
+[categories.serialization]
+threshold_pct = 12
+fail_ci = false
+benchmarks = [
+    "snapshot_*",
+    "value_*",
+]
+
+[memory]
+fail_ci = false
+
+[memory.bounds]
+memory_empty_db = 524288             # 512 KB
+memory_1k_nodes_5k_edges = 4194304  # 4 MB
+memory_10k_nodes_50k_edges = 41943040  # 40 MB
+memory_after_100_queries = 6291456  # 6 MB
+memory_vector_index_1k = 8388608    # 8 MB

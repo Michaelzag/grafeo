@@ -2047,7 +2047,7 @@ impl<'a> Parser<'a> {
         }
         self.expect(TokenKind::RParen)?;
 
-        use crate::query::gql::ast as gql;
+        use crate::query::schema as gql;
         Ok(Statement::Schema(gql::SchemaStatement::CreateIndex(
             gql::CreateIndexStatement {
                 name,
@@ -2102,7 +2102,7 @@ impl<'a> Parser<'a> {
         }
 
         // Parse constraint kind: IS UNIQUE, IS NOT NULL, IS NODE KEY
-        use crate::query::gql::ast as gql;
+        use crate::query::schema as gql;
         let constraint_kind = if self.current.kind == TokenKind::Is {
             self.advance();
             if self.is_contextual("UNIQUE") {
@@ -2142,7 +2142,7 @@ impl<'a> Parser<'a> {
         let saved_cur = self.current.clone();
         self.advance(); // consume DROP
 
-        use crate::query::gql::ast as gql;
+        use crate::query::schema as gql;
 
         if self.is_contextual("INDEX") {
             self.advance();
@@ -2223,7 +2223,7 @@ impl<'a> Parser<'a> {
 
         self.expect_contextual("TYPE")?;
 
-        use crate::query::gql::ast as gql;
+        use crate::query::schema as gql;
 
         // Determine the operation: SET, ADD, or DROP
         if self.current.kind == TokenKind::Set {
@@ -2299,10 +2299,10 @@ impl<'a> Parser<'a> {
     fn parse_inline_graph_type_body(
         &mut self,
     ) -> Result<(
-        Vec<crate::query::gql::ast::InlineElementType>,
-        Vec<crate::query::gql::ast::InlineElementType>,
+        Vec<crate::query::schema::InlineElementType>,
+        Vec<crate::query::schema::InlineElementType>,
     )> {
-        use crate::query::gql::ast::InlineElementType;
+        use crate::query::schema::InlineElementType;
 
         self.expect(TokenKind::LBrace)?;
 
@@ -2331,8 +2331,8 @@ impl<'a> Parser<'a> {
     ///
     /// Starting from `(`, determines whether it is a node type or an edge type
     /// by looking for a following `-[` pattern.
-    fn parse_inline_type_element(&mut self) -> Result<crate::query::gql::ast::InlineElementType> {
-        use crate::query::gql::ast::InlineElementType;
+    fn parse_inline_type_element(&mut self) -> Result<crate::query::schema::InlineElementType> {
+        use crate::query::schema::InlineElementType;
 
         self.expect(TokenKind::LParen)?;
 
@@ -2377,9 +2377,9 @@ impl<'a> Parser<'a> {
     fn parse_inline_edge_type(
         &mut self,
         source_label: String,
-        _source_props: Vec<crate::query::gql::ast::PropertyDefinition>,
-    ) -> Result<crate::query::gql::ast::InlineElementType> {
-        use crate::query::gql::ast::InlineElementType;
+        _source_props: Vec<crate::query::schema::PropertyDefinition>,
+    ) -> Result<crate::query::schema::InlineElementType> {
+        use crate::query::schema::InlineElementType;
 
         // Determine direction and consume leading arrow part
         let (is_outgoing, _is_undirected) = match self.current.kind {
@@ -2447,8 +2447,8 @@ impl<'a> Parser<'a> {
     /// Supports both GQL-style (`prop TYPE`) and Neo4j-style (`prop :: TYPE`).
     fn parse_inline_property_defs(
         &mut self,
-    ) -> Result<Vec<crate::query::gql::ast::PropertyDefinition>> {
-        use crate::query::gql::ast::PropertyDefinition;
+    ) -> Result<Vec<crate::query::schema::PropertyDefinition>> {
+        use crate::query::schema::PropertyDefinition;
 
         self.expect(TokenKind::LBrace)?;
 
@@ -3751,7 +3751,7 @@ mod tests {
 
     #[test]
     fn test_parse_alter_current_graph_type_set_node() {
-        use crate::query::gql::ast::{InlineElementType, SchemaStatement};
+        use crate::query::schema::{InlineElementType, SchemaStatement};
 
         let stmt = parse_ok("ALTER CURRENT GRAPH TYPE SET { (:Person { name STRING NOT NULL }) }");
         if let Statement::Schema(SchemaStatement::CreateGraphType(create)) = stmt {
@@ -3773,7 +3773,7 @@ mod tests {
 
     #[test]
     fn test_parse_alter_current_graph_type_set_node_neo4j_type_syntax() {
-        use crate::query::gql::ast::{InlineElementType, SchemaStatement};
+        use crate::query::schema::{InlineElementType, SchemaStatement};
 
         // Neo4j uses :: for type annotations
         let stmt =
@@ -3794,7 +3794,7 @@ mod tests {
 
     #[test]
     fn test_parse_alter_current_graph_type_set_edge() {
-        use crate::query::gql::ast::{InlineElementType, SchemaStatement};
+        use crate::query::schema::{InlineElementType, SchemaStatement};
 
         let stmt = parse_ok("ALTER CURRENT GRAPH TYPE SET { (:Person)-[:KNOWS]->(:Person) }");
         if let Statement::Schema(SchemaStatement::CreateGraphType(create)) = stmt {
@@ -3820,7 +3820,7 @@ mod tests {
 
     #[test]
     fn test_parse_alter_current_graph_type_set_mixed() {
-        use crate::query::gql::ast::{InlineElementType, SchemaStatement};
+        use crate::query::schema::{InlineElementType, SchemaStatement};
 
         let stmt = parse_ok(
             "ALTER CURRENT GRAPH TYPE SET { (:Person { name STRING }), (:Person)-[:KNOWS]->(:Person) }",
@@ -3847,7 +3847,7 @@ mod tests {
 
     #[test]
     fn test_parse_alter_current_graph_type_add() {
-        use crate::query::gql::ast::{GraphTypeAlteration, SchemaStatement};
+        use crate::query::schema::{GraphTypeAlteration, SchemaStatement};
 
         let stmt = parse_ok("ALTER CURRENT GRAPH TYPE ADD { (:Movie { title STRING }) }");
         if let Statement::Schema(SchemaStatement::AlterGraphType(alter)) = stmt {
@@ -3864,7 +3864,7 @@ mod tests {
 
     #[test]
     fn test_parse_alter_current_graph_type_add_edge() {
-        use crate::query::gql::ast::{GraphTypeAlteration, SchemaStatement};
+        use crate::query::schema::{GraphTypeAlteration, SchemaStatement};
 
         let stmt = parse_ok("ALTER CURRENT GRAPH TYPE ADD { (:Person)-[:ACTED_IN]->(:Movie) }");
         if let Statement::Schema(SchemaStatement::AlterGraphType(alter)) = stmt {
@@ -3885,7 +3885,7 @@ mod tests {
 
     #[test]
     fn test_parse_alter_current_graph_type_drop() {
-        use crate::query::gql::ast::{GraphTypeAlteration, SchemaStatement};
+        use crate::query::schema::{GraphTypeAlteration, SchemaStatement};
 
         let stmt = parse_ok("ALTER CURRENT GRAPH TYPE DROP { (:Movie) }");
         if let Statement::Schema(SchemaStatement::AlterGraphType(alter)) = stmt {
@@ -3902,7 +3902,7 @@ mod tests {
 
     #[test]
     fn test_parse_alter_current_graph_type_drop_edge() {
-        use crate::query::gql::ast::{GraphTypeAlteration, SchemaStatement};
+        use crate::query::schema::{GraphTypeAlteration, SchemaStatement};
 
         let stmt = parse_ok("ALTER CURRENT GRAPH TYPE DROP { (:Person)-[:ACTED_IN]->(:Movie) }");
         if let Statement::Schema(SchemaStatement::AlterGraphType(alter)) = stmt {
@@ -3924,7 +3924,7 @@ mod tests {
     #[test]
     fn test_parse_alter_current_graph_type_set_empty_body() {
         let stmt = parse_ok("ALTER CURRENT GRAPH TYPE SET { }");
-        if let Statement::Schema(crate::query::gql::ast::SchemaStatement::CreateGraphType(create)) =
+        if let Statement::Schema(crate::query::schema::SchemaStatement::CreateGraphType(create)) =
             stmt
         {
             assert_eq!(create.name, "__current__");
@@ -3937,7 +3937,7 @@ mod tests {
 
     #[test]
     fn test_parse_alter_current_graph_type_multiple_properties() {
-        use crate::query::gql::ast::{InlineElementType, SchemaStatement};
+        use crate::query::schema::{InlineElementType, SchemaStatement};
 
         let stmt = parse_ok(
             "ALTER CURRENT GRAPH TYPE SET { (:Person { name STRING NOT NULL, age INTEGER }) }",
@@ -3960,7 +3960,7 @@ mod tests {
 
     #[test]
     fn test_parse_alter_current_graph_type_edge_with_properties() {
-        use crate::query::gql::ast::{InlineElementType, SchemaStatement};
+        use crate::query::schema::{InlineElementType, SchemaStatement};
 
         let stmt = parse_ok(
             "ALTER CURRENT GRAPH TYPE SET { (:Person)-[:KNOWS { since INTEGER }]->(:Person) }",

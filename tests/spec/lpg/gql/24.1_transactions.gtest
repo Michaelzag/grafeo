@@ -10,6 +10,7 @@
 meta:
   language: gql
   model: lpg
+  iso: [GT01, GT02, GS01, GS04, GS06, GS07]
   section: "24.1"
   title: Transactions and sessions
   dataset: empty

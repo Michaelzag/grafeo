@@ -43,7 +43,7 @@ mod merge_unwind {
             .unwrap();
         let r = s.execute("MATCH (n:Item) RETURN count(n) AS cnt").unwrap();
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Int64(1),
             "MERGE with duplicate values should create only one node"
         );
@@ -57,7 +57,7 @@ mod merge_unwind {
             .unwrap();
         let r = s.execute("MATCH (n:Item) RETURN count(n) AS cnt").unwrap();
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Int64(3),
             "MERGE with distinct values should create three nodes"
         );
@@ -74,7 +74,7 @@ mod merge_unwind {
             .unwrap();
         let r = s.execute("MATCH (n:Item) RETURN count(n) AS cnt").unwrap();
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Int64(3),
             "MERGE should create 2 new nodes and match 1 existing"
         );
@@ -98,11 +98,11 @@ mod merge_unwind {
             .unwrap();
         assert_eq!(r.row_count(), 2);
         // val=1 was matched, so status should be 'updated'
-        assert_eq!(r.rows[0][0], Value::Int64(1));
-        assert_eq!(r.rows[0][1], Value::String("updated".into()));
+        assert_eq!(r.rows()[0][0], Value::Int64(1));
+        assert_eq!(r.rows()[0][1], Value::String("updated".into()));
         // val=2 was created, so status should be 'new'
-        assert_eq!(r.rows[1][0], Value::Int64(2));
-        assert_eq!(r.rows[1][1], Value::String("new".into()));
+        assert_eq!(r.rows()[1][0], Value::Int64(2));
+        assert_eq!(r.rows()[1][1], Value::String("new".into()));
     }
 }
 
@@ -123,7 +123,7 @@ mod merge_composite_keys {
             .unwrap();
         let r = s.execute("MATCH (n:City) RETURN count(n) AS cnt").unwrap();
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Int64(1),
             "Identical composite key should not create duplicate"
         );
@@ -140,7 +140,7 @@ mod merge_composite_keys {
             .unwrap();
         let r = s.execute("MATCH (n:City) RETURN count(n) AS cnt").unwrap();
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Int64(2),
             "Partial composite match should create a new node"
         );
@@ -158,7 +158,7 @@ mod merge_composite_keys {
             .unwrap();
         let r = s.execute("MATCH (n:Place) RETURN count(n) AS cnt").unwrap();
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Int64(2),
             "Three-property MERGE: identical creates 1, different district creates 2"
         );
@@ -193,7 +193,7 @@ mod relationship_isomorphism {
                  RETURN count(*) AS cnt",
             )
             .unwrap();
-        let cnt = &r.rows[0][0];
+        let cnt = &r.rows()[0][0];
         // Triangle: Alix->Gus->Vincent->Alix gives exactly 3 two-hop paths.
         assert_eq!(
             *cnt,
@@ -216,7 +216,7 @@ mod relationship_isomorphism {
             )
             .unwrap();
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Int64(0),
             "Single edge cannot satisfy a two-hop pattern"
         );
@@ -285,7 +285,7 @@ mod aggregation_in_subquery {
             .execute("CALL { MATCH (n:Person) RETURN count(n) AS cnt } RETURN cnt")
             .unwrap();
         assert_eq!(r.row_count(), 1, "Aggregation in CALL should return 1 row");
-        assert_eq!(r.rows[0][0], Value::Int64(3));
+        assert_eq!(r.rows()[0][0], Value::Int64(3));
     }
 }
 
@@ -314,7 +314,7 @@ mod collect_order {
             .execute("MATCH (p:Person) RETURN collect(p.name) AS names")
             .unwrap();
         assert_eq!(r.row_count(), 1);
-        if let Value::List(names) = &r.rows[0][0] {
+        if let Value::List(names) = &r.rows()[0][0] {
             assert_eq!(names.len(), 5, "COLLECT must gather all 5 names");
             // Verify all names are present (order may vary)
             let name_strs: Vec<String> = names
@@ -328,7 +328,7 @@ mod collect_order {
             sorted.sort();
             assert_eq!(sorted, vec!["Alix", "Gus", "Jules", "Mia", "Vincent"],);
         } else {
-            panic!("Expected List, got {:?}", r.rows[0][0]);
+            panic!("Expected List, got {:?}", r.rows()[0][0]);
         }
     }
 }
@@ -343,7 +343,7 @@ mod group_by_expression_order {
     /// Helper: extract a column of string values from query results.
     fn string_column(result: &QueryResult, col: usize) -> Vec<String> {
         result
-            .rows
+            .rows()
             .iter()
             .map(|row| match &row[col] {
                 Value::String(s) => s.to_string(),
@@ -412,10 +412,10 @@ mod where_filter_and_projection {
             )
             .unwrap();
         assert_eq!(r.row_count(), 1);
-        assert_eq!(r.rows[0][0], Value::String("Temp".into()));
+        assert_eq!(r.rows()[0][0], Value::String("Temp".into()));
         // The returned value must be the actual reading, NOT boolean true
         assert_eq!(
-            r.rows[0][1],
+            r.rows()[0][1],
             Value::Float64(42.5),
             "WHERE IS NOT NULL must not replace the returned value with boolean"
         );
@@ -441,7 +441,7 @@ mod sum_overflow {
             )
             .unwrap();
         assert_eq!(r.row_count(), 1);
-        match &r.rows[0][0] {
+        match &r.rows()[0][0] {
             Value::Float64(f) => {
                 assert!(
                     f.is_infinite() && f.is_sign_positive(),
@@ -468,8 +468,8 @@ mod unicode_emoji {
             .unwrap();
         let r = s.execute("MATCH (t:Tag) RETURN t.symbol, t.name").unwrap();
         assert_eq!(r.row_count(), 1);
-        assert_eq!(r.rows[0][0], Value::String("\u{1F389}".into()));
-        assert_eq!(r.rows[0][1], Value::String("party".into()));
+        assert_eq!(r.rows()[0][0], Value::String("\u{1F389}".into()));
+        assert_eq!(r.rows()[0][1], Value::String("party".into()));
     }
 
     #[test]
@@ -479,7 +479,7 @@ mod unicode_emoji {
         s.execute("INSERT (:City {name: '\u{6771}\u{4EAC}'})") // 東京
             .unwrap();
         let r = s.execute("MATCH (c:City) RETURN c.name").unwrap();
-        assert_eq!(r.rows[0][0], Value::String("\u{6771}\u{4EAC}".into()));
+        assert_eq!(r.rows()[0][0], Value::String("\u{6771}\u{4EAC}".into()));
     }
 
     #[test]
@@ -490,7 +490,7 @@ mod unicode_emoji {
         s.execute("INSERT (:Word {text: 'calf\u{0065}\u{0301}'})")
             .unwrap();
         let r = s.execute("MATCH (w:Word) RETURN w.text").unwrap();
-        assert_eq!(r.rows[0][0], Value::String("calf\u{0065}\u{0301}".into()));
+        assert_eq!(r.rows()[0][0], Value::String("calf\u{0065}\u{0301}".into()));
     }
 }
 
@@ -512,7 +512,7 @@ mod self_loop {
             .execute("MATCH (a:Node)-[r:SELF]->(a) RETURN a.name")
             .unwrap();
         assert_eq!(r.row_count(), 1);
-        assert_eq!(r.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(r.rows()[0][0], Value::String("Alix".into()));
     }
 
     #[test]
@@ -526,7 +526,7 @@ mod self_loop {
             .execute("MATCH (:Node)-[r:SELF]->() RETURN count(r) AS cnt")
             .unwrap();
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Int64(1),
             "Self-loop should be counted exactly once"
         );
@@ -567,7 +567,7 @@ mod deleted_node_access {
             .execute("MATCH ()-[r:R]->() RETURN count(r) AS cnt")
             .unwrap();
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Int64(0),
             "DETACH DELETE should remove all connected edges"
         );
@@ -603,7 +603,7 @@ mod nested_properties {
         let r = s.execute("MATCH (d:Data) RETURN d.meta").unwrap();
         assert_eq!(r.row_count(), 1);
         // Verify the nested structure survived
-        if let Value::Map(outer) = &r.rows[0][0] {
+        if let Value::Map(outer) = &r.rows()[0][0] {
             let b = outer.get(&PropertyKey::new("b")).expect("Missing key 'b'");
             if let Value::Map(inner_result) = b {
                 assert_eq!(
@@ -614,7 +614,7 @@ mod nested_properties {
                 panic!("Expected inner Map, got {:?}", b);
             }
         } else {
-            panic!("Expected Map, got {:?}", r.rows[0][0]);
+            panic!("Expected Map, got {:?}", r.rows()[0][0]);
         }
     }
 
@@ -639,14 +639,14 @@ mod nested_properties {
         s.execute_with_params("INSERT (:Data {items: $items})", params)
             .unwrap();
         let r = s.execute("MATCH (d:Data) RETURN d.items").unwrap();
-        if let Value::List(items) = &r.rows[0][0] {
+        if let Value::List(items) = &r.rows()[0][0] {
             assert_eq!(items.len(), 4);
             assert_eq!(items[0], Value::Int64(1));
             assert_eq!(items[1], Value::String("two".into()));
             assert_eq!(items[2], Value::Bool(true));
             assert_eq!(items[3], Value::Null);
         } else {
-            panic!("Expected List, got {:?}", r.rows[0][0]);
+            panic!("Expected List, got {:?}", r.rows()[0][0]);
         }
     }
 }
@@ -747,7 +747,7 @@ mod concurrent_merge {
             .execute("MATCH (n:Singleton) RETURN count(n) AS cnt")
             .unwrap();
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Int64(1),
             "Concurrent MERGE should produce exactly 1 node"
         );
@@ -813,7 +813,7 @@ mod merge_null_node_reference {
             )
             .unwrap();
         assert_eq!(check.row_count(), 1);
-        assert_eq!(check.rows[0][0], Value::String("Jules".into()));
+        assert_eq!(check.rows()[0][0], Value::String("Jules".into()));
     }
 
     #[test]
@@ -824,7 +824,7 @@ mod merge_null_node_reference {
             .execute("MERGE (:Person {name: 'Mia'}) RETURN 1 AS ok")
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::Int64(1));
+        assert_eq!(result.rows()[0][0], Value::Int64(1));
     }
 }
 
@@ -857,10 +857,10 @@ mod distinct_edges {
             )
             .unwrap();
         assert_eq!(
-            result.rows.len(),
+            result.rows().len(),
             1,
             "DISTINCT e should return exactly one row, got: {}",
-            result.rows.len()
+            result.rows().len()
         );
     }
 
@@ -887,10 +887,10 @@ mod distinct_edges {
             .execute("MATCH ()-[e:KNOWS]->() RETURN DISTINCT e")
             .unwrap();
         assert_eq!(
-            result.rows.len(),
+            result.rows().len(),
             2,
             "DISTINCT should return both edges, got: {}",
-            result.rows.len()
+            result.rows().len()
         );
     }
 }
@@ -922,8 +922,8 @@ mod call_block_scope {
              RETURN age_a, age_b",
         );
         let result = result.expect("sibling CALL outputs should be accessible in outer RETURN");
-        assert_eq!(result.rows[0][0], Value::Int64(30)); // age_a
-        assert_eq!(result.rows[0][1], Value::Int64(25)); // age_b
+        assert_eq!(result.rows()[0][0], Value::Int64(30)); // age_a
+        assert_eq!(result.rows()[0][1], Value::Int64(25)); // age_b
     }
 
     /// Internal variable `a` from CALL block 1 must not be visible in CALL block 2.
@@ -965,8 +965,8 @@ mod call_block_scope {
             )
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-        assert_eq!(result.rows[0][1], Value::String("TechCorp".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[0][1], Value::String("TechCorp".into()));
     }
 
     /// SUM aggregation inside a CALL subquery should produce a single row
@@ -986,7 +986,7 @@ mod call_block_scope {
             .execute("CALL { MATCH (n:Person) RETURN sum(n.age) AS total } RETURN total")
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::Int64(95));
+        assert_eq!(result.rows()[0][0], Value::Int64(95));
     }
 }
 
@@ -1018,14 +1018,14 @@ mod unwind_merge_set {
             .unwrap();
 
         assert_eq!(result.row_count(), 2);
-        assert_eq!(result.rows[0][0], Value::String("test://bar".into()));
+        assert_eq!(result.rows()[0][0], Value::String("test://bar".into()));
         assert_eq!(
-            result.rows[0][1],
+            result.rows()[0][1],
             Value::String("Bar".into()),
             "SET x.name = item.name should resolve item.name from UNWIND map (#172)"
         );
-        assert_eq!(result.rows[1][0], Value::String("test://foo".into()));
-        assert_eq!(result.rows[1][1], Value::String("Foo".into()));
+        assert_eq!(result.rows()[1][0], Value::String("test://foo".into()));
+        assert_eq!(result.rows()[1][1], Value::String("Foo".into()));
     }
 
     /// SET x += item (map merge) should also work with UNWIND variables.
@@ -1047,11 +1047,11 @@ mod unwind_merge_set {
 
         assert_eq!(result.row_count(), 1);
         assert_eq!(
-            result.rows[0][0],
+            result.rows()[0][0],
             Value::String("Baz".into()),
             "SET x += item should merge all map properties (#172)"
         );
-        assert_eq!(result.rows[0][1], Value::String("module".into()));
+        assert_eq!(result.rows()[0][1], Value::String("module".into()));
     }
 }
 
@@ -1083,10 +1083,10 @@ mod issue_187_labels_type_aggregation {
             2,
             "Should have two groups: Class and Method"
         );
-        assert_eq!(result.rows[0][0], Value::String("Class".into()));
-        assert_eq!(result.rows[0][1], Value::Int64(2));
-        assert_eq!(result.rows[1][0], Value::String("Method".into()));
-        assert_eq!(result.rows[1][1], Value::Int64(1));
+        assert_eq!(result.rows()[0][0], Value::String("Class".into()));
+        assert_eq!(result.rows()[0][1], Value::Int64(2));
+        assert_eq!(result.rows()[1][0], Value::String("Method".into()));
+        assert_eq!(result.rows()[1][1], Value::Int64(1));
     }
 
     #[test]
@@ -1109,10 +1109,10 @@ mod issue_187_labels_type_aggregation {
             2,
             "Should have two groups: CALLS and IMPORTS"
         );
-        assert_eq!(result.rows[0][0], Value::String("CALLS".into()));
-        assert_eq!(result.rows[0][1], Value::Int64(2));
-        assert_eq!(result.rows[1][0], Value::String("IMPORTS".into()));
-        assert_eq!(result.rows[1][1], Value::Int64(1));
+        assert_eq!(result.rows()[0][0], Value::String("CALLS".into()));
+        assert_eq!(result.rows()[0][1], Value::Int64(2));
+        assert_eq!(result.rows()[1][0], Value::String("IMPORTS".into()));
+        assert_eq!(result.rows()[1][1], Value::Int64(1));
     }
 
     #[test]
@@ -1127,8 +1127,8 @@ mod issue_187_labels_type_aggregation {
 
         assert_eq!(result.row_count(), 2);
         // Each single-label node forms its own group with count 1.
-        assert_eq!(result.rows[0][1], Value::Int64(1));
-        assert_eq!(result.rows[1][1], Value::Int64(1));
+        assert_eq!(result.rows()[0][1], Value::Int64(1));
+        assert_eq!(result.rows()[1][1], Value::Int64(1));
     }
 
     #[test]
@@ -1144,8 +1144,8 @@ mod issue_187_labels_type_aggregation {
 
         assert_eq!(result.row_count(), 2);
         // "Apple" < "Zebra" alphabetically
-        assert_eq!(result.rows[0][0], Value::String("A".into()));
-        assert_eq!(result.rows[1][0], Value::String("Z".into()));
+        assert_eq!(result.rows()[0][0], Value::String("A".into()));
+        assert_eq!(result.rows()[1][0], Value::String("Z".into()));
     }
 
     #[test]
@@ -1160,8 +1160,8 @@ mod issue_187_labels_type_aggregation {
             .unwrap();
 
         assert_eq!(result.row_count(), 2);
-        assert_eq!(result.rows[0][0], Value::String("ALPHA".into()));
-        assert_eq!(result.rows[1][0], Value::String("BETA".into()));
+        assert_eq!(result.rows()[0][0], Value::String("ALPHA".into()));
+        assert_eq!(result.rows()[1][0], Value::String("BETA".into()));
     }
 
     #[test]
@@ -1178,10 +1178,10 @@ mod issue_187_labels_type_aggregation {
             .unwrap();
 
         assert_eq!(result.row_count(), 2);
-        assert_eq!(result.rows[0][0], Value::String("Designer".into()));
-        assert_eq!(result.rows[0][1], Value::Int64(1));
-        assert_eq!(result.rows[1][0], Value::String("Engineer".into()));
-        assert_eq!(result.rows[1][1], Value::Int64(2));
+        assert_eq!(result.rows()[0][0], Value::String("Designer".into()));
+        assert_eq!(result.rows()[0][1], Value::Int64(1));
+        assert_eq!(result.rows()[1][0], Value::String("Engineer".into()));
+        assert_eq!(result.rows()[1][1], Value::Int64(2));
     }
 
     #[test]
@@ -1196,8 +1196,8 @@ mod issue_187_labels_type_aggregation {
             .unwrap();
 
         assert_eq!(result.row_count(), 2);
-        assert_eq!(result.rows[0][0], Value::String("A".into()));
-        assert_eq!(result.rows[1][0], Value::String("Z".into()));
+        assert_eq!(result.rows()[0][0], Value::String("A".into()));
+        assert_eq!(result.rows()[1][0], Value::String("Z".into()));
     }
 }
 
@@ -1223,10 +1223,10 @@ mod issue_187_extended {
             .unwrap();
 
         assert_eq!(result.row_count(), 2);
-        assert_eq!(result.rows[0][0], Value::String("Alpha".into()));
-        assert_eq!(result.rows[0][1], Value::Int64(30));
-        assert_eq!(result.rows[1][0], Value::String("Beta".into()));
-        assert_eq!(result.rows[1][1], Value::Int64(5));
+        assert_eq!(result.rows()[0][0], Value::String("Alpha".into()));
+        assert_eq!(result.rows()[0][1], Value::Int64(30));
+        assert_eq!(result.rows()[1][0], Value::String("Beta".into()));
+        assert_eq!(result.rows()[1][1], Value::Int64(5));
     }
 
     #[test]
@@ -1263,7 +1263,7 @@ mod issue_187_extended {
             2,
             "Expected exactly 2 rows (one per distinct label-set), got {}: {:?}",
             result.row_count(),
-            result.rows
+            result.rows()
         );
     }
 
@@ -1281,9 +1281,9 @@ mod issue_187_extended {
             .unwrap();
 
         assert_eq!(result.row_count(), 3);
-        assert_eq!(result.rows[0][0], Value::String("GAMMA".into()));
-        assert_eq!(result.rows[1][0], Value::String("BETA".into()));
-        assert_eq!(result.rows[2][0], Value::String("ALPHA".into()));
+        assert_eq!(result.rows()[0][0], Value::String("GAMMA".into()));
+        assert_eq!(result.rows()[1][0], Value::String("BETA".into()));
+        assert_eq!(result.rows()[2][0], Value::String("ALPHA".into()));
     }
 
     #[test]
@@ -1364,10 +1364,10 @@ mod issue_187_gql_type_with_count {
             .unwrap();
 
         assert_eq!(result.row_count(), 2, "Two edge types: BLOCKS and FOLLOWS");
-        assert_eq!(result.rows[0][0], Value::String("BLOCKS".into()));
-        assert_eq!(result.rows[0][1], Value::Int64(1));
-        assert_eq!(result.rows[1][0], Value::String("FOLLOWS".into()));
-        assert_eq!(result.rows[1][1], Value::Int64(2));
+        assert_eq!(result.rows()[0][0], Value::String("BLOCKS".into()));
+        assert_eq!(result.rows()[0][1], Value::Int64(1));
+        assert_eq!(result.rows()[1][0], Value::String("FOLLOWS".into()));
+        assert_eq!(result.rows()[1][1], Value::Int64(2));
     }
 }
 
@@ -1387,7 +1387,7 @@ mod integer_overflow {
         // i64::MAX + 1 overflows: returns NULL (SQL overflow semantics)
         let r = s.execute("RETURN 9223372036854775807 + 1 AS r").unwrap();
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Null,
             "i64::MAX + 1 should return NULL (overflow)"
         );
@@ -1402,7 +1402,7 @@ mod integer_overflow {
             Err(_) => {} // Parse error for the literal is also acceptable
             Ok(r) => {
                 assert_ne!(
-                    r.rows[0][0],
+                    r.rows()[0][0],
                     Value::Int64(i64::MAX),
                     "Must not silently wrap i64::MIN - 1 to i64::MAX"
                 );
@@ -1420,7 +1420,7 @@ mod integer_overflow {
             .execute("RETURN 100 * 1000000000 * 100000000 AS r")
             .unwrap();
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Null,
             "Intermediate multiplication overflow should return NULL"
         );
@@ -1481,7 +1481,7 @@ mod variable_length_path_enumeration {
             1,
             "1..1 hop should match exactly 1 direct neighbor"
         );
-        assert_eq!(r.rows[0][0], Value::String("Gus".into()));
+        assert_eq!(r.rows()[0][0], Value::String("Gus".into()));
     }
 
     #[test]
@@ -1527,7 +1527,7 @@ mod exists_subquery {
             .unwrap();
         assert_eq!(r.row_count(), 1);
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Bool(false),
             "EXISTS must return false when no matching pattern exists"
         );
@@ -1548,7 +1548,7 @@ mod exists_subquery {
             .unwrap();
         assert_eq!(r.row_count(), 1);
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Bool(true),
             "EXISTS must return true when matching pattern exists"
         );
@@ -1568,7 +1568,7 @@ mod exists_subquery {
                  RETURN EXISTS { MATCH (u)<-[:AUTH]-(:Identity) } AS has_id",
             )
             .unwrap();
-        assert_eq!(r.rows[0][0], Value::Bool(false));
+        assert_eq!(r.rows()[0][0], Value::Bool(false));
     }
 }
 
@@ -1608,7 +1608,7 @@ mod unwind_null {
         let _ = s.execute("UNWIND NULL AS x INSERT (:Ghost {val: x})");
         let r = s.execute("MATCH (n:Ghost) RETURN count(n) AS cnt").unwrap();
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Int64(0),
             "No nodes should be created when UNWIND produces zero rows"
         );
@@ -1761,7 +1761,7 @@ mod double_delete {
         }
         let check = s.execute("MATCH (n) RETURN count(n) AS cnt").unwrap();
         assert_eq!(
-            check.rows[0][0],
+            check.rows()[0][0],
             Value::Int64(0),
             "No phantom nodes should remain after double delete"
         );
@@ -1782,12 +1782,12 @@ mod double_delete {
             .execute("MATCH ()-[r]->() RETURN count(r) AS cnt")
             .unwrap();
         assert_eq!(
-            nodes.rows[0][0],
+            nodes.rows()[0][0],
             Value::Int64(0),
             "All nodes should be gone"
         );
         assert_eq!(
-            edges.rows[0][0],
+            edges.rows()[0][0],
             Value::Int64(0),
             "All edges should be gone"
         );
@@ -1835,9 +1835,9 @@ mod optional_match_cartesian {
             )
             .unwrap();
         assert_eq!(r.row_count(), 1);
-        assert_eq!(r.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(r.rows()[0][0], Value::String("Alix".into()));
         assert_eq!(
-            r.rows[0][1],
+            r.rows()[0][1],
             Value::Null,
             "Unmatched OPTIONAL MATCH variable should be NULL"
         );
@@ -1873,8 +1873,8 @@ mod where_filter_on_traversal {
             )
             .unwrap();
         assert_eq!(r.row_count(), 1);
-        assert_eq!(r.rows[0][0], Value::String("Gus".into()));
-        assert_eq!(r.rows[0][1], Value::String("Berlin".into()));
+        assert_eq!(r.rows()[0][0], Value::String("Gus".into()));
+        assert_eq!(r.rows()[0][1], Value::String("Berlin".into()));
     }
 
     #[test]
@@ -1898,8 +1898,8 @@ mod where_filter_on_traversal {
             )
             .unwrap();
         assert_eq!(r.row_count(), 1);
-        assert_eq!(r.rows[0][0], Value::String("Vincent".into()));
-        assert_eq!(r.rows[0][1], Value::String("Jules".into()));
+        assert_eq!(r.rows()[0][0], Value::String("Vincent".into()));
+        assert_eq!(r.rows()[0][1], Value::String("Jules".into()));
     }
 
     #[test]
@@ -1921,8 +1921,8 @@ mod where_filter_on_traversal {
             )
             .unwrap();
         assert_eq!(r.row_count(), 1);
-        assert_eq!(r.rows[0][0], Value::String("Vincent".into()));
-        assert_eq!(r.rows[0][1], Value::String("Jules".into()));
+        assert_eq!(r.rows()[0][0], Value::String("Vincent".into()));
+        assert_eq!(r.rows()[0][1], Value::String("Jules".into()));
     }
 }
 
@@ -1946,7 +1946,7 @@ mod empty_aggregation {
             1,
             "Aggregation over empty set should return 1 row"
         );
-        assert_eq!(r.rows[0][0], Value::Int64(0));
+        assert_eq!(r.rows()[0][0], Value::Int64(0));
     }
 
     #[test]
@@ -1960,9 +1960,9 @@ mod empty_aggregation {
         // SQL standard: SUM of no rows is NULL. Some engines return 0.
         // Grafeo returns NULL, which is spec-compliant.
         assert!(
-            r.rows[0][0] == Value::Null || r.rows[0][0] == Value::Int64(0),
+            r.rows()[0][0] == Value::Null || r.rows()[0][0] == Value::Int64(0),
             "SUM over empty set should be NULL or 0, got {:?}",
-            r.rows[0][0]
+            r.rows()[0][0]
         );
     }
 
@@ -1975,7 +1975,7 @@ mod empty_aggregation {
             .unwrap();
         assert_eq!(r.row_count(), 1);
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Null,
             "AVG over empty set should return NULL"
         );
@@ -1990,12 +1990,12 @@ mod empty_aggregation {
             .unwrap();
         assert_eq!(r.row_count(), 1);
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Null,
             "MIN over empty set should be NULL"
         );
         assert_eq!(
-            r.rows[0][1],
+            r.rows()[0][1],
             Value::Null,
             "MAX over empty set should be NULL"
         );
@@ -2086,7 +2086,7 @@ mod merge_edge_patterns {
         let r = s
             .execute("MATCH (:Person)-[k:KNOWS]->(:Person) RETURN count(k) AS cnt")
             .unwrap();
-        assert_eq!(r.rows[0][0], Value::Int64(1));
+        assert_eq!(r.rows()[0][0], Value::Int64(1));
     }
 
     #[test]
@@ -2107,7 +2107,7 @@ mod merge_edge_patterns {
             .execute("MATCH (:Person)-[k:KNOWS]->(:Person) RETURN count(k) AS cnt")
             .unwrap();
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Int64(1),
             "MERGE should not create duplicate relationship"
         );
@@ -2132,7 +2132,7 @@ mod delete_reinsert {
 
         // Verify clean slate
         let r = s.execute("MATCH (n:Item) RETURN count(n) AS cnt").unwrap();
-        assert_eq!(r.rows[0][0], Value::Int64(0));
+        assert_eq!(r.rows()[0][0], Value::Int64(0));
 
         // Re-insert
         s.execute("INSERT (:Item {val: 10})").unwrap();
@@ -2142,8 +2142,8 @@ mod delete_reinsert {
             .execute("MATCH (n:Item) RETURN n.val ORDER BY n.val")
             .unwrap();
         assert_eq!(r2.row_count(), 2);
-        assert_eq!(r2.rows[0][0], Value::Int64(10));
-        assert_eq!(r2.rows[1][0], Value::Int64(20));
+        assert_eq!(r2.rows()[0][0], Value::Int64(10));
+        assert_eq!(r2.rows()[1][0], Value::Int64(20));
     }
 
     #[test]
@@ -2162,8 +2162,8 @@ mod delete_reinsert {
         let edges = s
             .execute("MATCH ()-[r]->() RETURN count(r) AS cnt")
             .unwrap();
-        assert_eq!(nodes.rows[0][0], Value::Int64(2));
-        assert_eq!(edges.rows[0][0], Value::Int64(1));
+        assert_eq!(nodes.rows()[0][0], Value::Int64(2));
+        assert_eq!(edges.rows()[0][0], Value::Int64(1));
     }
 }
 
@@ -2200,7 +2200,7 @@ mod multi_label {
             .execute("MATCH (n:Person) RETURN labels(n) AS lbls")
             .unwrap();
         assert_eq!(r.row_count(), 1);
-        if let Value::List(labels) = &r.rows[0][0] {
+        if let Value::List(labels) = &r.rows()[0][0] {
             assert_eq!(labels.len(), 3, "Should have 3 labels");
             let label_strs: Vec<String> = labels
                 .iter()
@@ -2213,7 +2213,7 @@ mod multi_label {
             assert!(label_strs.contains(&"Employee".to_string()));
             assert!(label_strs.contains(&"Manager".to_string()));
         } else {
-            panic!("Expected List, got {:?}", r.rows[0][0]);
+            panic!("Expected List, got {:?}", r.rows()[0][0]);
         }
     }
 }
@@ -2253,7 +2253,7 @@ mod property_type_edge_cases {
             .unwrap();
         assert_eq!(r.row_count(), 1);
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Null,
             "Accessing a missing property should return NULL"
         );
@@ -2269,7 +2269,7 @@ mod property_type_edge_cases {
             .execute("MATCH (n:N) WHERE n.name IS NOT NULL RETURN n.name")
             .unwrap();
         assert_eq!(r.row_count(), 1, "Empty string is a valid value, not NULL");
-        assert_eq!(r.rows[0][0], Value::String("".into()));
+        assert_eq!(r.rows()[0][0], Value::String("".into()));
     }
 
     #[test]
@@ -2282,7 +2282,7 @@ mod property_type_edge_cases {
             .execute("MATCH (n:N) WHERE n.val IS NOT NULL RETURN n.val")
             .unwrap();
         assert_eq!(r.row_count(), 1, "Integer 0 is a valid value, not NULL");
-        assert_eq!(r.rows[0][0], Value::Int64(0));
+        assert_eq!(r.rows()[0][0], Value::Int64(0));
     }
 
     #[test]
@@ -2295,7 +2295,7 @@ mod property_type_edge_cases {
             .execute("MATCH (n:N) WHERE n.flag IS NOT NULL RETURN n.flag")
             .unwrap();
         assert_eq!(r.row_count(), 1, "Boolean false is a valid value, not NULL");
-        assert_eq!(r.rows[0][0], Value::Bool(false));
+        assert_eq!(r.rows()[0][0], Value::Bool(false));
     }
 }
 
@@ -2318,7 +2318,7 @@ mod avg_large_integers {
 
         let r = s.execute("MATCH (m:M) RETURN avg(m.val) AS a").unwrap();
         assert_eq!(r.row_count(), 1);
-        match &r.rows[0][0] {
+        match &r.rows()[0][0] {
             Value::Float64(f) => {
                 let expected = 389_916_982_198_384.0_f64;
                 let diff = (f - expected).abs();
@@ -2354,7 +2354,7 @@ mod list_comparison {
         assert_eq!(r.row_count(), 1);
         // [] and [null] are structurally different
         assert_ne!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Bool(true),
             "Empty list must not equal a list containing NULL"
         );
@@ -2366,7 +2366,7 @@ mod list_comparison {
         let s = db.session();
         let r = s.execute("RETURN [] = [] AS eq").unwrap();
         assert_eq!(r.row_count(), 1);
-        assert_eq!(r.rows[0][0], Value::Bool(true));
+        assert_eq!(r.rows()[0][0], Value::Bool(true));
     }
 
     #[test]
@@ -2375,7 +2375,7 @@ mod list_comparison {
         let s = db.session();
         let r = s.execute("RETURN [1, 2, 3] = [1, 2, 3] AS eq").unwrap();
         assert_eq!(r.row_count(), 1);
-        assert_eq!(r.rows[0][0], Value::Bool(true));
+        assert_eq!(r.rows()[0][0], Value::Bool(true));
     }
 
     #[test]
@@ -2384,7 +2384,7 @@ mod list_comparison {
         let s = db.session();
         let r = s.execute("RETURN [1, 2] = [1, 3] AS eq").unwrap();
         assert_eq!(r.row_count(), 1);
-        assert_eq!(r.rows[0][0], Value::Bool(false));
+        assert_eq!(r.rows()[0][0], Value::Bool(false));
     }
 }
 
@@ -2418,14 +2418,14 @@ mod optional_match_aggregation {
             "All 3 persons should appear, even those without friends"
         );
         // Alix has 1 friend
-        assert_eq!(r.rows[0][0], Value::String("Alix".into()));
-        assert_eq!(r.rows[0][1], Value::Int64(1));
+        assert_eq!(r.rows()[0][0], Value::String("Alix".into()));
+        assert_eq!(r.rows()[0][1], Value::Int64(1));
         // Gus has 0 friends (outgoing)
-        assert_eq!(r.rows[1][0], Value::String("Gus".into()));
-        assert_eq!(r.rows[1][1], Value::Int64(0));
+        assert_eq!(r.rows()[1][0], Value::String("Gus".into()));
+        assert_eq!(r.rows()[1][1], Value::Int64(0));
         // Vincent has 0 friends
-        assert_eq!(r.rows[2][0], Value::String("Vincent".into()));
-        assert_eq!(r.rows[2][1], Value::Int64(0));
+        assert_eq!(r.rows()[2][0], Value::String("Vincent".into()));
+        assert_eq!(r.rows()[2][1], Value::Int64(0));
     }
 }
 
@@ -2484,8 +2484,8 @@ mod or_condition {
             )
             .unwrap();
         assert_eq!(r.row_count(), 2, "OR should match both A and B");
-        assert_eq!(r.rows[0][0], Value::String("A".into()));
-        assert_eq!(r.rows[1][0], Value::String("B".into()));
+        assert_eq!(r.rows()[0][0], Value::String("A".into()));
+        assert_eq!(r.rows()[1][0], Value::String("B".into()));
     }
 
     #[test]
@@ -2505,8 +2505,8 @@ mod or_condition {
             )
             .unwrap();
         assert_eq!(r.row_count(), 2);
-        assert_eq!(r.rows[0][0], Value::Int64(1));
-        assert_eq!(r.rows[1][0], Value::Int64(5));
+        assert_eq!(r.rows()[0][0], Value::Int64(1));
+        assert_eq!(r.rows()[1][0], Value::Int64(5));
     }
 
     #[test]
@@ -2521,8 +2521,8 @@ mod or_condition {
             .execute("MATCH (n:Item) WHERE NOT n.val = 2 RETURN n.val ORDER BY n.val")
             .unwrap();
         assert_eq!(r.row_count(), 2);
-        assert_eq!(r.rows[0][0], Value::Int64(1));
-        assert_eq!(r.rows[1][0], Value::Int64(3));
+        assert_eq!(r.rows()[0][0], Value::Int64(1));
+        assert_eq!(r.rows()[1][0], Value::Int64(3));
     }
 }
 
@@ -2551,7 +2551,7 @@ mod type_coercion_string_bool {
             1,
             "Boolean false is not equal to string 'false'"
         );
-        assert_eq!(r.rows[0][0], Value::Bool(false));
+        assert_eq!(r.rows()[0][0], Value::Bool(false));
     }
 
     #[test]
@@ -2569,7 +2569,7 @@ mod type_coercion_string_bool {
             1,
             "Boolean true is not equal to string 'true'"
         );
-        assert_eq!(r.rows[0][0], Value::Bool(true));
+        assert_eq!(r.rows()[0][0], Value::Bool(true));
     }
 }
 
@@ -2627,7 +2627,7 @@ mod self_loop_variable_length {
                 "OPTIONAL MATCH should still return 1 row"
             );
             assert_eq!(
-                result.rows[0][0],
+                result.rows()[0][0],
                 Value::Null,
                 "No matching :R paths from solo node, should be NULL"
             );
@@ -2648,7 +2648,7 @@ mod in_operator {
         let db = db();
         let s = db.session();
         let r = s.execute("RETURN 2 IN [1, 2, 3] AS found").unwrap();
-        assert_eq!(r.rows[0][0], Value::Bool(true));
+        assert_eq!(r.rows()[0][0], Value::Bool(true));
     }
 
     #[test]
@@ -2656,7 +2656,7 @@ mod in_operator {
         let db = db();
         let s = db.session();
         let r = s.execute("RETURN 4 IN [1, 2, 3] AS found").unwrap();
-        assert_eq!(r.rows[0][0], Value::Bool(false));
+        assert_eq!(r.rows()[0][0], Value::Bool(false));
     }
 
     #[test]
@@ -2664,7 +2664,7 @@ mod in_operator {
         let db = db();
         let s = db.session();
         let r = s.execute("RETURN 1 IN [] AS found").unwrap();
-        assert_eq!(r.rows[0][0], Value::Bool(false));
+        assert_eq!(r.rows()[0][0], Value::Bool(false));
     }
 
     #[test]
@@ -2673,7 +2673,7 @@ mod in_operator {
         let s = db.session();
         // 1 IN [1, null] should be true (1 is found)
         let r = s.execute("RETURN 1 IN [1, NULL] AS found").unwrap();
-        assert_eq!(r.rows[0][0], Value::Bool(true));
+        assert_eq!(r.rows()[0][0], Value::Bool(true));
     }
 
     #[test]
@@ -2684,7 +2684,7 @@ mod in_operator {
         let r = s.execute("RETURN 2 IN [1, NULL] AS found").unwrap();
         // Per SQL/Cypher semantics: UNKNOWN (NULL)
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Null,
             "x IN [y, NULL] where x != y should be NULL (unknown)"
         );
@@ -2719,7 +2719,7 @@ mod order_by_nulls {
         );
         // NULL should sort last
         assert_eq!(
-            r.rows[2][1],
+            r.rows()[2][1],
             Value::Null,
             "NULL score should sort to the end"
         );
@@ -2747,7 +2747,7 @@ mod merge_after_delete {
             .execute("MATCH (n:Singleton) RETURN count(n) AS cnt")
             .unwrap();
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Int64(1),
             "MERGE after delete should create exactly 1 new node"
         );
@@ -2787,7 +2787,7 @@ mod label_intersection {
             .unwrap();
         assert_eq!(r.row_count(), 1);
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::String("Vincent".into()),
             "Only Vincent has both :Worker and :Senior"
         );
@@ -2807,7 +2807,7 @@ mod label_intersection {
             1,
             "Only the node with both :A and :B should match"
         );
-        assert_eq!(r.rows[0][0], Value::String("both".into()));
+        assert_eq!(r.rows()[0][0], Value::String("both".into()));
     }
 }
 
@@ -2867,7 +2867,7 @@ mod quantifier_functions {
             .unwrap();
         assert_eq!(r.row_count(), 1);
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Bool(false),
             "any() on empty list should be FALSE per spec"
         );
@@ -2882,7 +2882,7 @@ mod quantifier_functions {
             .unwrap();
         assert_eq!(r.row_count(), 1);
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Bool(true),
             "all() on empty list should be TRUE per spec (vacuous truth)"
         );
@@ -2897,7 +2897,7 @@ mod quantifier_functions {
             .unwrap();
         assert_eq!(r.row_count(), 1);
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Bool(true),
             "none() on empty list should be TRUE (no elements violate)"
         );
@@ -2921,14 +2921,14 @@ mod string_escapes {
 
         let r = s.execute("MATCH (e:Entry) RETURN e.text").unwrap();
         assert_eq!(r.row_count(), 1);
-        if let Value::String(s) = &r.rows[0][0] {
+        if let Value::String(s) = &r.rows()[0][0] {
             assert!(
                 s.contains('\n'),
                 "String should contain actual newline, got: {:?}",
                 s
             );
         } else {
-            panic!("Expected String, got {:?}", r.rows[0][0]);
+            panic!("Expected String, got {:?}", r.rows()[0][0]);
         }
     }
 
@@ -2941,14 +2941,14 @@ mod string_escapes {
 
         let r = s.execute("MATCH (e:Entry) RETURN e.text").unwrap();
         assert_eq!(r.row_count(), 1);
-        if let Value::String(s) = &r.rows[0][0] {
+        if let Value::String(s) = &r.rows()[0][0] {
             assert!(
                 s.contains('\t'),
                 "String should contain actual tab, got: {:?}",
                 s
             );
         } else {
-            panic!("Expected String, got {:?}", r.rows[0][0]);
+            panic!("Expected String, got {:?}", r.rows()[0][0]);
         }
     }
 }
@@ -2986,7 +2986,7 @@ mod null_join_semantics {
             1,
             "Only 'Alix'='Alix' should match, NULL=NULL must not"
         );
-        assert_eq!(r.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(r.rows()[0][0], Value::String("Alix".into()));
     }
 }
 
@@ -3013,7 +3013,7 @@ mod null_function_arguments {
             .unwrap();
         assert_eq!(r.row_count(), 1);
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Null,
             "type() of NULL relationship should return NULL"
         );
@@ -3056,7 +3056,7 @@ mod delete_recreate_edge {
             1,
             "Should have exactly 1 LIKES edge after replace"
         );
-        assert_eq!(r.rows[0][0], Value::String("banana".into()));
+        assert_eq!(r.rows()[0][0], Value::String("banana".into()));
     }
 }
 
@@ -3085,8 +3085,8 @@ mod limit_with_order {
             "LIMIT 5 with ORDER BY should return exactly 5"
         );
         // Should be the first 5 in order
-        assert_eq!(r.rows[0][0], Value::Int64(0));
-        assert_eq!(r.rows[4][0], Value::Int64(4));
+        assert_eq!(r.rows()[0][0], Value::Int64(0));
+        assert_eq!(r.rows()[4][0], Value::Int64(4));
     }
 
     #[test]
@@ -3145,7 +3145,7 @@ mod idempotent_set {
         let r = s.execute("MATCH (n:N {code: 'X'}) RETURN n.note").unwrap();
         assert_eq!(r.row_count(), 1);
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::String("updated".into()),
             "SET with unchanged code should still update note"
         );
@@ -3168,14 +3168,14 @@ mod float_precision {
 
         let r = s.execute("MATCH (m:M) RETURN m.val").unwrap();
         assert_eq!(r.row_count(), 1);
-        if let Value::Float64(f) = r.rows[0][0] {
+        if let Value::Float64(f) = r.rows()[0][0] {
             let diff = (f - 0.123456789012345_f64).abs();
             assert!(
                 diff < 1e-15,
                 "Float64 must preserve full precision, got {f} (diff {diff})"
             );
         } else {
-            panic!("Expected Float64, got {:?}", r.rows[0][0]);
+            panic!("Expected Float64, got {:?}", r.rows()[0][0]);
         }
     }
 
@@ -3210,7 +3210,7 @@ mod float_precision {
             1,
             "Should have exactly 1 NESTS edge after 2 updates"
         );
-        assert_eq!(r.rows[0][0], Value::String("n3".into()));
+        assert_eq!(r.rows()[0][0], Value::String("n3".into()));
     }
 }
 
@@ -3275,7 +3275,7 @@ mod inequality_missing_property {
             1,
             "<> must not match nodes missing the property (NULL <> x is UNKNOWN)"
         );
-        assert_eq!(r.rows[0][0], Value::String("Gus".into()));
+        assert_eq!(r.rows()[0][0], Value::String("Gus".into()));
     }
 }
 
@@ -3297,7 +3297,7 @@ mod merge_batch_composite_dedup {
 
         let r = s.execute("MATCH (n:Item) RETURN count(n) AS cnt").unwrap();
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Int64(3),
             "Duplicate values in UNWIND should MERGE into distinct nodes"
         );
@@ -3331,7 +3331,7 @@ mod mixed_aggregate_non_aggregate {
                     "If not an error, must return grouped result, not empty"
                 );
                 // Verify no NULL values leaked in where real data should be
-                for row in &result.rows {
+                for row in result.rows() {
                     assert_ne!(
                         row[0],
                         Value::Null,
@@ -3368,8 +3368,8 @@ mod order_by_aliased_property {
             )
             .unwrap();
         assert_eq!(r.row_count(), 2);
-        assert_eq!(r.rows[0][0], Value::String("Alix".into()));
-        assert_eq!(r.rows[1][0], Value::String("Gus".into()));
+        assert_eq!(r.rows()[0][0], Value::String("Alix".into()));
+        assert_eq!(r.rows()[1][0], Value::String("Gus".into()));
     }
 
     #[test]
@@ -3389,10 +3389,10 @@ mod order_by_aliased_property {
             )
             .unwrap();
         assert_eq!(r.row_count(), 2);
-        assert_eq!(r.rows[0][0], Value::String("Alix".into()));
-        assert_eq!(r.rows[0][1], Value::String("Acme".into()));
-        assert_eq!(r.rows[1][0], Value::String("Gus".into()));
-        assert_eq!(r.rows[1][1], Value::Null);
+        assert_eq!(r.rows()[0][0], Value::String("Alix".into()));
+        assert_eq!(r.rows()[0][1], Value::String("Acme".into()));
+        assert_eq!(r.rows()[1][0], Value::String("Gus".into()));
+        assert_eq!(r.rows()[1][1], Value::Null);
     }
 }
 
@@ -3434,7 +3434,7 @@ mod order_by_relationship_traversal_218 {
             )
             .unwrap();
         assert_eq!(r.row_count(), 2);
-        for row in &r.rows {
+        for row in r.rows() {
             assert!(
                 matches!(&row[0], Value::String(s) if s == "foo" || s == "baz"),
                 "caller should be a string, got {:?}",
@@ -3465,10 +3465,10 @@ mod order_by_relationship_traversal_218 {
             r.columns
         );
         // Sorted ascending by name: baz < foo
-        assert_eq!(r.rows[0][0], Value::String("baz".into()));
-        assert_eq!(r.rows[0][1], Value::String("java://C:baz()".into()));
-        assert_eq!(r.rows[1][0], Value::String("foo".into()));
-        assert_eq!(r.rows[1][1], Value::String("java://A:foo()".into()));
+        assert_eq!(r.rows()[0][0], Value::String("baz".into()));
+        assert_eq!(r.rows()[0][1], Value::String("java://C:baz()".into()));
+        assert_eq!(r.rows()[1][0], Value::String("foo".into()));
+        assert_eq!(r.rows()[1][1], Value::String("java://A:foo()".into()));
     }
 
     #[test]
@@ -3500,8 +3500,8 @@ mod order_by_relationship_traversal_218 {
             .unwrap();
         assert_eq!(r.row_count(), 2);
         // Sorted descending: foo > baz
-        assert_eq!(r.rows[0][0], Value::String("foo".into()));
-        assert_eq!(r.rows[1][0], Value::String("baz".into()));
+        assert_eq!(r.rows()[0][0], Value::String("foo".into()));
+        assert_eq!(r.rows()[1][0], Value::String("baz".into()));
     }
 }
 
@@ -3540,7 +3540,7 @@ mod call_subquery_scope {
                     result.row_count()
                 );
                 // All should have movie_count = 0
-                for row in &result.rows {
+                for row in result.rows() {
                     assert_eq!(row[1], Value::Int64(0));
                 }
             }
@@ -3581,7 +3581,7 @@ mod edge_properties_in_path {
             .unwrap();
         assert_eq!(r.row_count(), 1);
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::String("continent".into()),
             "Edge property must be preserved"
         );
@@ -3603,8 +3603,8 @@ mod edge_properties_in_path {
             )
             .unwrap();
         assert_eq!(r.row_count(), 1);
-        assert_eq!(r.rows[0][0], Value::Int64(10));
-        assert_eq!(r.rows[0][1], Value::Int64(20));
+        assert_eq!(r.rows()[0][0], Value::Int64(10));
+        assert_eq!(r.rows()[0][1], Value::Int64(20));
     }
 }
 
@@ -3640,7 +3640,8 @@ mod varlength_vs_explicit {
             .unwrap();
 
         assert_eq!(
-            explicit.rows[0][0], varlength.rows[0][0],
+            explicit.rows()[0][0],
+            varlength.rows()[0][0],
             "Variable-length *2 must match explicit two-hop count"
         );
     }
@@ -3671,7 +3672,7 @@ mod case_when_null_aggregate {
             Ok(result) => {
                 assert_eq!(result.row_count(), 1);
                 assert_eq!(
-                    result.rows[0][0],
+                    result.rows()[0][0],
                     Value::Int64(0),
                     "When count is 0, CASE should return 0"
                 );
@@ -3717,7 +3718,7 @@ mod chained_or_and {
             )
             .unwrap();
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Int64(2),
             "(A OR B) AND (C OR D) must not flatten to (A OR B OR C OR D)"
         );
@@ -3741,7 +3742,7 @@ mod substring_indexing {
         match r {
             Ok(result) => {
                 assert_eq!(result.row_count(), 1);
-                if let Value::String(s) = &result.rows[0][0] {
+                if let Value::String(s) = &result.rows()[0][0] {
                     // Whether 0-based or 1-based, should not return empty
                     assert!(
                         !s.is_empty(),
@@ -3770,10 +3771,10 @@ mod property_key_prefix {
             .unwrap();
 
         let r1 = s.execute("MATCH (n:N) RETURN n.hel").unwrap();
-        assert_eq!(r1.rows[0][0], Value::String("wor".into()));
+        assert_eq!(r1.rows()[0][0], Value::String("wor".into()));
 
         let r2 = s.execute("MATCH (n:N) RETURN n.hello").unwrap();
-        assert_eq!(r2.rows[0][0], Value::String("world".into()));
+        assert_eq!(r2.rows()[0][0], Value::String("world".into()));
     }
 
     #[test]
@@ -3786,8 +3787,8 @@ mod property_key_prefix {
             .execute("MATCH (n:N) WHERE n.abc = 1 RETURN n.abcdef, n.ab")
             .unwrap();
         assert_eq!(r.row_count(), 1);
-        assert_eq!(r.rows[0][0], Value::Int64(2));
-        assert_eq!(r.rows[0][1], Value::Int64(3));
+        assert_eq!(r.rows()[0][0], Value::Int64(2));
+        assert_eq!(r.rows()[0][1], Value::Int64(3));
     }
 }
 
@@ -3809,7 +3810,7 @@ mod property_type_overwrite {
         let r = s.execute("MATCH (n:Item) RETURN n.flag").unwrap();
         assert_eq!(r.row_count(), 1);
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::String("yes".into()),
             "Property type should be overwritable from bool to string"
         );
@@ -3824,7 +3825,7 @@ mod property_type_overwrite {
 
         let r = s.execute("MATCH (n:Item) RETURN n.val").unwrap();
         assert_eq!(r.row_count(), 1);
-        assert_eq!(r.rows[0][0], Value::String("forty-two".into()));
+        assert_eq!(r.rows()[0][0], Value::String("forty-two".into()));
     }
 
     #[test]
@@ -3836,7 +3837,7 @@ mod property_type_overwrite {
 
         let r = s.execute("MATCH (n:Item) RETURN n.val").unwrap();
         assert_eq!(r.row_count(), 1);
-        assert_eq!(r.rows[0][0], Value::Int64(99));
+        assert_eq!(r.rows()[0][0], Value::Int64(99));
     }
 }
 
@@ -3857,13 +3858,13 @@ mod escaped_quotes {
 
         let r = s.execute("MATCH (b:Book) RETURN b.title").unwrap();
         assert_eq!(r.row_count(), 1);
-        if let Value::String(title) = &r.rows[0][0] {
+        if let Value::String(title) = &r.rows()[0][0] {
             assert!(
                 title.contains('"'),
                 "Double quotes should be preserved in property value, got: {title}"
             );
         } else {
-            panic!("Expected String, got {:?}", r.rows[0][0]);
+            panic!("Expected String, got {:?}", r.rows()[0][0]);
         }
     }
 
@@ -3876,13 +3877,13 @@ mod escaped_quotes {
 
         let r = s.execute("MATCH (b:Book) RETURN b.title").unwrap();
         assert_eq!(r.row_count(), 1);
-        if let Value::String(title) = &r.rows[0][0] {
+        if let Value::String(title) = &r.rows()[0][0] {
             assert!(
                 title.contains('\''),
                 "Single quotes should be preserved, got: {title}"
             );
         } else {
-            panic!("Expected String, got {:?}", r.rows[0][0]);
+            panic!("Expected String, got {:?}", r.rows()[0][0]);
         }
     }
 }
@@ -3911,7 +3912,7 @@ mod phantom_relationships {
             .execute("MATCH ()-[r:R]->() RETURN count(r) AS cnt")
             .unwrap();
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Int64(1),
             "Unrelated edge chain should survive DETACH DELETE of another node"
         );
@@ -3936,7 +3937,7 @@ mod detach_delete_return {
 
         // After delete, node must not be queryable
         let r = s.execute("MATCH (n:Ghost) RETURN count(n) AS cnt").unwrap();
-        assert_eq!(r.rows[0][0], Value::Int64(0));
+        assert_eq!(r.rows()[0][0], Value::Int64(0));
     }
 }
 
@@ -3958,7 +3959,7 @@ mod multi_statement {
 
         let r = s.execute("MATCH (n:Item) RETURN count(n) AS cnt").unwrap();
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Int64(3),
             "All sequential statements should execute"
         );
@@ -3988,7 +3989,7 @@ mod backtick_identifiers {
                     1,
                     "Backtick-quoted :Person should match plain :Person"
                 );
-                assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+                assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
             }
             Err(_) => {
                 // Backtick syntax not supported is acceptable
@@ -4017,7 +4018,7 @@ mod skip_limit {
             .execute("MATCH (n:Item) RETURN n.seq ORDER BY n.seq SKIP 2")
             .unwrap();
         assert_eq!(r.row_count(), 3);
-        assert_eq!(r.rows[0][0], Value::Int64(2));
+        assert_eq!(r.rows()[0][0], Value::Int64(2));
     }
 
     #[test]
@@ -4032,8 +4033,8 @@ mod skip_limit {
             .execute("MATCH (n:Item) RETURN n.seq ORDER BY n.seq SKIP 3 LIMIT 2")
             .unwrap();
         assert_eq!(r.row_count(), 2);
-        assert_eq!(r.rows[0][0], Value::Int64(3));
-        assert_eq!(r.rows[1][0], Value::Int64(4));
+        assert_eq!(r.rows()[0][0], Value::Int64(3));
+        assert_eq!(r.rows()[1][0], Value::Int64(4));
     }
 
     #[test]
@@ -4096,8 +4097,8 @@ mod return_distinct {
             .execute("MATCH (n:N) RETURN DISTINCT n.val ORDER BY n.val")
             .unwrap();
         assert_eq!(r.row_count(), 2);
-        assert_eq!(r.rows[0][0], Value::Int64(1));
-        assert_eq!(r.rows[1][0], Value::Int64(2));
+        assert_eq!(r.rows()[0][0], Value::Int64(1));
+        assert_eq!(r.rows()[1][0], Value::Int64(2));
     }
 
     #[test]
@@ -4141,8 +4142,8 @@ mod with_clause {
             )
             .unwrap();
         assert_eq!(r.row_count(), 1);
-        assert_eq!(r.rows[0][0], Value::String("Alix".into()));
-        assert_eq!(r.rows[0][1], Value::Int64(30));
+        assert_eq!(r.rows()[0][0], Value::String("Alix".into()));
+        assert_eq!(r.rows()[0][1], Value::Int64(30));
     }
 
     #[test]
@@ -4161,8 +4162,8 @@ mod with_clause {
             )
             .unwrap();
         assert_eq!(r.row_count(), 2);
-        assert_eq!(r.rows[0][0], Value::Int64(2));
-        assert_eq!(r.rows[1][0], Value::Int64(3));
+        assert_eq!(r.rows()[0][0], Value::Int64(2));
+        assert_eq!(r.rows()[1][0], Value::Int64(3));
     }
 }
 
@@ -4195,11 +4196,11 @@ mod multi_match_create_edge {
             .execute("MATCH ()-[r:KNOWS]->() RETURN count(r) AS cnt")
             .unwrap();
         assert_eq!(
-            nodes.rows[0][0],
+            nodes.rows()[0][0],
             Value::Int64(2),
             "Should still have 2 nodes"
         );
-        assert_eq!(edges.rows[0][0], Value::Int64(1), "Should have 1 edge");
+        assert_eq!(edges.rows()[0][0], Value::Int64(1), "Should have 1 edge");
     }
 
     #[test]
@@ -4221,7 +4222,7 @@ mod multi_match_create_edge {
         let edges = s
             .execute("MATCH (:Person {name: 'Alix'})-[r:KNOWS]->() RETURN count(r) AS cnt")
             .unwrap();
-        assert_eq!(edges.rows[0][0], Value::Int64(2));
+        assert_eq!(edges.rows()[0][0], Value::Int64(2));
     }
 }
 
@@ -4241,8 +4242,8 @@ mod negative_numerics {
             .unwrap();
 
         let r = s.execute("MATCH (l:Location) RETURN l.lat, l.lon").unwrap();
-        assert_eq!(r.rows[0][0], Value::Int64(-33));
-        assert_eq!(r.rows[0][1], Value::Int64(151));
+        assert_eq!(r.rows()[0][0], Value::Int64(-33));
+        assert_eq!(r.rows()[0][1], Value::Int64(151));
     }
 
     #[test]
@@ -4253,11 +4254,11 @@ mod negative_numerics {
             .unwrap();
 
         let r = s.execute("MATCH (l:Location) RETURN l.lat, l.lon").unwrap();
-        if let Value::Float64(lat) = r.rows[0][0] {
+        if let Value::Float64(lat) = r.rows()[0][0] {
             assert!(lat < 0.0, "Negative latitude must be preserved");
             assert!((lat - (-33.8688)).abs() < 0.001);
         } else {
-            panic!("Expected Float64 for lat, got {:?}", r.rows[0][0]);
+            panic!("Expected Float64 for lat, got {:?}", r.rows()[0][0]);
         }
     }
 
@@ -4283,7 +4284,7 @@ mod negative_numerics {
 
         let r = s.execute("MATCH (n:Temp) RETURN count(n) AS cnt").unwrap();
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Int64(1),
             "MERGE with negative value should deduplicate"
         );
@@ -4306,7 +4307,7 @@ mod count_variants {
         s.execute("INSERT (:N {val: 2})").unwrap();
 
         let r = s.execute("MATCH (n:N) RETURN count(*) AS cnt").unwrap();
-        assert_eq!(r.rows[0][0], Value::Int64(2));
+        assert_eq!(r.rows()[0][0], Value::Int64(2));
     }
 
     #[test]
@@ -4317,7 +4318,7 @@ mod count_variants {
         s.execute("INSERT (:N {val: 2})").unwrap();
 
         let r = s.execute("MATCH (n:N) RETURN count(n) AS cnt").unwrap();
-        assert_eq!(r.rows[0][0], Value::Int64(2));
+        assert_eq!(r.rows()[0][0], Value::Int64(2));
     }
 
     #[test]
@@ -4331,7 +4332,8 @@ mod count_variants {
         let r1 = s.execute("MATCH (n:N) RETURN count(*) AS cnt").unwrap();
         let r2 = s.execute("MATCH (n:N) RETURN count(n) AS cnt").unwrap();
         assert_eq!(
-            r1.rows[0][0], r2.rows[0][0],
+            r1.rows()[0][0],
+            r2.rows()[0][0],
             "count(*) and count(n) must agree"
         );
     }
@@ -4359,7 +4361,7 @@ mod batch_upsert {
         let r = s
             .execute("MATCH (n:Item) WHERE n.updated = true RETURN count(n) AS cnt")
             .unwrap();
-        assert_eq!(r.rows[0][0], Value::Int64(3));
+        assert_eq!(r.rows()[0][0], Value::Int64(3));
     }
 
     #[test]
@@ -4375,7 +4377,7 @@ mod batch_upsert {
 
         let r = s.execute("MATCH (n:Item) RETURN count(n) AS cnt").unwrap();
         assert_eq!(
-            r.rows[0][0],
+            r.rows()[0][0],
             Value::Int64(3),
             "No duplicates from second MERGE"
         );
@@ -4384,7 +4386,7 @@ mod batch_upsert {
             .execute("MATCH (n:Item) WHERE n.ver = 2 RETURN count(n) AS cnt")
             .unwrap();
         assert_eq!(
-            r2.rows[0][0],
+            r2.rows()[0][0],
             Value::Int64(3),
             "All nodes should have ver=2 after second pass"
         );
@@ -4411,10 +4413,10 @@ mod aggregation_with_functions {
             .execute("MATCH (n) RETURN labels(n)[0] AS label, count(n) AS cnt ORDER BY label")
             .unwrap();
         assert_eq!(r.row_count(), 2);
-        assert_eq!(r.rows[0][0], Value::String("City".into()));
-        assert_eq!(r.rows[0][1], Value::Int64(1));
-        assert_eq!(r.rows[1][0], Value::String("Person".into()));
-        assert_eq!(r.rows[1][1], Value::Int64(2));
+        assert_eq!(r.rows()[0][0], Value::String("City".into()));
+        assert_eq!(r.rows()[0][1], Value::Int64(1));
+        assert_eq!(r.rows()[1][0], Value::String("Person".into()));
+        assert_eq!(r.rows()[1][1], Value::Int64(2));
     }
 
     #[test]
@@ -4454,7 +4456,7 @@ mod persistence_roundtrip {
             .execute("MATCH (n:Persist {key: 'test'}) RETURN n.val")
             .unwrap();
         assert_eq!(r.row_count(), 1);
-        assert_eq!(r.rows[0][0], Value::Int64(42));
+        assert_eq!(r.rows()[0][0], Value::Int64(42));
     }
 }
 
@@ -4574,7 +4576,7 @@ mod group_by_list_keys {
             3,
             "GROUP BY labels(n) should produce 3 distinct groups, got {}: {:?}",
             r.row_count(),
-            r.rows
+            r.rows()
         );
     }
 
@@ -4596,7 +4598,7 @@ mod group_by_list_keys {
             2,
             "GROUP BY labels(n) should produce 2 distinct groups, got {}: {:?}",
             r.row_count(),
-            r.rows
+            r.rows()
         );
     }
 
@@ -4620,7 +4622,7 @@ mod group_by_list_keys {
             2,
             "GROUP BY date should produce 2 distinct groups, got {}: {:?}",
             r.row_count(),
-            r.rows
+            r.rows()
         );
     }
 }

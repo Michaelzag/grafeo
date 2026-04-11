@@ -151,7 +151,7 @@ impl Operator for ScanOperator {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "lpg"))]
 mod tests {
     use super::*;
     use crate::graph::GraphStoreMut;

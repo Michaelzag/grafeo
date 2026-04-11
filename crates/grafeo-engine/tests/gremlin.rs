@@ -384,7 +384,7 @@ fn test_values_single_property() {
         .unwrap();
     assert_eq!(result.row_count(), 3, "Should return 3 name values");
 
-    let names: Vec<&str> = result.rows.iter().filter_map(|r| r[0].as_str()).collect();
+    let names: Vec<&str> = result.rows().iter().filter_map(|r| r[0].as_str()).collect();
     assert!(names.contains(&"Alix"));
     assert!(names.contains(&"Gus"));
     assert!(names.contains(&"Vincent"));
@@ -437,7 +437,7 @@ fn test_count() {
         .execute_gremlin("g.V().hasLabel('Person').count()")
         .unwrap();
     assert_eq!(result.row_count(), 1);
-    assert_eq!(result.rows[0][0], Value::Int64(3));
+    assert_eq!(result.rows()[0][0], Value::Int64(3));
 }
 
 #[test]
@@ -447,7 +447,7 @@ fn test_count_edges() {
         .execute_gremlin("g.E().hasLabel('KNOWS').count()")
         .unwrap();
     assert_eq!(result.row_count(), 1);
-    assert_eq!(result.rows[0][0], Value::Int64(3));
+    assert_eq!(result.rows()[0][0], Value::Int64(3));
 }
 
 #[test]
@@ -458,7 +458,7 @@ fn test_sum() {
         .unwrap();
     assert_eq!(result.row_count(), 1);
     // 30 + 25 + 35 = 90
-    assert_eq!(result.rows[0][0], Value::Int64(90));
+    assert_eq!(result.rows()[0][0], Value::Int64(90));
 }
 
 #[test]
@@ -468,7 +468,7 @@ fn test_min() {
         .execute_gremlin("g.V().hasLabel('Person').values('age').min()")
         .unwrap();
     assert_eq!(result.row_count(), 1);
-    assert_eq!(result.rows[0][0], Value::Int64(25));
+    assert_eq!(result.rows()[0][0], Value::Int64(25));
 }
 
 #[test]
@@ -478,7 +478,7 @@ fn test_max() {
         .execute_gremlin("g.V().hasLabel('Person').values('age').max()")
         .unwrap();
     assert_eq!(result.row_count(), 1);
-    assert_eq!(result.rows[0][0], Value::Int64(35));
+    assert_eq!(result.rows()[0][0], Value::Int64(35));
 }
 
 #[test]
@@ -489,7 +489,7 @@ fn test_mean() {
         .unwrap();
     assert_eq!(result.row_count(), 1);
     // mean of 25, 30, 35 = 30.0
-    match &result.rows[0][0] {
+    match &result.rows()[0][0] {
         Value::Float64(f) => assert!((f - 30.0).abs() < 0.01, "Mean should be 30.0, got {f}"),
         Value::Int64(i) => assert_eq!(*i, 30, "Mean should be 30"),
         other => panic!("Expected numeric mean, got: {other:?}"),
@@ -548,7 +548,7 @@ fn test_order_by_property_asc() {
         .execute_gremlin("g.V().hasLabel('Person').order().by('age', asc).values('name')")
         .unwrap();
     assert_eq!(result.row_count(), 3);
-    let names: Vec<&str> = result.rows.iter().filter_map(|r| r[0].as_str()).collect();
+    let names: Vec<&str> = result.rows().iter().filter_map(|r| r[0].as_str()).collect();
     assert_eq!(names, vec!["Gus", "Alix", "Vincent"]);
 }
 
@@ -559,7 +559,7 @@ fn test_order_by_property_desc() {
         .execute_gremlin("g.V().hasLabel('Person').order().by('age', desc).values('name')")
         .unwrap();
     assert_eq!(result.row_count(), 3);
-    let names: Vec<&str> = result.rows.iter().filter_map(|r| r[0].as_str()).collect();
+    let names: Vec<&str> = result.rows().iter().filter_map(|r| r[0].as_str()).collect();
     assert_eq!(names, vec!["Vincent", "Alix", "Gus"]);
 }
 
@@ -576,7 +576,7 @@ fn test_add_vertex() {
     let result = db
         .execute_gremlin("g.V().hasLabel('Person').count()")
         .unwrap();
-    assert_eq!(result.rows[0][0], Value::Int64(1));
+    assert_eq!(result.rows()[0][0], Value::Int64(1));
 }
 
 #[test]
@@ -590,7 +590,7 @@ fn test_add_multiple_vertices() {
     let result = db
         .execute_gremlin("g.V().hasLabel('Person').count()")
         .unwrap();
-    assert_eq!(result.rows[0][0], Value::Int64(2));
+    assert_eq!(result.rows()[0][0], Value::Int64(2));
 }
 
 #[test]
@@ -605,7 +605,7 @@ fn test_add_edge() {
     let result = db
         .execute_gremlin("g.E().hasLabel('FOLLOWS').count()")
         .unwrap();
-    assert_eq!(result.rows[0][0], Value::Int64(1));
+    assert_eq!(result.rows()[0][0], Value::Int64(1));
 }
 
 #[test]
@@ -619,7 +619,7 @@ fn test_add_edge_with_property() {
     let result = db
         .execute_gremlin("g.E().hasLabel('FOLLOWS').count()")
         .unwrap();
-    assert_eq!(result.rows[0][0], Value::Int64(1));
+    assert_eq!(result.rows()[0][0], Value::Int64(1));
 }
 
 #[test]
@@ -633,7 +633,7 @@ fn test_source_add_edge() {
     let result = db
         .execute_gremlin("g.E().hasLabel('FOLLOWS').count()")
         .unwrap();
-    assert_eq!(result.rows[0][0], Value::Int64(1));
+    assert_eq!(result.rows()[0][0], Value::Int64(1));
 }
 
 #[test]
@@ -646,7 +646,7 @@ fn test_drop_vertex() {
 
     let result = db.execute_gremlin("g.V().count()").unwrap();
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(3),
         "Should have 3 vertices after drop"
     );
@@ -661,7 +661,7 @@ fn test_drop_edge() {
 
     let result = db.execute_gremlin("g.E().count()").unwrap();
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(3),
         "Should have 3 edges after dropping WORKS_AT"
     );
@@ -857,7 +857,7 @@ fn test_constant() {
         .execute_gremlin("g.V().hasLabel('Person').constant('hello')")
         .unwrap();
     assert_eq!(result.row_count(), 3);
-    for row in &result.rows {
+    for row in result.rows() {
         assert_eq!(row[0], Value::String("hello".into()));
     }
 }
@@ -873,7 +873,7 @@ fn test_label_step() {
         .execute_gremlin("g.V().has('name', 'Alix').label()")
         .unwrap();
     assert_eq!(result.row_count(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Person".into()));
+    assert_eq!(result.rows()[0][0], Value::String("Person".into()));
 }
 
 #[test]
@@ -912,7 +912,7 @@ fn test_out_then_values() {
         .execute_gremlin("g.V().has('name', 'Alix').out('KNOWS').values('name')")
         .unwrap();
     assert_eq!(result.row_count(), 2);
-    let names: Vec<&str> = result.rows.iter().filter_map(|r| r[0].as_str()).collect();
+    let names: Vec<&str> = result.rows().iter().filter_map(|r| r[0].as_str()).collect();
     assert!(names.contains(&"Gus"));
     assert!(names.contains(&"Vincent"));
 }
@@ -936,7 +936,7 @@ fn test_filter_then_count() {
     let result = db
         .execute_gremlin("g.V().hasLabel('Person').has('age', gt(28)).count()")
         .unwrap();
-    assert_eq!(result.rows[0][0], Value::Int64(2));
+    assert_eq!(result.rows()[0][0], Value::Int64(2));
 }
 
 // ============================================================================
@@ -963,7 +963,7 @@ fn test_count_zero() {
     let result = db
         .execute_gremlin("g.V().hasLabel('NonExistent').count()")
         .unwrap();
-    assert_eq!(result.rows[0][0], Value::Int64(0));
+    assert_eq!(result.rows()[0][0], Value::Int64(0));
 }
 
 // ============================================================================
@@ -992,7 +992,7 @@ fn test_syntax_error_unknown_step() {
 fn test_database_level_execute() {
     let db = create_social_network();
     let result = db.execute_gremlin("g.V().count()").unwrap();
-    assert_eq!(result.rows[0][0], Value::Int64(4));
+    assert_eq!(result.rows()[0][0], Value::Int64(4));
 }
 
 // ============================================================================
@@ -1284,7 +1284,7 @@ fn test_has_id_single() {
         1,
         "Should find exactly 1 ID for Alix"
     );
-    let alix_id = &id_result.rows[0][0];
+    let alix_id = &id_result.rows()[0][0];
 
     // Look up the vertex via hasId()
     let query = format!("g.V().hasId({alix_id})");
@@ -1300,7 +1300,7 @@ fn test_has_id_single() {
     let name_result = db.execute_gremlin(&name_query).unwrap();
     assert_eq!(name_result.row_count(), 1);
     assert_eq!(
-        name_result.rows[0][0],
+        name_result.rows()[0][0],
         Value::String("Alix".into()),
         "hasId should retrieve the correct vertex"
     );
@@ -1513,7 +1513,7 @@ fn test_side_effect_pass_through_count() {
         .unwrap();
     assert_eq!(result.row_count(), 1);
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(3),
         "sideEffect should not filter: all 3 Persons should pass through"
     );
@@ -1544,17 +1544,17 @@ fn test_order_values_ascending_default() {
         .unwrap();
     assert_eq!(result.row_count(), 3);
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(25),
         "First age should be 25"
     );
     assert_eq!(
-        result.rows[1][0],
+        result.rows()[1][0],
         Value::Int64(30),
         "Second age should be 30"
     );
     assert_eq!(
-        result.rows[2][0],
+        result.rows()[2][0],
         Value::Int64(35),
         "Third age should be 35"
     );
@@ -1567,7 +1567,7 @@ fn test_order_values_strings_ascending() {
         .execute_gremlin("g.V().hasLabel('Person').values('name').order()")
         .unwrap();
     assert_eq!(result.row_count(), 3);
-    let names: Vec<&str> = result.rows.iter().filter_map(|r| r[0].as_str()).collect();
+    let names: Vec<&str> = result.rows().iter().filter_map(|r| r[0].as_str()).collect();
     assert_eq!(
         names,
         vec!["Alix", "Gus", "Vincent"],
@@ -1582,9 +1582,9 @@ fn test_order_by_identity_modifier() {
         .execute_gremlin("g.V().hasLabel('Person').values('age').order().by()")
         .unwrap();
     assert_eq!(result.row_count(), 3);
-    assert_eq!(result.rows[0][0], Value::Int64(25));
-    assert_eq!(result.rows[1][0], Value::Int64(30));
-    assert_eq!(result.rows[2][0], Value::Int64(35));
+    assert_eq!(result.rows()[0][0], Value::Int64(25));
+    assert_eq!(result.rows()[1][0], Value::Int64(30));
+    assert_eq!(result.rows()[2][0], Value::Int64(35));
 }
 
 // ============================================================================
@@ -1603,7 +1603,7 @@ fn test_choose_traversal_condition_out_knows() {
         "All 4 vertices should produce a result"
     );
     let loner_count = result
-        .rows
+        .rows()
         .iter()
         .filter(|r| r[0] == Value::String("loner".into()))
         .count();
@@ -1625,12 +1625,12 @@ fn test_choose_traversal_condition_has_revenue() {
         "All 4 vertices should produce a result"
     );
     let company_count = result
-        .rows
+        .rows()
         .iter()
         .filter(|r| r[0] == Value::String("company".into()))
         .count();
     let person_count = result
-        .rows
+        .rows()
         .iter()
         .filter(|r| r[0] == Value::String("person".into()))
         .count();
@@ -1660,7 +1660,7 @@ fn test_choose_has_key_city() {
         "All 4 vertices should produce a result"
     );
     let no_city_count = result
-        .rows
+        .rows()
         .iter()
         .filter(|r| r[0] == Value::String("no city".into()))
         .count();
@@ -1680,7 +1680,7 @@ fn test_property_set_on_existing_node() {
         .execute_gremlin("g.V().has('nickname', 'Al').count()")
         .unwrap();
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(1),
         "Exactly 1 vertex should have nickname 'Al'"
     );
@@ -1696,7 +1696,7 @@ fn test_property_set_and_read_back_value() {
         .unwrap();
     assert_eq!(result.row_count(), 1, "Gus should have a nickname");
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::String("G".into()),
         "Gus's nickname should be 'G'"
     );
@@ -1841,7 +1841,7 @@ fn test_value_map_no_args() {
         .unwrap();
     assert_eq!(result.row_count(), 1, "Should return one row for Alix");
     // The result should be a map containing all properties
-    let val = &result.rows[0][0];
+    let val = &result.rows()[0][0];
     match val {
         Value::Map(map) => {
             assert!(
@@ -1868,7 +1868,7 @@ fn test_element_map_no_args() {
         .execute_gremlin("g.V().hasLabel('Person').has('name', 'Alix').elementMap()")
         .unwrap();
     assert_eq!(result.row_count(), 1, "Should return one row for Alix");
-    let val = &result.rows[0][0];
+    let val = &result.rows()[0][0];
     match val {
         Value::Map(map) => {
             assert!(

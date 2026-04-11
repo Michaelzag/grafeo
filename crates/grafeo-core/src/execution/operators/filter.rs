@@ -248,6 +248,7 @@ pub struct SessionContext {
 
 /// A filter expression that can be evaluated.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum FilterExpression {
     /// A literal value.
     Literal(Value),
@@ -383,6 +384,7 @@ pub enum FilterExpression {
 
 /// The kind of list predicate function.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ListPredicateKind {
     /// all(x IN list WHERE pred): true if pred holds for every element.
     All,
@@ -396,6 +398,7 @@ pub enum ListPredicateKind {
 
 /// Binary operators for filter expressions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum BinaryFilterOp {
     /// Equal.
     Eq,
@@ -445,6 +448,7 @@ pub enum BinaryFilterOp {
 
 /// Unary operators for filter expressions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum UnaryFilterOp {
     /// Logical NOT.
     Not,
@@ -3695,7 +3699,7 @@ fn value_to_string(val: &Value) -> Option<String> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "lpg"))]
 mod tests {
     use super::*;
     use crate::execution::chunk::DataChunkBuilder;

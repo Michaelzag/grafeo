@@ -11,6 +11,7 @@ use arcstr::ArcStr;
 /// used in the columnar storage. This lets the query engine pick the right
 /// decoder without any runtime dispatch.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ColumnType {
     /// Unsigned integer with a fixed bit width (1, 8, 16, 32, or 64).
     UInt {

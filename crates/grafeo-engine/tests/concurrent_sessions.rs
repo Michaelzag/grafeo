@@ -1124,7 +1124,7 @@ fn test_non_repeatable_read() {
     // Reader sees val='original'
     let reader = db.session();
     let r1 = reader.execute("MATCH (n:NRR) RETURN n.val AS val").unwrap();
-    assert_eq!(r1.rows.len(), 1);
+    assert_eq!(r1.rows().len(), 1);
 
     // Writer updates
     session1
@@ -1133,10 +1133,10 @@ fn test_non_repeatable_read() {
 
     // Reader sees val='updated' (non-repeatable read)
     let r2 = reader.execute("MATCH (n:NRR) RETURN n.val AS val").unwrap();
-    assert_eq!(r2.rows.len(), 1);
+    assert_eq!(r2.rows().len(), 1);
     // Without snapshot isolation, the reader sees the updated value
     assert_eq!(
-        r2.rows[0][0],
+        r2.rows()[0][0],
         grafeo_common::types::Value::String("updated".into()),
         "Non-repeatable read: reader sees committed update"
     );
@@ -1236,8 +1236,8 @@ fn test_write_write_conflict_through_execute() {
     let result = session
         .execute("MATCH (a:Account {name: 'shared'}) RETURN a.balance AS b")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], grafeo_common::types::Value::Int64(200));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], grafeo_common::types::Value::Int64(200));
 }
 
 /// Tests that a rollback in one session doesn't affect another session's committed writes.
@@ -1267,9 +1267,9 @@ fn test_concurrent_write_one_rollback() {
     let result = session
         .execute("MATCH (c:Counter {name: 'hits'}) RETURN c.val AS v")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         grafeo_common::types::Value::Int64(10),
         "Rolled-back write should not affect committed value"
     );
@@ -1372,7 +1372,7 @@ fn test_node_delete_rollback() {
         "Node should be restored after rollback"
     );
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         grafeo_common::types::Value::String("ephemeral".into())
     );
 }
@@ -1403,11 +1403,11 @@ fn test_detach_delete_rollback() {
         "Both nodes should be restored after rollback"
     );
     assert_eq!(
-        nodes.rows[0][0],
+        nodes.rows()[0][0],
         grafeo_common::types::Value::String("Alix".into())
     );
     assert_eq!(
-        nodes.rows[1][0],
+        nodes.rows()[1][0],
         grafeo_common::types::Value::String("Gus".into())
     );
 
@@ -1447,7 +1447,7 @@ fn test_cross_session_visibility_after_explicit_commit() {
         "New session should see committed data"
     );
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         grafeo_common::types::Value::String("committed".into())
     );
 }
@@ -1473,7 +1473,7 @@ fn test_cross_session_visibility_multiple_mutations() {
         .unwrap();
     assert_eq!(result.row_count(), 1);
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         grafeo_common::types::Value::Int64(25),
         "New session should see the updated price"
     );
@@ -1495,11 +1495,11 @@ fn test_cross_session_edge_visibility() {
         .unwrap();
     assert_eq!(result.row_count(), 1);
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         grafeo_common::types::Value::String("Alix".into())
     );
     assert_eq!(
-        result.rows[0][1],
+        result.rows()[0][1],
         grafeo_common::types::Value::String("Gus".into())
     );
 }

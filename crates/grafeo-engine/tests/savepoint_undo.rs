@@ -36,7 +36,7 @@ fn test_savepoint_rolls_back_set_property() {
         .execute("MATCH (a:Account {owner: 'Alix'}) RETURN a.balance")
         .unwrap();
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(2000),
         "balance should be 2000 (pre-savepoint value), not 9999"
     );
@@ -47,7 +47,7 @@ fn test_savepoint_rolls_back_set_property() {
     let result = session
         .execute("MATCH (a:Account {owner: 'Alix'}) RETURN a.balance")
         .unwrap();
-    assert_eq!(result.rows[0][0], Value::Int64(2000));
+    assert_eq!(result.rows()[0][0], Value::Int64(2000));
 }
 
 #[test]
@@ -72,7 +72,7 @@ fn test_savepoint_rolls_back_new_property() {
         .execute("MATCH (p:Person {name: 'Gus'}) RETURN p.status")
         .unwrap();
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Null,
         "status property should not exist after savepoint rollback"
     );
@@ -157,7 +157,7 @@ fn test_savepoint_preserves_pre_savepoint_changes() {
         .execute("MATCH (p:Person {name: 'Jules'}) RETURN p.age")
         .unwrap();
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(40),
         "age should be 40 (pre-savepoint value)"
     );
@@ -202,7 +202,7 @@ fn test_full_rollback_after_savepoint_undoes_everything() {
         .execute("MATCH (a:Account {owner: 'Mia'}) RETURN a.balance")
         .unwrap();
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(500),
         "balance should be restored to original 500 after full rollback"
     );
@@ -230,21 +230,21 @@ fn test_savepoint_rollback_preserves_earlier_label() {
     session.execute("MATCH (n:Base) SET n:Second").unwrap();
 
     let during = session.execute("MATCH (n:Second) RETURN n.name").unwrap();
-    assert_eq!(during.rows.len(), 1);
+    assert_eq!(during.rows().len(), 1);
 
     // Rollback to savepoint: Second removed, First preserved
     session.rollback_to_savepoint("sp1").unwrap();
 
     let first_check = session.execute("MATCH (n:First) RETURN n.name").unwrap();
     assert_eq!(
-        first_check.rows.len(),
+        first_check.rows().len(),
         1,
         "First label should survive savepoint rollback"
     );
 
     let second_check = session.execute("MATCH (n:Second) RETURN n.name").unwrap();
     assert!(
-        second_check.rows.is_empty(),
+        second_check.rows().is_empty(),
         "Second label should be rolled back"
     );
 }

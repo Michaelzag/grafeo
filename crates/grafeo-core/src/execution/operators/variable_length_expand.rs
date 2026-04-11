@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 /// Path traversal mode controlling which paths are allowed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum PathMode {
     /// Allows repeated nodes and edges (default).
     #[default]
@@ -649,7 +650,7 @@ impl Operator for VariableLengthExpandOperator {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "lpg"))]
 mod tests {
     use super::*;
     use crate::execution::operators::ScanOperator;

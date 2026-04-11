@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 /// A projection expression.
+#[non_exhaustive]
 pub enum ProjectExpr {
     /// Reference to an input column.
     Column(usize),
@@ -462,7 +463,7 @@ fn edge_to_map(edge: &Edge) -> Value {
     Value::Map(Arc::new(map))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "lpg"))]
 mod tests {
     use super::*;
     use crate::execution::chunk::DataChunkBuilder;

@@ -483,6 +483,7 @@ impl LpgStore {
                 self.epoch_store
                     .get_node(cold_ref.epoch, cold_ref.block_offset, cold_ref.length)
             }
+            _ => None,
         }
     }
 

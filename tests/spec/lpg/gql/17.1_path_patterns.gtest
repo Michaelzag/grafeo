@@ -10,6 +10,7 @@ meta:
   section: "17.1"
   title: Path patterns
   dataset: empty
+  iso: [G035, G036, G037, G038, G060, G061, G044]
 
 tests:
 

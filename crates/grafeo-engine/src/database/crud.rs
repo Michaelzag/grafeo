@@ -1,8 +1,8 @@
 //! Node and edge CRUD operations for GrafeoDB.
 
-#[cfg(feature = "wal")]
-use grafeo_adapters::storage::wal::WalRecord;
 use grafeo_common::grafeo_warn;
+#[cfg(feature = "wal")]
+use grafeo_storage::wal::WalRecord;
 
 impl super::GrafeoDB {
     // === Node Operations ===

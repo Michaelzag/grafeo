@@ -567,7 +567,7 @@ mod introspection {
         let db = db();
         let session = db.session();
         let result = session.execute("RETURN CURRENT_SCHEMA AS s").unwrap();
-        assert_eq!(result.rows[0][0], Value::String("default".into()));
+        assert_eq!(result.rows()[0][0], Value::String("default".into()));
     }
 
     #[test]
@@ -575,7 +575,7 @@ mod introspection {
         let db = db();
         let session = db.session();
         let result = session.execute("RETURN CURRENT_GRAPH AS g").unwrap();
-        assert_eq!(result.rows[0][0], Value::String("default".into()));
+        assert_eq!(result.rows()[0][0], Value::String("default".into()));
     }
 
     #[test]
@@ -585,7 +585,7 @@ mod introspection {
         session.execute("CREATE SCHEMA analytics").unwrap();
         session.execute("SESSION SET SCHEMA analytics").unwrap();
         let result = session.execute("RETURN CURRENT_SCHEMA AS s").unwrap();
-        assert_eq!(result.rows[0][0], Value::String("analytics".into()));
+        assert_eq!(result.rows()[0][0], Value::String("analytics".into()));
     }
 
     #[test]
@@ -595,7 +595,7 @@ mod introspection {
         session.execute("CREATE GRAPH mydb").unwrap();
         session.execute("SESSION SET GRAPH mydb").unwrap();
         let result = session.execute("RETURN CURRENT_GRAPH AS g").unwrap();
-        assert_eq!(result.rows[0][0], Value::String("mydb".into()));
+        assert_eq!(result.rows()[0][0], Value::String("mydb".into()));
     }
 
     #[test]
@@ -606,7 +606,7 @@ mod introspection {
         session.execute("SESSION SET SCHEMA analytics").unwrap();
         session.execute("SESSION RESET SCHEMA").unwrap();
         let result = session.execute("RETURN CURRENT_SCHEMA AS s").unwrap();
-        assert_eq!(result.rows[0][0], Value::String("default".into()));
+        assert_eq!(result.rows()[0][0], Value::String("default".into()));
     }
 
     #[test]
@@ -617,7 +617,7 @@ mod introspection {
         session.execute("SESSION SET GRAPH mydb").unwrap();
         session.execute("SESSION RESET GRAPH").unwrap();
         let result = session.execute("RETURN CURRENT_GRAPH AS g").unwrap();
-        assert_eq!(result.rows[0][0], Value::String("default".into()));
+        assert_eq!(result.rows()[0][0], Value::String("default".into()));
     }
 
     #[test]
@@ -626,8 +626,8 @@ mod introspection {
         let session = db.session();
         session.execute("INSERT (:Person {name: 'Alix'})").unwrap();
         let result = session.execute("RETURN info() AS i").unwrap();
-        assert_eq!(result.rows.len(), 1);
-        match &result.rows[0][0] {
+        assert_eq!(result.rows().len(), 1);
+        match &result.rows()[0][0] {
             Value::Map(m) => {
                 assert!(
                     m.contains_key("node_count"),
@@ -654,7 +654,7 @@ mod introspection {
         session.execute("INSERT (:Event {type: 'click'})").unwrap();
 
         let result = session.execute("RETURN info() AS i").unwrap();
-        match &result.rows[0][0] {
+        match &result.rows()[0][0] {
             Value::Map(m) => {
                 let node_count = m.get("node_count").expect("should have node_count");
                 assert_eq!(
@@ -673,8 +673,8 @@ mod introspection {
         let session = db.session();
         session.execute("INSERT (:Person {name: 'Alix'})").unwrap();
         let result = session.execute("RETURN schema() AS s").unwrap();
-        assert_eq!(result.rows.len(), 1);
-        match &result.rows[0][0] {
+        assert_eq!(result.rows().len(), 1);
+        match &result.rows()[0][0] {
             Value::Map(m) => {
                 assert!(m.contains_key("labels"), "schema() should have labels");
             }
@@ -696,7 +696,7 @@ mod introspection {
         session.execute("INSERT (:Event {type: 'click'})").unwrap();
 
         let result = session.execute("RETURN schema() AS s").unwrap();
-        match &result.rows[0][0] {
+        match &result.rows()[0][0] {
             Value::Map(m) => {
                 let labels = m.get("labels").expect("should have labels");
                 match labels {
@@ -735,7 +735,7 @@ mod introspection {
         let result = session
             .execute("RETURN CASE WHEN CURRENT_SCHEMA = 'analytics' THEN true ELSE false END AS ok")
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::Bool(true));
+        assert_eq!(result.rows()[0][0], Value::Bool(true));
     }
 
     #[test]
@@ -751,7 +751,7 @@ mod introspection {
         let result = session
             .execute("RETURN CURRENT_SCHEMA AS s, CURRENT_GRAPH AS g")
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::String("analytics".into()));
-        assert_eq!(result.rows[0][1], Value::String("mydb".into()));
+        assert_eq!(result.rows()[0][0], Value::String("analytics".into()));
+        assert_eq!(result.rows()[0][1], Value::String("mydb".into()));
     }
 }

@@ -53,10 +53,10 @@ fn test_null_equality_filters_out() {
         .execute("MATCH (i:Item) WHERE i.val = NULL RETURN i.name AS name ORDER BY name")
         .unwrap();
     assert_eq!(
-        r.rows.len(),
+        r.rows().len(),
         0,
         "NULL = NULL is UNKNOWN: no rows should match, got {} rows",
-        r.rows.len()
+        r.rows().len()
     );
 }
 
@@ -69,7 +69,7 @@ fn test_null_ne_null_is_unknown() {
         .execute("MATCH (i:Item) WHERE i.val <> NULL RETURN i.name AS name ORDER BY name")
         .unwrap();
     assert_eq!(
-        r.rows.len(),
+        r.rows().len(),
         0,
         "NULL <> NULL is UNKNOWN: no rows should match"
     );
@@ -85,9 +85,9 @@ fn test_case_when_null_eq_null_is_unknown() {
              RETURN CASE WHEN i.val = NULL THEN 'hit' ELSE 'miss' END AS result",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows().len(), 1);
     assert_eq!(
-        r.rows[0][0].as_str(),
+        r.rows()[0][0].as_str(),
         Some("miss"),
         "CASE WHEN val = NULL should be UNKNOWN, falling through to ELSE"
     );
@@ -103,9 +103,9 @@ fn test_simple_case_null_when_null() {
              RETURN CASE i.val WHEN NULL THEN 'hit' ELSE 'miss' END AS result",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows().len(), 1);
     assert_eq!(
-        r.rows[0][0].as_str(),
+        r.rows()[0][0].as_str(),
         Some("miss"),
         "Simple CASE: NULL WHEN NULL should not match"
     );
@@ -122,8 +122,8 @@ fn test_or_with_null_unknown() {
              RETURN i.name AS name ORDER BY name",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0].as_str(), Some("alpha"));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0].as_str(), Some("alpha"));
 }
 
 #[test]
@@ -138,7 +138,7 @@ fn test_and_with_null_unknown() {
         )
         .unwrap();
     assert_eq!(
-        r.rows.len(),
+        r.rows().len(),
         0,
         "UNKNOWN AND TRUE = UNKNOWN, should match nothing"
     );
@@ -152,7 +152,7 @@ fn test_nullif_both_null() {
         .execute("RETURN NULLIF(NULL, NULL) AS result")
         .unwrap();
     assert!(
-        r.rows[0][0].is_null(),
+        r.rows()[0][0].is_null(),
         "NULLIF(NULL, NULL) should return NULL"
     );
 }
@@ -165,7 +165,7 @@ fn test_nullif_value_null() {
         .execute("RETURN NULLIF(42, NULL) AS result")
         .unwrap();
     assert_eq!(
-        r.rows[0][0].as_int64(),
+        r.rows()[0][0].as_int64(),
         Some(42),
         "NULLIF(42, NULL) should return 42"
     );
@@ -180,7 +180,7 @@ fn test_null_comparison_gt_filters_out() {
         .execute("MATCH (i:Item) WHERE i.val > NULL RETURN i.name")
         .unwrap();
     assert_eq!(
-        r.rows.len(),
+        r.rows().len(),
         0,
         "Comparison with NULL should yield unknown and filter out all rows"
     );
@@ -195,9 +195,9 @@ fn test_missing_property_is_null() {
     let r = session
         .execute("MATCH (t:Thing) RETURN t.nonexistent AS val")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows().len(), 1);
     assert_eq!(
-        r.rows[0][0],
+        r.rows()[0][0],
         Value::Null,
         "Missing property should return NULL"
     );
@@ -214,9 +214,9 @@ fn test_sum_skips_nulls() {
     let r = session
         .execute("MATCH (i:Item) RETURN sum(i.val) AS total")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows().len(), 1);
     // sum(10, NULL, 30) = 40
-    match &r.rows[0][0] {
+    match &r.rows()[0][0] {
         Value::Int64(v) => assert_eq!(*v, 40),
         Value::Float64(v) => assert!((*v - 40.0).abs() < 0.01),
         other => panic!("expected numeric, got {other:?}"),
@@ -230,15 +230,15 @@ fn test_avg_skips_nulls() {
     let r = session
         .execute("MATCH (i:Item) RETURN avg(i.val) AS average")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows().len(), 1);
     // avg(10, NULL, 30) = 20.0 (only 2 non-null values)
-    if let Value::Float64(v) = r.rows[0][0] {
+    if let Value::Float64(v) = r.rows()[0][0] {
         assert!(
             (v - 20.0).abs() < 0.01,
             "avg(10, NULL, 30) should be 20.0, got {v}"
         );
     } else {
-        panic!("expected Float64, got {:?}", r.rows[0][0]);
+        panic!("expected Float64, got {:?}", r.rows()[0][0]);
     }
 }
 
@@ -249,14 +249,14 @@ fn test_min_max_skip_nulls() {
     let r = session
         .execute("MATCH (i:Item) RETURN min(i.val) AS lo, max(i.val) AS hi")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows().len(), 1);
     // min(10, NULL, 30) = 10, max(10, NULL, 30) = 30
-    match &r.rows[0][0] {
+    match &r.rows()[0][0] {
         Value::Int64(v) => assert_eq!(*v, 10),
         Value::Float64(v) => assert!((*v - 10.0).abs() < 0.01),
         other => panic!("expected numeric for min, got {other:?}"),
     }
-    match &r.rows[0][1] {
+    match &r.rows()[0][1] {
         Value::Int64(v) => assert_eq!(*v, 30),
         Value::Float64(v) => assert!((*v - 30.0).abs() < 0.01),
         other => panic!("expected numeric for max, got {other:?}"),
@@ -271,11 +271,11 @@ fn test_count_excludes_nulls() {
     let r = session
         .execute("MATCH (i:Item) RETURN count(i.val) AS cnt, count(i) AS total")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows().len(), 1);
     // count(val) should exclude NULLs: 2
-    assert_eq!(r.rows[0][0], Value::Int64(2));
+    assert_eq!(r.rows()[0][0], Value::Int64(2));
     // count(i) counts all rows: 3
-    assert_eq!(r.rows[0][1], Value::Int64(3));
+    assert_eq!(r.rows()[0][1], Value::Int64(3));
 }
 
 // ===========================================================================
@@ -292,8 +292,8 @@ fn test_case_when_null_goes_to_else() {
              RETURN CASE WHEN i.val IS NOT NULL THEN 'has_val' ELSE 'no_val' END AS status",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::String("no_val".into()));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::String("no_val".into()));
 }
 
 #[test]
@@ -307,8 +307,8 @@ fn test_case_when_with_null_value() {
              RETURN CASE x.v WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'other' END AS label",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::String("one".into()));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::String("one".into()));
 }
 
 // ===========================================================================
@@ -328,9 +328,9 @@ fn test_where_value_in_list_with_null() {
         .unwrap();
     // 1 and 5 match directly; NULL in the list should not cause issues
     assert!(
-        r.rows.len() >= 2,
+        r.rows().len() >= 2,
         "At least 1 and 5 should match, got {} rows",
-        r.rows.len()
+        r.rows().len()
     );
 }
 
@@ -349,8 +349,8 @@ fn test_null_arithmetic_returns_null() {
              RETURN i.val + 1 AS incremented",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::Null, "NULL + 1 should be NULL");
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::Null, "NULL + 1 should be NULL");
 }
 
 // ===========================================================================
@@ -367,7 +367,7 @@ fn test_int_float_comparison_gt() {
     let r = session
         .execute("MATCH (n:Num) WHERE n.v > 2.5 RETURN n.v AS v")
         .unwrap();
-    assert_eq!(r.rows.len(), 1, "Int64(3) > Float64(2.5) should match");
+    assert_eq!(r.rows().len(), 1, "Int64(3) > Float64(2.5) should match");
 }
 
 /// Int64 vs Float64 with `<` operator.
@@ -380,7 +380,7 @@ fn test_int_float_comparison_lt() {
     let r = session
         .execute("MATCH (n:Num) WHERE n.v < 2.5 RETURN n.v AS v")
         .unwrap();
-    assert_eq!(r.rows.len(), 1, "Int64(2) < Float64(2.5) should match");
+    assert_eq!(r.rows().len(), 1, "Int64(2) < Float64(2.5) should match");
 }
 
 #[test]
@@ -392,12 +392,12 @@ fn test_int_float_arithmetic() {
     let r = session
         .execute("MATCH (n:Num) RETURN n.v + 0.5 AS result")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows().len(), 1);
     // Int64(3) + Float64(0.5) should promote to Float64(3.5)
-    if let Value::Float64(v) = r.rows[0][0] {
+    if let Value::Float64(v) = r.rows()[0][0] {
         assert!((v - 3.5).abs() < 0.01, "3 + 0.5 should be 3.5, got {v}");
     } else {
-        panic!("expected Float64, got {:?}", r.rows[0][0]);
+        panic!("expected Float64, got {:?}", r.rows()[0][0]);
     }
 }
 
@@ -415,9 +415,9 @@ fn test_sum_mixed_int_float() {
     let r = session
         .execute("MATCH (v:Val) RETURN sum(v.n) AS total")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows().len(), 1);
     // SUM promotes to Float64 when it encounters mixed Int64/Float64 values.
-    match &r.rows[0][0] {
+    match &r.rows()[0][0] {
         Value::Float64(v) => {
             assert!(
                 (*v - 60.5).abs() < 0.01,
@@ -438,7 +438,7 @@ fn test_int_equality_with_float() {
     let r = session
         .execute("MATCH (n:Num) WHERE n.v = 5.0 RETURN n.v AS v")
         .unwrap();
-    assert_eq!(r.rows.len(), 1, "Int64(5) = Float64(5.0) should match");
+    assert_eq!(r.rows().len(), 1, "Int64(5) = Float64(5.0) should match");
 }
 
 /// Same-type comparison works correctly.
@@ -451,8 +451,8 @@ fn test_same_type_int_comparison() {
     let r = session
         .execute("MATCH (n:Num) WHERE n.v > 2 RETURN n.v AS v")
         .unwrap();
-    assert_eq!(r.rows.len(), 1, "Same-type Int64 comparison should work");
-    assert_eq!(r.rows[0][0], Value::Int64(3));
+    assert_eq!(r.rows().len(), 1, "Same-type Int64 comparison should work");
+    assert_eq!(r.rows()[0][0], Value::Int64(3));
 }
 
 /// Same-type Float64 comparison works.
@@ -465,7 +465,11 @@ fn test_same_type_float_comparison() {
     let r = session
         .execute("MATCH (n:Num) WHERE n.v > 2.0 RETURN n.v AS v")
         .unwrap();
-    assert_eq!(r.rows.len(), 1, "Same-type Float64 comparison should work");
+    assert_eq!(
+        r.rows().len(),
+        1,
+        "Same-type Float64 comparison should work"
+    );
 }
 
 // ===========================================================================
@@ -487,10 +491,10 @@ fn test_distinct_with_nulls() {
         .unwrap();
     // Should have 3 distinct values: NULL, 1, 2
     assert_eq!(
-        r.rows.len(),
+        r.rows().len(),
         3,
         "DISTINCT should deduplicate NULLs: expected 3 distinct values, got {}",
-        r.rows.len()
+        r.rows().len()
     );
 }
 
@@ -533,5 +537,5 @@ fn test_group_by_null_key() {
         )
         .unwrap();
     // Should have 2 groups: NULL (50+75=125), North (100+200=300)
-    assert_eq!(r.rows.len(), 2, "NULL keys should form their own group");
+    assert_eq!(r.rows().len(), 2, "NULL keys should form their own group");
 }

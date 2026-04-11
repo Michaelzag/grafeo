@@ -355,7 +355,7 @@ impl Operator for VectorScanOperator {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "lpg"))]
 mod tests {
     use super::*;
     use crate::graph::lpg::LpgStore;

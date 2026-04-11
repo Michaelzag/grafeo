@@ -6,6 +6,7 @@ meta:
   section: "21.2"
   title: Numeric functions
   dataset: empty
+  iso: [GF01]
 
 tests:
 

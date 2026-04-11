@@ -16,6 +16,7 @@ meta:
   section: "16.8"
   title: Label expressions
   dataset: empty
+  iso: [G074]
 
 tests:
 

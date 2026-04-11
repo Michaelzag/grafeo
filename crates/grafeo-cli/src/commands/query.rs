@@ -70,7 +70,7 @@ pub fn run(opts: QueryRunOptions<'_>) -> Result<()> {
     // Format rows as strings, applying max_width truncation
     let headers = result.columns.clone();
     let rows: Vec<Vec<String>> = result
-        .rows
+        .rows()
         .iter()
         .map(|row| {
             row.iter()

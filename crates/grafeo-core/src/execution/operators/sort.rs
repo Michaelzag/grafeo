@@ -14,6 +14,7 @@ use crate::execution::chunk::DataChunkBuilder;
 
 /// Sort direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SortDirection {
     /// Ascending order (smallest first).
     Ascending,
@@ -23,6 +24,7 @@ pub enum SortDirection {
 
 /// Null ordering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NullOrder {
     /// Nulls come first.
     NullsFirst,

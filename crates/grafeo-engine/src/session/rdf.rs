@@ -1,25 +1,32 @@
 //! RDF-specific session methods.
 //!
 //! This module consolidates all RDF functionality from the session layer.
-//! The entire module is gated behind `#[cfg(feature = "rdf")]` in the parent.
+//! The entire module is gated behind `#[cfg(feature = "triple-store")]` in the parent.
 
 use std::sync::Arc;
+#[cfg(feature = "lpg")]
 use std::sync::atomic::AtomicUsize;
 #[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
 use std::time::Instant;
 
 use grafeo_common::types::{TransactionId, Value};
 use grafeo_common::utils::error::Result;
+#[cfg(feature = "lpg")]
 use grafeo_core::graph::lpg::LpgStore;
+#[cfg(feature = "lpg")]
 use grafeo_core::graph::rdf::RdfStore;
+#[cfg(feature = "lpg")]
 use grafeo_core::graph::{GraphStore, GraphStoreMut};
 
 use crate::database::QueryResult;
 
-use super::{Session, SessionConfig};
+use super::Session;
+#[cfg(feature = "lpg")]
+use super::SessionConfig;
 
 impl Session {
     /// Creates a new session with RDF store and adaptive configuration.
+    #[cfg(feature = "lpg")]
     pub(crate) fn with_rdf_store_and_adaptive(
         store: Arc<LpgStore>,
         rdf_store: Arc<RdfStore>,
@@ -93,7 +100,7 @@ impl Session {
             .with_transaction_id(*self.current_transaction.lock());
         #[cfg(feature = "wal")]
         let planner = planner.with_wal(self.wal.clone());
-        #[cfg(feature = "cdc")]
+        #[cfg(all(feature = "cdc", feature = "lpg"))]
         let planner =
             planner.with_cdc_log(Some(Arc::clone(&self.cdc_log)), self.store.current_epoch());
         let mut physical_plan = planner.plan(&optimized_plan)?;
@@ -189,7 +196,7 @@ impl Session {
             .with_transaction_id(*self.current_transaction.lock());
         #[cfg(feature = "wal")]
         let planner = planner.with_wal(self.wal.clone());
-        #[cfg(feature = "cdc")]
+        #[cfg(all(feature = "cdc", feature = "lpg"))]
         let planner =
             planner.with_cdc_log(Some(Arc::clone(&self.cdc_log)), self.store.current_epoch());
         let mut physical_plan = planner.plan(&optimized_plan)?;
@@ -246,7 +253,7 @@ impl Session {
             .with_transaction_id(*self.current_transaction.lock());
         #[cfg(feature = "wal")]
         let planner = planner.with_wal(self.wal.clone());
-        #[cfg(feature = "cdc")]
+        #[cfg(all(feature = "cdc", feature = "lpg"))]
         let planner =
             planner.with_cdc_log(Some(Arc::clone(&self.cdc_log)), self.store.current_epoch());
         let mut physical_plan = planner.plan(&optimized_plan)?;

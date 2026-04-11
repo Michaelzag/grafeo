@@ -236,6 +236,46 @@ enum BackupCommands {
         #[arg(long)]
         force: bool,
     },
+
+    /// Create a full backup of the database
+    Full {
+        /// Path to the database
+        path: PathBuf,
+
+        /// Backup directory
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+
+    /// Create an incremental backup (WAL records since last backup)
+    Incremental {
+        /// Path to the database
+        path: PathBuf,
+
+        /// Backup directory
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+
+    /// Show backup status and manifest
+    Status {
+        /// Backup directory
+        path: PathBuf,
+    },
+
+    /// Restore to a specific epoch from an incremental backup chain
+    RestoreToEpoch {
+        /// Backup directory
+        backup_dir: PathBuf,
+
+        /// Target epoch
+        #[arg(long)]
+        epoch: u64,
+
+        /// Output database path
+        #[arg(short, long)]
+        output: PathBuf,
+    },
 }
 
 /// Data export/import commands.

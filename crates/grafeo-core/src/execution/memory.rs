@@ -89,6 +89,7 @@ impl ExecutionMemoryContext {
             PressureLevel::Moderate => requested.min(MODERATE_PRESSURE_CHUNK_SIZE),
             PressureLevel::High => requested.min(HIGH_PRESSURE_CHUNK_SIZE),
             PressureLevel::Critical => requested.min(CRITICAL_PRESSURE_CHUNK_SIZE),
+            _ => requested.min(CRITICAL_PRESSURE_CHUNK_SIZE),
         }
     }
 

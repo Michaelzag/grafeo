@@ -187,6 +187,7 @@ impl RdfStatistics {
 
 /// Which position in a triple pattern - subject, predicate, or object.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TriplePosition {
     /// Subject position.
     Subject,

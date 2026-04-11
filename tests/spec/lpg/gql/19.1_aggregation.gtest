@@ -6,6 +6,7 @@ meta:
   section: "19.1"
   title: Aggregation functions
   dataset: empty
+  iso: [GF10]
 
 tests:
 

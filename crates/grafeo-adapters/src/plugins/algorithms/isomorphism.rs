@@ -13,7 +13,7 @@ use grafeo_common::utils::error::Result;
 use grafeo_common::utils::hash::{FxHashMap, FxHashSet};
 use grafeo_core::graph::Direction;
 use grafeo_core::graph::GraphStore;
-#[cfg(test)]
+#[cfg(all(test, feature = "lpg"))]
 use grafeo_core::graph::lpg::LpgStore;
 
 use super::super::{AlgorithmResult, ParameterDef, ParameterType, Parameters};
@@ -443,7 +443,7 @@ impl GraphAlgorithm for SubgraphIsomorphismAlgorithm {
 // Tests
 // ============================================================================
 
-#[cfg(test)]
+#[cfg(all(test, feature = "lpg"))]
 mod tests {
     use super::*;
 

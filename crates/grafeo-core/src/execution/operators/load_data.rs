@@ -11,6 +11,7 @@ use grafeo_common::types::{ArcStr, LogicalType, PropertyKey, Value};
 
 /// File format for the load data operator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum LoadDataFormat {
     /// CSV (comma-separated values).
     Csv,

@@ -16,8 +16,8 @@ use super::node_table::NodeTable;
 use super::rel_table::RelTable;
 use super::schema::{ColumnDef, ColumnType, EdgeSchema, TableSchema};
 use super::zone_map::ZoneMap;
+use crate::codec::{BitPackedInts, BitVector, DictionaryBuilder};
 use crate::statistics::{EdgeTypeStatistics, LabelStatistics, Statistics};
-use crate::storage::{BitPackedInts, BitVector, DictionaryBuilder};
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -25,6 +25,7 @@ use crate::storage::{BitPackedInts, BitVector, DictionaryBuilder};
 
 /// Errors that can occur while building a [`CompactStore`].
 #[derive(Debug, Clone, Error)]
+#[non_exhaustive]
 pub enum CompactStoreError {
     /// A relationship table references a node label that was not defined.
     #[error("node label not found: {0:?}")]

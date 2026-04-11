@@ -10,6 +10,7 @@ meta:
   section: "14.6"
   title: FILTER, LET, FOR statements
   dataset: empty
+  iso: [GQ08, GQ09, GQ10, GQ11, GQ24]
 
 tests:
 

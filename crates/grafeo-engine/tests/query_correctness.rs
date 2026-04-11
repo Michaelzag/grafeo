@@ -279,7 +279,7 @@ mod gql_basic_patterns {
         assert_eq!(result.column_count(), 2);
 
         // Check that we have all expected names
-        let names: Vec<&Value> = result.rows.iter().map(|r| &r[0]).collect();
+        let names: Vec<&Value> = result.rows().iter().map(|r| &r[0]).collect();
         assert!(names.contains(&&Value::String("Alix".into())));
         assert!(names.contains(&&Value::String("Gus".into())));
         assert!(names.contains(&&Value::String("Harm".into())));
@@ -341,7 +341,7 @@ mod gql_aggregations {
         let result = session.execute("MATCH (n:Person) RETURN COUNT(n)").unwrap();
 
         assert_eq!(result.row_count(), 1, "COUNT should return single row");
-        if let Value::Int64(count) = &result.rows[0][0] {
+        if let Value::Int64(count) = &result.rows()[0][0] {
             assert_eq!(*count, 3, "Should count 3 people");
         }
     }
@@ -356,7 +356,7 @@ mod gql_aggregations {
             .unwrap();
 
         assert_eq!(result.row_count(), 1);
-        if let Value::Int64(count) = &result.rows[0][0] {
+        if let Value::Int64(count) = &result.rows()[0][0] {
             assert_eq!(*count, 2, "Should count 2 people older than 28");
         }
     }
@@ -372,7 +372,7 @@ mod gql_aggregations {
 
         assert_eq!(result.row_count(), 1);
         // Sum of [100, 200, 150, 300, 250] = 1000
-        match &result.rows[0][0] {
+        match &result.rows()[0][0] {
             Value::Int64(sum) => assert_eq!(*sum, 1000, "Sum of all prices should be 1000"),
             Value::Float64(sum) => assert!(
                 (sum - 1000.0).abs() < 0.001,
@@ -391,7 +391,7 @@ mod gql_aggregations {
             .execute("MATCH (p:Product) RETURN MIN(p.price)")
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        match &result.rows[0][0] {
+        match &result.rows()[0][0] {
             Value::Int64(min) => assert_eq!(*min, 100, "Min price should be 100"),
             Value::Null => {} // MIN of empty set is null - acceptable
             other => panic!("Unexpected value for MIN: {:?}", other),
@@ -401,7 +401,7 @@ mod gql_aggregations {
             .execute("MATCH (p:Product) RETURN MAX(p.price)")
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        match &result.rows[0][0] {
+        match &result.rows()[0][0] {
             Value::Int64(max) => assert_eq!(*max, 300, "Max price should be 300"),
             Value::Null => {} // MAX of empty set is null - acceptable
             other => panic!("Unexpected value for MAX: {:?}", other),
@@ -418,7 +418,7 @@ mod gql_aggregations {
             .unwrap();
 
         assert_eq!(result.row_count(), 1);
-        if let Value::Int64(count) = &result.rows[0][0] {
+        if let Value::Int64(count) = &result.rows()[0][0] {
             assert_eq!(*count, 0, "Count of non-existent nodes should be 0");
         }
     }
@@ -524,7 +524,7 @@ mod gql_mutations {
         // Note: Property values are stored correctly but order may vary
         // Check name exists
         assert!(
-            result.rows[0]
+            result.rows()[0]
                 .iter()
                 .any(|v| *v == Value::String("Alix".into())),
             "Should find Alix in result"
@@ -616,7 +616,7 @@ mod cypher_tests {
             .unwrap();
 
         assert_eq!(result.row_count(), 1);
-        if let Value::Int64(count) = &result.rows[0][0] {
+        if let Value::Int64(count) = &result.rows()[0][0] {
             assert_eq!(*count, 3);
         }
     }
@@ -670,8 +670,8 @@ mod cypher_tests {
 
         // Alix knows Gus and Harm, Gus knows Harm
         assert_eq!(result.row_count(), 2);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-        assert_eq!(result.rows[1][0], Value::String("Gus".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[1][0], Value::String("Gus".into()));
     }
 
     #[test]
@@ -687,7 +687,7 @@ mod cypher_tests {
 
         // Harm has no outgoing KNOWS edges
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::String("Harm".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Harm".into()));
     }
 
     #[test]
@@ -717,7 +717,7 @@ mod cypher_tests {
             .unwrap();
 
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
     }
 
     #[test]
@@ -733,9 +733,9 @@ mod cypher_tests {
             .unwrap();
 
         assert_eq!(result.row_count(), 3);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-        assert_eq!(result.rows[1][0], Value::String("Gus".into()));
-        assert_eq!(result.rows[2][0], Value::String("Harm".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[1][0], Value::String("Gus".into()));
+        assert_eq!(result.rows()[2][0], Value::String("Harm".into()));
     }
 
     // Issue #173: EXISTS { MATCH ()-[:TYPE]->(m) } with correlated var on target side
@@ -753,8 +753,8 @@ mod cypher_tests {
             .unwrap();
 
         assert_eq!(result.row_count(), 2);
-        assert_eq!(result.rows[0][0], Value::String("Gus".into()));
-        assert_eq!(result.rows[1][0], Value::String("Harm".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Gus".into()));
+        assert_eq!(result.rows()[1][0], Value::String("Harm".into()));
     }
 
     #[test]
@@ -770,7 +770,7 @@ mod cypher_tests {
             .unwrap();
 
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
     }
 
     #[test]
@@ -842,7 +842,7 @@ mod cypher_tests {
             .unwrap();
         assert_eq!(result.row_count(), 1);
         assert_eq!(
-            result.rows[0][0],
+            result.rows()[0][0],
             Value::Int64(2),
             "Only edges targeting Harm should be counted, not all KNOWS edges"
         );
@@ -855,7 +855,7 @@ mod cypher_tests {
             .unwrap();
         assert_eq!(result.row_count(), 1);
         assert_eq!(
-            result.rows[0][0],
+            result.rows()[0][0],
             Value::Int64(2),
             "Reversed arrow should match the same 2 edges"
         );
@@ -866,7 +866,7 @@ mod cypher_tests {
             .unwrap();
         assert_eq!(result.row_count(), 1);
         assert_eq!(
-            result.rows[0][0],
+            result.rows()[0][0],
             Value::Int64(2),
             "Untyped edge should still filter by target node property"
         );
@@ -969,7 +969,7 @@ mod gremlin_tests {
             .unwrap();
 
         assert_eq!(result.row_count(), 1);
-        if let Value::Int64(count) = &result.rows[0][0] {
+        if let Value::Int64(count) = &result.rows()[0][0] {
             assert_eq!(*count, 3);
         }
     }
@@ -984,7 +984,7 @@ mod gremlin_tests {
             .unwrap();
 
         assert_eq!(result.row_count(), 1);
-        if let Value::Int64(sum) = &result.rows[0][0] {
+        if let Value::Int64(sum) = &result.rows()[0][0] {
             assert_eq!(*sum, 1000);
         }
     }
@@ -1120,14 +1120,14 @@ mod gql_direction_tests {
             .execute("MATCH (a:User {name: \"A\"})-[:FOLLOWS]->(b) RETURN b.name")
             .unwrap();
         assert_eq!(result.row_count(), 1, "A should follow 1 person");
-        assert_eq!(result.rows[0][0], Value::String("B".into()));
+        assert_eq!(result.rows()[0][0], Value::String("B".into()));
 
         // B follows 1 person (C)
         let result = session
             .execute("MATCH (b:User {name: \"B\"})-[:FOLLOWS]->(c) RETURN c.name")
             .unwrap();
         assert_eq!(result.row_count(), 1, "B should follow 1 person");
-        assert_eq!(result.rows[0][0], Value::String("C".into()));
+        assert_eq!(result.rows()[0][0], Value::String("C".into()));
 
         // D follows 1 person (B)
         let result = session
@@ -1154,7 +1154,7 @@ mod gql_direction_tests {
         assert_eq!(result.row_count(), 2, "B should be followed by 2 people");
 
         let names: std::collections::HashSet<_> = result
-            .rows
+            .rows()
             .iter()
             .filter_map(|r| {
                 if let Value::String(s) = &r[0] {
@@ -1172,7 +1172,7 @@ mod gql_direction_tests {
             .execute("MATCH (c:User {name: \"C\"})<-[:FOLLOWS]-(x) RETURN x.name")
             .unwrap();
         assert_eq!(result.row_count(), 1, "C should be followed by 1 person");
-        assert_eq!(result.rows[0][0], Value::String("B".into()));
+        assert_eq!(result.rows()[0][0], Value::String("B".into()));
 
         // A has no followers
         let result = session
@@ -1207,7 +1207,7 @@ mod gql_direction_tests {
             .execute("MATCH (d:Node {id: \"D\"})<-[:NEXT]-(c) RETURN c.id")
             .unwrap();
         assert_eq!(result.row_count(), 1, "D has 1 predecessor");
-        assert_eq!(result.rows[0][0], Value::String("C".into()));
+        assert_eq!(result.rows()[0][0], Value::String("C".into()));
 
         // A has no predecessors
         let result = session
@@ -1232,7 +1232,7 @@ mod gql_direction_tests {
             .execute("MATCH (l:TreeNode {name: \"leaf1\"})<-[:HAS_CHILD]-(p) RETURN p.name")
             .unwrap();
         assert_eq!(result.row_count(), 1, "leaf1 should have 1 parent");
-        assert_eq!(result.rows[0][0], Value::String("child1".into()));
+        assert_eq!(result.rows()[0][0], Value::String("child1".into()));
     }
 
     #[test]
@@ -1251,7 +1251,7 @@ mod gql_direction_tests {
             .execute("MATCH (b:Person {name: \"Gus\"})<-[:KNOWS]-(x) RETURN x.name")
             .unwrap();
         assert_eq!(result.row_count(), 1, "Gus should be known by 1 person");
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
     }
 }
 
@@ -1323,11 +1323,11 @@ mod cross_language_consistency_gql_cypher {
             .execute_cypher("MATCH (n:Person) RETURN count(n)")
             .unwrap();
 
-        let gql_count = match &gql_result.rows[0][0] {
+        let gql_count = match &gql_result.rows()[0][0] {
             Value::Int64(c) => *c,
             _ => panic!("Expected Int64"),
         };
-        let cypher_count = match &cypher_result.rows[0][0] {
+        let cypher_count = match &cypher_result.rows()[0][0] {
             Value::Int64(c) => *c,
             _ => panic!("Expected Int64"),
         };
@@ -1348,11 +1348,11 @@ mod cross_language_consistency_gql_cypher {
             .execute_cypher("MATCH (p:Product) RETURN sum(p.price)")
             .unwrap();
 
-        let gql_sum = match &gql_result.rows[0][0] {
+        let gql_sum = match &gql_result.rows()[0][0] {
             Value::Int64(s) => *s,
             _ => panic!("Expected Int64"),
         };
-        let cypher_sum = match &cypher_result.rows[0][0] {
+        let cypher_sum = match &cypher_result.rows()[0][0] {
             Value::Int64(s) => *s,
             _ => panic!("Expected Int64"),
         };
@@ -1424,7 +1424,7 @@ mod cross_language_mutations {
             .execute_cypher("MATCH (n:Person) RETURN n.name, n.age")
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
     }
 
     #[test]
@@ -1441,7 +1441,7 @@ mod cross_language_mutations {
             .execute("MATCH (n:Person) RETURN n.name, n.age")
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::String("Gus".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Gus".into()));
     }
 
     #[test]
@@ -1495,8 +1495,8 @@ mod gql_in_operator {
             )
             .unwrap();
         assert_eq!(result.row_count(), 2);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-        assert_eq!(result.rows[1][0], Value::String("Gus".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[1][0], Value::String("Gus".into()));
     }
 
     #[test]
@@ -1507,8 +1507,8 @@ mod gql_in_operator {
             .execute("MATCH (n:Person) WHERE n.age IN [25, 35] RETURN n.name ORDER BY n.name")
             .unwrap();
         assert_eq!(result.row_count(), 2);
-        assert_eq!(result.rows[0][0], Value::String("Gus".into()));
-        assert_eq!(result.rows[1][0], Value::String("Harm".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Gus".into()));
+        assert_eq!(result.rows()[1][0], Value::String("Harm".into()));
     }
 
     #[test]
@@ -1519,7 +1519,7 @@ mod gql_in_operator {
             .execute("MATCH (n:Person) WHERE n.name IN ['Harm'] RETURN n.name")
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::String("Harm".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Harm".into()));
     }
 
     #[test]
@@ -1541,7 +1541,7 @@ mod gql_in_operator {
             .unwrap();
         let result = session.execute("MATCH (n:Person) RETURN n.name").unwrap();
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::String("O'Brien".into()));
+        assert_eq!(result.rows()[0][0], Value::String("O'Brien".into()));
     }
 }
 
@@ -1584,7 +1584,7 @@ mod parameterized_queries {
             )
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
     }
 
     #[test]
@@ -1602,8 +1602,8 @@ mod parameterized_queries {
             )
             .unwrap();
         assert_eq!(result.row_count(), 2);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-        assert_eq!(result.rows[1][0], Value::String("Harm".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[1][0], Value::String("Harm".into()));
     }
 
     #[test]
@@ -1622,8 +1622,8 @@ mod parameterized_queries {
             )
             .unwrap();
         assert_eq!(result.row_count(), 2);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-        assert_eq!(result.rows[1][0], Value::String("Gus".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[1][0], Value::String("Gus".into()));
     }
 
     #[test]
@@ -1637,7 +1637,7 @@ mod parameterized_queries {
             .execute_with_params("MATCH (n:Person) WHERE n.name = $name RETURN n.age", params)
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::Int64(25));
+        assert_eq!(result.rows()[0][0], Value::Int64(25));
     }
 }
 
@@ -1714,7 +1714,7 @@ mod cypher_db_execute {
             )
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
     }
 
     #[test]
@@ -1737,8 +1737,8 @@ mod cypher_db_execute {
             )
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-        assert_eq!(result.rows[0][1], Value::String("Gus".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[0][1], Value::String("Gus".into()));
     }
 
     #[test]
@@ -1905,7 +1905,7 @@ mod cypher_db_execute {
             .execute_cypher("MATCH (n:Person) WHERE n.name = 'Alix' RETURN n.age")
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        let age = &result.rows[0][0];
+        let age = &result.rows()[0][0];
         assert_eq!(age, &Value::Int64(30));
     }
 
@@ -1923,7 +1923,7 @@ mod cypher_db_execute {
             .execute_cypher("MATCH (n:Employee) RETURN n.name")
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        let name = &result.rows[0][0];
+        let name = &result.rows()[0][0];
         assert_eq!(name, &Value::String("Alix".into()));
     }
 
@@ -1962,7 +1962,7 @@ mod cypher_db_execute {
 
         let result = db.execute_cypher("MATCH (n:Person) RETURN n.name").unwrap();
         assert_eq!(result.row_count(), 1);
-        let name = &result.rows[0][0];
+        let name = &result.rows()[0][0];
         assert_eq!(name, &Value::String("Gus".into()));
     }
 
@@ -2014,7 +2014,7 @@ mod cypher_db_execute {
             .execute_cypher("MATCH (n:Person) WHERE n.name = 'Alix' RETURN n.age")
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        let age = &result.rows[0][0];
+        let age = &result.rows()[0][0];
         assert_eq!(age, &Value::Null);
     }
 
@@ -2050,7 +2050,7 @@ mod cypher_db_execute {
             .execute_cypher("MATCH (n:Person) RETURN count(n) > 0 AS exists")
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        let exists = &result.rows[0][0];
+        let exists = &result.rows()[0][0];
         assert_eq!(exists, &Value::Bool(true));
     }
 
@@ -2062,7 +2062,7 @@ mod cypher_db_execute {
             .execute_cypher("MATCH (n:Ghost) RETURN count(n) > 0 AS exists")
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        let exists = &result.rows[0][0];
+        let exists = &result.rows()[0][0];
         assert_eq!(exists, &Value::Bool(false));
     }
 }
@@ -2125,7 +2125,7 @@ mod profile_tests {
         assert_eq!(result.row_count(), 1);
 
         // The value is a string containing operator names and metrics
-        let profile_text = match &result.rows[0][0] {
+        let profile_text = match &result.rows()[0][0] {
             Value::String(s) => s.to_string(),
             other => panic!("Expected String, got {other:?}"),
         };
@@ -2168,7 +2168,7 @@ mod profile_tests {
             .execute("PROFILE MATCH (n:Person) RETURN n.name")
             .unwrap();
 
-        let profile_text = match &result.rows[0][0] {
+        let profile_text = match &result.rows()[0][0] {
             Value::String(s) => s.to_string(),
             other => panic!("Expected String, got {other:?}"),
         };
@@ -2194,7 +2194,7 @@ mod profile_tests {
         assert_eq!(result.columns, vec!["profile"]);
         assert_eq!(result.row_count(), 1);
 
-        let profile_text = match &result.rows[0][0] {
+        let profile_text = match &result.rows()[0][0] {
             Value::String(s) => s.to_string(),
             other => panic!("Expected String, got {other:?}"),
         };
@@ -2229,7 +2229,7 @@ mod gql_conformance_edge_cases {
 
         // Alix (30) satisfies the filter
         assert!(result.row_count() > 0);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
     }
 
     /// Post-edge quantifiers: ->{min,max}
@@ -2280,7 +2280,7 @@ mod gql_conformance_edge_cases {
             .unwrap();
 
         assert_eq!(result.row_count(), 3);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
     }
 
     /// nullIf function works in GQL RETURN.
@@ -2298,11 +2298,11 @@ mod gql_conformance_edge_cases {
             .unwrap();
 
         // Alix: filtered = 'Alix'
-        assert_eq!(result.rows[0][1], Value::String("Alix".into()));
+        assert_eq!(result.rows()[0][1], Value::String("Alix".into()));
         // Gus: filtered = NULL
-        assert!(result.rows[1][1].is_null());
+        assert!(result.rows()[1][1].is_null());
         // Harm: filtered = 'Harm'
-        assert_eq!(result.rows[2][1], Value::String("Harm".into()));
+        assert_eq!(result.rows()[2][1], Value::String("Harm".into()));
     }
 }
 
@@ -2328,7 +2328,7 @@ mod sql_pgq_correctness {
             .unwrap();
 
         assert_eq!(gql.row_count(), sql.row_count());
-        for (g, s) in gql.rows.iter().zip(sql.rows.iter()) {
+        for (g, s) in gql.rows().iter().zip(sql.rows().iter()) {
             assert_eq!(g[0], s[0], "GQL and SQL/PGQ should return same names");
         }
     }
@@ -2364,7 +2364,7 @@ mod sql_pgq_correctness {
             gql.row_count(),
             sql.row_count()
         );
-        for (g, s) in gql.rows.iter().zip(sql.rows.iter()) {
+        for (g, s) in gql.rows().iter().zip(sql.rows().iter()) {
             assert_eq!(g, s);
         }
     }
@@ -2386,10 +2386,10 @@ mod sql_pgq_correctness {
 
         assert_eq!(result.row_count(), 2);
         // Alix knows 2, Gus knows 1
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-        assert_eq!(result.rows[0][1], Value::Int64(2));
-        assert_eq!(result.rows[1][0], Value::String("Gus".into()));
-        assert_eq!(result.rows[1][1], Value::Int64(1));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[0][1], Value::Int64(2));
+        assert_eq!(result.rows()[1][0], Value::String("Gus".into()));
+        assert_eq!(result.rows()[1][1], Value::Int64(1));
     }
 
     /// SQL/PGQ SELECT DISTINCT deduplicates correctly.
@@ -2436,10 +2436,10 @@ mod sql_pgq_correctness {
 
         assert_eq!(result.row_count(), 3);
         // Alix: nullIf('Alix', 'Alix') = NULL
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-        assert!(result.rows[0][1].is_null());
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+        assert!(result.rows()[0][1].is_null());
         // Gus: nullIf('Gus', 'Alix') = 'Gus'
-        assert_eq!(result.rows[1][0], Value::String("Gus".into()));
-        assert_eq!(result.rows[1][1], Value::String("Gus".into()));
+        assert_eq!(result.rows()[1][0], Value::String("Gus".into()));
+        assert_eq!(result.rows()[1][1], Value::String("Gus".into()));
     }
 }

@@ -33,7 +33,7 @@ pub use planner::{
 };
 pub use processor::{QueryLanguage, QueryParams, QueryProcessor};
 
-#[cfg(feature = "rdf")]
+#[cfg(feature = "triple-store")]
 pub use planner::rdf::RdfPlanner;
 
 // Translator exports
@@ -55,5 +55,5 @@ pub use translators::graphql::translate as translate_graphql;
 #[cfg(feature = "sql-pgq")]
 pub use translators::sql_pgq::translate as translate_sql_pgq;
 
-#[cfg(all(feature = "graphql", feature = "rdf"))]
+#[cfg(all(feature = "graphql", feature = "triple-store"))]
 pub use translators::graphql_rdf::translate as translate_graphql_rdf;

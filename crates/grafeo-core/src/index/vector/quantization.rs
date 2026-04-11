@@ -56,6 +56,7 @@ use serde::{Deserialize, Serialize};
 
 /// Quantization strategy for vector storage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum QuantizationType {
     /// No quantization - full f32 precision.
     #[default]

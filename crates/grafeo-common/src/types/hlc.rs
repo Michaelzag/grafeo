@@ -438,14 +438,16 @@ mod tests {
         ignore = "requires wall clock (SystemTime::now) unavailable under Miri isolation"
     )]
     fn update_all_three_equal() {
-        // Force last and received to have the same physical time as wall clock
-        let pt = wall_clock_ms();
+        // Use a future physical time so the wall clock cannot overtake it
+        // between setup and the update() call (avoids CI timing flakes).
+        let pt = wall_clock_ms() + 60_000;
         let clock = HlcClock {
             last: AtomicU64::new(HlcTimestamp::new(pt, 5).as_u64()),
         };
         let remote = HlcTimestamp::new(pt, 10);
         let merged = clock.update(remote);
-        // max(5, 10) + 1 = 11
+        // All three physical times equal (wall < pt, last = pt, remote = pt).
+        // HLC picks max physical = pt, then max(last.logical=5, remote.logical=10) + 1 = 11
         assert_eq!(merged.physical_ms(), pt);
         assert_eq!(merged.logical(), 11);
     }

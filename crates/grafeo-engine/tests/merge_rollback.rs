@@ -26,7 +26,7 @@ fn test_merge_on_match_set_rollback() {
     let result = session
         .execute("MATCH (p:Person {name: 'Alix'}) RETURN p.status")
         .unwrap();
-    assert_eq!(result.rows[0][0], Value::String("inactive".into()));
+    assert_eq!(result.rows()[0][0], Value::String("inactive".into()));
 
     session.rollback().unwrap();
 
@@ -35,7 +35,7 @@ fn test_merge_on_match_set_rollback() {
         .execute("MATCH (p:Person {name: 'Alix'}) RETURN p.status")
         .unwrap();
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::String("active".into()),
         "status should be restored to 'active' after rollback"
     );
@@ -61,7 +61,7 @@ fn test_merge_on_match_set_new_property_rollback() {
         .execute("MATCH (p:Person {name: 'Gus'}) RETURN p.updated")
         .unwrap();
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Null,
         "'updated' property should not exist after rollback"
     );
@@ -87,7 +87,7 @@ fn test_merge_on_match_committed_stays() {
         .execute("MATCH (p:Person {name: 'Vincent'}) RETURN p.score")
         .unwrap();
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(100),
         "score should retain the committed value"
     );

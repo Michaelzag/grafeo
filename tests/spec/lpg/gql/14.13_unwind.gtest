@@ -6,6 +6,7 @@ meta:
   section: "14.13"
   title: UNWIND clause
   dataset: empty
+  iso: [GQ10]
 
 tests:
 

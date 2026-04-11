@@ -12,6 +12,7 @@ description = "Query engine and database management for Grafeo"
 grafeo-common.workspace = true
 grafeo-core = { workspace = true, default-features = false }
 grafeo-adapters = { workspace = true, default-features = false }
+grafeo-storage = { workspace = true, default-features = false }
 
 # Error handling
 thiserror.workspace = true
@@ -47,10 +48,16 @@ tokio = { workspace = true, optional = true }
 # Tracing (optional, zero-cost when disabled)
 tracing = { workspace = true, optional = true }
 
+# Arrow (optional, for zero-copy data export)
+arrow-schema = { workspace = true, optional = true }
+arrow-array = { workspace = true, optional = true }
+arrow-ipc = { workspace = true, optional = true }
+
 # Embedding (optional, for ONNX embedding generation)
 ort = { version = "2.0.0-rc.12", optional = true, default-features = false, features = ["std", "ndarray", "load-dynamic", "api-24"] }
 tokenizers = { version = "0.22", optional = true, default-features = false, features = ["onig"] }
 hf-hub = { version = "0.5", optional = true }
+crc32fast.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
@@ -59,7 +66,8 @@ serde_json = "1"
 tokio.workspace = true
 
 [features]
-default = ["gql", "parallel", "wal", "grafeo-file", "spill", "mmap", "regex"]
+default = ["lpg", "gql", "parallel", "wal", "grafeo-file", "spill", "mmap", "regex"]
+lpg = ["grafeo-core/lpg"]  # Enable LPG (labeled property graph) model
 regex = ["dep:regex", "grafeo-core/regex"]
 regex-lite = ["dep:regex-lite", "grafeo-core/regex-lite"]
 gql = ["grafeo-adapters/gql"]
@@ -68,12 +76,13 @@ sparql = ["grafeo-adapters/sparql"]
 gremlin = ["grafeo-adapters/gremlin"]
 graphql = ["grafeo-adapters/graphql"]
 sql-pgq = ["grafeo-adapters/sql-pgq"]  # SQL/PGQ (SQL:2023 GRAPH_TABLE)
-rdf = ["grafeo-core/rdf", "grafeo-adapters/rdf", "md5", "sha1", "sha2", "regex"]  # RDF graph model and planner
+triple-store = ["grafeo-core/triple-store", "grafeo-adapters/triple-store", "md5", "sha1", "sha2", "regex"]  # RDF triple store model and planner
+rdf = ["triple-store"]  # Deprecated: use triple-store
 parallel = ["rayon", "crossbeam", "grafeo-core/parallel", "grafeo-adapters/parallel"]  # Parallel execution
 algos = ["grafeo-adapters/algos"]  # Graph algorithm plugin (SSSP, PageRank, etc.)
-wal = ["grafeo-adapters/wal"]  # Write-ahead log storage
-async-storage = ["grafeo-adapters/async-storage", "dep:tokio"]  # Async WAL and storage backend
-grafeo-file = ["grafeo-adapters/grafeo-file"]  # Single-file .grafeo format
+wal = ["grafeo-storage/wal"]  # Write-ahead log storage
+async-storage = ["grafeo-storage/async-storage", "dep:tokio"]  # Async WAL and storage backend
+grafeo-file = ["grafeo-storage/grafeo-file"]  # Single-file .grafeo format
 spill = ["grafeo-core/spill"]  # Disk spilling for out-of-core execution
 mmap = ["grafeo-core/mmap"]  # File-backed vector storage
 temporal = ["grafeo-core/temporal"]  # Append-only versioned properties
@@ -84,10 +93,10 @@ ai = ["vector-index", "text-index", "hybrid-search", "cdc"]  # All AI/RAG featur
 storage = ["wal", "grafeo-file", "spill", "mmap"]  # Persistent storage (WAL, single-file, disk spill, mmap)
 
 # Named profiles (ecosystem-aligned)
-embedded = ["gql", "ai", "algos", "parallel", "regex", "jsonl-import", "grafeo-file"]  # Python libs, MCP, in-process
-browser = ["gql", "regex-lite"]  # WASM / grafeo-web
+embedded = ["lpg", "gql", "ai", "algos", "parallel", "regex", "jsonl-import", "grafeo-file", "arrow-export"]  # Python libs, MCP, in-process
+browser = ["lpg", "gql", "regex-lite"]  # WASM / grafeo-web
 server = ["full", "async-storage", "metrics", "tracing"]  # grafeo-server
-full = ["languages", "ai", "rdf", "parallel", "algos", "storage", "jsonl-import", "parquet-import"]
+full = ["lpg", "languages", "ai", "triple-store", "parallel", "algos", "storage", "jsonl-import", "parquet-import"]
 
 # Data import
 jsonl-import = ["grafeo-core/jsonl-import"]  # JSON Lines file import
@@ -102,8 +111,11 @@ metrics = []  # Lock-free query, transaction, and session metrics
 embed = ["ort", "tokenizers", "hf-hub"]  # ONNX embedding generation (opt-in, adds ~17MB)
 tracing = ["dep:tracing", "grafeo-common/tracing", "grafeo-adapters/tracing"]  # Observability spans and events
 
+# Data export
+arrow-export = ["dep:arrow-schema", "dep:arrow-array", "dep:arrow-ipc"]  # Arrow IPC zero-copy export
+
 # Testing utilities (zero overhead when disabled)
-testing-crash-injection = ["grafeo-core/testing-crash-injection"]  # Crash injection for recovery testing
+testing-crash-injection = ["grafeo-common/testing-crash-injection", "grafeo-storage/testing-crash-injection"]  # Crash injection for recovery testing
 
 [lints]
 workspace = true
@@ -114,4 +126,12 @@ harness = false
 
 [[bench]]
 name = "serialization_bench"
+harness = false
+
+[[bench]]
+name = "regression_bench"
+harness = false
+
+[[bench]]
+name = "memory_bench"
 harness = false

@@ -9,8 +9,8 @@
 
 use std::panic::AssertUnwindSafe;
 
+use grafeo_common::testing::crash::{CrashResult, with_crash_at};
 use grafeo_common::types::Value;
-use grafeo_core::testing::crash::{CrashResult, with_crash_at};
 use grafeo_engine::{Config, GrafeoDB};
 
 /// Helper: extract sorted string values from column 0 of query result rows.
@@ -96,6 +96,7 @@ fn crash_during_close_checkpoint_preserves_data_via_sidecar_wal() {
                     // Close completed: the crash point was past all crash
                     // injection calls. Data should be in the .grafeo file.
                 }
+                _ => {}
             }
         }
 
@@ -106,7 +107,7 @@ fn crash_during_close_checkpoint_preserves_data_via_sidecar_wal() {
         let session = db.session();
 
         let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
-        let names = extract_strings(&result.rows);
+        let names = extract_strings(result.rows());
         assert_eq!(
             names,
             vec!["Alix", "Gus"],
@@ -155,6 +156,7 @@ fn crash_during_wal_checkpoint_leaves_db_usable() {
             CrashResult::Completed(()) => {
                 // Checkpoint completed successfully
             }
+            _ => {}
         }
 
         // Drop without close to simulate process exit
@@ -167,7 +169,7 @@ fn crash_during_wal_checkpoint_leaves_db_usable() {
         let session2 = db2.session();
 
         let result = session2.execute("MATCH (c:City) RETURN c.name").unwrap();
-        let names = extract_strings(&result.rows);
+        let names = extract_strings(result.rows());
         assert_eq!(
             names,
             vec!["Amsterdam", "Berlin"],
@@ -210,7 +212,7 @@ fn crash_after_successful_checkpoint_with_new_writes() {
     let session = db.session();
 
     let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
-    let names = extract_strings(&result.rows);
+    let names = extract_strings(result.rows());
 
     // Pre-checkpoint data must survive
     assert!(
@@ -301,6 +303,7 @@ fn crash_before_sidecar_wal_removal_recovered_on_reopen() {
                 // Crash point exceeded the injection count - close completed normally.
                 // This is fine; the test still verifies reopen works.
             }
+            _ => {}
         }
     }
 
@@ -318,7 +321,7 @@ fn crash_before_sidecar_wal_removal_recovered_on_reopen() {
         .session()
         .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name")
         .unwrap();
-    let names = extract_strings(&result.rows);
+    let names = extract_strings(result.rows());
     assert!(
         names.contains(&"Beatrix".to_string()),
         "Beatrix missing after crash"
@@ -390,7 +393,7 @@ fn wal_disabled_checkpoint_preserves_data() {
     let session = db.session();
 
     let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
-    let names = extract_strings(&result.rows);
+    let names = extract_strings(result.rows());
     assert_eq!(
         names,
         vec!["Alix", "Gus"],
@@ -452,6 +455,7 @@ fn wal_disabled_crash_during_checkpoint_recovers() {
                 CrashResult::Completed(()) => {
                     // Close completed before crash point was reached
                 }
+                _ => {}
             }
         }
 
@@ -466,7 +470,7 @@ fn wal_disabled_crash_during_checkpoint_recovers() {
         let session = db.session();
 
         let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
-        let names = extract_strings(&result.rows);
+        let names = extract_strings(result.rows());
 
         // Round-1 data must survive
         assert!(
@@ -533,7 +537,7 @@ fn wal_disabled_uncommitted_data_lost_on_crash() {
     let session = db.session();
 
     let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
-    let names = extract_strings(&result.rows);
+    let names = extract_strings(result.rows());
 
     assert!(
         names.contains(&"Butch".to_string()),

@@ -2,7 +2,7 @@
 //!
 //! When a sort or aggregation grows too large for RAM, we spill partitions to
 //! disk and merge them back later. This lets queries complete even with limited
-//! memory - just slower.
+//! memory, just slower.
 //!
 //! | Component | Purpose |
 //! | --------- | ------- |
@@ -11,19 +11,15 @@
 //! | [`ExternalSort`] | External merge sort for big ORDER BY |
 //! | [`PartitionedState`] | Hash partitioning for spillable GROUP BY |
 //!
-//! Async variants (`AsyncSpillManager`, `AsyncSpillFile`) use tokio for
-//! non-blocking I/O when running in async contexts.
+//! Async variants (`AsyncSpillManager`, `AsyncSpillFile`) live in
+//! `grafeo-engine::execution::spill` (requires tokio runtime).
 
-mod async_file;
-mod async_manager;
 mod external_sort;
 mod file;
 mod manager;
 mod partition;
 mod serializer;
 
-pub use async_file::{AsyncSpillFile, AsyncSpillFileReader};
-pub use async_manager::AsyncSpillManager;
 pub use external_sort::{ExternalSort, NullOrder, SortDirection, SortKey};
 pub use file::{SpillFile, SpillFileReader};
 pub use manager::SpillManager;

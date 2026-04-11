@@ -78,6 +78,7 @@ struct Meta {
     dataset: String,
     requires: Vec<String>,
     tags: Vec<String>,
+    iso: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -89,6 +90,7 @@ struct TestCase {
     params: HashMap<String, String>,
     tags: Vec<String>,
     requires: Vec<String>,
+    iso: Vec<String>,
     language: Option<String>,
     dataset: Option<String>,
     skip: Option<String>,
@@ -168,6 +170,7 @@ fn parse_meta(lines: &[&str], idx: &mut usize) -> Result<Meta, String> {
                 "dataset" => meta.dataset = value.to_string(),
                 "requires" => meta.requires = parse_yaml_list(value),
                 "tags" => meta.tags = parse_yaml_list(value),
+                "iso" => meta.iso = parse_yaml_list(value),
                 _ => {} // ignore unknown keys
             }
         }
@@ -230,6 +233,7 @@ fn parse_single_test(lines: &[&str], idx: &mut usize) -> Result<TestCase, String
         params: HashMap::new(),
         tags: Vec::new(),
         requires: Vec::new(),
+        iso: Vec::new(),
         language: None,
         dataset: None,
         skip: None,
@@ -295,6 +299,10 @@ fn parse_single_test(lines: &[&str], idx: &mut usize) -> Result<TestCase, String
                 }
                 "requires" => {
                     tc.requires = parse_yaml_list(value);
+                    *idx += 1;
+                }
+                "iso" => {
+                    tc.iso = parse_yaml_list(value);
                     *idx += 1;
                 }
                 "language" => {

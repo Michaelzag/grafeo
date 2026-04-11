@@ -255,6 +255,22 @@ impl BufferManager {
         self.run_eviction_internal(to_free)
     }
 
+    /// Spills all consumers that support it, regardless of memory pressure.
+    ///
+    /// Used when `TierOverride::ForceDisk` is configured. Returns total bytes freed.
+    pub fn spill_all(&self) -> usize {
+        let consumers = self.consumers.read();
+        let mut total_freed = 0;
+        for consumer in consumers.iter() {
+            if consumer.can_spill()
+                && let Ok(freed) = consumer.spill(usize::MAX)
+            {
+                total_freed += freed;
+            }
+        }
+        total_freed
+    }
+
     /// Returns the configuration.
     #[must_use]
     pub fn config(&self) -> &BufferManagerConfig {
@@ -334,7 +350,7 @@ impl BufferManager {
         sorted.sort_by_key(|c| c.eviction_priority());
 
         let mut total_freed = 0;
-        for consumer in sorted {
+        for consumer in &sorted {
             if total_freed >= to_free {
                 break;
             }
@@ -347,8 +363,24 @@ impl BufferManager {
             if target_evict > 0 {
                 let freed = consumer.evict(target_evict);
                 total_freed += freed;
-                // Note: consumers should call release through their grants,
-                // so we don't double-decrement here.
+            }
+        }
+
+        // If eviction was not enough, try spilling to disk for consumers
+        // that support it (e.g., vector indexes with mmap storage).
+        if total_freed < to_free {
+            for consumer in &sorted {
+                if total_freed >= to_free {
+                    break;
+                }
+                if !consumer.can_spill() {
+                    continue;
+                }
+                let remaining = to_free - total_freed;
+                match consumer.spill(remaining) {
+                    Ok(freed) => total_freed += freed,
+                    Err(_) => continue,
+                }
             }
         }
 
@@ -594,5 +626,450 @@ mod tests {
 
         let _g = manager.try_allocate(300, MemoryRegion::ExecutionBuffers);
         assert_eq!(manager.available(), 700);
+    }
+
+    // --- Spill-aware test consumer ---
+
+    struct SpillableConsumer {
+        name: String,
+        usage: AtomicUsize,
+        priority: u8,
+        region: MemoryRegion,
+        evicted: AtomicUsize,
+        spilled: AtomicUsize,
+        spillable: bool,
+        evict_returns_zero: bool,
+    }
+
+    impl SpillableConsumer {
+        fn new(
+            name: &str,
+            usage: usize,
+            priority: u8,
+            region: MemoryRegion,
+            spillable: bool,
+        ) -> Arc<Self> {
+            Arc::new(Self {
+                name: name.to_string(),
+                usage: AtomicUsize::new(usage),
+                priority,
+                region,
+                evicted: AtomicUsize::new(0),
+                spilled: AtomicUsize::new(0),
+                spillable,
+                evict_returns_zero: false,
+            })
+        }
+
+        fn new_evict_fails(
+            name: &str,
+            usage: usize,
+            priority: u8,
+            region: MemoryRegion,
+            spillable: bool,
+        ) -> Arc<Self> {
+            Arc::new(Self {
+                name: name.to_string(),
+                usage: AtomicUsize::new(usage),
+                priority,
+                region,
+                evicted: AtomicUsize::new(0),
+                spilled: AtomicUsize::new(0),
+                spillable,
+                evict_returns_zero: true,
+            })
+        }
+    }
+
+    impl MemoryConsumer for SpillableConsumer {
+        fn name(&self) -> &str {
+            &self.name
+        }
+
+        fn memory_usage(&self) -> usize {
+            self.usage.load(Ordering::Relaxed)
+        }
+
+        fn eviction_priority(&self) -> u8 {
+            self.priority
+        }
+
+        fn region(&self) -> MemoryRegion {
+            self.region
+        }
+
+        fn evict(&self, target_bytes: usize) -> usize {
+            if self.evict_returns_zero {
+                return 0;
+            }
+            let current = self.usage.load(Ordering::Relaxed);
+            let to_evict = target_bytes.min(current);
+            self.usage.fetch_sub(to_evict, Ordering::Relaxed);
+            self.evicted.fetch_add(to_evict, Ordering::Relaxed);
+            to_evict
+        }
+
+        fn can_spill(&self) -> bool {
+            self.spillable
+        }
+
+        fn spill(
+            &self,
+            target_bytes: usize,
+        ) -> Result<usize, crate::memory::buffer::consumer::SpillError> {
+            if !self.spillable {
+                return Err(crate::memory::buffer::consumer::SpillError::NotSupported);
+            }
+            let current = self.usage.load(Ordering::Relaxed);
+            let to_spill = target_bytes.min(current);
+            self.usage.fetch_sub(to_spill, Ordering::Relaxed);
+            self.spilled.fetch_add(to_spill, Ordering::Relaxed);
+            Ok(to_spill)
+        }
+    }
+
+    #[test]
+    fn test_spill_all_calls_spillable_consumers() {
+        let manager = BufferManager::with_budget(10000);
+        let spillable = SpillableConsumer::new(
+            "spillable",
+            500,
+            priorities::QUERY_CACHE,
+            MemoryRegion::ExecutionBuffers,
+            true,
+        );
+        let non_spillable = SpillableConsumer::new(
+            "non_spillable",
+            500,
+            priorities::QUERY_CACHE,
+            MemoryRegion::ExecutionBuffers,
+            false,
+        );
+        manager.register_consumer(Arc::clone(&spillable) as Arc<dyn MemoryConsumer>);
+        manager.register_consumer(Arc::clone(&non_spillable) as Arc<dyn MemoryConsumer>);
+
+        let freed = manager.spill_all();
+        assert_eq!(freed, 500);
+        assert_eq!(spillable.spilled.load(Ordering::Relaxed), 500);
+        assert_eq!(non_spillable.spilled.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn test_spill_all_skips_non_spillable() {
+        let manager = BufferManager::with_budget(10000);
+        let consumer = SpillableConsumer::new(
+            "no_spill",
+            1000,
+            priorities::INDEX_BUFFERS,
+            MemoryRegion::IndexBuffers,
+            false,
+        );
+        manager.register_consumer(Arc::clone(&consumer) as Arc<dyn MemoryConsumer>);
+
+        assert_eq!(manager.spill_all(), 0);
+        assert_eq!(consumer.memory_usage(), 1000);
+    }
+
+    #[test]
+    fn test_eviction_falls_back_to_spill() {
+        let manager = BufferManager::with_budget(10000);
+        let consumer = SpillableConsumer::new_evict_fails(
+            "spill_fallback",
+            1000,
+            priorities::QUERY_CACHE,
+            MemoryRegion::ExecutionBuffers,
+            true,
+        );
+        manager.register_consumer(Arc::clone(&consumer) as Arc<dyn MemoryConsumer>);
+        manager.allocated.store(2000, Ordering::Relaxed);
+
+        let freed = manager.evict_to_target(1500);
+        assert_eq!(consumer.evicted.load(Ordering::Relaxed), 0);
+        assert!(consumer.spilled.load(Ordering::Relaxed) > 0);
+        assert!(freed > 0);
+    }
+
+    #[test]
+    fn test_eviction_no_spill_when_sufficient() {
+        let manager = BufferManager::with_budget(10000);
+        let consumer = SpillableConsumer::new(
+            "eviction_enough",
+            1000,
+            priorities::QUERY_CACHE,
+            MemoryRegion::ExecutionBuffers,
+            true,
+        );
+        manager.register_consumer(Arc::clone(&consumer) as Arc<dyn MemoryConsumer>);
+        manager.allocated.store(1200, Ordering::Relaxed);
+
+        let freed = manager.evict_to_target(1000);
+        assert_eq!(freed, 200);
+        assert_eq!(consumer.spilled.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn test_eviction_spill_skips_non_spillable() {
+        let manager = BufferManager::with_budget(10000);
+        let consumer = SpillableConsumer::new_evict_fails(
+            "no_spill",
+            1000,
+            priorities::QUERY_CACHE,
+            MemoryRegion::ExecutionBuffers,
+            false,
+        );
+        manager.register_consumer(Arc::clone(&consumer) as Arc<dyn MemoryConsumer>);
+        manager.allocated.store(2000, Ordering::Relaxed);
+
+        let freed = manager.evict_to_target(1500);
+        assert_eq!(freed, 0);
+        assert_eq!(consumer.memory_usage(), 1000);
+    }
+
+    #[test]
+    fn alix_with_defaults_creates_manager() {
+        let manager = BufferManager::with_defaults();
+        // with_defaults uses system memory detection, budget should be > 0
+        assert!(manager.budget() > 0);
+        assert_eq!(manager.allocated(), 0);
+        assert_eq!(manager.available(), manager.budget());
+    }
+
+    #[test]
+    fn gus_config_accessor_returns_budget() {
+        let manager = BufferManager::with_budget(4096);
+        let config = manager.config();
+        assert_eq!(config.budget, 4096);
+        assert!(!config.background_eviction);
+        assert!(config.spill_path.is_none());
+    }
+
+    #[test]
+    fn vincent_shutdown_sets_flag() {
+        let manager = BufferManager::with_budget(1000);
+        manager.shutdown();
+        // shutdown stores true; drop also stores true, so this just verifies
+        // the method runs without error and the manager remains usable
+        assert_eq!(manager.allocated(), 0);
+    }
+
+    #[test]
+    fn jules_critical_pressure_level() {
+        let config = BufferManagerConfig {
+            budget: 1000,
+            soft_limit_fraction: 0.70,
+            evict_limit_fraction: 0.85,
+            hard_limit_fraction: 0.95,
+            background_eviction: false,
+            spill_path: None,
+        };
+        let manager = BufferManager::new(config);
+
+        // Manually set allocated above hard limit to test Critical level
+        manager.allocated.store(960, Ordering::Relaxed);
+        assert_eq!(manager.pressure_level(), PressureLevel::Critical);
+    }
+
+    #[test]
+    fn mia_evict_to_target_already_below() {
+        let manager = BufferManager::with_budget(10000);
+        // allocated is 0, target is 5000: already below target
+        let freed = manager.evict_to_target(5000);
+        assert_eq!(freed, 0);
+    }
+
+    #[test]
+    fn butch_try_allocate_raw_success() {
+        let config = BufferManagerConfig {
+            budget: 1000,
+            soft_limit_fraction: 0.70,
+            evict_limit_fraction: 0.85,
+            hard_limit_fraction: 0.95,
+            background_eviction: false,
+            spill_path: None,
+        };
+        let manager = BufferManager::new(config);
+
+        // GrantReleaser::try_allocate_raw succeeds when under hard limit
+        let success = manager.try_allocate_raw(100, MemoryRegion::GraphStorage);
+        assert!(success);
+        assert_eq!(manager.allocated(), 100);
+        assert_eq!(
+            manager.stats().region_usage(MemoryRegion::GraphStorage),
+            100
+        );
+    }
+
+    #[test]
+    fn django_try_allocate_raw_fails_at_hard_limit() {
+        let config = BufferManagerConfig {
+            budget: 1000,
+            soft_limit_fraction: 0.70,
+            evict_limit_fraction: 0.85,
+            hard_limit_fraction: 0.95,
+            background_eviction: false,
+            spill_path: None,
+        };
+        let manager = BufferManager::new(config);
+
+        // Fill up to hard limit
+        manager.allocated.store(940, Ordering::Relaxed);
+
+        // This exceeds hard limit (940 + 100 = 1040 > 950), no consumers to evict
+        let success = manager.try_allocate_raw(100, MemoryRegion::ExecutionBuffers);
+        assert!(!success);
+    }
+
+    #[test]
+    fn shosanna_drop_sets_shutdown() {
+        // Create and immediately drop to exercise the Drop impl
+        let manager = BufferManager::with_budget(512);
+        drop(manager);
+        // If we get here without panic, the Drop impl ran successfully.
+    }
+
+    #[test]
+    fn hans_eviction_with_zero_usage_consumer() {
+        let manager = BufferManager::with_budget(10000);
+        // Consumer with zero usage: target_evict will be 0, so evict is skipped
+        let consumer = TestConsumer::new(
+            "empty",
+            0,
+            priorities::SPILL_STAGING,
+            MemoryRegion::SpillStaging,
+        );
+        manager.register_consumer(Arc::clone(&consumer) as Arc<dyn MemoryConsumer>);
+        manager.allocated.store(500, Ordering::Relaxed);
+
+        let freed = manager.evict_to_target(200);
+        // Consumer has 0 usage, so target_evict = min(300, 0/2) = 0, evict skipped
+        assert_eq!(consumer.evicted.load(Ordering::Relaxed), 0);
+        assert_eq!(freed, 0);
+    }
+
+    #[test]
+    fn beatrix_grant_releaser_release_decrements() {
+        let config = BufferManagerConfig {
+            budget: 1000,
+            soft_limit_fraction: 0.70,
+            evict_limit_fraction: 0.85,
+            hard_limit_fraction: 0.95,
+            background_eviction: false,
+            spill_path: None,
+        };
+        let manager = BufferManager::new(config);
+
+        // Allocate via try_allocate_raw, then release via GrantReleaser trait
+        assert!(manager.try_allocate_raw(200, MemoryRegion::IndexBuffers));
+        assert_eq!(manager.allocated(), 200);
+
+        manager.release(200, MemoryRegion::IndexBuffers);
+        assert_eq!(manager.allocated(), 0);
+        assert_eq!(manager.stats().region_usage(MemoryRegion::IndexBuffers), 0);
+    }
+
+    /// Consumer whose spill() returns an error to exercise the Err(_) => continue path.
+    struct FailingSpillConsumer {
+        name: String,
+        usage: AtomicUsize,
+        priority: u8,
+        region: MemoryRegion,
+    }
+
+    impl FailingSpillConsumer {
+        fn new(name: &str, usage: usize, priority: u8, region: MemoryRegion) -> Arc<Self> {
+            Arc::new(Self {
+                name: name.to_string(),
+                usage: AtomicUsize::new(usage),
+                priority,
+                region,
+            })
+        }
+    }
+
+    impl MemoryConsumer for FailingSpillConsumer {
+        fn name(&self) -> &str {
+            &self.name
+        }
+
+        fn memory_usage(&self) -> usize {
+            self.usage.load(Ordering::Relaxed)
+        }
+
+        fn eviction_priority(&self) -> u8 {
+            self.priority
+        }
+
+        fn region(&self) -> MemoryRegion {
+            self.region
+        }
+
+        fn evict(&self, _target_bytes: usize) -> usize {
+            0 // eviction always fails
+        }
+
+        fn can_spill(&self) -> bool {
+            true
+        }
+
+        fn spill(
+            &self,
+            _target_bytes: usize,
+        ) -> Result<usize, crate::memory::buffer::consumer::SpillError> {
+            Err(crate::memory::buffer::consumer::SpillError::IoError(
+                "disk full".to_string(),
+            ))
+        }
+    }
+
+    #[test]
+    fn vincent_spill_error_continues_to_next_consumer() {
+        let manager = BufferManager::with_budget(10000);
+
+        // First consumer: spill fails
+        let failing = FailingSpillConsumer::new(
+            "failing_spill",
+            500,
+            priorities::SPILL_STAGING,
+            MemoryRegion::SpillStaging,
+        );
+
+        // Second consumer: spill succeeds
+        let working = SpillableConsumer::new_evict_fails(
+            "working_spill",
+            500,
+            priorities::QUERY_CACHE,
+            MemoryRegion::ExecutionBuffers,
+            true,
+        );
+
+        manager.register_consumer(Arc::clone(&failing) as Arc<dyn MemoryConsumer>);
+        manager.register_consumer(Arc::clone(&working) as Arc<dyn MemoryConsumer>);
+        manager.allocated.store(2000, Ordering::Relaxed);
+
+        let freed = manager.evict_to_target(1500);
+        // failing consumer's spill errors out, working consumer's spill succeeds
+        assert!(working.spilled.load(Ordering::Relaxed) > 0);
+        assert!(freed > 0);
+    }
+
+    #[test]
+    fn django_detect_system_memory_returns_positive() {
+        let mem = BufferManagerConfig::detect_system_memory();
+        assert!(mem > 0);
+    }
+
+    #[test]
+    fn shosanna_spill_path_config() {
+        let config = BufferManagerConfig {
+            budget: 1024,
+            spill_path: Some(PathBuf::from("/tmp/grafeo-spill")),
+            ..Default::default()
+        };
+        assert_eq!(
+            config.spill_path.as_ref().unwrap().to_str().unwrap(),
+            "/tmp/grafeo-spill"
+        );
+        let manager = BufferManager::new(config);
+        assert!(manager.config().spill_path.is_some());
     }
 }

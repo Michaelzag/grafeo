@@ -439,8 +439,8 @@ fn show_graphs_lists_created_graphs() {
     assert_eq!(result.columns, vec!["name"]);
     assert_eq!(result.row_count(), 2);
     // Results should be sorted alphabetically
-    assert_eq!(result.rows[0][0], Value::String("alpha".into()));
-    assert_eq!(result.rows[1][0], Value::String("beta".into()));
+    assert_eq!(result.rows()[0][0], Value::String("alpha".into()));
+    assert_eq!(result.rows()[1][0], Value::String("beta".into()));
 }
 
 #[test]
@@ -668,16 +668,16 @@ fn concurrent_sessions_on_different_graphs() {
     let r1 = s1.execute("MATCH (i:Item) RETURN i.name").unwrap();
     let r2 = s2.execute("MATCH (i:Item) RETURN i.name").unwrap();
 
-    assert_eq!(r1.rows.len(), 1, "alpha should have 1 item");
-    assert_eq!(r2.rows.len(), 1, "beta should have 1 item");
+    assert_eq!(r1.rows().len(), 1, "alpha should have 1 item");
+    assert_eq!(r2.rows().len(), 1, "beta should have 1 item");
 
     // Cross-check: each graph has its own data
     assert_eq!(
-        r1.rows[0][0],
+        r1.rows()[0][0],
         grafeo_common::types::Value::String("widget".into())
     );
     assert_eq!(
-        r2.rows[0][0],
+        r2.rows()[0][0],
         grafeo_common::types::Value::String("gadget".into())
     );
 }

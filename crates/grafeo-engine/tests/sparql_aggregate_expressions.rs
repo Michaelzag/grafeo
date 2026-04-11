@@ -11,7 +11,7 @@
 //! cargo test -p grafeo-engine --all-features --test sparql_aggregate_expressions
 //! ```
 
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 mod sparql_aggregate_expression_tests {
     use grafeo_engine::GrafeoDB;
 

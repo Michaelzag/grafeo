@@ -48,6 +48,7 @@ use std::sync::Arc;
 
 /// Storage backend configuration for vector data.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum StorageBackend {
     /// In-memory storage (fastest, highest memory usage).
     Ram,
@@ -107,6 +108,12 @@ pub trait VectorStorage: Send + Sync {
     ///
     /// Returns `Err` if the flush to the storage backend fails.
     fn flush(&self) -> io::Result<()>;
+
+    /// Returns all stored (NodeId, vector) pairs for bulk export.
+    ///
+    /// Used during spill to export RAM contents to a persistent backend.
+    /// Order is not guaranteed.
+    fn export_all(&self) -> Vec<(NodeId, Arc<[f32]>)>;
 }
 
 // ============================================================================
@@ -153,6 +160,17 @@ impl RamStorage {
     }
 }
 
+impl RamStorage {
+    /// Removes all vectors, returning the count removed.
+    /// Used during spill to free RAM after export.
+    pub fn clear(&self) -> usize {
+        let mut vectors = self.vectors.write();
+        let count = vectors.len();
+        vectors.clear();
+        count
+    }
+}
+
 impl VectorStorage for RamStorage {
     fn insert(&self, id: NodeId, vector: &[f32]) -> io::Result<()> {
         debug_assert_eq!(
@@ -196,6 +214,14 @@ impl VectorStorage for RamStorage {
     fn flush(&self) -> io::Result<()> {
         // No-op for RAM storage
         Ok(())
+    }
+
+    fn export_all(&self) -> Vec<(NodeId, Arc<[f32]>)> {
+        self.vectors
+            .read()
+            .iter()
+            .map(|(&id, vec)| (id, Arc::clone(vec)))
+            .collect()
     }
 }
 
@@ -492,6 +518,14 @@ impl VectorStorage for MmapStorage {
 
     fn flush(&self) -> io::Result<()> {
         self.file.write().flush()
+    }
+
+    fn export_all(&self) -> Vec<(NodeId, Arc<[f32]>)> {
+        let index = self.index.read();
+        index
+            .keys()
+            .filter_map(|&id| self.get(id).map(|v| (id, v)))
+            .collect()
     }
 }
 
@@ -807,6 +841,43 @@ mod tests {
                 _ => panic!("Unexpected ID: {}", id.0),
             }
         }
+    }
+
+    #[test]
+    fn test_ram_storage_export_all() {
+        let storage = RamStorage::new(3);
+
+        storage.insert(NodeId::new(1), &[1.0, 2.0, 3.0]).unwrap();
+        storage.insert(NodeId::new(2), &[4.0, 5.0, 6.0]).unwrap();
+        storage.insert(NodeId::new(3), &[7.0, 8.0, 9.0]).unwrap();
+
+        let exported = storage.export_all();
+        assert_eq!(exported.len(), 3);
+
+        let mut ids: Vec<u64> = exported.iter().map(|(id, _)| id.as_u64()).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec![1, 2, 3]);
+
+        // Verify vectors
+        for (id, vec) in &exported {
+            match id.as_u64() {
+                1 => assert_eq!(&**vec, &[1.0, 2.0, 3.0]),
+                2 => assert_eq!(&**vec, &[4.0, 5.0, 6.0]),
+                3 => assert_eq!(&**vec, &[7.0, 8.0, 9.0]),
+                _ => panic!("unexpected id"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_ram_storage_clear() {
+        let storage = RamStorage::new(2);
+        storage.insert(NodeId::new(1), &[1.0, 2.0]).unwrap();
+        storage.insert(NodeId::new(2), &[3.0, 4.0]).unwrap();
+
+        assert_eq!(storage.clear(), 2);
+        assert!(storage.is_empty());
+        assert!(storage.get(NodeId::new(1)).is_none());
     }
 
     #[test]

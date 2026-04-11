@@ -18,6 +18,7 @@ use crate::graph::traits::GraphStore;
 
 /// Whether the horizontal aggregate operates on edges or nodes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum EntityKind {
     /// Aggregate over edges in a path.
     Edge,
@@ -151,7 +152,7 @@ impl Operator for HorizontalAggregateOperator {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "lpg"))]
 mod tests {
     use super::*;
     use crate::execution::chunk::DataChunkBuilder;

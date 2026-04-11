@@ -88,7 +88,7 @@ fn insert_close_reopen_persists_data() {
         let result = session
             .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name")
             .unwrap();
-        assert_eq!(extract_strings(&result.rows), vec!["Alix", "Gus"]);
+        assert_eq!(extract_strings(result.rows()), vec!["Alix", "Gus"]);
         db.close().unwrap();
     }
 }
@@ -118,7 +118,7 @@ fn save_as_grafeo_file_from_in_memory() {
     let result = session2
         .execute("MATCH (c:City) RETURN c.name ORDER BY c.name")
         .unwrap();
-    assert_eq!(extract_strings(&result.rows), vec!["Amsterdam", "Berlin"]);
+    assert_eq!(extract_strings(result.rows()), vec!["Amsterdam", "Berlin"]);
     db2.close().unwrap();
 }
 
@@ -139,7 +139,9 @@ fn wal_checkpoint_writes_to_file() {
     // Verify the file manager has a non-empty header
     let fm = db.file_manager().expect("should have file manager");
     let header = fm.active_header();
-    assert!(header.snapshot_length > 0);
+    // v2 format uses section directory (snapshot_length = 0),
+    // v1 used snapshot_length > 0. Either is valid.
+    assert!(header.iteration > 0, "checkpoint should have been written");
     assert_eq!(header.node_count, 1);
     assert_eq!(header.edge_count, 0);
 
@@ -266,7 +268,7 @@ fn checkpoint_merges_incremental_writes() {
         .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name")
         .unwrap();
     assert_eq!(
-        extract_strings(&result.rows),
+        extract_strings(result.rows()),
         vec!["Alix", "Jules", "Mia", "Vincent"]
     );
 
@@ -274,7 +276,7 @@ fn checkpoint_merges_incremental_writes() {
     let result = session2
         .execute("MATCH (p:Person {name: 'Alix'}) RETURN p.age")
         .unwrap();
-    assert_eq!(result.rows[0][0], Value::Int64(31));
+    assert_eq!(result.rows()[0][0], Value::Int64(31));
 
     db2.close().unwrap();
 }
@@ -306,7 +308,7 @@ fn writes_after_checkpoint_survive_reopen() {
         .execute("MATCH (c:City) RETURN c.name ORDER BY c.name")
         .unwrap();
     assert_eq!(
-        extract_strings(&result.rows),
+        extract_strings(result.rows()),
         vec!["Amsterdam", "Berlin", "Prague"]
     );
     db2.close().unwrap();
@@ -377,7 +379,7 @@ fn multiple_reopen_cycles() {
             .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name")
             .unwrap();
         assert_eq!(
-            extract_strings(&result.rows),
+            extract_strings(result.rows()),
             vec!["Alix", "Gus", "Vincent"]
         );
         db.close().unwrap();
@@ -409,7 +411,7 @@ fn large_property_values_roundtrip() {
         let db = GrafeoDB::with_config(Config::persistent(&path)).unwrap();
         let session = db.session();
         let result = session.execute("MATCH (d:Doc) RETURN d.content").unwrap();
-        match &result.rows[0][0] {
+        match &result.rows()[0][0] {
             Value::String(s) => assert_eq!(s.len(), 100_000),
             other => panic!("expected String, got {other:?}"),
         }
@@ -447,7 +449,7 @@ fn diverse_property_types_roundtrip() {
                 "MATCH (t:Thing) RETURN t.str_val, t.int_val, t.float_val, t.bool_val, t.list_val",
             )
             .unwrap();
-        let row = &result.rows[0];
+        let row = &result.rows()[0];
         assert_eq!(row[0], Value::String("hello".into()));
         assert_eq!(row[1], Value::Int64(42));
         assert!(matches!(row[2], Value::Float64(_)));
@@ -603,12 +605,12 @@ fn named_graphs_persist() {
         // Default graph should have Gus
         let session = db.session();
         let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
-        assert_eq!(extract_strings(&result.rows), vec!["Gus"]);
+        assert_eq!(extract_strings(result.rows()), vec!["Gus"]);
 
         // Social graph should have Alix
         session.execute("USE GRAPH social").unwrap();
         let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
-        assert_eq!(extract_strings(&result.rows), vec!["Alix"]);
+        assert_eq!(extract_strings(result.rows()), vec!["Alix"]);
         db.close().unwrap();
     }
 }
@@ -638,9 +640,9 @@ fn edges_with_properties_persist() {
         let result = session
             .execute("MATCH ()-[e:KNOWS]->() RETURN e.since, e.strength")
             .unwrap();
-        assert_eq!(result.rows.len(), 1);
-        assert_eq!(result.rows[0][0], Value::Int64(2020));
-        assert!(matches!(result.rows[0][1], Value::Float64(_)));
+        assert_eq!(result.rows().len(), 1);
+        assert_eq!(result.rows()[0][0], Value::Int64(2020));
+        assert!(matches!(result.rows()[0][1], Value::Float64(_)));
         db.close().unwrap();
     }
 }
@@ -815,11 +817,11 @@ fn node_type_definitions_persist() {
 
         // Verify data
         let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
-        assert_eq!(extract_strings(&result.rows), vec!["Alix"]);
+        assert_eq!(extract_strings(result.rows()), vec!["Alix"]);
 
         // Verify node type definitions survived via SHOW NODE TYPES
         let result = session.execute("SHOW NODE TYPES").unwrap();
-        let type_names = extract_strings(&result.rows);
+        let type_names = extract_strings(result.rows());
         assert!(
             type_names.contains(&"Person".to_string()),
             "Person type missing: {type_names:?}"
@@ -855,7 +857,7 @@ fn edge_type_definitions_persist() {
         let session = db.session();
 
         let result = session.execute("SHOW EDGE TYPES").unwrap();
-        let type_names = extract_strings(&result.rows);
+        let type_names = extract_strings(result.rows());
         assert!(
             type_names.contains(&"KNOWS".to_string()),
             "KNOWS type missing: {type_names:?}"
@@ -899,7 +901,7 @@ fn graph_type_definitions_persist() {
         let session = db.session();
 
         let result = session.execute("SHOW GRAPH TYPES").unwrap();
-        let type_names = extract_strings(&result.rows);
+        let type_names = extract_strings(result.rows());
         assert!(
             type_names.contains(&"SocialGraph".to_string()),
             "SocialGraph type missing: {type_names:?}"
@@ -928,11 +930,11 @@ fn schema_survives_export_import_roundtrip() {
 
     // Verify data
     let result = session2.execute("MATCH (p:Person) RETURN p.name").unwrap();
-    assert_eq!(extract_strings(&result.rows), vec!["Alix"]);
+    assert_eq!(extract_strings(result.rows()), vec!["Alix"]);
 
     // Verify schema
     let result = session2.execute("SHOW NODE TYPES").unwrap();
-    let type_names = extract_strings(&result.rows);
+    let type_names = extract_strings(result.rows());
     assert!(
         type_names.contains(&"Person".to_string()),
         "Person type missing after import: {type_names:?}"
@@ -940,6 +942,7 @@ fn schema_survives_export_import_roundtrip() {
 }
 
 #[test]
+#[cfg(feature = "algos")]
 fn stored_procedures_persist() {
     let dir = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("procedures.grafeo");
@@ -963,8 +966,8 @@ fn stored_procedures_persist() {
         session.execute("INSERT (:Person {name: 'Alix'})").unwrap();
         // CALL the procedure to verify it survived the roundtrip
         let result = session.execute("CALL get_people()").unwrap();
-        assert_eq!(result.rows.len(), 1);
-        assert_eq!(extract_strings(&result.rows), vec!["Alix"]);
+        assert_eq!(result.rows().len(), 1);
+        assert_eq!(extract_strings(result.rows()), vec!["Alix"]);
         db.close().unwrap();
     }
 }
@@ -992,7 +995,7 @@ fn schema_with_data_across_multiple_cycles() {
 
         // Verify first type survived
         let result = session.execute("SHOW NODE TYPES").unwrap();
-        assert!(extract_strings(&result.rows).contains(&"Person".to_string()));
+        assert!(extract_strings(result.rows()).contains(&"Person".to_string()));
 
         session
             .execute("CREATE NODE TYPE City (name STRING NOT NULL)")
@@ -1009,7 +1012,7 @@ fn schema_with_data_across_multiple_cycles() {
         let session = db.session();
 
         let result = session.execute("SHOW NODE TYPES").unwrap();
-        let types = extract_strings(&result.rows);
+        let types = extract_strings(result.rows());
         assert!(types.contains(&"Person".to_string()), "Person missing");
         assert!(types.contains(&"City".to_string()), "City missing");
 
@@ -1079,7 +1082,7 @@ fn wal_disabled_single_file_persists_on_close() {
 
         let session = db.session();
         let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
-        assert_eq!(extract_strings(&result.rows), vec!["Alix"]);
+        assert_eq!(extract_strings(result.rows()), vec!["Alix"]);
         db.close().unwrap();
     }
 }
@@ -1128,7 +1131,7 @@ fn drop_persists_data_and_removes_sidecar_wal() {
             .session()
             .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name")
             .unwrap();
-        assert_eq!(extract_strings(&result.rows), vec!["Jules", "Vincent"]);
+        assert_eq!(extract_strings(result.rows()), vec!["Jules", "Vincent"]);
         db.close().unwrap();
     }
 }
@@ -1167,8 +1170,8 @@ fn two_concurrent_read_only_opens() {
         .session()
         .execute("MATCH (c:City) RETURN c.name")
         .unwrap();
-    assert_eq!(extract_strings(&r1.rows), vec!["Amsterdam"]);
-    assert_eq!(extract_strings(&r2.rows), vec!["Amsterdam"]);
+    assert_eq!(extract_strings(r1.rows()), vec!["Amsterdam"]);
+    assert_eq!(extract_strings(r2.rows()), vec!["Amsterdam"]);
 
     ro1.close().unwrap();
     ro2.close().unwrap();
@@ -1251,7 +1254,7 @@ fn wal_data_after_checkpoint_survives_drop() {
             .session()
             .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name")
             .unwrap();
-        assert_eq!(extract_strings(&result.rows), vec!["Butch", "Shosanna"]);
+        assert_eq!(extract_strings(result.rows()), vec!["Butch", "Shosanna"]);
         db.close().unwrap();
     }
 }

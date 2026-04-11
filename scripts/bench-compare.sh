@@ -1,25 +1,172 @@
 #!/usr/bin/env bash
-# bench-compare.sh: Compare two Criterion baselines and post results as a PR comment.
+# bench-compare.sh: Compare two Criterion baselines with per-benchmark thresholds
+# and optional memory snapshot comparison.
 #
-# Usage: bench-compare.sh <baseline> <candidate> <threshold_pct> <pr_number>
+# Usage: bench-compare.sh <baseline> <candidate> <config_file> <pr_number>
 #
-# Requires: critcmp, gh (GitHub CLI)
+# Requires: critcmp, gh (GitHub CLI), python3 (3.11+ for tomllib)
 
 set -euo pipefail
 
-BASELINE="${1:?Usage: bench-compare.sh <baseline> <candidate> <threshold_pct> <pr_number>}"
+BASELINE="${1:?Usage: bench-compare.sh <baseline> <candidate> <config_file> <pr_number>}"
 CANDIDATE="${2:?}"
-THRESHOLD="${3:?}"
+CONFIG="${3:?}"
 PR_NUMBER="${4:?}"
 
-# Run critcmp comparison
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ── Load per-benchmark thresholds ──────────────────────────────────────
+# Build an associative array: pattern -> "threshold_pct:fail_ci"
+declare -A THRESHOLDS
+DEFAULT_THRESHOLD=15
+DEFAULT_FAIL_CI="false"
+
+while IFS=$'\t' read -r pattern threshold fail_ci; do
+  if [[ "$pattern" == "benchmark_pattern" ]]; then
+    continue  # skip header
+  fi
+  if [[ "$pattern" == "__default__" ]]; then
+    DEFAULT_THRESHOLD="$threshold"
+    DEFAULT_FAIL_CI="$fail_ci"
+  else
+    THRESHOLDS["$pattern"]="${threshold}:${fail_ci}"
+  fi
+done < <(python3 "$SCRIPT_DIR/parse-thresholds.py" "$CONFIG")
+
+# Resolve threshold for a given benchmark name.
+resolve_threshold() {
+  local bench_name="$1"
+  for pattern in "${!THRESHOLDS[@]}"; do
+    # Use bash pattern matching (fnmatch-style via case)
+    # shellcheck disable=SC2254
+    case "$bench_name" in
+      $pattern)
+        echo "${THRESHOLDS[$pattern]}"
+        return
+        ;;
+    esac
+  done
+  echo "${DEFAULT_THRESHOLD}:${DEFAULT_FAIL_CI}"
+}
+
+# ── Run critcmp comparison ─────────────────────────────────────────────
 COMPARISON=$(critcmp "$BASELINE" "$CANDIDATE" --color never 2>&1) || true
 
 echo "--- critcmp output ---"
 echo "$COMPARISON"
 echo "--- end ---"
 
-# Build markdown body
+# ── Parse regressions with per-benchmark thresholds ────────────────────
+BLOCKING_FAILURES=0
+declare -a REGRESSION_LINES=()
+
+while IFS= read -r line; do
+  # Skip header/separator lines
+  if [[ "$line" =~ ^group ]] || [[ "$line" =~ ^----- ]] || [[ -z "$line" ]]; then
+    continue
+  fi
+  # Data lines start with a letter or underscore
+  if [[ "$line" =~ ^[a-zA-Z_] ]]; then
+    bench_name=$(echo "$line" | awk '{print $1}')
+    # Find the candidate ratio (second ratio value in line)
+    ratio=$(echo "$line" | awk '{
+      count = 0
+      for (i = 2; i <= NF; i++) {
+        if ($i ~ /^[0-9]+\.[0-9]+$/) {
+          count++
+          if (count == 2) { print $i; exit }
+        }
+      }
+    }')
+
+    if [[ -z "$ratio" ]] || [[ "$ratio" == "0" ]]; then
+      continue
+    fi
+
+    pct_change=$(awk "BEGIN { printf \"%.1f\", ($ratio - 1.0) * 100 }")
+
+    # Check if positive (regression)
+    is_regression=$(awk "BEGIN { print ($ratio > 1.0) ? 1 : 0 }")
+    if [[ "$is_regression" != "1" ]]; then
+      continue
+    fi
+
+    # Resolve per-benchmark threshold
+    resolved=$(resolve_threshold "$bench_name")
+    threshold="${resolved%%:*}"
+    fail_ci="${resolved##*:}"
+
+    exceeds=$(awk "BEGIN { print ($pct_change > $threshold + 0) ? 1 : 0 }")
+    if [[ "$exceeds" == "1" ]]; then
+      marker=""
+      if [[ "$fail_ci" == "true" ]]; then
+        marker=" **BLOCKING**"
+        BLOCKING_FAILURES=$((BLOCKING_FAILURES + 1))
+      fi
+      REGRESSION_LINES+=("| \`$bench_name\` | +${pct_change}% | ${threshold}% |${marker}")
+    fi
+  fi
+done <<< "$COMPARISON"
+
+# ── Memory comparison ──────────────────────────────────────────────────
+MEMORY_BASE="target/criterion/memory_snapshot_base.json"
+MEMORY_PR="target/criterion/memory_snapshot.json"
+declare -a MEMORY_LINES=()
+MEMORY_FAIL=0
+
+if [[ -f "$MEMORY_BASE" && -f "$MEMORY_PR" ]]; then
+  # Read memory bounds from config
+  while IFS=$'\t' read -r key value; do
+    # Read PR snapshot value for this key
+    pr_value=$(python3 -c "
+import json, sys
+with open('$MEMORY_PR') as f:
+    data = json.load(f)
+print(data.get('$key', 0))
+" 2>/dev/null || echo "0")
+
+    base_value=$(python3 -c "
+import json, sys
+with open('$MEMORY_BASE') as f:
+    data = json.load(f)
+print(data.get('$key', 0))
+" 2>/dev/null || echo "0")
+
+    if [[ "$pr_value" -gt 0 ]]; then
+      # Check against absolute bound from config
+      bound=$(python3 -c "
+import tomllib
+with open('$CONFIG', 'rb') as f:
+    c = tomllib.load(f)
+print(c.get('memory', {}).get('bounds', {}).get('$key', 0))
+" 2>/dev/null || echo "0")
+
+      if [[ "$bound" -gt 0 && "$pr_value" -gt "$bound" ]]; then
+        MEMORY_LINES+=("| \`$key\` | $(numfmt --to=iec "$base_value" 2>/dev/null || echo "$base_value") | $(numfmt --to=iec "$pr_value" 2>/dev/null || echo "$pr_value") | $(numfmt --to=iec "$bound" 2>/dev/null || echo "$bound") | EXCEEDED |")
+        # Check if memory failures should block
+        mem_fail_ci=$(python3 -c "
+import tomllib
+with open('$CONFIG', 'rb') as f:
+    c = tomllib.load(f)
+print(str(c.get('memory', {}).get('fail_ci', False)).lower())
+" 2>/dev/null || echo "false")
+        if [[ "$mem_fail_ci" == "true" ]]; then
+          MEMORY_FAIL=1
+        fi
+      else
+        MEMORY_LINES+=("| \`$key\` | $(numfmt --to=iec "$base_value" 2>/dev/null || echo "$base_value") | $(numfmt --to=iec "$pr_value" 2>/dev/null || echo "$pr_value") | $(numfmt --to=iec "$bound" 2>/dev/null || echo "$bound") | OK |")
+      fi
+    fi
+  done < <(python3 -c "
+import json, sys
+with open('$MEMORY_PR') as f:
+    data = json.load(f)
+for k, v in data.items():
+    print(f'{k}\t{v}')
+" 2>/dev/null)
+fi
+
+# ── Build markdown body ────────────────────────────────────────────────
 BODY_FILE=$(mktemp)
 {
   echo "## Benchmark Comparison (base vs PR)"
@@ -37,59 +184,40 @@ BODY_FILE=$(mktemp)
   echo ""
 } > "$BODY_FILE"
 
-# Parse critcmp output for regressions exceeding threshold.
-# critcmp output lines look like:
-#   bench_name    base  1.00  123.4ns    candidate  1.05  129.6ns
-# The ratio column (e.g. 1.05) for the candidate indicates relative time.
-# A ratio > 1.0 means the candidate is slower.
-REGRESSIONS=$(echo "$COMPARISON" | awk -v threshold="$THRESHOLD" '
-  # Skip header lines
-  /^group|^-----/ { next }
-  # Match data lines (start with a letter or underscore)
-  /^[a-zA-Z_]/ {
-    name = $1
-    # Find the candidate ratio column (second ratio value in the line)
-    ratio = 0
-    count = 0
-    for (i = 2; i <= NF; i++) {
-      # Ratios look like "1.05" or "0.95"
-      if ($i ~ /^[0-9]+\.[0-9]+$/ && $i != "" ) {
-        count++
-        if (count == 2) {
-          ratio = $i + 0
-          break
-        }
-      }
-    }
-    if (ratio > 0) {
-      pct_change = (ratio - 1.0) * 100
-      if (pct_change > threshold + 0) {
-        printf "%s %.1f%%\n", name, pct_change
-      }
-    }
-  }
-')
-
-if [ -n "$REGRESSIONS" ]; then
+if [[ ${#REGRESSION_LINES[@]} -gt 0 ]]; then
   {
-    echo "### Regressions detected (>${THRESHOLD}%)"
+    echo "### Performance regressions"
     echo ""
-    echo "| Benchmark | Regression |"
-    echo "| --- | --- |"
-    echo "$REGRESSIONS" | while IFS=' ' read -r name pct; do
-      echo "| \`$name\` | +$pct |"
+    echo "| Benchmark | Regression | Threshold |"
+    echo "| --- | --- | --- |"
+    for line in "${REGRESSION_LINES[@]}"; do
+      echo "$line"
     done
     echo ""
   } >> "$BODY_FILE"
 else
-  echo "No regressions above ${THRESHOLD}% threshold." >> "$BODY_FILE"
+  echo "No performance regressions above configured thresholds." >> "$BODY_FILE"
+  echo "" >> "$BODY_FILE"
+fi
+
+if [[ ${#MEMORY_LINES[@]} -gt 0 ]]; then
+  {
+    echo "### Memory usage"
+    echo ""
+    echo "| Benchmark | Base | PR | Bound | Status |"
+    echo "| --- | --- | --- | --- | --- |"
+    for line in "${MEMORY_LINES[@]}"; do
+      echo "$line"
+    done
+    echo ""
+  } >> "$BODY_FILE"
 fi
 
 # Add marker for idempotent comment updates
 echo "" >> "$BODY_FILE"
 echo "<!-- grafeo-bench-comparison -->" >> "$BODY_FILE"
 
-# Post or update PR comment
+# ── Post or update PR comment ──────────────────────────────────────────
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
 
 COMMENT_ID=$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" \
@@ -106,3 +234,12 @@ else
   gh pr comment "$PR_NUMBER" --body "$BODY"
   echo "Posted new comment on PR #$PR_NUMBER"
 fi
+
+# ── Exit code ──────────────────────────────────────────────────────────
+TOTAL_FAILURES=$((BLOCKING_FAILURES + MEMORY_FAIL))
+if [[ "$TOTAL_FAILURES" -gt 0 ]]; then
+  echo "ERROR: $BLOCKING_FAILURES blocking regression(s), $MEMORY_FAIL memory bound failure(s)"
+  exit 1
+fi
+
+echo "All benchmarks within configured thresholds."

@@ -62,6 +62,7 @@ impl ProjectExpression for ConstantExpr {
 
 /// Arithmetic operations.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub enum ArithOp {
     /// Addition.
     Add,

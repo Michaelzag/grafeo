@@ -340,6 +340,7 @@ Per the standard, minimum conformance requires:
 | GF04 | Enhanced path functions | **Supported** |
 | GF05 | Multi-character TRIM function | **Supported** |
 | GF06 | Explicit TRIM function | Supported |
+| GF07 | Byte string TRIM function | **Not yet** |
 | GF10 | Advanced aggregates: general set functions | **Supported** |
 | GF11 | Advanced aggregates: binary set functions | **Supported** |
 | GF12 | CARDINALITY function | **Supported** |
@@ -363,22 +364,34 @@ Per the standard, minimum conformance requires:
 | GG02 | Graph with closed graph type | Supported |
 | GG03 | Graph type inline specification | **Supported** |
 | GG04 | Graph type like a graph | **Supported** |
+| GG05 | Graph from a graph source | **Not yet** |
 | GG20 | Explicit element type names | Supported |
 | GG21 | Explicit element type key label sets | **Supported** |
 | GG22 | Element type key label set inference | **Supported** |
-| GG24 | Relaxed structural consistency | **Not yet** |
+| GG23 | Optional element type key label sets | **Not yet** |
+| GG24 | Relaxed structural consistency | Inactive |
+| GG25 | Relaxed key label set uniqueness for edge types | Inactive |
+| GG26 | Relaxed property value type consistency | Inactive |
 
 ### Session & Transaction Features
 
 | ID | Feature | Status |
 |----|---------|--------|
-| GS01 | Session-local graph parameters | Supported |
-| GS03 | Session-local value parameters | Supported |
+| GS01 | SESSION SET: session-local graph parameters | Supported |
+| GS02 | SESSION SET: session-local binding table parameters | **Not yet** |
+| GS03 | SESSION SET: session-local value parameters | Supported |
 | GS04 | SESSION RESET: all characteristics | Supported |
 | GS05 | SESSION RESET: session schema | Supported |
 | GS06 | SESSION RESET: session graph | Supported |
-| GS07 | SESSION RESET: time zone | Supported |
+| GS07 | SESSION RESET: time zone displacement | Supported |
+| GS08 | SESSION RESET: all session parameters | Supported |
+| GS10 | SESSION SET: binding table parameters based on subqueries | **Not yet** |
+| GS11 | SESSION SET: value parameters based on subqueries | **Not yet** |
+| GS12 | SESSION SET: graph parameters based on simple expressions | **Not yet** |
+| GS13 | SESSION SET: binding table parameters based on simple expressions | **Not yet** |
+| GS14 | SESSION SET: value parameters based on simple expressions | **Not yet** |
 | GS15 | SESSION SET: time zone displacement | Supported |
+| GS16 | SESSION RESET: individual session parameters | **Not yet** |
 | GT01 | Explicit transaction commands | Supported |
 | GT02 | Specified transaction characteristics | Supported |
 | GT03 | Use of multiple graphs in a transaction | **Not yet** |
@@ -389,8 +402,20 @@ Per the standard, minimum conformance requires:
 |----|---------|--------|
 | GP01 | Inline procedure | Supported |
 | GP02 | Inline procedure with implicit nested variable scope | Supported |
+| GP03 | Inline procedure with explicit nested variable scope | **Not yet** |
 | GP04 | Named procedure calls | Supported |
 | GP05 | Procedure-local value variable definitions | **Not yet** |
+| GP06 | Procedure-local value variable definitions: based on simple expressions | **Not yet** |
+| GP07 | Procedure-local value variable definitions: based on subqueries | **Not yet** |
+| GP08 | Procedure-local binding table variable definitions | **Not yet** |
+| GP09 | Procedure-local binding table variable definitions: based on simple expressions | **Not yet** |
+| GP10 | Procedure-local binding table variable definitions: based on subqueries | **Not yet** |
+| GP11 | Procedure-local graph variable definitions | **Not yet** |
+| GP12 | Procedure-local graph variable definitions: based on simple expressions | **Not yet** |
+| GP13 | Procedure-local graph variable definitions: based on subqueries | **Not yet** |
+| GP14 | Binding tables as procedure arguments | **Not yet** |
+| GP15 | Graphs as procedure arguments | **Not yet** |
+| GP16 | AT schema clause | **Not yet** |
 | GP17 | Binding variable definition block | **Not yet** |
 | GP18 | Catalog and data statement mixing | **Not yet** |
 
@@ -413,28 +438,71 @@ Per the standard, minimum conformance requires:
 | GQ13 | ORDER BY: LIMIT clause | Supported |
 | GQ14 | Complex expressions in sort keys | Supported |
 | GQ15 | GROUP BY clause | Supported |
+| GQ16 | Pre-projection aliases in sort keys | Supported |
+| GQ17 | Element-wise group variable operations | **Not yet** |
 | GQ18 | Scalar subqueries | Supported |
+| GQ19 | Graph pattern YIELD clause | **Not yet** |
 | GQ20 | Advanced linear composition (NEXT) | Supported |
 | GQ21 | OPTIONAL: multiple MATCH statements | Supported |
 | GQ22 | EXISTS predicate: multiple MATCH | Supported |
+| GQ23 | FOR statement: binding table support | **Not yet** |
 | GQ24 | FOR statement: WITH OFFSET | Supported |
 
 ### Value Type Features
 
 | ID | Feature | Status |
 |----|---------|--------|
+| GV01 | 8-bit unsigned integer numbers | **Not yet** |
+| GV02 | 8-bit signed integer numbers | **Not yet** |
+| GV03 | 16-bit unsigned integer numbers | **Not yet** |
+| GV04 | 16-bit signed integer numbers | **Not yet** |
+| GV05 | Small unsigned integer numbers | **Not yet** |
+| GV06 | 32-bit unsigned integer numbers | **Not yet** |
+| GV07 | 32-bit signed integer numbers | **Not yet** |
+| GV08 | Regular unsigned integer numbers | **Not yet** |
+| GV09 | Specified integer number precision | **Not yet** |
+| GV10 | Big unsigned integer numbers | **Not yet** |
+| GV11 | 64-bit unsigned integer numbers | **Not yet** |
 | GV12 | 64-bit signed integer numbers | Supported |
+| GV13 | 128-bit unsigned integer numbers | **Not yet** |
+| GV14 | 128-bit signed integer numbers | **Not yet** |
+| GV15 | 256-bit unsigned integer numbers | **Not yet** |
+| GV16 | 256-bit signed integer numbers | **Not yet** |
+| GV17 | Decimal numbers | **Not yet** |
+| GV18 | Small signed integer numbers | **Not yet** |
+| GV19 | Big signed integer numbers | **Not yet** |
+| GV20 | 16-bit floating point numbers | **Not yet** |
+| GV21 | 32-bit floating point numbers | **Not yet** |
+| GV22 | Specified floating point number precision | **Not yet** |
+| GV23 | Floating point type name synonyms | **Not yet** |
 | GV24 | 64-bit floating point numbers | Supported |
+| GV25 | 128-bit floating point numbers | **Not yet** |
+| GV26 | 256-bit floating point numbers | **Not yet** |
+| GV30 | Specified character string minimum length | **Not yet** |
+| GV31 | Specified character string maximum length | **Not yet** |
+| GV32 | Specified character string fixed length | **Not yet** |
+| GV35 | Byte string types | **Not yet** |
+| GV36 | Specified byte string minimum length | **Not yet** |
+| GV37 | Specified byte string maximum length | **Not yet** |
+| GV38 | Specified byte string fixed length | **Not yet** |
 | GV39 | Temporal: date, local datetime/time | Supported |
 | GV40 | Temporal: zoned datetime/time | Supported |
 | GV41 | Temporal: duration | Supported |
 | GV45 | Record types | **Not yet** |
+| GV46 | Closed record types | **Not yet** |
+| GV47 | Open record types | **Not yet** |
+| GV48 | Nested record types | **Not yet** |
 | GV50 | List value types | Supported |
 | GV55 | Path value types | **Supported** |
 | GV60 | Graph reference value types | **Not yet** |
 | GV61 | Binding table reference value types | **Not yet** |
 | GV65 | Dynamic union types | **Not yet** |
+| GV66 | Open dynamic union types | **Not yet** |
+| GV67 | Closed dynamic union types | **Not yet** |
 | GV68 | Dynamic property value types | Supported |
+| GV70 | Immaterial value types | **Not yet** |
+| GV71 | Immaterial value types: null type support | Supported |
+| GV72 | Immaterial value types: empty type support | **Not yet** |
 | GV90 | Explicit value type nullability | Supported |
 
 ### Lexical Features
@@ -447,8 +515,22 @@ Per the standard, minimum conformance requires:
 | GL01 | Hexadecimal literals | **Supported** |
 | GL02 | Octal literals | **Supported** |
 | GL03 | Binary literals | **Supported** |
+| GL04 | Exact number in common notation without suffix | **Not yet** |
+| GL05 | Exact number in common notation or as decimal integer with suffix | **Not yet** |
+| GL06 | Exact number in scientific notation with suffix | **Not yet** |
+| GL07 | Approximate number in common notation or as decimal integer with suffix | **Not yet** |
+| GL08 | Approximate number in scientific notation with suffix | **Not yet** |
+| GL09 | Optional float number suffix | **Not yet** |
+| GL10 | Optional double number suffix | **Not yet** |
 | GL11 | Opt-out character escaping | **Not yet** |
 | GL12 | SQL datetime and interval formats | **Not yet** |
+
+### Miscellaneous Features
+
+| ID | Feature | Status |
+|----|---------|--------|
+| GH01 | External object references | **Not yet** |
+| GH02 | Undirected edge patterns | **Not yet** |
 
 ## Three-Valued Logic
 

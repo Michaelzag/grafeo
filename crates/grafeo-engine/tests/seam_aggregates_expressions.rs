@@ -35,7 +35,7 @@ mod count_semantics {
         let result = session
             .execute("MATCH (n:Person) RETURN COUNT(*) AS cnt")
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::Int64(3));
+        assert_eq!(result.rows()[0][0], Value::Int64(3));
     }
 
     #[test]
@@ -47,7 +47,7 @@ mod count_semantics {
             .execute("MATCH (n:Person) RETURN COUNT(*) AS cnt")
             .unwrap();
         assert_eq!(result.row_count(), 1, "Should return one row");
-        assert_eq!(result.rows[0][0], Value::Int64(0));
+        assert_eq!(result.rows()[0][0], Value::Int64(0));
     }
 
     #[test]
@@ -66,7 +66,7 @@ mod count_semantics {
             .execute("MATCH (n:Person) RETURN COUNT(n.age) AS cnt")
             .unwrap();
         assert_eq!(
-            result.rows[0][0],
+            result.rows()[0][0],
             Value::Int64(2),
             "COUNT(expr) should skip NULLs"
         );
@@ -85,12 +85,12 @@ mod count_semantics {
             .execute("MATCH (n:Person) RETURN COUNT(*) AS total, COUNT(n.age) AS with_age")
             .unwrap();
         assert_eq!(
-            result.rows[0][0],
+            result.rows()[0][0],
             Value::Int64(2),
             "COUNT(*) counts all rows"
         );
         assert_eq!(
-            result.rows[0][1],
+            result.rows()[0][1],
             Value::Int64(1),
             "COUNT(n.age) skips NULL age"
         );
@@ -113,7 +113,7 @@ mod count_semantics {
         let result = session
             .execute("MATCH (n:Person) RETURN COUNT(DISTINCT n.city) AS cities")
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::Int64(2));
+        assert_eq!(result.rows()[0][0], Value::Int64(2));
     }
 }
 
@@ -135,7 +135,11 @@ mod aggregate_nulls {
         let result = session
             .execute("MATCH (n:Data) RETURN SUM(n.val) AS s")
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::Int64(30), "SUM should skip NULLs");
+        assert_eq!(
+            result.rows()[0][0],
+            Value::Int64(30),
+            "SUM should skip NULLs"
+        );
     }
 
     #[test]
@@ -150,7 +154,7 @@ mod aggregate_nulls {
             .execute("MATCH (n:Data) RETURN AVG(n.val) AS a")
             .unwrap();
         // AVG(10, 20) = 15.0 (NULL is excluded from count)
-        assert_eq!(result.rows[0][0], Value::Float64(15.0));
+        assert_eq!(result.rows()[0][0], Value::Float64(15.0));
     }
 
     #[test]
@@ -164,7 +168,7 @@ mod aggregate_nulls {
         let result = session
             .execute("MATCH (n:Data) RETURN MIN(n.val) AS m")
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::Int64(10));
+        assert_eq!(result.rows()[0][0], Value::Int64(10));
     }
 
     #[test]
@@ -178,7 +182,7 @@ mod aggregate_nulls {
         let result = session
             .execute("MATCH (n:Data) RETURN MAX(n.val) AS m")
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::Int64(30));
+        assert_eq!(result.rows()[0][0], Value::Int64(30));
     }
 
     #[test]
@@ -192,7 +196,7 @@ mod aggregate_nulls {
         let result = session
             .execute("MATCH (n:Data) RETURN COLLECT(n.val) AS c")
             .unwrap();
-        match &result.rows[0][0] {
+        match &result.rows()[0][0] {
             Value::List(list) => {
                 // COLLECT may or may not include NULLs depending on implementation.
                 // The key invariant: it should be a list.
@@ -220,7 +224,7 @@ mod nullif_coalesce {
 
         let result = session.execute("RETURN NULLIF(5, 5) AS r").unwrap();
         assert_eq!(
-            result.rows[0][0],
+            result.rows()[0][0],
             Value::Null,
             "NULLIF(x, x) should return NULL"
         );
@@ -232,7 +236,7 @@ mod nullif_coalesce {
         let session = db.session();
 
         let result = session.execute("RETURN NULLIF(5, 3) AS r").unwrap();
-        assert_eq!(result.rows[0][0], Value::Int64(5));
+        assert_eq!(result.rows()[0][0], Value::Int64(5));
     }
 
     #[test]
@@ -243,7 +247,7 @@ mod nullif_coalesce {
         let result = session
             .execute("RETURN COALESCE(NULL, NULL, 3) AS r")
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::Int64(3));
+        assert_eq!(result.rows()[0][0], Value::Int64(3));
     }
 
     #[test]
@@ -253,7 +257,7 @@ mod nullif_coalesce {
 
         let result = session.execute("RETURN COALESCE(NULL, NULL) AS r").unwrap();
         assert_eq!(
-            result.rows[0][0],
+            result.rows()[0][0],
             Value::Null,
             "COALESCE of all NULLs should be NULL"
         );
@@ -265,7 +269,7 @@ mod nullif_coalesce {
         let session = db.session();
 
         let result = session.execute("RETURN COALESCE(1, 2, 3) AS r").unwrap();
-        assert_eq!(result.rows[0][0], Value::Int64(1));
+        assert_eq!(result.rows()[0][0], Value::Int64(1));
     }
 }
 
@@ -289,7 +293,7 @@ mod case_expressions {
                 "MATCH (n:Person) RETURN CASE n.age WHEN 30 THEN 'young' WHEN 50 THEN 'senior' ELSE 'unknown' END AS category",
             )
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::String("young".into()));
+        assert_eq!(result.rows()[0][0], Value::String("young".into()));
     }
 
     #[test]
@@ -305,7 +309,7 @@ mod case_expressions {
                 "MATCH (n:Person) RETURN CASE WHEN n.age < 20 THEN 'teen' WHEN n.age < 40 THEN 'adult' ELSE 'senior' END AS category",
             )
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::String("adult".into()));
+        assert_eq!(result.rows()[0][0], Value::String("adult".into()));
     }
 
     #[test]
@@ -319,7 +323,7 @@ mod case_expressions {
                 "MATCH (n:Person) RETURN CASE WHEN n.age > 50 THEN 'old' ELSE 'no age' END AS r",
             )
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::String("no age".into()));
+        assert_eq!(result.rows()[0][0], Value::String("no age".into()));
     }
 
     #[test]
@@ -332,7 +336,7 @@ mod case_expressions {
             .execute("MATCH (n:Person) RETURN CASE WHEN n.age > 50 THEN 'old' END AS r")
             .unwrap();
         assert_eq!(
-            result.rows[0][0],
+            result.rows()[0][0],
             Value::Null,
             "CASE with no ELSE and no match should return NULL"
         );
@@ -352,7 +356,7 @@ mod type_coercion {
         let session = db.session();
 
         let result = session.execute("RETURN CAST(42 AS STRING) AS r").unwrap();
-        assert_eq!(result.rows[0][0], Value::String("42".into()));
+        assert_eq!(result.rows()[0][0], Value::String("42".into()));
     }
 
     #[test]
@@ -361,7 +365,7 @@ mod type_coercion {
         let session = db.session();
 
         let result = session.execute("RETURN CAST('42' AS INT64) AS r").unwrap();
-        assert_eq!(result.rows[0][0], Value::Int64(42));
+        assert_eq!(result.rows()[0][0], Value::Int64(42));
     }
 
     #[test]
@@ -370,7 +374,7 @@ mod type_coercion {
         let session = db.session();
 
         let result = session.execute("RETURN CAST(3.9 AS INT64) AS r").unwrap();
-        assert_eq!(result.rows[0][0], Value::Int64(3));
+        assert_eq!(result.rows()[0][0], Value::Int64(3));
     }
 
     #[test]
@@ -379,7 +383,7 @@ mod type_coercion {
         let session = db.session();
 
         let result = session.execute("RETURN CAST(42 AS FLOAT64) AS r").unwrap();
-        assert_eq!(result.rows[0][0], Value::Float64(42.0));
+        assert_eq!(result.rows()[0][0], Value::Float64(42.0));
     }
 
     #[test]
@@ -388,7 +392,7 @@ mod type_coercion {
         let session = db.session();
 
         let result = session.execute("RETURN CAST(true AS STRING) AS r").unwrap();
-        match &result.rows[0][0] {
+        match &result.rows()[0][0] {
             Value::String(s) => assert!(
                 s == "true" || s == "TRUE",
                 "CAST(true AS STRING) should produce 'true', got '{s}'"
@@ -404,7 +408,7 @@ mod type_coercion {
 
         let result = session.execute("RETURN CAST(NULL AS INT64) AS r").unwrap();
         assert_eq!(
-            result.rows[0][0],
+            result.rows()[0][0],
             Value::Null,
             "CAST(NULL) should remain NULL"
         );

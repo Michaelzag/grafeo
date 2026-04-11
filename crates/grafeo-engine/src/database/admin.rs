@@ -89,7 +89,7 @@ impl super::GrafeoDB {
                 if cfg!(feature = "sql-pgq") {
                     f.push("sql-pgq".into());
                 }
-                if cfg!(feature = "rdf") {
+                if cfg!(feature = "triple-store") {
                     f.push("rdf".into());
                 }
                 if cfg!(feature = "algos") {
@@ -358,10 +358,10 @@ impl super::GrafeoDB {
             wal.sync()?;
         }
 
-        // For single-file format: flush snapshot to .grafeo file
+        // Flush all sections to .grafeo file (explicit checkpoint)
         #[cfg(feature = "grafeo-file")]
         if let Some(ref fm) = self.file_manager {
-            self.checkpoint_to_file(fm)?;
+            let _ = self.checkpoint_to_file(fm, super::flush::FlushReason::Explicit)?;
         }
 
         Ok(())

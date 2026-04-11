@@ -16,6 +16,7 @@ use crate::execution::{DataChunk, ValueVector};
 
 /// The type of join to perform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum JoinType {
     /// Inner join: only matching rows from both sides.
     Inner,
@@ -35,6 +36,7 @@ pub enum JoinType {
 
 /// A hash key that can be hashed and compared for join operations.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum HashKey {
     /// Null key.
     Null,
@@ -139,6 +141,7 @@ impl HashKey {
                 let n: i64 = neg.values().copied().map(|v| v as i64).sum();
                 HashKey::Int64(p - n)
             }
+            _ => HashKey::Null,
         }
     }
 

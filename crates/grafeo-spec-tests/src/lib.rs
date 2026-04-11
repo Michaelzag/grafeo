@@ -79,13 +79,13 @@ pub fn execute_query_result(
         ("gql" | "", _) => db.execute(query),
         #[cfg(feature = "cypher")]
         ("cypher", _) => db.execute_cypher(query),
-        #[cfg(all(feature = "sparql", feature = "rdf"))]
+        #[cfg(all(feature = "sparql", feature = "triple-store"))]
         ("sparql", _) => db.execute_sparql(query),
         #[cfg(feature = "gremlin")]
         ("gremlin", _) => db.execute_gremlin(query),
         #[cfg(feature = "graphql")]
         ("graphql", _) => db.execute_graphql(query),
-        #[cfg(all(feature = "graphql", feature = "rdf"))]
+        #[cfg(all(feature = "graphql", feature = "triple-store"))]
         ("graphql-rdf", _) => db.execute_language(query, "graphql-rdf", None),
         #[cfg(feature = "sql-pgq")]
         ("sql-pgq" | "sql_pgq", _) => db.execute_sql(query),
@@ -119,7 +119,7 @@ pub fn execute_query_result_with_params(
 /// Convert a QueryResult into rows of string values for comparison.
 pub fn result_to_strings(result: &QueryResult) -> Vec<Vec<String>> {
     result
-        .rows
+        .rows()
         .iter()
         .map(|row| row.iter().map(value_to_string).collect())
         .collect()
@@ -176,6 +176,7 @@ pub fn value_to_string(value: &Value) -> String {
             let neg_sum: u64 = neg.values().sum();
             format!("{}", pos_sum as i64 - neg_sum as i64)
         }
+        _ => value.to_string(),
     }
 }
 

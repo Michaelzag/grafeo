@@ -76,7 +76,7 @@ fn extract_strings(db: &GrafeoDB, query: &str) -> Vec<String> {
     let session = db.session();
     let result = session.execute(query).unwrap();
     result
-        .rows
+        .rows()
         .iter()
         .map(|row| match &row[0] {
             Value::String(s) => s.to_string(),
@@ -122,7 +122,11 @@ mod gql_set_ops {
         // Should be at most 4 distinct names
         assert!(result.row_count() <= 4);
         // All names should be unique
-        let names: Vec<_> = result.rows.iter().map(|r| format!("{:?}", r[0])).collect();
+        let names: Vec<_> = result
+            .rows()
+            .iter()
+            .map(|r| format!("{:?}", r[0]))
+            .collect();
         let unique: std::collections::HashSet<_> = names.iter().collect();
         assert_eq!(names.len(), unique.len(), "UNION should deduplicate");
     }
@@ -140,7 +144,7 @@ mod gql_set_ops {
             .unwrap();
         // Should exclude Harm (35)
         let names = result
-            .rows
+            .rows()
             .iter()
             .filter_map(|r| match &r[0] {
                 Value::String(s) => Some(s.to_string()),
@@ -222,7 +226,7 @@ mod gql_predicates {
         let result = session
             .execute("MATCH (n:Person) WHERE n.name = 'Alix' RETURN NULLIF(n.age, 30) AS val")
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::Null);
+        assert_eq!(result.rows()[0][0], Value::Null);
     }
 
     /// GQL NULLIF: returns the first argument when they differ.
@@ -233,7 +237,7 @@ mod gql_predicates {
         let result = session
             .execute("MATCH (n:Person) WHERE n.name = 'Gus' RETURN NULLIF(n.age, 30) AS val")
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::Int64(25));
+        assert_eq!(result.rows()[0][0], Value::Int64(25));
     }
 
     #[test]
@@ -243,7 +247,7 @@ mod gql_predicates {
         let result = session
             .execute("MATCH (n:Person) WHERE n.name = 'Alix' RETURN element_id(n)")
             .unwrap();
-        let id_str = match &result.rows[0][0] {
+        let id_str = match &result.rows()[0][0] {
             Value::String(s) => s.to_string(),
             other => panic!("Expected string element ID, got {other:?}"),
         };
@@ -262,7 +266,7 @@ mod gql_predicates {
                 "MATCH (n:Person) WHERE n.name = 'Alix' RETURN CAST(n.age AS STRING) AS age_str",
             )
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::String("30".into()));
+        assert_eq!(result.rows()[0][0], Value::String("30".into()));
     }
 
     #[test]
@@ -273,7 +277,7 @@ mod gql_predicates {
         let result = session
             .execute("MATCH (n:Item) RETURN CAST(n.value AS INTEGER) AS v")
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::Int64(42));
+        assert_eq!(result.rows()[0][0], Value::Int64(42));
     }
 
     #[test]
@@ -284,7 +288,7 @@ mod gql_predicates {
         let result = session
             .execute("MATCH (n:Item) RETURN CAST(n.value AS FLOAT) AS v")
             .unwrap();
-        match &result.rows[0][0] {
+        match &result.rows()[0][0] {
             Value::Float64(f) => assert!((f - std::f64::consts::PI).abs() < 0.01),
             other => panic!("Expected Float64, got {other:?}"),
         }
@@ -298,7 +302,7 @@ mod gql_predicates {
         let result = session
             .execute("MATCH (n:Item) RETURN CAST(n.value AS BOOLEAN) AS v")
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::Bool(true));
+        assert_eq!(result.rows()[0][0], Value::Bool(true));
     }
 
     #[test]
@@ -351,7 +355,7 @@ mod gql_statements {
             .execute("MATCH (n:Person WHERE n.age > 28) RETURN n.name ORDER BY n.name")
             .unwrap();
         let names: Vec<_> = result
-            .rows
+            .rows()
             .iter()
             .filter_map(|r| match &r[0] {
                 Value::String(s) => Some(s.to_string()),
@@ -524,7 +528,7 @@ mod gql_statements {
         let result = session
             .execute("MATCH (n:Item) RETURN n.tags[0] AS first")
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::String("a".into()));
+        assert_eq!(result.rows()[0][0], Value::String("a".into()));
     }
 
     #[test]
@@ -534,7 +538,7 @@ mod gql_statements {
         let result = session
             .execute("MATCH /* all people */ (n:Person) RETURN count(n) AS cnt")
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::Int64(4));
+        assert_eq!(result.rows()[0][0], Value::Int64(4));
     }
 }
 
@@ -724,9 +728,9 @@ mod gql_session_commands {
         let session = db.session();
         let result = session.execute("RETURN CURRENT_SCHEMA AS s").unwrap();
         assert_eq!(result.columns, vec!["s"]);
-        assert_eq!(result.rows.len(), 1);
-        assert_eq!(result.rows[0].len(), 1);
-        assert_eq!(result.rows[0][0], Value::String("default".into()));
+        assert_eq!(result.rows().len(), 1);
+        assert_eq!(result.rows()[0].len(), 1);
+        assert_eq!(result.rows()[0][0], Value::String("default".into()));
     }
 
     #[test]
@@ -736,7 +740,7 @@ mod gql_session_commands {
         session.execute("CREATE SCHEMA analytics").unwrap();
         session.execute("SESSION SET SCHEMA analytics").unwrap();
         let result = session.execute("RETURN CURRENT_SCHEMA AS s").unwrap();
-        assert_eq!(result.rows[0][0], Value::String("analytics".into()));
+        assert_eq!(result.rows()[0][0], Value::String("analytics".into()));
     }
 
     #[test]
@@ -745,8 +749,8 @@ mod gql_session_commands {
         let session = db.session();
         let result = session.execute("RETURN CURRENT_GRAPH AS g").unwrap();
         assert_eq!(result.columns, vec!["g"]);
-        assert_eq!(result.rows.len(), 1);
-        assert_eq!(result.rows[0][0], Value::String("default".into()));
+        assert_eq!(result.rows().len(), 1);
+        assert_eq!(result.rows()[0][0], Value::String("default".into()));
     }
 
     #[test]
@@ -756,7 +760,7 @@ mod gql_session_commands {
         session.execute("CREATE GRAPH social").unwrap();
         session.execute("USE GRAPH social").unwrap();
         let result = session.execute("RETURN CURRENT_GRAPH AS g").unwrap();
-        assert_eq!(result.rows[0][0], Value::String("social".into()));
+        assert_eq!(result.rows()[0][0], Value::String("social".into()));
     }
 
     #[test]
@@ -770,8 +774,8 @@ mod gql_session_commands {
             .unwrap();
         let result = session.execute("RETURN info() AS i").unwrap();
         assert_eq!(result.columns, vec!["i"]);
-        assert_eq!(result.rows.len(), 1);
-        let info = result.rows[0][0]
+        assert_eq!(result.rows().len(), 1);
+        let info = result.rows()[0][0]
             .as_map()
             .expect("info() should return a map");
         assert_eq!(
@@ -800,8 +804,8 @@ mod gql_session_commands {
             .unwrap();
         let result = session.execute("RETURN schema() AS s").unwrap();
         assert_eq!(result.columns, vec!["s"]);
-        assert_eq!(result.rows.len(), 1);
-        let schema = result.rows[0][0]
+        assert_eq!(result.rows().len(), 1);
+        let schema = result.rows()[0][0]
             .as_map()
             .expect("schema() should return a map");
         // Labels should include "Person"
@@ -985,7 +989,7 @@ mod gql_insert_patterns {
         let result = session
             .execute("MATCH (a)-[e:KNOWS]->(b) RETURN e.since")
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::Int64(2020));
+        assert_eq!(result.rows()[0][0], Value::Int64(2020));
     }
 }
 
@@ -1006,7 +1010,7 @@ mod cypher_features {
             .execute("MATCH (n:Person) RETURN COUNT(*) AS cnt")
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        assert_eq!(result.rows[0][0], Value::Int64(4)); // Alix, Gus, Dave, Harm
+        assert_eq!(result.rows()[0][0], Value::Int64(4)); // Alix, Gus, Dave, Harm
     }
 
     #[test]
@@ -1033,7 +1037,7 @@ mod cypher_features {
             .unwrap();
         assert_eq!(result.row_count(), 1);
         // Should return a map value
-        match &result.rows[0][0] {
+        match &result.rows()[0][0] {
             Value::Map(m) => {
                 let keys: Vec<String> = m.keys().map(|k| k.as_str().to_string()).collect();
                 assert!(keys.contains(&"name".to_string()), "Map should have 'name'");
@@ -1055,7 +1059,7 @@ mod cypher_features {
                 "MATCH (n:Item) RETURN reduce(total = 0, x IN n.nums | total + x) AS sum",
             )
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::Int64(15));
+        assert_eq!(result.rows()[0][0], Value::Int64(15));
     }
 
     #[test]
@@ -1072,8 +1076,8 @@ mod cypher_features {
             .unwrap();
         assert_eq!(result.row_count(), 1);
         // Alix=30, Gus=25, Harm=35, Dave=28 => over_30=2 (Alix, Harm), under_30=2 (Gus, Dave)
-        let over_30 = &result.rows[0][0];
-        let under_30 = &result.rows[0][1];
+        let over_30 = &result.rows()[0][0];
+        let under_30 = &result.rows()[0][1];
         assert_eq!(*over_30, Value::Int64(2), "Expected 2 people aged >= 30");
         assert_eq!(*under_30, Value::Int64(2), "Expected 2 people aged < 30");
     }
@@ -1089,7 +1093,7 @@ mod cypher_features {
             )
             .unwrap();
         // sign(30) = 1
-        assert_eq!(result.rows[0][0], Value::Int64(1));
+        assert_eq!(result.rows()[0][0], Value::Int64(1));
     }
 
     #[test]
@@ -1102,8 +1106,8 @@ mod cypher_features {
                  RETURN left(n.name, 3) AS l, right(n.name, 3) AS r",
             )
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::String("Ali".into()));
-        assert_eq!(result.rows[0][1], Value::String("lix".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Ali".into()));
+        assert_eq!(result.rows()[0][1], Value::String("lix".into()));
     }
 
     #[test]
@@ -1114,11 +1118,11 @@ mod cypher_features {
         let result = session
             .execute_cypher("MATCH (n:Val) RETURN sin(n.x) AS s, cos(n.x) AS c")
             .unwrap();
-        match &result.rows[0][0] {
+        match &result.rows()[0][0] {
             Value::Float64(f) => assert!((f - 0.0).abs() < 0.001, "sin(0) should be 0"),
             other => panic!("Expected Float64 for sin, got {other:?}"),
         }
-        match &result.rows[0][1] {
+        match &result.rows()[0][1] {
             Value::Float64(f) => assert!((f - 1.0).abs() < 0.001, "cos(0) should be 1"),
             other => panic!("Expected Float64 for cos, got {other:?}"),
         }
@@ -1132,7 +1136,7 @@ mod cypher_features {
         let result = session
             .execute_cypher("MATCH (n:X) RETURN pi() AS p, e() AS e")
             .unwrap();
-        match &result.rows[0][0] {
+        match &result.rows()[0][0] {
             Value::Float64(f) => assert!((f - std::f64::consts::PI).abs() < 0.001),
             other => panic!("Expected Float64, got {other:?}"),
         }
@@ -1146,7 +1150,7 @@ mod cypher_features {
         let result = session
             .execute_cypher("MATCH (n:X) RETURN n.x ^ 2 AS sq")
             .unwrap();
-        match &result.rows[0][0] {
+        match &result.rows()[0][0] {
             Value::Float64(f) => assert!((f - 9.0).abs() < 0.001),
             Value::Int64(n) => assert_eq!(*n, 9),
             other => panic!("Expected numeric, got {other:?}"),
@@ -1346,7 +1350,7 @@ mod cypher_features {
         let result = session
             .execute("MATCH (n:Person) WHERE n.verified = true RETURN count(n) AS cnt")
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::Int64(2));
+        assert_eq!(result.rows()[0][0], Value::Int64(2));
     }
 
     #[test]
@@ -1375,7 +1379,7 @@ mod cypher_features {
             )
             .unwrap();
         assert_eq!(result.row_count(), 1);
-        match &result.rows[0][1] {
+        match &result.rows()[0][1] {
             Value::List(items) => assert_eq!(items.len(), 2, "Alix knows exactly Gus and Harm"),
             other => panic!("Expected list of friends, got {other:?}"),
         }
@@ -1424,7 +1428,7 @@ mod cypher_features {
             .unwrap();
         assert_eq!(result.row_count(), 2);
         // Ordered by name: Alix(0), Dave(1), Gus(2), Harm(3). Skip 1 = Dave first.
-        assert_eq!(result.rows[0][0], Value::String("Dave".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Dave".into()));
     }
 
     #[test]
@@ -1486,10 +1490,10 @@ mod cypher_features {
         );
         let result = result.unwrap();
         assert_eq!(result.row_count(), 3, "Should have 3 rows");
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-        assert_eq!(result.rows[0][1], Value::String("30".into())); // CSV values are strings
-        assert_eq!(result.rows[1][0], Value::String("Gus".into()));
-        assert_eq!(result.rows[2][0], Value::String("Mia".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[0][1], Value::String("30".into())); // CSV values are strings
+        assert_eq!(result.rows()[1][0], Value::String("Gus".into()));
+        assert_eq!(result.rows()[2][0], Value::String("Mia".into()));
 
         std::fs::remove_file(&csv_path).ok();
     }
@@ -1519,8 +1523,8 @@ mod cypher_features {
         );
         let result = result.unwrap();
         assert_eq!(result.row_count(), 2);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-        assert_eq!(result.rows[0][1], Value::String("30".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[0][1], Value::String("30".into()));
 
         std::fs::remove_file(&csv_path).ok();
     }
@@ -1555,8 +1559,8 @@ mod cypher_features {
             .execute_cypher("MATCH (p:Person) RETURN p.name ORDER BY p.name")
             .unwrap();
         assert_eq!(check.row_count(), 2);
-        assert_eq!(check.rows[0][0], Value::String("Jules".into()));
-        assert_eq!(check.rows[1][0], Value::String("Vincent".into()));
+        assert_eq!(check.rows()[0][0], Value::String("Jules".into()));
+        assert_eq!(check.rows()[1][0], Value::String("Vincent".into()));
 
         std::fs::remove_file(&csv_path).ok();
     }
@@ -1587,7 +1591,7 @@ mod cypher_features {
         );
         let result = result.unwrap();
         assert_eq!(result.row_count(), 2);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
 
         std::fs::remove_file(&csv_path).ok();
     }
@@ -1649,7 +1653,7 @@ mod load_data_features {
             result.err()
         );
         let result = result.unwrap();
-        assert_eq!(result.rows.len(), 2);
+        assert_eq!(result.rows().len(), 2);
     }
 
     #[test]
@@ -1674,7 +1678,7 @@ mod load_data_features {
             result.err()
         );
         let result = result.unwrap();
-        assert_eq!(result.rows.len(), 2);
+        assert_eq!(result.rows().len(), 2);
     }
 
     #[test]
@@ -1700,7 +1704,7 @@ mod load_data_features {
             result.err()
         );
         let result = result.unwrap();
-        assert_eq!(result.rows.len(), 1);
+        assert_eq!(result.rows().len(), 1);
     }
 
     #[test]
@@ -1730,7 +1734,7 @@ mod load_data_features {
         let verify = session
             .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name")
             .unwrap();
-        assert_eq!(verify.rows.len(), 2);
+        assert_eq!(verify.rows().len(), 2);
     }
 
     #[test]
@@ -1755,7 +1759,7 @@ mod load_data_features {
             result.err()
         );
         let result = result.unwrap();
-        assert_eq!(result.rows.len(), 1);
+        assert_eq!(result.rows().len(), 1);
     }
 
     #[test]
@@ -1804,7 +1808,7 @@ mod load_data_features {
             result.err()
         );
         let result = result.unwrap();
-        assert_eq!(result.rows.len(), 2);
+        assert_eq!(result.rows().len(), 2);
     }
 
     #[cfg(feature = "jsonl-import")]
@@ -1833,7 +1837,7 @@ mod load_data_features {
         let verify = session
             .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name")
             .unwrap();
-        assert_eq!(verify.rows.len(), 2);
+        assert_eq!(verify.rows().len(), 2);
     }
 
     #[cfg(feature = "jsonl-import")]
@@ -1885,7 +1889,7 @@ mod load_data_features {
 // SPARQL Features (covers sparql_translator.rs)
 // ============================================================================
 
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 mod sparql_features {
     use grafeo_common::types::Value;
     use grafeo_engine::{Config, GrafeoDB, GraphModel};
@@ -1995,7 +1999,7 @@ mod sparql_features {
         // Alix has age, Gus does not
         // Verify Gus row has NULL for age
         let gus_row = result
-            .rows
+            .rows()
             .iter()
             .find(|r| r[0] == Value::String("Gus".into()))
             .expect("Gus should appear in results");
@@ -2036,7 +2040,7 @@ mod sparql_features {
         // Harm knows nobody: Harm, NULL, NULL
         assert_eq!(result.row_count(), 3);
         let alix_row = result
-            .rows
+            .rows()
             .iter()
             .find(|r| r[0] == Value::String("Alix".into()))
             .expect("Alix should appear");
@@ -2044,7 +2048,7 @@ mod sparql_features {
         assert_eq!(alix_row[2], Value::String("Amsterdam".into()));
 
         let harm_row = result
-            .rows
+            .rows()
             .iter()
             .find(|r| r[0] == Value::String("Harm".into()))
             .expect("Harm should appear");
@@ -2093,7 +2097,7 @@ mod sparql_features {
             "All 3 persons preserved: FILTER inside OPTIONAL is a join condition"
         );
         let alix_row = result
-            .rows
+            .rows()
             .iter()
             .find(|r| r[0] == Value::String("Alix".into()))
             .expect("Alix should appear");
@@ -2104,7 +2108,7 @@ mod sparql_features {
         );
 
         let gus_row = result
-            .rows
+            .rows()
             .iter()
             .find(|r| r[0] == Value::String("Gus".into()))
             .expect("Gus should appear");
@@ -2115,7 +2119,7 @@ mod sparql_features {
         );
 
         let harm_row = result
-            .rows
+            .rows()
             .iter()
             .find(|r| r[0] == Value::String("Harm".into()))
             .expect("Harm should appear");
@@ -2153,14 +2157,14 @@ mod sparql_features {
         // Gus knows nobody -> Gus, NULL
         assert_eq!(result.row_count(), 2);
         let alix_row = result
-            .rows
+            .rows()
             .iter()
             .find(|r| r[0] == Value::String("Alix".into()))
             .expect("Alix should appear");
         assert_eq!(alix_row[1], Value::String("Gus".into()));
 
         let gus_row = result
-            .rows
+            .rows()
             .iter()
             .find(|r| r[0] == Value::String("Gus".into()))
             .expect("Gus should appear");
@@ -2456,7 +2460,7 @@ mod sparql_features {
             "All 3 persons should appear with independent OPTIONALLs"
         );
         let alix_row = result
-            .rows
+            .rows()
             .iter()
             .find(|r| r[0] == Value::String("Alix".into()))
             .expect("Alix should appear");
@@ -2464,7 +2468,7 @@ mod sparql_features {
         assert_eq!(alix_row[2], Value::Null, "Alix has no email");
 
         let gus_row = result
-            .rows
+            .rows()
             .iter()
             .find(|r| r[0] == Value::String("Gus".into()))
             .expect("Gus should appear");
@@ -2476,7 +2480,7 @@ mod sparql_features {
         );
 
         let harm_row = result
-            .rows
+            .rows()
             .iter()
             .find(|r| r[0] == Value::String("Harm".into()))
             .expect("Harm should appear");
@@ -2511,12 +2515,12 @@ mod sparql_features {
         assert_eq!(result.row_count(), 1);
         // 3 people total, 2 with scores
         assert_eq!(
-            result.rows[0][0],
+            result.rows()[0][0],
             Value::Int64(3),
             "COUNT(?name) should be 3"
         );
         assert_eq!(
-            result.rows[0][1],
+            result.rows()[0][1],
             Value::Int64(2),
             "COUNT(?score) should skip NULLs: 2"
         );
@@ -2559,14 +2563,14 @@ mod sparql_features {
             "Both people should appear even if inner join of optional fails"
         );
         let alix_row = result
-            .rows
+            .rows()
             .iter()
             .find(|r| r[0] == Value::String("Alix".into()))
             .expect("Alix should appear");
         assert_eq!(alix_row[1], Value::String("Amsterdam".into()));
 
         let harm_row = result
-            .rows
+            .rows()
             .iter()
             .find(|r| r[0] == Value::String("Harm".into()))
             .expect("Harm should appear");
@@ -2601,8 +2605,8 @@ mod sparql_features {
             .unwrap();
         // Both rows should appear with NULL email
         assert_eq!(result.row_count(), 2, "Both persons should appear");
-        assert_eq!(result.rows[0][1], Value::Null, "Alix: no email");
-        assert_eq!(result.rows[1][1], Value::Null, "Gus: no email");
+        assert_eq!(result.rows()[0][1], Value::Null, "Alix: no email");
+        assert_eq!(result.rows()[1][1], Value::Null, "Gus: no email");
     }
 
     #[test]
@@ -2643,7 +2647,7 @@ mod sparql_features {
             "All 3 persons should appear, UNION inside OPTIONAL"
         );
         let harm_row = result
-            .rows
+            .rows()
             .iter()
             .find(|r| r[0] == Value::String("Harm".into()))
             .expect("Harm should appear");

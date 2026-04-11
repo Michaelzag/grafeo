@@ -55,7 +55,7 @@ fn test_temporal_property_at_epoch() {
     let result = session
         .execute("MATCH (s:Server {name: 'web-01'}) RETURN s.status")
         .unwrap();
-    assert_eq!(result.rows[0][0], Value::String("offline".into()));
+    assert_eq!(result.rows()[0][0], Value::String("offline".into()));
 
     // At epoch_v1: healthy
     let result = session
@@ -64,9 +64,9 @@ fn test_temporal_property_at_epoch() {
             epoch_v1,
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::String("healthy".into()),
         "temporal query at epoch_v1 should return 'healthy'"
     );
@@ -78,9 +78,9 @@ fn test_temporal_property_at_epoch() {
             epoch_v2,
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::String("degraded".into()),
         "temporal query at epoch_v2 should return 'degraded'"
     );
@@ -121,8 +121,8 @@ fn test_temporal_multiple_properties() {
             epoch_v1,
         )
         .unwrap();
-    assert_eq!(result.rows[0][0], Value::Int64(10));
-    assert_eq!(result.rows[0][1], Value::Int64(1024));
+    assert_eq!(result.rows()[0][0], Value::Int64(10));
+    assert_eq!(result.rows()[0][1], Value::Int64(1024));
 
     // At epoch_v2: cpu=80, memory=1024 (only cpu changed)
     let result = session
@@ -131,8 +131,8 @@ fn test_temporal_multiple_properties() {
             epoch_v2,
         )
         .unwrap();
-    assert_eq!(result.rows[0][0], Value::Int64(80));
-    assert_eq!(result.rows[0][1], Value::Int64(1024));
+    assert_eq!(result.rows()[0][0], Value::Int64(80));
+    assert_eq!(result.rows()[0][1], Value::Int64(1024));
 }
 
 #[test]
@@ -161,7 +161,7 @@ fn test_temporal_where_filter_at_epoch() {
     let result = session
         .execute("MATCH (s:Server) WHERE s.status = 'healthy' RETURN s.name")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
 
     // At epoch_all_healthy: 2 healthy servers
     let result = session
@@ -171,7 +171,7 @@ fn test_temporal_where_filter_at_epoch() {
         )
         .unwrap();
     assert_eq!(
-        result.rows.len(),
+        result.rows().len(),
         2,
         "temporal WHERE filter should see both servers as healthy at epoch_all_healthy"
     );
@@ -238,9 +238,9 @@ fn test_temporal_edge_property_versioning() {
             epoch_v1,
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::Int64(5),
         "edge property should be 5 at epoch_v1"
     );
@@ -283,9 +283,9 @@ fn test_temporal_snapshot_roundtrip() {
         .unwrap();
     // At epoch_v1, node was imported with its full version history,
     // so status should be 'healthy'
-    if !result.rows.is_empty() {
+    if !result.rows().is_empty() {
         assert_eq!(
-            result.rows[0][0],
+            result.rows()[0][0],
             Value::String("healthy".into()),
             "snapshot roundtrip should preserve temporal property history"
         );
@@ -319,7 +319,7 @@ fn test_temporal_snapshot_query_roundtrip() {
     let result = session2
         .execute("MATCH (s:Server {name: 'web-01'}) RETURN s.status")
         .unwrap();
-    assert_eq!(result.rows[0][0], Value::String("degraded".into()));
+    assert_eq!(result.rows()[0][0], Value::String("degraded".into()));
 
     // Historical state preserved
     let result = session2
@@ -329,7 +329,7 @@ fn test_temporal_snapshot_query_roundtrip() {
         )
         .unwrap();
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::String("healthy".into()),
         "snapshot roundtrip should preserve temporal property history"
     );
@@ -357,7 +357,7 @@ fn test_temporal_transaction_rollback() {
     let result = session
         .execute("MATCH (s:Server {name: 'web-01'}) RETURN s.status")
         .unwrap();
-    assert_eq!(result.rows[0][0], Value::String("healthy".into()));
+    assert_eq!(result.rows()[0][0], Value::String("healthy".into()));
 }
 
 #[test]
@@ -400,12 +400,12 @@ fn test_temporal_savepoint_rollback() {
         .execute("MATCH (s:Server {name: 'web-01'}) RETURN s.status, s.cpu")
         .unwrap();
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::String("degraded".into()),
         "post-savepoint status change should be rolled back"
     );
     assert_eq!(
-        result.rows[0][1],
+        result.rows()[0][1],
         Value::Int64(10),
         "post-savepoint cpu change should be rolled back"
     );
@@ -418,7 +418,7 @@ fn test_temporal_savepoint_rollback() {
         )
         .unwrap();
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::String("healthy".into()),
         "temporal query at epoch_v1 should still return 'healthy' after savepoint rollback"
     );
@@ -431,7 +431,7 @@ fn test_temporal_savepoint_rollback() {
         )
         .unwrap();
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         Value::String("degraded".into()),
         "temporal query at epoch_v2 should return 'degraded'"
     );
@@ -467,5 +467,5 @@ fn test_temporal_gc_does_not_break_current_state() {
     let result = session
         .execute("MATCH (s:Server {name: 'web-01'}) RETURN s.status")
         .unwrap();
-    assert_eq!(result.rows[0][0], Value::String("v3".into()));
+    assert_eq!(result.rows()[0][0], Value::String("v3".into()));
 }

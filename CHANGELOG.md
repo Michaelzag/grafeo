@@ -2,22 +2,62 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
-## [0.5.35] - Unreleased
+## [0.5.35] - 2026-04-11
+
+Breaking: `QueryResult.rows` is now private (use `rows()`/`into_rows()`), all public enums are `#[non_exhaustive]` (add `_ =>` arms), old feature profiles (`embedded`, `browser`, `server`, `full`) are deprecated in favor of persona-based profiles (`lpg`, `rdf`, `analytics`, `ai`, `edge`, `enterprise`) and the on-disk storage format changed from bincode blobs to block-based sections (databases created with 0.5.34 or earlier must be re-created).
 
 ### Added
 
+- **Persona-based feature profiles**: new named profiles `lpg`, `rdf`, `analytics`, `ai`, `edge`, `enterprise` describe use cases instead of deployment targets. Compose them freely: `features = ["lpg", "ai"]` for a graph app with search, `features = ["rdf", "analytics"]` for a knowledge graph with algorithms. Old profiles (`embedded`, `browser`, `server`, `full`) remain as deprecated aliases with unchanged behavior, scheduled for removal in 0.7.0.
 - **Python named graph management**: `create_graph()`, `drop_graph()`, `list_graphs()`, `set_graph()`/`reset_graph()`/`current_graph()`, `set_schema()`/`reset_schema()`/`current_schema()` ([#241](https://github.com/GrafeoDB/grafeo/issues/241), [#243](https://github.com/GrafeoDB/grafeo/pull/243) by [@Michaelzag](https://github.com/Michaelzag))
-- **Python per-transaction CDC override**: `begin_transaction_with_cdc(True|False)` to enable or suppress change tracking per transaction ([#242](https://github.com/GrafeoDB/grafeo/issues/242), [#244](https://github.com/GrafeoDB/grafeo/pull/244) by [@Michaelzag](https://github.com/Michaelzag))
-
-### Fixed
-
-- **Graph/schema context validation**: `set_current_graph()` and `set_current_schema()` now reject nonexistent targets across all bindings; `drop_graph()` auto-clears the active context ([#245](https://github.com/GrafeoDB/grafeo/issues/245), [#246](https://github.com/GrafeoDB/grafeo/pull/246) by [@Michaelzag](https://github.com/Michaelzag))
-- **C binding `grafeo_reset_schema`**: propagates errors instead of silently discarding them
-- **WASM `setSchema` error type**: returns a proper JS `Error` object instead of a plain string
+- **Python per-transaction CDC override**: `begin_transaction_with_cdc(True|False)` ([#242](https://github.com/GrafeoDB/grafeo/issues/242), [#244](https://github.com/GrafeoDB/grafeo/pull/244) by [@Michaelzag](https://github.com/Michaelzag))
+- **Arrow IPC export** (`arrow-export`): zero-copy export to Arrow IPC for DuckDB, Polars, pandas, DataFusion interop
+- **GEXF + GraphML export**: graph interchange for Gephi, Cytoscape, NetworkX, yEd, igraph. CLI `--export-format gexf|graphml`
+- **Section-based container format**: `.grafeo` files use a section directory with checksummed, independently addressable sections. Checkpoint writes only dirty sections, recovery loads in parallel.
+- **`grafeo-storage` crate**: persistence I/O extracted from `grafeo-adapters`. `grafeo-core` and `grafeo-storage` are now siblings (both depend only on `grafeo-common`).
+- **Unified flush model**: checkpoint, `CHECKPOINT`, and memory-pressure eviction share one code path
+- **Regression + memory benchmarks**: 11 Criterion benchmarks with per-benchmark thresholds, 5 memory benchmarks with CI bounds checking
+- **Section serializers**: Vector Store (HNSW topology) and Text Index (BM25 postings) persist to container, eliminating index rebuild on open
+- **Per-section memory config**: `SectionMemoryConfig` with `max_ram` caps and `TierOverride` per section type
+- **Mmap for index sections**: zero-copy read via `memmap2`, CRC-verified, cross-platform lifecycle
+- **BufferManager section consumers**: sections register as `MemoryConsumer`s for accurate pressure tracking
+- **Periodic checkpoint timer**: background flush at `Config::checkpoint_interval`, bounds WAL size
+- **Container format spec**: `docs/architecture/storage/container-format.md`
+- **Vector spill to disk**: vector columns drain to `MmapStorage` under memory pressure, search reads transparently from mmap
+- **BufferManager spill integration**: eviction calls `spill()` on consumers after in-memory eviction exhausted
+- **PropertyColumn eviction**: `drain_values()`, `evict_values()`, `restore_values()` with `spilled` flag
+- **Block-based LPG section format (v2)**: replaces bincode blob with a structured layout: string table, packed node/edge arrays, columnar property blocks, label assignments, per-block CRC. Enables mmap for data sections.
+- **Block-based RDF section format (v2)**: replaces bincode with string-table-deduplicated triple storage, per-block CRC, named graph sub-sections.
+- **WAL overlay**: in-memory mutation layer (`WalOverlay`) for tracking inserts, updates, deletes on top of mmap'd base data. Supports drain/clear for checkpoint merge.
+- **TieredStore trait**: `StorageTier` enum (InMemory, OnDisk, Uninitialized) and `TieredStore` trait defining `persist()`, `open_mmap()`, `reload_to_ram()` lifecycle in `grafeo-common`.
+- **CDC retention and eviction**: `CdcRetentionConfig` with `max_epochs` and `max_events` limits. `CdcLog` implements `MemoryConsumer` for BufferManager-driven eviction. Pruning hooks into MVCC GC cycle. ([#250](https://github.com/GrafeoDB/grafeo/issues/250))
+- **EpochAdvance WAL record**: new `WalRecord::EpochAdvance { epoch }` logged after each `TransactionCommit`. `is_metadata()` trait method on `WalEntry`. Enables epoch-bounded WAL replay for point-in-time recovery.
+- **Incremental backup**: `backup_full()`, `backup_incremental()`, `restore_to_epoch()` on `GrafeoDB`. Backup manifest tracks the chain, backup cursor in WAL directory prevents premature log truncation. CLI commands: `grafeo backup full`, `grafeo backup incremental`, `grafeo backup status`, `grafeo backup restore-to-epoch`. Exposed in Python, Node.js, and C bindings.
 
 ### Changed
 
-- **CI**: moved Python CLI wheel build from `pypi.yml` to `release.yml`
+- **`VersionChain` uses `Vec` instead of `VecDeque`**: eliminates 4-slot minimum allocation per entity, reducing per-entity memory 14-31% ([#251](https://github.com/GrafeoDB/grafeo/issues/251))
+- **Schema DDL types decoupled from GQL parser**: shared types (`SchemaStatement`, `PropertyDefinition`, etc.) moved to `query::schema` module, allowing Cypher to compile without the `gql` feature ([#234](https://github.com/GrafeoDB/grafeo/issues/234))
+- **`QueryResult.rows` is now private**: use `rows()` for borrowed access, `into_rows()` for ownership, `push_row()`/`from_rows()` for construction
+- **`#[non_exhaustive]` on 95 public enums**: downstream `match` must add `_ =>` wildcard arms
+- **Python abi3 wheels**: single wheel per platform supports Python 3.12+
+- **`rdf` feature renamed to `triple-store`**: deprecated `rdf` alias kept for one release, `rdf` now names the persona profile
+- **`lpg` feature flag**: LPG model is now explicit in grafeo-core/engine/adapters, symmetric to `triple-store`
+- **Crate restructure**: storage backends moved to `grafeo-storage`, `grafeo-adapters` is parser-only, `grafeo-core/src/storage/` renamed to `codec/`
+- **Removed tokio from grafeo-core**: async spill moved to `grafeo-engine/src/execution/spill/`
+- **CI**: benchmark job adds per-benchmark thresholds and baseline persistence on main
+
+### Fixed
+
+- **WAL not replayed on reopen**: data written via mutations was lost across restarts when no explicit checkpoint was called. Session commits now log `TransactionCommit` + `EpochAdvance` to WAL, and the close path only removes the sidecar WAL after verifying the checkpoint wrote data. ([#252](https://github.com/GrafeoDB/grafeo/issues/252))
+- **CDC event log unbounded memory**: the CDC log stored every mutation with full property snapshots and never pruned. Added epoch-based and count-based retention (`CdcRetentionConfig`), integrated with BufferManager for memory-pressure eviction. ([#250](https://github.com/GrafeoDB/grafeo/issues/250))
+- **`VecDeque::first_mut` compile error**: fixed to `front_mut()` in MVCC `VersionChain` (tiered-storage feature path)
+- **Graph/schema context validation**: reject nonexistent targets, `drop_graph()` auto-clears active context ([#245](https://github.com/GrafeoDB/grafeo/issues/245), [#246](https://github.com/GrafeoDB/grafeo/pull/246) by [@Michaelzag](https://github.com/Michaelzag))
+- **C binding `grafeo_reset_schema`**: propagates errors instead of silently discarding
+- **WASM `setSchema`**: returns proper JS `Error` instead of plain string
+- **CI benchmark `--save-baseline`**: scoped to Criterion crates only
+- **Aggregate grouping hash collision**: wildcard arm now hashes `std::mem::discriminant` to distinguish future `Value` variants
+- **`edges_df()`/`nodes_df()` column overwrite**: properties named after structural columns (`source`, `target`, `type`, `id`, `labels`) no longer silently replace them ([#254](https://github.com/GrafeoDB/grafeo/issues/254))
 
 ## [0.5.34] - 2026-04-07
 

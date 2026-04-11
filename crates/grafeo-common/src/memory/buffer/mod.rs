@@ -52,9 +52,11 @@ mod grant;
 mod manager;
 mod region;
 mod stats;
+mod tiered;
 
 pub use consumer::{ConsumerStats, MemoryConsumer, SpillError, priorities};
 pub use grant::{CompositeGrant, GrantReleaser, MemoryGrant};
 pub use manager::{BufferManager, BufferManagerConfig};
 pub use region::MemoryRegion;
 pub use stats::{BufferStats, PressureLevel};
+pub use tiered::{StorageTier, TieredStore};

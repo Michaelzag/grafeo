@@ -105,20 +105,23 @@ impl Transaction {
         let param_map = grafeo_bindings_common::json::json_params_to_map(params)
             .map_err(|msg| napi::Error::from(NodeGrafeoError::InvalidArgument(msg)))?;
 
-        let result = session
+        let mut result = session
             .execute_language(query, language, param_map)
             .map_err(NodeGrafeoError::from)?;
 
         let db = self.db.read();
         let (nodes, edges) = crate::database::extract_entities(&result, &db);
+        let columns = std::mem::take(&mut result.columns);
+        let exec_time = result.execution_time_ms;
+        let scanned = result.rows_scanned;
 
         Ok(QueryResult::with_metrics(
-            result.columns,
-            result.rows,
+            columns,
+            result.into_rows(),
             nodes,
             edges,
-            result.execution_time_ms,
-            result.rows_scanned,
+            exec_time,
+            scanned,
         ))
     }
 

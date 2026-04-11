@@ -324,8 +324,8 @@ fn test_snapshot_export_import_roundtrip() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN n.age")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Int64(30));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Int64(30));
 }
 
 #[test]
@@ -440,8 +440,8 @@ fn test_execute_with_params() {
         .execute_with_params("MATCH (n:Person) WHERE n.name = $name RETURN n.age", params)
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Int64(30));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Int64(30));
 }
 
 // ── Info updates after operations ───────────────────────────────

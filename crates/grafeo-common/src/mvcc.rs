@@ -142,9 +142,9 @@ impl<T> VersionChain<T> {
     /// Creates a version chain with an initial version.
     #[must_use]
     pub fn with_initial(data: T, created_epoch: EpochId, created_by: TransactionId) -> Self {
-        let mut chain = Self::new();
-        chain.add_version(data, created_epoch, created_by);
-        chain
+        Self {
+            versions: VecDeque::from(vec![Version::new(data, created_epoch, created_by)]),
+        }
     }
 
     /// Adds a new version to the chain.
@@ -309,7 +309,7 @@ impl<T> VersionChain<T> {
 
     /// Returns estimated heap memory in bytes for this version chain.
     ///
-    /// Counts the `VecDeque` capacity overhead. Does not include the
+    /// Counts the `Vec` capacity overhead. Does not include the
     /// size of `T` payloads (the caller accounts for those).
     #[must_use]
     pub fn heap_memory_bytes(&self) -> usize {
@@ -584,6 +584,7 @@ impl ColdVersionRef {
 /// Unified reference to either a hot or cold version.
 #[derive(Debug, Clone, Copy)]
 #[cfg(feature = "tiered-storage")]
+#[non_exhaustive]
 pub enum VersionRef {
     /// Version data is in arena (hot tier).
     Hot(HotVersionRef),

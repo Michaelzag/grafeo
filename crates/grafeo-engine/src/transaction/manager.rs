@@ -10,6 +10,7 @@ use parking_lot::RwLock;
 
 /// State of a transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TransactionState {
     /// Transaction is active.
     Active,
@@ -64,6 +65,7 @@ pub enum IsolationLevel {
 
 /// Entity identifier for write tracking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum EntityId {
     /// A node.
     Node(NodeId),

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use arcstr::ArcStr;
 use grafeo_common::types::Value;
 
-use crate::storage::{BitPackedInts, BitVector, DictionaryEncoding};
+use crate::codec::{BitPackedInts, BitVector, DictionaryEncoding};
 
 /// A single column of data backed by one of Grafeo's storage codecs.
 ///
@@ -18,6 +18,7 @@ use crate::storage::{BitPackedInts, BitVector, DictionaryEncoding};
 /// `Value`-typed access and the specialised accessors when you know the
 /// underlying codec.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum ColumnCodec {
     /// Fixed-width bit-packed unsigned integers.
     BitPacked(BitPackedInts),
@@ -266,7 +267,7 @@ impl ColumnCodec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::{BitPackedInts, BitVector, DictionaryBuilder};
+    use crate::codec::{BitPackedInts, BitVector, DictionaryBuilder};
 
     #[test]
     fn test_bitpacked_round_trip() {

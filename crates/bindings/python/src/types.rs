@@ -392,6 +392,11 @@ impl PyValue {
                 dict.into_py_any(py)
                     .expect("dict to Python conversion cannot fail")
             }
+            _ => {
+                let s = value.to_string();
+                s.into_py_any(py)
+                    .expect("str to Python conversion cannot fail")
+            }
         }
     }
 }

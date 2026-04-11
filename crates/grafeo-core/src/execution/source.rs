@@ -258,7 +258,7 @@ where
 /// Source that scans RDF triples matching a pattern.
 ///
 /// Produces chunks with columns for subject, predicate, and object.
-#[cfg(feature = "rdf")]
+#[cfg(feature = "triple-store")]
 pub struct TripleScanSource {
     /// The triples to scan (materialized for simplicity).
     triples: Vec<(Value, Value, Value)>,
@@ -268,7 +268,7 @@ pub struct TripleScanSource {
     output_vars: Vec<String>,
 }
 
-#[cfg(feature = "rdf")]
+#[cfg(feature = "triple-store")]
 impl TripleScanSource {
     /// Create a new triple scan source.
     ///
@@ -297,7 +297,7 @@ impl TripleScanSource {
     }
 }
 
-#[cfg(feature = "rdf")]
+#[cfg(feature = "triple-store")]
 impl Source for TripleScanSource {
     fn next_chunk(&mut self, chunk_size: usize) -> Result<Option<DataChunk>, OperatorError> {
         if self.position >= self.triples.len() {

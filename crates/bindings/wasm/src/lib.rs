@@ -69,8 +69,8 @@ impl Database {
             .execute(query)
             .map_err(|e| JsError::new(&e.to_string()))?;
 
-        let rows = Array::new_with_length(result.rows.len() as u32);
-        for (i, row) in result.rows.iter().enumerate() {
+        let rows = Array::new_with_length(result.rows().len() as u32);
+        for (i, row) in result.rows().iter().enumerate() {
             rows.set(i as u32, types::row_to_js_object(&result.columns, row));
         }
         Ok(rows.into())
@@ -100,8 +100,8 @@ impl Database {
         let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("columns"), &cols);
 
         // rows: any[][]
-        let rows = Array::new_with_length(result.rows.len() as u32);
-        for (i, row) in result.rows.iter().enumerate() {
+        let rows = Array::new_with_length(result.rows().len() as u32);
+        for (i, row) in result.rows().iter().enumerate() {
             let js_row = Array::new_with_length(row.len() as u32);
             for (j, val) in row.iter().enumerate() {
                 js_row.set(j as u32, types::value_to_js(val));
@@ -690,8 +690,8 @@ impl Database {
         let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("columns"), &cols);
 
         // rows: any[][]
-        let rows = Array::new_with_length(result.rows.len() as u32);
-        for (i, row) in result.rows.iter().enumerate() {
+        let rows = Array::new_with_length(result.rows().len() as u32);
+        for (i, row) in result.rows().iter().enumerate() {
             let js_row = Array::new_with_length(row.len() as u32);
             for (j, val) in row.iter().enumerate() {
                 js_row.set(j as u32, types::value_to_js(val));
@@ -1102,8 +1102,8 @@ impl Database {
             .execute_language(query, language, param_map)
             .map_err(|e| JsError::new(&e.to_string()))?;
 
-        let rows = Array::new_with_length(result.rows.len() as u32);
-        for (i, row) in result.rows.iter().enumerate() {
+        let rows = Array::new_with_length(result.rows().len() as u32);
+        for (i, row) in result.rows().iter().enumerate() {
             rows.set(i as u32, types::row_to_js_object(&result.columns, row));
         }
         Ok(rows.into())
@@ -1702,7 +1702,7 @@ mod tests {
         let result = session
             .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name")
             .unwrap();
-        assert_eq!(result.rows.len(), 2);
+        assert_eq!(result.rows().len(), 2);
     }
 
     #[test]
@@ -1758,7 +1758,7 @@ mod tests {
         let result = session
             .execute("MATCH (p:Person) RETURN p.nickname")
             .unwrap();
-        assert_eq!(result.rows[0][0], Value::Null);
+        assert_eq!(result.rows()[0][0], Value::Null);
     }
 
     #[test]
@@ -1836,7 +1836,7 @@ mod tests {
         let result = session
             .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name")
             .unwrap();
-        assert_eq!(result.rows.len(), 2);
+        assert_eq!(result.rows().len(), 2);
     }
 
     #[test]
@@ -1868,7 +1868,7 @@ mod tests {
         let result = session
             .execute("MATCH (n)-[e:SELF_REF]->(n) RETURN n")
             .unwrap();
-        assert_eq!(result.rows.len(), 1);
+        assert_eq!(result.rows().len(), 1);
     }
 
     #[test]
@@ -1937,7 +1937,7 @@ mod tests {
         let result = session
             .execute("MATCH ()-[e:REL]->() RETURN e.weight, e.label")
             .unwrap();
-        assert_eq!(result.rows.len(), 1);
+        assert_eq!(result.rows().len(), 1);
     }
 
     // === RDF deserialization tests ===

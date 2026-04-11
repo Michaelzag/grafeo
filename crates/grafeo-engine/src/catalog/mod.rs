@@ -1069,6 +1069,7 @@ impl IndexCatalog {
 
 /// Data type for a typed property in a node or edge type definition.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub enum PropertyDataType {
     /// UTF-8 string.
     String,
@@ -1195,6 +1196,7 @@ pub struct TypedProperty {
 
 /// A constraint on a node or edge type.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub enum TypeConstraint {
     /// Primary key (implies UNIQUE + NOT NULL).
     PrimaryKey(Vec<String>),
@@ -1860,6 +1862,7 @@ impl SchemaCatalog {
 
 /// Catalog-related errors.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CatalogError {
     /// Schema constraints are not enabled.
     SchemaNotEnabled,

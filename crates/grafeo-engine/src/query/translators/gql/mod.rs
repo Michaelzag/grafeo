@@ -31,6 +31,7 @@ use grafeo_common::utils::error::{Error, QueryError, QueryErrorKind, Result};
 
 /// Result of translating a GQL query: either a logical plan, session command, or schema command.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum GqlTranslationResult {
     /// A query plan to execute (or EXPLAIN if `plan.explain` is true).
     Plan(LogicalPlan),

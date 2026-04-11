@@ -23,5 +23,5 @@ pub mod graphql;
 #[cfg(feature = "sql-pgq")]
 pub mod sql_pgq;
 
-#[cfg(all(feature = "graphql", feature = "rdf"))]
+#[cfg(all(feature = "graphql", feature = "triple-store"))]
 pub mod graphql_rdf;

@@ -10,6 +10,7 @@ meta:
   section: "23.1"
   title: Named graphs
   dataset: empty
+  iso: [GC04, GC05, GQ01]
 
 tests:
 

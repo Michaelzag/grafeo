@@ -100,6 +100,7 @@ pub fn value_to_js(value: &Value) -> JsValue {
             );
             wrapper.into()
         }
+        _ => JsValue::from_str(&value.to_string()),
     }
 }
 

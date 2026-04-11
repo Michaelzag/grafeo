@@ -947,4 +947,42 @@ impl LpgStore {
             self.increment_edge_type_count(type_id);
         }
     }
+
+    // === Column-Level Spill / Reload ===
+
+    /// Drains all values from a node property column, returning them for export.
+    ///
+    /// After this call, `is_node_column_spilled(key)` returns `true` and
+    /// `get_node_property(id, key)` returns `None` for all IDs.
+    /// Used by the vector spill path to export embeddings to `MmapStorage`.
+    #[cfg(not(feature = "temporal"))]
+    pub fn drain_node_property_column(&self, key: &PropertyKey) -> Vec<(NodeId, Value)> {
+        self.node_properties.drain_column(key)
+    }
+
+    /// Restores values into a previously spilled node property column.
+    #[cfg(not(feature = "temporal"))]
+    pub fn restore_node_property_column(
+        &self,
+        key: &PropertyKey,
+        values: impl Iterator<Item = (NodeId, Value)>,
+    ) {
+        self.node_properties.restore_column(key, values);
+    }
+
+    /// Whether a node property column has been spilled to disk.
+    #[cfg(not(feature = "temporal"))]
+    #[must_use]
+    pub fn is_node_column_spilled(&self, key: &PropertyKey) -> bool {
+        self.node_properties.is_column_spilled(key)
+    }
+
+    /// Marks a node property column as spilled without draining it.
+    ///
+    /// Used during startup to re-establish spill state for columns that
+    /// were already empty (serialized without values in the previous session).
+    #[cfg(not(feature = "temporal"))]
+    pub fn node_properties_mark_spilled(&self, key: &PropertyKey) {
+        self.node_properties.mark_column_spilled(key);
+    }
 }

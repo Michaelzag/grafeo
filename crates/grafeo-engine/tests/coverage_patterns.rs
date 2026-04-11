@@ -52,9 +52,9 @@ fn test_variable_length_1_to_3() {
              RETURN b.name AS name ORDER BY name",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 3, "1..3 hops from A via LINK: B, C, D");
+    assert_eq!(r.rows().len(), 3, "1..3 hops from A via LINK: B, C, D");
     let names: Vec<&str> = r
-        .rows
+        .rows()
         .iter()
         .filter_map(|row| match &row[0] {
             Value::String(s) => Some(s.as_str()),
@@ -78,8 +78,8 @@ fn test_variable_length_exact_2() {
              RETURN b.name AS name",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::String("C".into()));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::String("C".into()));
 }
 
 #[test]
@@ -93,7 +93,7 @@ fn test_variable_length_unbounded() {
         )
         .unwrap();
     assert_eq!(
-        r.rows.len(),
+        r.rows().len(),
         4,
         "Unbounded hops from A via LINK: B, C, D, E"
     );
@@ -112,8 +112,8 @@ fn test_multi_label_match_and_semantics() {
     let r = s
         .execute("MATCH (n:Node:Special) RETURN n.name AS name")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::String("E".into()));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::String("E".into()));
 }
 
 #[test]
@@ -124,7 +124,7 @@ fn test_multi_label_no_match_when_missing_label() {
     let r = s
         .execute("MATCH (n:Special:Nonexistent) RETURN n.name AS name")
         .unwrap();
-    assert_eq!(r.rows.len(), 0);
+    assert_eq!(r.rows().len(), 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -139,8 +139,8 @@ fn test_where_label_predicate() {
     let r = s
         .execute("MATCH (n) WHERE n:Special RETURN n.name AS name")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::String("E".into()));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::String("E".into()));
 }
 
 #[test]
@@ -151,8 +151,8 @@ fn test_where_label_predicate_multi() {
     let r = s
         .execute("MATCH (n) WHERE n:Node:Special RETURN n.name AS name")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::String("E".into()));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::String("E".into()));
 }
 
 #[test]
@@ -163,8 +163,8 @@ fn test_where_label_predicate_with_and() {
     let r = s
         .execute("MATCH (n) WHERE n:Node AND n.name = 'A' RETURN n.name AS name")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::String("A".into()));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::String("A".into()));
 }
 
 // ---------------------------------------------------------------------------
@@ -178,7 +178,7 @@ fn test_undirected_edge() {
     let r = s
         .execute("MATCH (a:Node {name: 'B'})-[:LINK]-(b:Node) RETURN b.name AS name ORDER BY name")
         .unwrap();
-    assert_eq!(r.rows.len(), 2, "Undirected LINK from B: A and C");
+    assert_eq!(r.rows().len(), 2, "Undirected LINK from B: A and C");
 }
 
 // ---------------------------------------------------------------------------
@@ -200,8 +200,8 @@ fn test_merge_on_create_and_on_match() {
     let r = session
         .execute("MATCH (p:Person {name: 'Django'}) RETURN p.created AS c, p.matched AS m")
         .unwrap();
-    assert_eq!(r.rows[0][0], Value::Bool(true));
-    assert_eq!(r.rows[0][1], Value::Null);
+    assert_eq!(r.rows()[0][0], Value::Bool(true));
+    assert_eq!(r.rows()[0][1], Value::Null);
 
     session
         .execute(
@@ -213,7 +213,7 @@ fn test_merge_on_create_and_on_match() {
     let r = session
         .execute("MATCH (p:Person {name: 'Django'}) RETURN p.matched AS m")
         .unwrap();
-    assert_eq!(r.rows[0][0], Value::Bool(true));
+    assert_eq!(r.rows()[0][0], Value::Bool(true));
 }
 
 // ---------------------------------------------------------------------------
@@ -238,8 +238,8 @@ fn test_merge_edge_pattern() {
     let r = session
         .execute("MATCH (:City)-[r:ROUTE]->(:City) RETURN r.distance AS d")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::Int64(650));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::Int64(650));
 }
 
 // ---------------------------------------------------------------------------
@@ -256,8 +256,8 @@ fn test_path_length() {
              RETURN length(p) AS len",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::Int64(4));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::Int64(4));
 }
 
 // ---------------------------------------------------------------------------
@@ -276,8 +276,8 @@ fn test_edge_property_filter() {
     let r = session
         .execute("MATCH (a:Person)-[r:RATED]->(b:Person) WHERE r.stars >= 4 RETURN b.name AS name")
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::String("Gus".into()));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::String("Gus".into()));
 }
 
 // ---------------------------------------------------------------------------
@@ -291,7 +291,7 @@ fn test_wildcard_edge_type() {
     let r = s
         .execute("MATCH (a:Node {name: 'A'})-[]->(b:Node) RETURN b.name AS name ORDER BY name")
         .unwrap();
-    assert_eq!(r.rows.len(), 2);
+    assert_eq!(r.rows().len(), 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -309,8 +309,8 @@ fn test_path_with_intermediate_filter() {
              RETURN c.name AS name",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::String("C".into()));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::String("C".into()));
 }
 
 // ---------------------------------------------------------------------------
@@ -326,7 +326,7 @@ fn test_delete_node() {
     let r = session
         .execute("MATCH (t:Temp) RETURN count(t) AS cnt")
         .unwrap();
-    assert_eq!(r.rows[0][0], Value::Int64(0));
+    assert_eq!(r.rows()[0][0], Value::Int64(0));
 }
 
 // ---------------------------------------------------------------------------
@@ -344,6 +344,6 @@ fn test_set_multiple_properties() {
     let r = session
         .execute("MATCH (i:Item) RETURN i.price AS p, i.stock AS s")
         .unwrap();
-    assert_eq!(r.rows[0][0], Value::Float64(9.99));
-    assert_eq!(r.rows[0][1], Value::Int64(100));
+    assert_eq!(r.rows()[0][0], Value::Float64(9.99));
+    assert_eq!(r.rows()[0][1], Value::Int64(100));
 }

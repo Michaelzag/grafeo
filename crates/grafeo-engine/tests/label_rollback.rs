@@ -137,13 +137,13 @@ fn test_label_add_undo_on_transaction_rollback() {
     session.execute("MATCH (n:Animal) SET n:Pet").unwrap();
 
     let during = session.execute("MATCH (n:Pet) RETURN n.species").unwrap();
-    assert_eq!(during.rows.len(), 1);
+    assert_eq!(during.rows().len(), 1);
 
     session.rollback().unwrap();
 
     let after = session.execute("MATCH (n:Pet) RETURN n.species").unwrap();
     assert!(
-        after.rows.is_empty(),
+        after.rows().is_empty(),
         "Label should be removed after rollback"
     );
 }
@@ -161,13 +161,13 @@ fn test_label_remove_undo_on_transaction_rollback() {
     session.execute("MATCH (n:Animal) REMOVE n:Pet").unwrap();
 
     let during = session.execute("MATCH (n:Pet) RETURN n.species").unwrap();
-    assert!(during.rows.is_empty());
+    assert!(during.rows().is_empty());
 
     session.rollback().unwrap();
 
     let after = session.execute("MATCH (n:Pet) RETURN n.species").unwrap();
     assert_eq!(
-        after.rows.len(),
+        after.rows().len(),
         1,
         "Label should be restored after rollback"
     );

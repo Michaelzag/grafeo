@@ -10,7 +10,7 @@ use grafeo_common::types::{EdgeId, NodeId, Value};
 use grafeo_common::utils::hash::FxHashMap;
 use grafeo_core::graph::Direction;
 use grafeo_core::graph::GraphStore;
-#[cfg(test)]
+#[cfg(all(test, feature = "lpg"))]
 use grafeo_core::graph::lpg::LpgStore;
 
 use super::super::{AlgorithmResult, ParameterDef, ParameterType};
@@ -387,7 +387,7 @@ impl_algorithm! {
 // Tests
 // ============================================================================
 
-#[cfg(test)]
+#[cfg(all(test, feature = "lpg"))]
 mod tests {
     use super::*;
 

@@ -42,6 +42,7 @@ pub struct FactorizedVector {
 
 /// The factorization state of a vector.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum FactorizedState {
     /// Flat: one value per logical row. `data.len() == logical_row_count`.
     Flat,

@@ -123,6 +123,7 @@ impl Default for DurabilityMode {
 
 /// Errors from [`Config::validate()`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ConfigError {
     /// Memory limit must be greater than zero.
     ZeroMemoryLimit,
@@ -243,6 +244,32 @@ pub struct Config {
     /// Default: `false` (CDC is opt-in to avoid overhead on the mutation
     /// hot path).
     pub cdc_enabled: bool,
+
+    /// CDC event retention policy.
+    ///
+    /// Controls how many events the CDC log retains in memory. By default,
+    /// retains up to 1,000 epochs and 100,000 events. Set to unlimited
+    /// (`max_epochs: None, max_events: None`) to disable pruning, but
+    /// beware of unbounded memory growth on long-running instances.
+    #[cfg(feature = "cdc")]
+    pub cdc_retention: crate::cdc::CdcRetentionConfig,
+
+    /// Per-section memory configuration.
+    ///
+    /// Maps `SectionType` to `SectionMemoryConfig` for sections that need
+    /// custom budgets or tier pinning. Sections not listed here use the
+    /// global `memory_limit` budget with automatic management.
+    pub section_configs: hashbrown::HashMap<
+        grafeo_common::storage::SectionType,
+        grafeo_common::storage::SectionMemoryConfig,
+    >,
+
+    /// Interval between automatic checkpoints.
+    ///
+    /// When set, the engine periodically flushes dirty sections to the
+    /// `.grafeo` container and truncates the WAL. `None` means checkpoints
+    /// only happen on explicit `wal_checkpoint()` or database close.
+    pub checkpoint_interval: Option<Duration>,
 }
 
 /// Configuration for adaptive query execution.
@@ -333,6 +360,10 @@ impl Default for Config {
             gc_interval: 100,
             access_mode: AccessMode::default(),
             cdc_enabled: false,
+            #[cfg(feature = "cdc")]
+            cdc_retention: crate::cdc::CdcRetentionConfig::default(),
+            section_configs: hashbrown::HashMap::new(),
+            checkpoint_interval: None,
         }
     }
 }
@@ -505,6 +536,43 @@ impl Config {
         self
     }
 
+    /// Sets memory configuration for a specific section type.
+    ///
+    /// Use this to cap a section's RAM usage or pin it to a storage tier.
+    /// Sections without explicit config use the global `memory_limit` budget.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use grafeo_engine::Config;
+    /// use grafeo_common::storage::{SectionType, SectionMemoryConfig, TierOverride};
+    ///
+    /// let config = Config::in_memory()
+    ///     .with_section_config(SectionType::VectorStore, SectionMemoryConfig {
+    ///         max_ram: Some(500 * 1024 * 1024), // 500 MB cap
+    ///         tier: TierOverride::Auto,
+    ///     });
+    /// ```
+    #[must_use]
+    pub fn with_section_config(
+        mut self,
+        section_type: grafeo_common::storage::SectionType,
+        config: grafeo_common::storage::SectionMemoryConfig,
+    ) -> Self {
+        self.section_configs.insert(section_type, config);
+        self
+    }
+
+    /// Sets the automatic checkpoint interval.
+    ///
+    /// When set, the engine periodically flushes dirty sections to disk.
+    /// Typical values: 30-300 seconds.
+    #[must_use]
+    pub fn with_checkpoint_interval(mut self, interval: Duration) -> Self {
+        self.checkpoint_interval = Some(interval);
+        self
+    }
+
     /// Validates the configuration, returning an error for invalid combinations.
     ///
     /// Called automatically by [`GrafeoDB::with_config()`](crate::GrafeoDB::with_config).
@@ -527,7 +595,7 @@ impl Config {
             return Err(ConfigError::ZeroWalFlushInterval);
         }
 
-        #[cfg(not(feature = "rdf"))]
+        #[cfg(not(feature = "triple-store"))]
         if self.graph_model == GraphModel::Rdf {
             return Err(ConfigError::RdfFeatureRequired);
         }
@@ -831,7 +899,7 @@ mod tests {
         assert_eq!(config.validate(), Err(ConfigError::ZeroWalFlushInterval));
     }
 
-    #[cfg(not(feature = "rdf"))]
+    #[cfg(not(feature = "triple-store"))]
     #[test]
     fn test_validate_rejects_rdf_without_feature() {
         let config = Config::in_memory().with_graph_model(GraphModel::Rdf);
@@ -917,5 +985,94 @@ mod tests {
     fn test_config_default_is_read_write() {
         let config = Config::default();
         assert_eq!(config.access_mode, AccessMode::ReadWrite);
+    }
+
+    // --- StorageFormat tests ---
+
+    #[test]
+    fn test_storage_format_default_is_auto() {
+        assert_eq!(StorageFormat::default(), StorageFormat::Auto);
+    }
+
+    #[test]
+    fn test_storage_format_display() {
+        assert_eq!(StorageFormat::Auto.to_string(), "auto");
+        assert_eq!(StorageFormat::WalDirectory.to_string(), "wal-directory");
+        assert_eq!(StorageFormat::SingleFile.to_string(), "single-file");
+    }
+
+    #[test]
+    fn test_config_with_storage_format() {
+        let config = Config::in_memory().with_storage_format(StorageFormat::SingleFile);
+        assert_eq!(config.storage_format, StorageFormat::SingleFile);
+
+        let config2 = Config::in_memory().with_storage_format(StorageFormat::WalDirectory);
+        assert_eq!(config2.storage_format, StorageFormat::WalDirectory);
+    }
+
+    // --- CDC config tests ---
+
+    #[test]
+    fn test_config_with_cdc() {
+        let config = Config::in_memory().with_cdc();
+        assert!(config.cdc_enabled);
+    }
+
+    #[test]
+    fn test_config_cdc_default_false() {
+        let config = Config::default();
+        assert!(!config.cdc_enabled);
+    }
+
+    // --- ConfigError as std::error::Error ---
+
+    #[test]
+    fn test_config_error_is_std_error() {
+        let err = ConfigError::ZeroMemoryLimit;
+        // Ensure it implements std::error::Error (no source)
+        let dyn_err: &dyn std::error::Error = &err;
+        assert!(dyn_err.source().is_none());
+        assert!(!dyn_err.to_string().is_empty());
+    }
+
+    // --- Validate accepts non-zero memory limit ---
+
+    #[test]
+    fn test_validate_accepts_nonzero_memory_limit() {
+        let config = Config::in_memory().with_memory_limit(1);
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_accepts_none_memory_limit() {
+        let config = Config::in_memory();
+        assert!(config.memory_limit.is_none());
+        assert!(config.validate().is_ok());
+    }
+
+    // --- DurabilityMode variants ---
+
+    #[test]
+    fn test_durability_mode_debug() {
+        let sync = DurabilityMode::Sync;
+        let debug = format!("{sync:?}");
+        assert_eq!(debug, "Sync");
+
+        let no_sync = DurabilityMode::NoSync;
+        let debug = format!("{no_sync:?}");
+        assert_eq!(debug, "NoSync");
+    }
+
+    // --- read_only config ---
+
+    #[test]
+    fn test_read_only_config_full() {
+        let config = Config::read_only("/tmp/data.grafeo");
+        assert_eq!(config.access_mode, AccessMode::ReadOnly);
+        assert!(!config.wal_enabled);
+        assert!(config.path.is_some());
+        // Other defaults should still apply
+        assert!(config.backward_edges);
+        assert_eq!(config.graph_model, GraphModel::Lpg);
     }
 }

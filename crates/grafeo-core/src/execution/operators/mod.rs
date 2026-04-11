@@ -254,6 +254,7 @@ impl FactorizedData for FlatDataWrapper {
 
 /// Error during operator execution.
 #[derive(Error, Debug, Clone)]
+#[non_exhaustive]
 pub enum OperatorError {
     /// Type mismatch during execution.
     #[error("type mismatch: expected {expected}, found {found}")]

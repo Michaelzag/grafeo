@@ -10,6 +10,7 @@ meta:
   section: "18.2"
   title: Advanced subqueries
   dataset: ecommerce
+  iso: [GQ18, GQ22]
 
 tests:
 

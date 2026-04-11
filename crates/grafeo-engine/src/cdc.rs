@@ -25,6 +25,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use grafeo_common::memory::buffer::{MemoryConsumer, MemoryRegion, priorities};
 use grafeo_common::types::{EdgeId, EpochId, HlcClock, HlcTimestamp, NodeId, Value};
 use hashbrown::HashMap as HbHashMap;
 use parking_lot::RwLock;
@@ -43,6 +44,7 @@ pub enum ChangeKind {
 
 /// A unique identifier for a graph entity (node, edge, or RDF triple).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub enum EntityId {
     /// A node identifier.
     Node(NodeId),
@@ -135,23 +137,65 @@ pub struct ChangeEvent {
     pub triple_graph: Option<String>,
 }
 
+/// Configuration for CDC event retention.
+///
+/// Controls how many events the CDC log keeps in memory. When limits are
+/// exceeded, the oldest events (by epoch) are pruned automatically.
+#[derive(Debug, Clone)]
+pub struct CdcRetentionConfig {
+    /// Maximum number of epochs to retain. Events older than
+    /// `current_epoch - max_epochs` are pruned during GC.
+    /// `None` disables epoch-based pruning.
+    pub max_epochs: Option<u64>,
+    /// Maximum total event count across all entities. Oldest events
+    /// (by epoch) are pruned when this limit is exceeded.
+    /// `None` disables count-based pruning.
+    pub max_events: Option<usize>,
+}
+
+impl Default for CdcRetentionConfig {
+    fn default() -> Self {
+        Self {
+            max_epochs: Some(1000),
+            max_events: Some(100_000),
+        }
+    }
+}
+
 /// The CDC log that records entity mutations.
 ///
 /// Thread-safe: uses `RwLock<HashMap>` for concurrent access. Timestamps
 /// are assigned by the embedded [`HlcClock`] to guarantee monotonicity.
+///
+/// Event retention is controlled by [`CdcRetentionConfig`]. Without retention
+/// limits, the log grows unbounded (see [#250]).
+///
+/// [#250]: https://github.com/GrafeoDB/grafeo/issues/250
 #[derive(Debug)]
 pub struct CdcLog {
     events: RwLock<HbHashMap<EntityId, Vec<ChangeEvent>>>,
     clock: Arc<HlcClock>,
+    retention: CdcRetentionConfig,
 }
 
 impl CdcLog {
-    /// Creates a new empty CDC log with a fresh HLC clock.
+    /// Creates a new empty CDC log with a fresh HLC clock and default retention.
     #[must_use]
     pub fn new() -> Self {
         Self {
             events: RwLock::new(HbHashMap::new()),
             clock: Arc::new(HlcClock::new()),
+            retention: CdcRetentionConfig::default(),
+        }
+    }
+
+    /// Creates a new CDC log with the given retention config.
+    #[must_use]
+    pub fn with_retention(retention: CdcRetentionConfig) -> Self {
+        Self {
+            events: RwLock::new(HbHashMap::new()),
+            clock: Arc::new(HlcClock::new()),
+            retention,
         }
     }
 
@@ -406,11 +450,132 @@ impl CdcLog {
     pub fn event_count(&self) -> usize {
         self.events.read().values().map(Vec::len).sum()
     }
+
+    /// Removes all events with `epoch < min_epoch`.
+    ///
+    /// Entities whose entire history falls below the threshold are removed
+    /// from the map entirely.
+    pub fn prune_before(&self, min_epoch: EpochId) {
+        let mut guard = self.events.write();
+        guard.retain(|_, events| {
+            events.retain(|e| e.epoch >= min_epoch);
+            !events.is_empty()
+        });
+    }
+
+    /// Prunes the oldest events to stay within `max_events`, if configured.
+    ///
+    /// Finds the epoch cutoff that brings the total count at or below the
+    /// limit, then calls [`prune_before`](Self::prune_before).
+    pub fn prune_to_limit(&self) {
+        let Some(max) = self.retention.max_events else {
+            return;
+        };
+        let count = self.event_count();
+        if count <= max {
+            return;
+        }
+
+        // Collect all epochs, sort, and find the cutoff
+        let guard = self.events.read();
+        let mut epochs: Vec<EpochId> = guard
+            .values()
+            .flat_map(|events| events.iter().map(|e| e.epoch))
+            .collect();
+        drop(guard);
+
+        epochs.sort();
+        let excess = count - max;
+        // The cutoff epoch: remove events up to and including this epoch
+        if let Some(&cutoff) = epochs.get(excess.saturating_sub(1)) {
+            self.prune_before(EpochId::new(cutoff.as_u64() + 1));
+        }
+    }
+
+    /// Applies epoch-based and count-based retention limits.
+    ///
+    /// Called from the database GC cycle.
+    pub fn apply_retention(&self, current_epoch: EpochId) {
+        // Epoch-based: prune events older than max_epochs
+        if let Some(max_epochs) = self.retention.max_epochs {
+            let cutoff = current_epoch.as_u64().saturating_sub(max_epochs);
+            self.prune_before(EpochId::new(cutoff));
+        }
+        // Count-based: prune oldest events if over limit
+        self.prune_to_limit();
+    }
+
+    /// Approximate memory usage in bytes.
+    ///
+    /// Each `ChangeEvent` is roughly 256 bytes including the property maps,
+    /// strings, and per-entity HashMap overhead.
+    #[must_use]
+    pub fn approximate_memory_bytes(&self) -> usize {
+        // ~256 bytes per event: struct fields + property map overhead + strings
+        self.event_count() * 256
+    }
 }
 
 impl Default for CdcLog {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// `MemoryConsumer` implementation for CDC: eviction prunes the oldest events.
+impl MemoryConsumer for CdcLog {
+    fn name(&self) -> &str {
+        "cdc_log"
+    }
+
+    fn memory_usage(&self) -> usize {
+        self.approximate_memory_bytes()
+    }
+
+    fn eviction_priority(&self) -> u8 {
+        // CDC events are derived data (can be re-computed from WAL if needed).
+        // Evict before index buffers and graph storage.
+        priorities::QUERY_CACHE
+    }
+
+    fn region(&self) -> MemoryRegion {
+        MemoryRegion::ExecutionBuffers
+    }
+
+    fn evict(&self, target_bytes: usize) -> usize {
+        let before = self.approximate_memory_bytes();
+        if before == 0 {
+            return 0;
+        }
+        // Estimate how many events to remove
+        let events_to_remove = target_bytes / 256;
+        if events_to_remove == 0 {
+            return 0;
+        }
+
+        // Find the epoch cutoff for the oldest N events
+        let guard = self.events.read();
+        let mut epochs: Vec<EpochId> = guard
+            .values()
+            .flat_map(|events| events.iter().map(|e| e.epoch))
+            .collect();
+        drop(guard);
+
+        if epochs.is_empty() {
+            return 0;
+        }
+        epochs.sort();
+        let cutoff_idx = events_to_remove.min(epochs.len()).saturating_sub(1);
+        let cutoff = epochs[cutoff_idx];
+        self.prune_before(EpochId::new(cutoff.as_u64() + 1));
+
+        before.saturating_sub(self.approximate_memory_bytes())
+    }
+
+    fn can_spill(&self) -> bool {
+        // CDC events are transient metadata: eviction (pruning) is sufficient.
+        // No disk spill needed.
+        false
     }
 }
 
@@ -550,5 +715,202 @@ mod tests {
         let entity: EntityId = edge_id.into();
         assert!(!entity.is_node());
         assert_eq!(entity.as_u64(), 7);
+    }
+
+    #[test]
+    fn test_prune_before() {
+        let log = CdcLog::new();
+
+        // Record events across 10 epochs
+        for epoch in 1..=10 {
+            log.record_create_node(NodeId::new(epoch), EpochId(epoch), None, None);
+        }
+        assert_eq!(log.event_count(), 10);
+
+        // Prune everything before epoch 6
+        log.prune_before(EpochId(6));
+        assert_eq!(log.event_count(), 5);
+
+        // Verify only epochs 6-10 remain
+        let remaining = log.changes_between(EpochId(0), EpochId(100));
+        assert!(remaining.iter().all(|e| e.epoch >= EpochId(6)));
+    }
+
+    #[test]
+    fn test_prune_to_limit() {
+        let retention = CdcRetentionConfig {
+            max_epochs: None,
+            max_events: Some(5),
+        };
+        let log = CdcLog::with_retention(retention);
+
+        // Record 10 events
+        for epoch in 1..=10 {
+            log.record_create_node(NodeId::new(epoch), EpochId(epoch), None, None);
+        }
+        assert_eq!(log.event_count(), 10);
+
+        // Prune to limit of 5
+        log.prune_to_limit();
+        assert!(log.event_count() <= 5);
+    }
+
+    #[test]
+    fn test_apply_retention_epoch_based() {
+        let retention = CdcRetentionConfig {
+            max_epochs: Some(3),
+            max_events: None,
+        };
+        let log = CdcLog::with_retention(retention);
+
+        for epoch in 1..=10 {
+            log.record_create_node(NodeId::new(epoch), EpochId(epoch), None, None);
+        }
+        assert_eq!(log.event_count(), 10);
+
+        // Apply retention at current epoch 10 with max_epochs=3
+        // Should prune events before epoch 7
+        log.apply_retention(EpochId(10));
+
+        let remaining = log.changes_between(EpochId(0), EpochId(100));
+        assert!(remaining.iter().all(|e| e.epoch >= EpochId(7)));
+        assert_eq!(remaining.len(), 4); // epochs 7, 8, 9, 10
+    }
+
+    #[test]
+    fn test_memory_consumer_evict() {
+        let log = CdcLog::new();
+
+        // Record 100 events
+        for epoch in 1..=100 {
+            log.record_create_node(NodeId::new(epoch), EpochId(epoch), None, None);
+        }
+
+        let before = log.approximate_memory_bytes();
+        assert!(before > 0);
+
+        // Evict ~half the memory
+        let freed = log.evict(before / 2);
+        assert!(freed > 0);
+        assert!(log.event_count() < 100);
+    }
+
+    #[test]
+    fn test_retention_config_default() {
+        let config = CdcRetentionConfig::default();
+        assert_eq!(config.max_epochs, Some(1000));
+        assert_eq!(config.max_events, Some(100_000));
+    }
+
+    #[test]
+    fn test_apply_retention_count_only() {
+        let retention = CdcRetentionConfig {
+            max_epochs: None,
+            max_events: Some(4),
+        };
+        let log = CdcLog::with_retention(retention);
+
+        for epoch in 1..=10 {
+            log.record_create_node(NodeId::new(epoch), EpochId(epoch), None, None);
+        }
+        assert_eq!(log.event_count(), 10);
+
+        // apply_retention with no epoch limit should still prune by count
+        log.apply_retention(EpochId(10));
+        assert!(
+            log.event_count() <= 4,
+            "count-based retention should prune to at most 4 events, got {}",
+            log.event_count()
+        );
+    }
+
+    #[test]
+    fn test_apply_retention_combined_epoch_and_count() {
+        // epoch limit keeps last 5 (epochs 6..=10), count limit keeps 3.
+        // The stricter (count) should win after both passes.
+        let retention = CdcRetentionConfig {
+            max_epochs: Some(5),
+            max_events: Some(3),
+        };
+        let log = CdcLog::with_retention(retention);
+
+        for epoch in 1..=10 {
+            log.record_create_node(NodeId::new(epoch), EpochId(epoch), None, None);
+        }
+        assert_eq!(log.event_count(), 10);
+
+        log.apply_retention(EpochId(10));
+
+        // Epoch pass prunes epochs < 5 (keeps 6..=10 = 5 events).
+        // Count pass then prunes to at most 3.
+        assert!(
+            log.event_count() <= 3,
+            "combined retention should honour the stricter limit, got {}",
+            log.event_count()
+        );
+        // All remaining events should be recent
+        let remaining = log.changes_between(EpochId(0), EpochId(100));
+        assert!(remaining.iter().all(|e| e.epoch >= EpochId(6)));
+    }
+
+    #[test]
+    fn test_prune_before_epoch_zero() {
+        let log = CdcLog::new();
+
+        for epoch in 1..=5 {
+            log.record_create_node(NodeId::new(epoch), EpochId(epoch), None, None);
+        }
+        assert_eq!(log.event_count(), 5);
+
+        // Pruning before epoch 0 should be a no-op: all events have epoch >= 1
+        log.prune_before(EpochId(0));
+        assert_eq!(
+            log.event_count(),
+            5,
+            "prune_before(0) should not remove anything"
+        );
+    }
+
+    #[test]
+    fn test_prune_to_limit_same_epoch() {
+        let retention = CdcRetentionConfig {
+            max_epochs: None,
+            max_events: Some(3),
+        };
+        let log = CdcLog::with_retention(retention);
+
+        // All 10 events share the same epoch: the cutoff epoch equals the
+        // only epoch present, so prune_before removes everything at or below
+        // that epoch. This is by design: epoch-granularity pruning cannot
+        // split events within the same epoch.
+        for i in 1..=10 {
+            log.record_create_node(NodeId::new(i), EpochId(5), None, None);
+        }
+        assert_eq!(log.event_count(), 10);
+
+        log.prune_to_limit();
+
+        // After pruning, the log should have fewer events than before.
+        // With all events at the same epoch, the cutoff removes them all
+        // because prune_before uses a strict < comparison on epoch+1.
+        assert!(
+            log.event_count() < 10,
+            "prune_to_limit should have removed events, got {}",
+            log.event_count()
+        );
+    }
+
+    #[test]
+    fn test_evict_tiny_target_is_noop() {
+        let log = CdcLog::new();
+        for epoch in 1..=10 {
+            log.record_create_node(NodeId::new(epoch), EpochId(epoch), None, None);
+        }
+        assert_eq!(log.event_count(), 10);
+
+        // target_bytes < 256 means events_to_remove rounds to 0, so nothing freed
+        let freed = log.evict(100);
+        assert_eq!(freed, 0, "evict with target < 256 bytes should be a no-op");
+        assert_eq!(log.event_count(), 10);
     }
 }

@@ -217,6 +217,68 @@ impl InvertedIndex {
         self.postings.len()
     }
 
+    /// Returns the BM25 configuration.
+    #[must_use]
+    pub fn config(&self) -> &BM25Config {
+        &self.config
+    }
+
+    /// Snapshot the index for serialization.
+    ///
+    /// Returns (postings, doc_lengths, total_length) where postings is
+    /// a vec of (term, vec of (node_id, term_freq)).
+    #[must_use]
+    pub fn snapshot(&self) -> (Vec<(String, Vec<(NodeId, u32)>)>, Vec<(NodeId, u32)>, u64) {
+        let mut postings: Vec<(String, Vec<(NodeId, u32)>)> = self
+            .postings
+            .iter()
+            .map(|(term, pl)| {
+                let entries: Vec<(NodeId, u32)> = pl
+                    .postings
+                    .iter()
+                    .map(|p| (p.node_id, p.term_freq))
+                    .collect();
+                (term.clone(), entries)
+            })
+            .collect();
+        postings.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        let mut doc_lengths: Vec<(NodeId, u32)> = self
+            .doc_lengths
+            .iter()
+            .map(|(id, len)| (*id, *len))
+            .collect();
+        doc_lengths.sort_by_key(|(id, _)| *id);
+
+        (postings, doc_lengths, self.total_length)
+    }
+
+    /// Override the BM25 configuration parameters.
+    pub fn set_config(&mut self, config: BM25Config) {
+        self.config = config;
+    }
+
+    /// Restore the index from a snapshot. Replaces all current data.
+    pub fn restore(
+        &mut self,
+        postings: Vec<(String, Vec<(NodeId, u32)>)>,
+        doc_lengths: Vec<(NodeId, u32)>,
+        total_length: u64,
+    ) {
+        self.postings.clear();
+        for (term, entries) in postings {
+            let posting_list = PostingList {
+                postings: entries
+                    .into_iter()
+                    .map(|(node_id, term_freq)| Posting { node_id, term_freq })
+                    .collect(),
+            };
+            self.postings.insert(term, posting_list);
+        }
+        self.doc_lengths = doc_lengths.into_iter().collect();
+        self.total_length = total_length;
+    }
+
     /// Returns estimated heap memory in bytes.
     #[must_use]
     pub fn heap_memory_bytes(&self) -> usize {

@@ -151,7 +151,7 @@ fn param_string_filter() {
         )
         .unwrap();
     assert_eq!(r.row_count(), 1);
-    assert_eq!(r.rows[0][0], Value::Int64(25));
+    assert_eq!(r.rows()[0][0], Value::Int64(25));
 }
 
 /// Multiple parameters in a single query.
@@ -169,7 +169,7 @@ fn param_multiple_in_and_condition() {
         )
         .unwrap();
     assert_eq!(r.row_count(), 1);
-    assert_eq!(r.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(r.rows()[0][0], Value::String("Alix".into()));
 }
 
 /// Parameter in an INSERT property value.
@@ -183,7 +183,7 @@ fn param_in_insert_property() {
         .unwrap();
     let r = s.execute("MATCH (c:City) RETURN c.name").unwrap();
     assert_eq!(r.row_count(), 1);
-    assert_eq!(r.rows[0][0], Value::String("Amsterdam".into()));
+    assert_eq!(r.rows()[0][0], Value::String("Amsterdam".into()));
 }
 
 /// Boolean parameter substitution.
@@ -205,7 +205,7 @@ fn param_boolean_value() {
         )
         .unwrap();
     assert_eq!(r.row_count(), 1);
-    assert_eq!(r.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(r.rows()[0][0], Value::String("Alix".into()));
 }
 
 /// Float parameter substitution.
@@ -227,7 +227,7 @@ fn param_float_comparison() {
         )
         .unwrap();
     assert_eq!(r.row_count(), 1);
-    assert_eq!(r.rows[0][0], Value::String("alpha".into()));
+    assert_eq!(r.rows()[0][0], Value::String("alpha".into()));
 }
 
 /// No parameters referenced in query, but params map provided: should succeed.
@@ -260,7 +260,7 @@ fn language_dispatch_gql() {
         )
         .unwrap();
     assert_eq!(r.row_count(), 3);
-    assert_eq!(r.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(r.rows()[0][0], Value::String("Alix".into()));
 }
 
 /// execute_language with unknown language name returns an error.
@@ -292,7 +292,7 @@ fn language_dispatch_gql_with_params() {
         )
         .unwrap();
     assert_eq!(r.row_count(), 1);
-    assert_eq!(r.rows[0][0], Value::Int64(40));
+    assert_eq!(r.rows()[0][0], Value::Int64(40));
 }
 
 /// execute_language "cypher" works when the feature is enabled.
@@ -309,8 +309,8 @@ fn language_dispatch_cypher() {
         )
         .unwrap();
     assert_eq!(r.row_count(), 2);
-    assert_eq!(r.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(r.rows[1][0], Value::String("Vincent".into()));
+    assert_eq!(r.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(r.rows()[1][0], Value::String("Vincent".into()));
 }
 
 /// execute_language "cypher" with params.
@@ -382,7 +382,7 @@ fn explain_returns_plan_tree() {
     assert_eq!(r.columns, vec!["plan"]);
     assert_eq!(r.row_count(), 1);
     // The plan text should mention key operators
-    if let Value::String(plan_text) = &r.rows[0][0] {
+    if let Value::String(plan_text) = &r.rows()[0][0] {
         assert!(
             !plan_text.is_empty(),
             "EXPLAIN plan text should not be empty"
@@ -433,7 +433,7 @@ fn transaction_commit_persists() {
     let s2 = db.session();
     let r = s2.execute("MATCH (k:Keeper) RETURN k.name").unwrap();
     assert_eq!(r.row_count(), 1);
-    assert_eq!(r.rows[0][0], Value::String("Butch".into()));
+    assert_eq!(r.rows()[0][0], Value::String("Butch".into()));
 }
 
 /// Multiple inserts in one transaction: all or nothing.
@@ -491,8 +491,8 @@ fn session_state_persists_across_queries() {
         .execute("MATCH (c:Counter) RETURN c.val ORDER BY c.val")
         .unwrap();
     assert_eq!(r.row_count(), 2);
-    assert_eq!(r.rows[0][0], Value::Int64(1));
-    assert_eq!(r.rows[1][0], Value::Int64(2));
+    assert_eq!(r.rows()[0][0], Value::Int64(1));
+    assert_eq!(r.rows()[1][0], Value::Int64(2));
 }
 
 // =========================================================================

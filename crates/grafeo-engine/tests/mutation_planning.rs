@@ -68,8 +68,8 @@ fn test_unwind_literal_list() {
 
     let result = session.execute("UNWIND [1, 2, 3] AS x RETURN x").unwrap();
 
-    assert_eq!(result.rows.len(), 3);
-    let values: Vec<&Value> = result.rows.iter().map(|r| &r[0]).collect();
+    assert_eq!(result.rows().len(), 3);
+    let values: Vec<&Value> = result.rows().iter().map(|r| &r[0]).collect();
     assert!(values.contains(&&Value::Int64(1)));
     assert!(values.contains(&&Value::Int64(2)));
     assert!(values.contains(&&Value::Int64(3)));
@@ -86,8 +86,8 @@ fn test_unwind_after_match() {
         .unwrap();
 
     // Alix x 2 unwind elements = 2 rows
-    assert_eq!(result.rows.len(), 2);
-    for row in &result.rows {
+    assert_eq!(result.rows().len(), 2);
+    for row in result.rows() {
         assert_eq!(row[0], Value::String("Alix".into()));
     }
 }
@@ -101,8 +101,8 @@ fn test_unwind_with_strings() {
         .execute("UNWIND ['a', 'b', 'c'] AS letter RETURN letter")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 3);
-    let values: Vec<&Value> = result.rows.iter().map(|r| &r[0]).collect();
+    assert_eq!(result.rows().len(), 3);
+    let values: Vec<&Value> = result.rows().iter().map(|r| &r[0]).collect();
     assert!(values.contains(&&Value::String("a".into())));
     assert!(values.contains(&&Value::String("b".into())));
     assert!(values.contains(&&Value::String("c".into())));
@@ -123,11 +123,11 @@ fn test_unwind_create() {
         .execute("MATCH (n:Number) RETURN n.val ORDER BY n.val")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows().len(), 3);
     // Verify actual property values, not just row count
-    assert_eq!(result.rows[0][0], Value::Int64(1));
-    assert_eq!(result.rows[1][0], Value::Int64(2));
-    assert_eq!(result.rows[2][0], Value::Int64(3));
+    assert_eq!(result.rows()[0][0], Value::Int64(1));
+    assert_eq!(result.rows()[1][0], Value::Int64(2));
+    assert_eq!(result.rows()[2][0], Value::Int64(3));
 }
 
 #[test]
@@ -148,11 +148,11 @@ fn test_unwind_create_map_property_access() {
         .execute("MATCH (n:Test) RETURN n.id AS id, n.name AS name ORDER BY n.id")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 2);
-    assert_eq!(result.rows[0][0], Value::String("u1".into()));
-    assert_eq!(result.rows[0][1], Value::String("Gus".into()));
-    assert_eq!(result.rows[1][0], Value::String("u2".into()));
-    assert_eq!(result.rows[1][1], Value::String("Harm".into()));
+    assert_eq!(result.rows().len(), 2);
+    assert_eq!(result.rows()[0][0], Value::String("u1".into()));
+    assert_eq!(result.rows()[0][1], Value::String("Gus".into()));
+    assert_eq!(result.rows()[1][0], Value::String("u2".into()));
+    assert_eq!(result.rows()[1][1], Value::String("Harm".into()));
 }
 
 #[test]
@@ -191,11 +191,11 @@ fn test_unwind_param_create_map_property_access() {
         .execute("MATCH (n:Test) RETURN n.id AS id, n.name AS name ORDER BY n.id")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 2);
-    assert_eq!(result.rows[0][0], Value::String("u1".into()));
-    assert_eq!(result.rows[0][1], Value::String("Gus".into()));
-    assert_eq!(result.rows[1][0], Value::String("u2".into()));
-    assert_eq!(result.rows[1][1], Value::String("Harm".into()));
+    assert_eq!(result.rows().len(), 2);
+    assert_eq!(result.rows()[0][0], Value::String("u1".into()));
+    assert_eq!(result.rows()[0][1], Value::String("Gus".into()));
+    assert_eq!(result.rows()[1][0], Value::String("u2".into()));
+    assert_eq!(result.rows()[1][1], Value::String("Harm".into()));
 }
 
 #[test]
@@ -207,10 +207,10 @@ fn test_for_with_ordinality() {
         .execute("FOR x IN [10, 20, 30] WITH ORDINALITY i RETURN x, i")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows().len(), 3);
     // ORDINALITY is 1-based
     let mut pairs: Vec<(i64, i64)> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| {
             let x = match &r[0] {
@@ -237,10 +237,10 @@ fn test_for_with_offset() {
         .execute("FOR x IN [10, 20, 30] WITH OFFSET idx RETURN x, idx")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows().len(), 3);
     // OFFSET is 0-based
     let mut pairs: Vec<(i64, i64)> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| {
             let x = match &r[0] {
@@ -266,7 +266,7 @@ fn test_for_without_ordinality_or_offset() {
 
     let result = session.execute("FOR x IN [1, 2, 3] RETURN x").unwrap();
 
-    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows().len(), 3);
 }
 
 // ============================================================================
@@ -282,8 +282,8 @@ fn test_merge_creates_when_not_exists() {
         .execute("MERGE (n:Animal {species: 'Cat'}) RETURN n.species")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Cat".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Cat".into()));
     assert_eq!(db.node_count(), 1);
 }
 
@@ -298,8 +298,8 @@ fn test_merge_matches_existing() {
         .execute("MERGE (n:Person {name: 'Alix'}) RETURN n.name")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
     // No new node created
     assert_eq!(db.node_count(), before);
 }
@@ -315,9 +315,9 @@ fn test_merge_on_create_set() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("NewGuy".into()));
-    assert_eq!(result.rows[0][1], Value::Bool(true));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("NewGuy".into()));
+    assert_eq!(result.rows()[0][1], Value::Bool(true));
 }
 
 #[test]
@@ -331,9 +331,9 @@ fn test_merge_on_match_set() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[0][1], Value::Bool(true));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[0][1], Value::Bool(true));
 }
 
 // ============================================================================
@@ -351,8 +351,8 @@ fn test_create_node_with_list_property() {
 
     let result = session.execute("MATCH (t:Tag) RETURN t.names").unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    match &result.rows[0][0] {
+    assert_eq!(result.rows().len(), 1);
+    match &result.rows()[0][0] {
         Value::List(items) => assert_eq!(items.len(), 3),
         other => panic!("expected list, got {:?}", other),
     }
@@ -372,8 +372,8 @@ fn test_create_edge_named_variable() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("LIKES".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("LIKES".into()));
 }
 
 #[cfg(feature = "cypher")]
@@ -415,9 +415,9 @@ fn test_create_path_with_new_nodes() {
         .execute("MATCH (c:City)-[:IN]->(co:Country) RETURN c.name, co.name")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Paris".into()));
-    assert_eq!(result.rows[0][1], Value::String("France".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Paris".into()));
+    assert_eq!(result.rows()[0][1], Value::String("France".into()));
 }
 
 // ============================================================================
@@ -483,8 +483,8 @@ fn test_set_property_literal() {
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN n.age")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Int64(31));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Int64(31));
 }
 
 #[test]
@@ -500,8 +500,8 @@ fn test_set_property_string() {
         .execute("MATCH (n:Person {name: 'Gus'}) RETURN n.city")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Berlin".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Berlin".into()));
 }
 
 // ============================================================================
@@ -521,8 +521,8 @@ fn test_add_label_via_set() {
     // Alix should now have both Person and Employee labels
     let result = session.execute("MATCH (n:Employee) RETURN n.name").unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
 }
 
 #[test]
@@ -536,14 +536,14 @@ fn test_remove_label() {
         .unwrap();
 
     let result = session.execute("MATCH (n:Temp) RETURN n.name").unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
 
     session
         .execute("MATCH (n:Person {name: 'Alix'}) REMOVE n:Temp")
         .unwrap();
 
     let result = session.execute("MATCH (n:Temp) RETURN n.name").unwrap();
-    assert!(result.rows.is_empty());
+    assert!(result.rows().is_empty());
 }
 
 // ── Regression: SET/REMOVE label variable binding (#178, #182) ──────────────
@@ -557,7 +557,7 @@ fn test_set_label_preserves_variable_binding() {
         .execute("MATCH (n:Person {name: 'Alix'}) SET n:Employee RETURN n.name")
         .unwrap();
     assert_eq!(r.row_count(), 1);
-    assert_eq!(r.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(r.rows()[0][0], Value::String("Alix".into()));
 }
 
 #[test]
@@ -571,7 +571,7 @@ fn test_remove_label_preserves_variable_binding() {
         .execute("MATCH (n:Person {name: 'Alix'}) REMOVE n:Employee RETURN n.name")
         .unwrap();
     assert_eq!(r.row_count(), 1);
-    assert_eq!(r.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(r.rows()[0][0], Value::String("Alix".into()));
 }
 
 #[test]
@@ -585,7 +585,7 @@ fn test_count_star_after_set_label() {
         .execute("MATCH (n:Node) SET n:Tagged RETURN count(*) AS cnt")
         .unwrap();
     assert_eq!(r.row_count(), 1);
-    assert_eq!(r.rows[0][0], Value::Int64(3));
+    assert_eq!(r.rows()[0][0], Value::Int64(3));
 }
 
 #[test]
@@ -600,7 +600,7 @@ fn test_set_label_then_set_property() {
         .execute("MATCH (n:Employee {name: 'Alix'}) RETURN n.role")
         .unwrap();
     assert_eq!(r.row_count(), 1);
-    assert_eq!(r.rows[0][0], Value::String("Engineer".into()));
+    assert_eq!(r.rows()[0][0], Value::String("Engineer".into()));
 }
 
 // ── Regression: phantom nodes from MATCH...CREATE edge (#181) ───────────────
@@ -620,7 +620,7 @@ fn test_match_create_edge_no_phantom_nodes() {
     let before = session
         .execute_cypher("MATCH (n) RETURN count(n) AS cnt")
         .unwrap();
-    let count_before = match &before.rows[0][0] {
+    let count_before = match &before.rows()[0][0] {
         Value::Int64(n) => *n,
         other => panic!("expected Int64, got {other:?}"),
     };
@@ -635,7 +635,7 @@ fn test_match_create_edge_no_phantom_nodes() {
         .execute_cypher("MATCH (n) RETURN count(n) AS cnt")
         .unwrap();
     assert_eq!(
-        after.rows[0][0],
+        after.rows()[0][0],
         Value::Int64(count_before),
         "phantom nodes created"
     );
@@ -643,7 +643,7 @@ fn test_match_create_edge_no_phantom_nodes() {
     let edges = session
         .execute_cypher("MATCH ()-[r:KNOWS]->() RETURN count(r) AS cnt")
         .unwrap();
-    assert_eq!(edges.rows[0][0], Value::Int64(1));
+    assert_eq!(edges.rows()[0][0], Value::Int64(1));
 }
 
 // ============================================================================
@@ -664,9 +664,9 @@ fn test_optional_match_with_results() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[0][1], Value::String("TechCorp".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[0][1], Value::String("TechCorp".into()));
 }
 
 #[test]
@@ -686,7 +686,7 @@ fn test_optional_match_null_when_missing() {
 
     // Should produce exactly 1 row: LEFT JOIN keeps Harm even without a MANAGES match
     assert_eq!(
-        result.rows.len(),
+        result.rows().len(),
         1,
         "OPTIONAL MATCH should return 1 row even when right side has no matches"
     );
@@ -717,20 +717,20 @@ fn test_optional_match_where_right_side_preserves_left() {
 
     // All 3 persons should appear: Alix+TechCorp, Gus+TechCorp, Harm+null
     assert_eq!(
-        result.rows.len(),
+        result.rows().len(),
         3,
         "All persons should be preserved; WHERE on right side should not filter left rows"
     );
 
     // Alix -> TechCorp
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[0][1], Value::String("TechCorp".into()));
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[0][1], Value::String("TechCorp".into()));
     // Gus -> TechCorp
-    assert_eq!(result.rows[1][0], Value::String("Gus".into()));
-    assert_eq!(result.rows[1][1], Value::String("TechCorp".into()));
+    assert_eq!(result.rows()[1][0], Value::String("Gus".into()));
+    assert_eq!(result.rows()[1][1], Value::String("TechCorp".into()));
     // Harm -> null (no WORKS_AT edge, preserved by left join)
-    assert_eq!(result.rows[2][0], Value::String("Harm".into()));
-    assert_eq!(result.rows[2][1], Value::Null);
+    assert_eq!(result.rows()[2][0], Value::String("Harm".into()));
+    assert_eq!(result.rows()[2][1], Value::Null);
 }
 
 #[cfg(feature = "cypher")]
@@ -751,9 +751,9 @@ fn test_optional_match_where_left_side_filters_correctly() {
         .unwrap();
 
     // Only NYC persons: Alix+TechCorp, Gus+TechCorp (Harm is in London, filtered out)
-    assert_eq!(result.rows.len(), 2);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[1][0], Value::String("Gus".into()));
+    assert_eq!(result.rows().len(), 2);
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[1][0], Value::String("Gus".into()));
 }
 
 #[cfg(feature = "cypher")]
@@ -776,11 +776,11 @@ fn test_optional_match_where_mixed_predicates() {
         .unwrap();
 
     // Only NYC persons: Alix+TechCorp, Gus+TechCorp
-    assert_eq!(result.rows.len(), 2);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[0][1], Value::String("TechCorp".into()));
-    assert_eq!(result.rows[1][0], Value::String("Gus".into()));
-    assert_eq!(result.rows[1][1], Value::String("TechCorp".into()));
+    assert_eq!(result.rows().len(), 2);
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[0][1], Value::String("TechCorp".into()));
+    assert_eq!(result.rows()[1][0], Value::String("Gus".into()));
+    assert_eq!(result.rows()[1][1], Value::String("TechCorp".into()));
 }
 
 #[cfg(feature = "cypher")]
@@ -803,11 +803,11 @@ fn test_optional_match_where_right_property_no_match() {
 
     // All 3 persons should still appear, all with NULL company
     assert_eq!(
-        result.rows.len(),
+        result.rows().len(),
         3,
         "All persons preserved with NULL when no right match passes the filter"
     );
-    for row in &result.rows {
+    for row in result.rows() {
         assert_eq!(row[1], Value::Null);
     }
 }
@@ -836,14 +836,14 @@ fn test_optional_match_where_cross_side_predicate() {
     // Gus(25) knows Harm(35). Harm is older -> Gus,Harm
     // Harm(35) knows nobody (no outgoing KNOWS edges) -> Harm,null
     assert!(
-        result.rows.len() >= 3,
+        result.rows().len() >= 3,
         "Expected at least 3 rows: Alix+Harm, Gus+Harm, Harm+null, got {}",
-        result.rows.len()
+        result.rows().len()
     );
 
     // Verify Harm appears with null (preserved by left join)
     let harm_rows: Vec<_> = result
-        .rows
+        .rows()
         .iter()
         .filter(|r| r[0] == Value::String("Harm".into()))
         .collect();
@@ -875,12 +875,12 @@ fn test_optional_match_gql_where_pushdown() {
         .unwrap();
 
     assert_eq!(
-        result.rows.len(),
+        result.rows().len(),
         3,
         "GQL: all persons preserved with right-side WHERE pushdown"
     );
-    assert_eq!(result.rows[2][0], Value::String("Harm".into()));
-    assert_eq!(result.rows[2][1], Value::Null);
+    assert_eq!(result.rows()[2][0], Value::String("Harm".into()));
+    assert_eq!(result.rows()[2][1], Value::Null);
 }
 
 #[cfg(feature = "cypher")]
@@ -900,10 +900,10 @@ fn test_chained_optional_matches() {
         .unwrap();
 
     // Harm has no WORKS_AT and no outgoing KNOWS edges
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Harm".into()));
-    assert_eq!(result.rows[0][1], Value::Null);
-    assert_eq!(result.rows[0][2], Value::Null);
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Harm".into()));
+    assert_eq!(result.rows()[0][1], Value::Null);
+    assert_eq!(result.rows()[0][2], Value::Null);
 }
 
 #[cfg(feature = "cypher")]
@@ -923,8 +923,8 @@ fn test_optional_match_is_null_check() {
         .unwrap();
 
     // Nobody has a MANAGES edge, so all rows should have c IS NULL = true
-    assert_eq!(result.rows.len(), 3);
-    for row in &result.rows {
+    assert_eq!(result.rows().len(), 3);
+    for row in result.rows() {
         assert_eq!(row[1], Value::Bool(true));
     }
 }
@@ -950,10 +950,10 @@ fn test_chained_independent_optional_matches_mixed() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[0][1], Value::String("TechCorp".into()));
-    assert_eq!(result.rows[0][2], Value::Null);
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[0][1], Value::String("TechCorp".into()));
+    assert_eq!(result.rows()[0][2], Value::Null);
 }
 
 #[cfg(feature = "cypher")]
@@ -974,10 +974,10 @@ fn test_chained_dependent_optional_matches() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Harm".into()));
-    assert_eq!(result.rows[0][1], Value::Null);
-    assert_eq!(result.rows[0][2], Value::Null);
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Harm".into()));
+    assert_eq!(result.rows()[0][1], Value::Null);
+    assert_eq!(result.rows()[0][2], Value::Null);
 }
 
 #[cfg(feature = "cypher")]
@@ -1000,15 +1000,15 @@ fn test_chained_dependent_optional_partial_match() {
         .unwrap();
 
     // Alix knows Gus (who works at TechCorp) and Harm (who doesn't)
-    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows().len(), 2);
 
     // Gus -> TechCorp
-    assert_eq!(result.rows[0][1], Value::String("Gus".into()));
-    assert_eq!(result.rows[0][2], Value::String("TechCorp".into()));
+    assert_eq!(result.rows()[0][1], Value::String("Gus".into()));
+    assert_eq!(result.rows()[0][2], Value::String("TechCorp".into()));
 
     // Harm -> null (no WORKS_AT edge)
-    assert_eq!(result.rows[1][1], Value::String("Harm".into()));
-    assert_eq!(result.rows[1][2], Value::Null);
+    assert_eq!(result.rows()[1][1], Value::String("Harm".into()));
+    assert_eq!(result.rows()[1][2], Value::Null);
 }
 
 #[cfg(feature = "cypher")]
@@ -1038,8 +1038,8 @@ fn test_optional_match_with_node_label_filter() {
         .unwrap();
 
     // Only Gus is a Developer, so one row with Gus
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][1], Value::String("Gus".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][1], Value::String("Gus".into()));
 }
 
 #[cfg(feature = "cypher")]
@@ -1071,13 +1071,13 @@ fn test_optional_match_with_vle() {
 
     // Alix reaches Gus (1 hop) and Harm (2 hops). Jules is unreachable.
     assert!(
-        result.rows.len() >= 2,
+        result.rows().len() >= 2,
         "Should find at least Gus and Harm via VLE, got {}",
-        result.rows.len()
+        result.rows().len()
     );
 
     let names: Vec<_> = result
-        .rows
+        .rows()
         .iter()
         .filter_map(|r| match &r[1] {
             Value::String(s) => Some(s.as_str().to_owned()),
@@ -1111,9 +1111,9 @@ fn test_optional_match_with_vle_no_path() {
         .unwrap();
 
     // No KNOWS edges, so m is NULL but Alix is preserved
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[0][1], Value::Null);
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[0][1], Value::Null);
 }
 
 #[test]
@@ -1131,10 +1131,10 @@ fn test_chained_independent_optional_gql() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[0][1], Value::String("TechCorp".into()));
-    assert_eq!(result.rows[0][2], Value::Null);
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[0][1], Value::String("TechCorp".into()));
+    assert_eq!(result.rows()[0][2], Value::Null);
 }
 
 // ============================================================================
@@ -1157,16 +1157,16 @@ fn test_optional_match_is_not_null() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows().len(), 3);
     // Alix has WORKS_AT -> true
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[0][1], Value::Bool(true));
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[0][1], Value::Bool(true));
     // Gus has WORKS_AT -> true
-    assert_eq!(result.rows[1][0], Value::String("Gus".into()));
-    assert_eq!(result.rows[1][1], Value::Bool(true));
+    assert_eq!(result.rows()[1][0], Value::String("Gus".into()));
+    assert_eq!(result.rows()[1][1], Value::Bool(true));
     // Harm has no WORKS_AT -> false
-    assert_eq!(result.rows[2][0], Value::String("Harm".into()));
-    assert_eq!(result.rows[2][1], Value::Bool(false));
+    assert_eq!(result.rows()[2][0], Value::String("Harm".into()));
+    assert_eq!(result.rows()[2][1], Value::Bool(false));
 }
 
 #[cfg(feature = "cypher")]
@@ -1185,10 +1185,10 @@ fn test_optional_match_coalesce() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 3);
-    assert_eq!(result.rows[0][1], Value::String("TechCorp".into()));
-    assert_eq!(result.rows[1][1], Value::String("TechCorp".into()));
-    assert_eq!(result.rows[2][1], Value::String("unemployed".into()));
+    assert_eq!(result.rows().len(), 3);
+    assert_eq!(result.rows()[0][1], Value::String("TechCorp".into()));
+    assert_eq!(result.rows()[1][1], Value::String("TechCorp".into()));
+    assert_eq!(result.rows()[2][1], Value::String("unemployed".into()));
 }
 
 #[cfg(feature = "cypher")]
@@ -1208,10 +1208,10 @@ fn test_optional_match_case_when() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 3);
-    assert_eq!(result.rows[0][1], Value::String("TechCorp".into()));
-    assert_eq!(result.rows[1][1], Value::String("TechCorp".into()));
-    assert_eq!(result.rows[2][1], Value::String("none".into()));
+    assert_eq!(result.rows().len(), 3);
+    assert_eq!(result.rows()[0][1], Value::String("TechCorp".into()));
+    assert_eq!(result.rows()[1][1], Value::String("TechCorp".into()));
+    assert_eq!(result.rows()[2][1], Value::String("none".into()));
 }
 
 #[cfg(feature = "cypher")]
@@ -1230,11 +1230,11 @@ fn test_optional_match_count_star_vs_count_expr() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     // COUNT(*) = 3 (all persons)
-    assert_eq!(result.rows[0][0], Value::Int64(3));
+    assert_eq!(result.rows()[0][0], Value::Int64(3));
     // COUNT(c.name) = 2 (only Alix and Gus have WORKS_AT with c.name = 'TechCorp')
-    assert_eq!(result.rows[0][1], Value::Int64(2));
+    assert_eq!(result.rows()[0][1], Value::Int64(2));
 }
 
 #[cfg(feature = "cypher")]
@@ -1252,8 +1252,8 @@ fn test_optional_match_collect_skips_nulls() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    match &result.rows[0][0] {
+    assert_eq!(result.rows().len(), 1);
+    match &result.rows()[0][0] {
         Value::List(list) => {
             // Should only contain TechCorp entries (no NULLs)
             assert_eq!(
@@ -1290,10 +1290,10 @@ fn test_optional_match_sum_skips_nulls() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
     // Alix and Gus both see headcount=100, Harm sees NULL (skipped)
     // SUM = 100 + 100 = 200
-    assert_eq!(result.rows[0][0], Value::Int64(200));
+    assert_eq!(result.rows()[0][0], Value::Int64(200));
 }
 
 #[cfg(feature = "cypher")]
@@ -1312,16 +1312,16 @@ fn test_optional_match_count_per_group() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows().len(), 3);
     // Alix knows Gus and Harm -> 2
-    assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(result.rows[0][1], Value::Int64(2));
+    assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(result.rows()[0][1], Value::Int64(2));
     // Gus knows Harm -> 1
-    assert_eq!(result.rows[1][0], Value::String("Gus".into()));
-    assert_eq!(result.rows[1][1], Value::Int64(1));
+    assert_eq!(result.rows()[1][0], Value::String("Gus".into()));
+    assert_eq!(result.rows()[1][1], Value::Int64(1));
     // Harm knows nobody -> 0
-    assert_eq!(result.rows[2][0], Value::String("Harm".into()));
-    assert_eq!(result.rows[2][1], Value::Int64(0));
+    assert_eq!(result.rows()[2][0], Value::String("Harm".into()));
+    assert_eq!(result.rows()[2][1], Value::Int64(0));
 }
 
 #[cfg(feature = "cypher")]
@@ -1353,8 +1353,12 @@ fn test_optional_match_boolean_null_comparison() {
     // Alix has no outgoing KNOWS to someone with active=true (Gus has no active prop).
     // Gus has no outgoing KNOWS at all.
     // Both should be preserved by the left join.
-    assert_eq!(result.rows.len(), 2, "Both persons preserved by left join");
-    for row in &result.rows {
+    assert_eq!(
+        result.rows().len(),
+        2,
+        "Both persons preserved by left join"
+    );
+    for row in result.rows() {
         assert_eq!(
             row[1],
             Value::Null,
@@ -1399,15 +1403,15 @@ fn test_optional_match_where_cross_predicate_preserves_null_rows() {
 
     // All 3 persons must be preserved by the left join.
     assert_eq!(
-        result.rows.len(),
+        result.rows().len(),
         3,
         "Cross-predicate WHERE must not eliminate unmatched left rows, got {} rows",
-        result.rows.len()
+        result.rows().len()
     );
 
     // Alix (age 30) knows Gus (age 25): cross-predicate 25 < 30 is TRUE, Gus should appear.
     let alix_row = result
-        .rows
+        .rows()
         .iter()
         .find(|r| r[0] == Value::String("Alix".into()))
         .expect("Alix row missing");
@@ -1419,7 +1423,7 @@ fn test_optional_match_where_cross_predicate_preserves_null_rows() {
 
     // Gus knows nobody: right side NULL, row must be preserved.
     let gus_row = result
-        .rows
+        .rows()
         .iter()
         .find(|r| r[0] == Value::String("Gus".into()))
         .expect("Gus row missing");
@@ -1431,7 +1435,7 @@ fn test_optional_match_where_cross_predicate_preserves_null_rows() {
 
     // Harm knows nobody: right side NULL, row must be preserved.
     let harm_row = result
-        .rows
+        .rows()
         .iter()
         .find(|r| r[0] == Value::String("Harm".into()))
         .expect("Harm row missing");
@@ -1455,7 +1459,7 @@ fn test_call_list_procedures() {
     let result = session.execute("CALL grafeo.procedures()").unwrap();
 
     // Should return a list of available procedures
-    assert!(!result.rows.is_empty());
+    assert!(!result.rows().is_empty());
 }
 
 #[cfg(feature = "algos")]
@@ -1467,7 +1471,7 @@ fn test_call_degree_centrality() {
     let result = session.execute("CALL grafeo.degree_centrality()").unwrap();
 
     // Should return results for each node
-    assert!(!result.rows.is_empty());
+    assert!(!result.rows().is_empty());
 }
 
 #[cfg(feature = "algos")]
@@ -1480,7 +1484,7 @@ fn test_call_procedure_with_yield() {
         .execute("CALL grafeo.pagerank() YIELD node_id, score RETURN node_id, score")
         .unwrap();
 
-    assert!(!result.rows.is_empty());
+    assert!(!result.rows().is_empty());
     // Each row should have node_id and score
     assert!(result.columns.len() >= 2);
 }
@@ -1501,7 +1505,7 @@ fn test_gql_remove_property() {
     let before = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN n.temp")
         .unwrap();
-    assert_eq!(before.rows[0][0], Value::String("delete_me".into()));
+    assert_eq!(before.rows()[0][0], Value::String("delete_me".into()));
 
     session
         .execute("MATCH (n:Person {name: 'Alix'}) REMOVE n.temp")
@@ -1510,7 +1514,7 @@ fn test_gql_remove_property() {
     let after = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN n.temp")
         .unwrap();
-    assert_eq!(after.rows[0][0], Value::Null);
+    assert_eq!(after.rows()[0][0], Value::Null);
 }
 
 // ============================================================================
@@ -1532,10 +1536,13 @@ fn test_gql_set_map_merge() {
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN n.email, n.active, n.name")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("alix@example.com".into()));
-    assert_eq!(result.rows[0][1], Value::Bool(true));
-    assert_eq!(result.rows[0][2], Value::String("Alix".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(
+        result.rows()[0][0],
+        Value::String("alix@example.com".into())
+    );
+    assert_eq!(result.rows()[0][1], Value::Bool(true));
+    assert_eq!(result.rows()[0][2], Value::String("Alix".into()));
 }
 
 // ============================================================================
@@ -1556,9 +1563,9 @@ fn test_gql_set_multiple_labels() {
         .execute("MATCH (n:Developer) RETURN n.name")
         .unwrap();
 
-    assert_eq!(emp.rows.len(), 1);
-    assert_eq!(dev.rows.len(), 1);
-    assert_eq!(emp.rows[0][0], Value::String("Gus".into()));
+    assert_eq!(emp.rows().len(), 1);
+    assert_eq!(dev.rows().len(), 1);
+    assert_eq!(emp.rows()[0][0], Value::String("Gus".into()));
 }
 
 // ============================================================================
@@ -1578,8 +1585,8 @@ fn test_gql_merge_with_match_input() {
         .unwrap();
 
     let result = session.execute("MATCH (t:Trend) RETURN t.name").unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Rust".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Rust".into()));
 }
 
 // ============================================================================
@@ -1603,8 +1610,8 @@ fn test_gql_merge_in_ordered_clauses() {
         .execute("MATCH (n:Config) RETURN n.key, n.value")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][1], Value::String("light".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][1], Value::String("light".into()));
 }
 
 // ============================================================================
@@ -1632,9 +1639,9 @@ fn test_gql_match_create_edge_ordered() {
         .execute("MATCH (c:City)-[:IN]->(co:Country) RETURN c.name, co.name")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("Prague".into()));
-    assert_eq!(result.rows[0][1], Value::String("Czechia".into()));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("Prague".into()));
+    assert_eq!(result.rows()[0][1], Value::String("Czechia".into()));
 }
 
 // ============================================================================
@@ -1668,11 +1675,11 @@ fn test_gql_for_in_ordered_clauses() {
         .execute("FOR x IN [100, 200, 300] WITH ORDINALITY idx RETURN x, idx ORDER BY x")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 3);
-    assert_eq!(result.rows[0][0], Value::Int64(100));
-    assert_eq!(result.rows[0][1], Value::Int64(1));
-    assert_eq!(result.rows[2][0], Value::Int64(300));
-    assert_eq!(result.rows[2][1], Value::Int64(3));
+    assert_eq!(result.rows().len(), 3);
+    assert_eq!(result.rows()[0][0], Value::Int64(100));
+    assert_eq!(result.rows()[0][1], Value::Int64(1));
+    assert_eq!(result.rows()[2][0], Value::Int64(300));
+    assert_eq!(result.rows()[2][1], Value::Int64(3));
 }
 
 // ============================================================================
@@ -1714,9 +1721,9 @@ fn test_traits_create_with_props_convenience() {
         .execute("MATCH (w:Widget) RETURN w.color, w.weight")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::String("blue".into()));
-    assert_eq!(result.rows[0][1], Value::Int64(42));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::String("blue".into()));
+    assert_eq!(result.rows()[0][1], Value::Int64(42));
 
     let other = session.create_node_with_props(&["Box"], [("size", Value::Int64(10))]);
     session.create_edge(node, other, "FITS_IN");
@@ -1725,7 +1732,7 @@ fn test_traits_create_with_props_convenience() {
         .execute("MATCH (w:Widget)-[:FITS_IN]->(b:Box) RETURN w.color, b.size")
         .unwrap();
 
-    assert_eq!(edge_result.rows.len(), 1);
+    assert_eq!(edge_result.rows().len(), 1);
 }
 
 // ============================================================================
@@ -1791,8 +1798,8 @@ mod cypher_mutations {
             )
             .unwrap();
 
-        assert_eq!(result.rows.len(), 1);
-        assert_eq!(result.rows[0][0], Value::Int64(2025));
+        assert_eq!(result.rows().len(), 1);
+        assert_eq!(result.rows()[0][0], Value::Int64(2025));
     }
 
     #[cfg(feature = "cypher")]
@@ -1825,9 +1832,9 @@ mod cypher_mutations {
             .execute("MATCH (n:Person) RETURN n.name ORDER BY n.name")
             .unwrap();
 
-        assert_eq!(result.rows.len(), 2);
-        assert_eq!(result.rows[0][0], Value::String("Alix".into()));
-        assert_eq!(result.rows[1][0], Value::String("Gus".into()));
+        assert_eq!(result.rows().len(), 2);
+        assert_eq!(result.rows()[0][0], Value::String("Alix".into()));
+        assert_eq!(result.rows()[1][0], Value::String("Gus".into()));
     }
 
     #[cfg(feature = "cypher")]
@@ -1848,9 +1855,9 @@ mod cypher_mutations {
             .execute("MATCH (n:Item) RETURN n.name, n.price, n.color")
             .unwrap();
 
-        assert_eq!(result.rows[0][0], Value::String("Gadget".into()));
-        assert_eq!(result.rows[0][1], Value::Int64(20));
-        assert_eq!(result.rows[0][2], Value::Null);
+        assert_eq!(result.rows()[0][0], Value::String("Gadget".into()));
+        assert_eq!(result.rows()[0][1], Value::Int64(20));
+        assert_eq!(result.rows()[0][2], Value::Null);
     }
 
     #[cfg(feature = "cypher")]
@@ -1871,9 +1878,9 @@ mod cypher_mutations {
             .execute("MATCH (n:Item) RETURN n.name, n.price, n.color")
             .unwrap();
 
-        assert_eq!(result.rows[0][0], Value::String("Widget".into()));
-        assert_eq!(result.rows[0][1], Value::Int64(15));
-        assert_eq!(result.rows[0][2], Value::String("blue".into()));
+        assert_eq!(result.rows()[0][0], Value::String("Widget".into()));
+        assert_eq!(result.rows()[0][1], Value::Int64(15));
+        assert_eq!(result.rows()[0][2], Value::String("blue".into()));
     }
 
     #[cfg(feature = "cypher")]
@@ -1893,7 +1900,7 @@ mod cypher_mutations {
             .execute("MATCH (n:Person) WHERE n.tagged = true RETURN n.name")
             .unwrap();
 
-        assert_eq!(result.rows.len(), 3);
+        assert_eq!(result.rows().len(), 3);
     }
 
     #[cfg(feature = "cypher")]
@@ -1910,8 +1917,8 @@ mod cypher_mutations {
             )
             .unwrap();
 
-        assert!(!result.rows.is_empty());
-        for row in &result.rows {
+        assert!(!result.rows().is_empty());
+        for row in result.rows() {
             assert_eq!(row[1], Value::String("TechCorp".into()));
         }
     }
@@ -1929,8 +1936,8 @@ mod cypher_mutations {
             .execute_cypher("MATCH (a:A), (b:B) RETURN a.val, b.val")
             .unwrap();
 
-        assert_eq!(result.rows.len(), 1);
-        assert_eq!(result.rows[0][0], Value::Int64(1));
-        assert_eq!(result.rows[0][1], Value::Int64(2));
+        assert_eq!(result.rows().len(), 1);
+        assert_eq!(result.rows()[0][0], Value::Int64(1));
+        assert_eq!(result.rows()[0][1], Value::Int64(2));
     }
 }

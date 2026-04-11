@@ -109,10 +109,10 @@ fn test_execute_at_epoch() {
     let r = session
         .execute_at_epoch("MATCH (i:Item) RETURN i.name AS name", epoch)
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows().len(), 1);
     // NOTE: In-memory MVCC may not fully support epoch-based time travel for reads.
     // The key coverage goal is exercising the execute_at_epoch code path.
-    assert!(matches!(&r.rows[0][0], Value::String(_)));
+    assert!(matches!(&r.rows()[0][0], Value::String(_)));
 }
 
 // ---------------------------------------------------------------------------
@@ -182,8 +182,8 @@ fn test_execute_with_params_direct() {
             params,
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::String("Alix".into()));
 }
 
 // ---------------------------------------------------------------------------
@@ -213,9 +213,9 @@ fn test_optional_match_no_match() {
              RETURN p.name AS name, e.name AS emp",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(r.rows[0][1], Value::Null);
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(r.rows()[0][1], Value::Null);
 }
 
 #[test]
@@ -233,8 +233,8 @@ fn test_optional_match_with_where() {
              RETURN p.name AS name, f.name AS friend",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][1], Value::Null);
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][1], Value::Null);
 }
 
 // ---------------------------------------------------------------------------
@@ -246,8 +246,8 @@ fn test_standalone_return_arithmetic() {
     let db = GrafeoDB::new_in_memory();
     let s = db.session();
     let r = s.execute("RETURN 1 + 2 AS result").unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::Int64(3));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::Int64(3));
 }
 
 #[test]
@@ -255,8 +255,8 @@ fn test_standalone_return_string() {
     let db = GrafeoDB::new_in_memory();
     let s = db.session();
     let r = s.execute("RETURN 'hello' AS greeting").unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::String("hello".into()));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::String("hello".into()));
 }
 
 #[test]
@@ -264,11 +264,11 @@ fn test_standalone_return_list() {
     let db = GrafeoDB::new_in_memory();
     let s = db.session();
     let r = s.execute("RETURN [1, 2, 3] AS nums").unwrap();
-    assert_eq!(r.rows.len(), 1);
-    if let Value::List(items) = &r.rows[0][0] {
+    assert_eq!(r.rows().len(), 1);
+    if let Value::List(items) = &r.rows()[0][0] {
         assert_eq!(items.len(), 3);
     } else {
-        panic!("expected list, got {:?}", r.rows[0][0]);
+        panic!("expected list, got {:?}", r.rows()[0][0]);
     }
 }
 
@@ -281,7 +281,7 @@ fn test_unwind_list() {
     let db = GrafeoDB::new_in_memory();
     let session = db.session();
     let r = session.execute("UNWIND [1, 2, 3] AS x RETURN x").unwrap();
-    assert_eq!(r.rows.len(), 3);
+    assert_eq!(r.rows().len(), 3);
 }
 
 // ---------------------------------------------------------------------------
@@ -297,7 +297,7 @@ fn test_call_subquery() {
             "MATCH (p:Person) CALL { WITH p RETURN p.age * 2 AS doubled } RETURN p.name, doubled ORDER BY p.name",
         )
         .unwrap();
-    assert_eq!(r.rows.len(), 2);
+    assert_eq!(r.rows().len(), 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -315,7 +315,7 @@ fn test_session_recovers_after_parse_error() {
     let result = session
         .execute("MATCH (n:Person) RETURN n.name ORDER BY n.name")
         .unwrap();
-    assert!(!result.rows.is_empty());
+    assert!(!result.rows().is_empty());
 }
 
 #[test]
@@ -327,7 +327,7 @@ fn test_session_recovers_after_runtime_error() {
     // Whether this errors or returns empty, session should remain usable
     let _ = err;
     let result = session.execute("MATCH (n:Person) RETURN count(n)").unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
 }
 
 #[test]
@@ -342,7 +342,7 @@ fn test_session_recovers_after_rollback() {
 
     // Session should work normally after rollback
     let result = session.execute("MATCH (t:Temp) RETURN count(t)").unwrap();
-    assert_eq!(result.rows[0][0], Value::Int64(0));
+    assert_eq!(result.rows()[0][0], Value::Int64(0));
 
     // And can start a new transaction
     session.begin_transaction().unwrap();
@@ -350,7 +350,7 @@ fn test_session_recovers_after_rollback() {
     session.commit().unwrap();
 
     let result = session.execute("MATCH (v:Valid) RETURN count(v)").unwrap();
-    assert_eq!(result.rows[0][0], Value::Int64(1));
+    assert_eq!(result.rows()[0][0], Value::Int64(1));
 }
 
 // ---------------------------------------------------------------------------
@@ -400,7 +400,7 @@ fn test_prepare_commit_abort() {
 
     // Data should not persist after abort
     let r = session.execute("MATCH (t:Temp) RETURN count(t)").unwrap();
-    assert_eq!(r.rows[0][0], Value::Int64(0));
+    assert_eq!(r.rows()[0][0], Value::Int64(0));
 }
 
 #[test]
@@ -432,7 +432,7 @@ fn test_begin_transaction_with_read_committed() {
         .begin_transaction_with_isolation(grafeo_engine::transaction::IsolationLevel::ReadCommitted)
         .unwrap();
     let r = session.execute("MATCH (p:Person) RETURN count(p)").unwrap();
-    assert_eq!(r.rows[0][0], Value::Int64(2));
+    assert_eq!(r.rows()[0][0], Value::Int64(2));
     session.commit().unwrap();
 }
 
@@ -444,7 +444,7 @@ fn test_begin_transaction_with_serializable() {
         .begin_transaction_with_isolation(grafeo_engine::transaction::IsolationLevel::Serializable)
         .unwrap();
     let r = session.execute("MATCH (p:Person) RETURN count(p)").unwrap();
-    assert_eq!(r.rows[0][0], Value::Int64(2));
+    assert_eq!(r.rows()[0][0], Value::Int64(2));
     session.commit().unwrap();
 }
 
@@ -463,7 +463,7 @@ fn test_begin_transaction_with_isolation_nested_creates_savepoint() {
         .unwrap();
     // Queries should still work inside the nested transaction
     let r = session.execute("MATCH (p:Person) RETURN count(p)").unwrap();
-    assert_eq!(r.rows[0][0], Value::Int64(2));
+    assert_eq!(r.rows()[0][0], Value::Int64(2));
     session.rollback().unwrap();
 }
 
@@ -501,7 +501,7 @@ fn test_clear_plan_cache() {
     db.clear_plan_cache();
     // Queries should still work after clearing
     let r = session.execute("MATCH (p:Person) RETURN count(p)").unwrap();
-    assert_eq!(r.rows[0][0], Value::Int64(2));
+    assert_eq!(r.rows()[0][0], Value::Int64(2));
 }
 
 // ---------------------------------------------------------------------------
@@ -533,7 +533,7 @@ fn test_query_cache_accessible() {
 // execute_sparql_with_params()
 // ---------------------------------------------------------------------------
 
-#[cfg(all(feature = "sparql", feature = "rdf"))]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 #[test]
 fn test_execute_sparql_with_params() {
     use grafeo_engine::config::{Config, GraphModel};
@@ -565,10 +565,10 @@ fn test_execute_sparql_with_params() {
         )
         .unwrap();
     assert_eq!(
-        r.rows.len(),
+        r.rows().len(),
         2,
         "should return two rows, got {}",
-        r.rows.len()
+        r.rows().len()
     );
 }
 
@@ -705,7 +705,7 @@ fn test_questioned_edge_preserves_source_rows() {
     );
 
     let names: Vec<&str> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| r[0].as_str().unwrap_or("NULL"))
         .collect();
@@ -725,7 +725,7 @@ fn test_questioned_edge_null_when_no_match() {
 
     // Vincent's b.name should be NULL
     let vincent_row = result
-        .rows
+        .rows()
         .iter()
         .find(|r| r[0].as_str() == Some("Vincent"))
         .unwrap();
@@ -759,7 +759,7 @@ fn test_questioned_edge_with_target_label_filter() {
     assert_eq!(result.row_count(), 2, "Two Person nodes should appear");
 
     let alix_row = result
-        .rows
+        .rows()
         .iter()
         .find(|r| r[0].as_str() == Some("Alix"))
         .unwrap();
@@ -770,7 +770,7 @@ fn test_questioned_edge_with_target_label_filter() {
     );
 
     let gus_row = result
-        .rows
+        .rows()
         .iter()
         .find(|r| r[0].as_str() == Some("Gus"))
         .unwrap();
@@ -810,7 +810,7 @@ fn test_questioned_edge_combined_with_optional_match() {
 
     // Alix should have both a friend and a city
     let alix_row = result
-        .rows
+        .rows()
         .iter()
         .find(|r| r[0].as_str() == Some("Alix"))
         .unwrap();

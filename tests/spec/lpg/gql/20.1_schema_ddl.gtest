@@ -9,6 +9,7 @@ meta:
   section: "20.1"
   title: Schema DDL
   dataset: empty
+  iso: [GC01, GC02, GC03, GG01, GG02, GG03, GG20, GG21, GG22]
 
 tests:
 

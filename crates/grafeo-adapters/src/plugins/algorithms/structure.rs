@@ -9,7 +9,7 @@ use grafeo_common::utils::error::Result;
 use grafeo_common::utils::hash::{FxHashMap, FxHashSet};
 use grafeo_core::graph::Direction;
 use grafeo_core::graph::GraphStore;
-#[cfg(test)]
+#[cfg(all(test, feature = "lpg"))]
 use grafeo_core::graph::lpg::LpgStore;
 
 use super::super::{AlgorithmResult, ParameterDef, ParameterType, Parameters};
@@ -840,7 +840,7 @@ impl GraphAlgorithm for KTrussAlgorithm {
 // Tests
 // ============================================================================
 
-#[cfg(test)]
+#[cfg(all(test, feature = "lpg"))]
 mod tests {
     use super::*;
 
@@ -1184,7 +1184,7 @@ mod tests {
 
     // ---- Cross-model: RDF adapter produces same results as LPG ----
 
-    #[cfg(feature = "rdf")]
+    #[cfg(feature = "triple-store")]
     #[test]
     fn test_ktruss_rdf_matches_lpg() {
         use grafeo_core::graph::rdf::{RdfGraphStoreAdapter, RdfStore, Term, Triple};
@@ -1221,7 +1221,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "rdf")]
+    #[cfg(feature = "triple-store")]
     #[test]
     fn test_kcore_rdf_matches_lpg() {
         use grafeo_core::graph::rdf::{RdfGraphStoreAdapter, RdfStore, Term, Triple};

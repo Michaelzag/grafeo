@@ -6,6 +6,7 @@ meta:
   section: "16.2"
   title: CAST expressions
   dataset: empty
+  iso: [GA05]
 
 tests:
 

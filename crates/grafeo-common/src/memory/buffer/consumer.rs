@@ -6,6 +6,7 @@ use super::region::MemoryRegion;
 
 /// Error type for spilling operations.
 #[derive(Error, Debug, Clone)]
+#[non_exhaustive]
 pub enum SpillError {
     /// Spilling is not supported by this consumer.
     #[error("spilling not supported")]

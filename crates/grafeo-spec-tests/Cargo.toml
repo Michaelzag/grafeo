@@ -8,20 +8,21 @@ description = "Declarative .gtest spec tests for Grafeo"
 publish = false
 
 [features]
-default = ["gql", "cypher", "gremlin", "graphql", "sparql", "sql-pgq", "rdf", "vector-index", "text-index", "algos"]
+default = ["gql", "cypher", "gremlin", "graphql", "sparql", "sql-pgq", "triple-store", "vector-index", "text-index", "algos"]
 gql = []
 cypher = []
 gremlin = []
 graphql = []
 sparql = []
 sql-pgq = []
-rdf = []
+triple-store = []
+rdf = ["triple-store"]  # Deprecated: use triple-store
 vector-index = []
 text-index = []
 algos = []
 
 [dependencies]
-grafeo-engine = { workspace = true, features = ["embedded", "languages", "rdf"] }
+grafeo-engine = { workspace = true, features = ["embedded", "languages", "triple-store"] }
 grafeo-common = { workspace = true }
 md-5 = "0.11"
 

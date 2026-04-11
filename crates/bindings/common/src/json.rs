@@ -153,6 +153,7 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
                 }
             })
         }
+        _ => serde_json::Value::String(v.to_string()),
     }
 }
 

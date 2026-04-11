@@ -65,4 +65,10 @@ graph TB
 
     Type-specific compression strategies.
 
+-   **[Container Format](container-format.md)**
+
+    ---
+
+    `.grafeo` file format: section-based container with crash safety.
+
 </div>

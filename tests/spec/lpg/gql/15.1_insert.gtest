@@ -6,6 +6,7 @@ meta:
   section: "15.1"
   title: INSERT clause
   dataset: empty
+  iso: [GD01]
 
 tests:
 

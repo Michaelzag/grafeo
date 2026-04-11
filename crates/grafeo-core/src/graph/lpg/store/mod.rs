@@ -46,7 +46,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use crate::index::vector::HnswIndex;
 
 #[cfg(feature = "tiered-storage")]
-use crate::storage::EpochStore;
+use crate::codec::EpochStore;
 use grafeo_common::memory::arena::AllocError;
 #[cfg(feature = "tiered-storage")]
 use grafeo_common::memory::arena::ArenaAllocator;
@@ -59,6 +59,7 @@ use grafeo_common::temporal::VersionLog;
 ///
 /// Captures the previous state of a property so it can be restored on rollback.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum PropertyUndoEntry {
     /// A node property was changed or added.
     NodeProperty {

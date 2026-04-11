@@ -53,8 +53,8 @@ fn test_execute_at_epoch_sees_old_state() {
     let result = session
         .execute("MATCH (p:Person {name: 'Alix'}) RETURN p.age")
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Int64(31));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Int64(31));
 
     // Time-travel to the epoch after insert should see the node.
     // Note: properties are not versioned per-epoch in the current architecture,
@@ -65,7 +65,7 @@ fn test_execute_at_epoch_sees_old_state() {
             epoch_after_insert,
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
 }
 
 #[test]
@@ -86,14 +86,14 @@ fn test_execute_at_epoch_before_creation_returns_empty() {
 
     // Verify node exists at current epoch
     let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
 
     // At epoch before creation, the node should not exist
     let result = session
         .execute_at_epoch("MATCH (p:Person) RETURN p.name", epoch_before)
         .unwrap();
     assert!(
-        result.rows.is_empty(),
+        result.rows().is_empty(),
         "Node should not be visible before its creation epoch"
     );
 }
@@ -124,7 +124,7 @@ fn test_deleted_node_history_preserves_epoch() {
     let result = session
         .execute("MATCH (p:Person {name: 'Vincent'}) RETURN p")
         .unwrap();
-    assert!(result.rows.is_empty());
+    assert!(result.rows().is_empty());
 
     // The version history API still tracks the deletion metadata.
     // Note: MATCH-based time-travel on deleted nodes is not supported
@@ -186,7 +186,7 @@ fn test_session_set_viewing_epoch() {
 
     // Without override: 2 nodes
     let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
-    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows().len(), 2);
 
     // Set viewing epoch to after Eve but before Frank
     session.set_viewing_epoch(epoch_after_eve);
@@ -194,7 +194,7 @@ fn test_session_set_viewing_epoch() {
 
     // With override: only Eve should be visible
     let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
 
     // Clear override
     session.clear_viewing_epoch();
@@ -202,7 +202,7 @@ fn test_session_set_viewing_epoch() {
 
     // Back to normal: 2 nodes
     let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
-    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows().len(), 2);
 }
 
 #[test]
@@ -251,14 +251,14 @@ fn test_gql_session_set_viewing_epoch() {
 
     // Only Grace should be visible
     let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
-    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows().len(), 1);
 
     // Reset session
     session.execute("SESSION RESET").unwrap();
 
     // Both should be visible again
     let result = session.execute("MATCH (p:Person) RETURN p.name").unwrap();
-    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows().len(), 2);
 }
 
 // ---------------------------------------------------------------------------

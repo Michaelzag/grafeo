@@ -40,7 +40,7 @@ const DEFAULT_CHUNK_SIZE: usize = 1024;
 
 /// Logs an RDF WAL record if a WAL reference is present.
 #[cfg(feature = "wal")]
-fn log_rdf_wal(wal: &Option<Arc<RdfWal>>, record: &grafeo_adapters::storage::wal::WalRecord) {
+fn log_rdf_wal(wal: &Option<Arc<RdfWal>>, record: &grafeo_storage::wal::WalRecord) {
     if let Some(wal) = wal
         && let Err(err) = wal.log(record)
     {
@@ -98,7 +98,7 @@ fn record_cdc_triple_delete(
 
 /// Type alias for the WAL used by the RDF planner.
 #[cfg(feature = "wal")]
-type RdfWal = grafeo_adapters::storage::wal::LpgWal;
+type RdfWal = grafeo_storage::wal::LpgWal;
 
 /// Groups the variable-substitution operands for pattern-based mutation operators.
 ///
@@ -1416,7 +1416,7 @@ impl Operator for RdfInsertTripleOperator {
         #[cfg(feature = "wal")]
         log_rdf_wal(
             &self.wal,
-            &grafeo_adapters::storage::wal::WalRecord::InsertRdfTriple {
+            &grafeo_storage::wal::WalRecord::InsertRdfTriple {
                 subject: term_to_wal(self.triple.subject()),
                 predicate: term_to_wal(self.triple.predicate()),
                 object: term_to_wal(self.triple.object()),
@@ -1590,7 +1590,7 @@ impl Operator for RdfInsertPatternOperator {
         for triple in &triples_to_insert {
             log_rdf_wal(
                 &self.wal,
-                &grafeo_adapters::storage::wal::WalRecord::InsertRdfTriple {
+                &grafeo_storage::wal::WalRecord::InsertRdfTriple {
                     subject: term_to_wal(triple.subject()),
                     predicate: term_to_wal(triple.predicate()),
                     object: term_to_wal(triple.object()),
@@ -1692,7 +1692,7 @@ impl Operator for RdfDeleteTripleOperator {
         #[cfg(feature = "wal")]
         log_rdf_wal(
             &self.wal,
-            &grafeo_adapters::storage::wal::WalRecord::DeleteRdfTriple {
+            &grafeo_storage::wal::WalRecord::DeleteRdfTriple {
                 subject: term_to_wal(self.triple.subject()),
                 predicate: term_to_wal(self.triple.predicate()),
                 object: term_to_wal(self.triple.object()),
@@ -1866,7 +1866,7 @@ impl Operator for RdfDeletePatternOperator {
         for triple in &triples_to_delete {
             log_rdf_wal(
                 &self.wal,
-                &grafeo_adapters::storage::wal::WalRecord::DeleteRdfTriple {
+                &grafeo_storage::wal::WalRecord::DeleteRdfTriple {
                     subject: term_to_wal(triple.subject()),
                     predicate: term_to_wal(triple.predicate()),
                     object: term_to_wal(triple.object()),
@@ -1948,7 +1948,7 @@ impl Operator for RdfClearGraphOperator {
         #[cfg(feature = "wal")]
         log_rdf_wal(
             &self.wal,
-            &grafeo_adapters::storage::wal::WalRecord::ClearRdfGraph {
+            &grafeo_storage::wal::WalRecord::ClearRdfGraph {
                 graph: self.graph.clone(),
             },
         );
@@ -2016,7 +2016,7 @@ impl Operator for RdfCreateGraphOperator {
         if created {
             log_rdf_wal(
                 &self.wal,
-                &grafeo_adapters::storage::wal::WalRecord::CreateRdfGraph {
+                &grafeo_storage::wal::WalRecord::CreateRdfGraph {
                     name: self.graph.clone(),
                 },
             );
@@ -2084,7 +2084,7 @@ impl Operator for RdfDropGraphOperator {
         #[cfg(feature = "wal")]
         log_rdf_wal(
             &self.wal,
-            &grafeo_adapters::storage::wal::WalRecord::DropRdfGraph {
+            &grafeo_storage::wal::WalRecord::DropRdfGraph {
                 name: self.graph.clone(),
             },
         );
@@ -3115,6 +3115,7 @@ impl RdfExpressionPredicate {
             | FilterExpression::ExistsSubquery { .. }
             | FilterExpression::CountSubquery { .. }
             | FilterExpression::Reduce { .. } => None,
+            _ => None,
         }
     }
 
@@ -3345,6 +3346,7 @@ impl RdfExpressionPredicate {
                 }
                 _ => None,
             },
+            _ => None,
         }
     }
 
@@ -3358,6 +3360,7 @@ impl RdfExpressionPredicate {
                 Value::Float64(v) => Some(Value::Float64(-v)),
                 _ => None,
             },
+            _ => None,
         }
     }
 
@@ -4321,6 +4324,7 @@ fn term_to_string(term: &Term) -> String {
         Term::Iri(iri) => iri.as_str().to_string(),
         Term::BlankNode(bnode) => format!("_:{}", bnode.id()),
         Term::Literal(lit) => lit.value().to_string(),
+        _ => String::new(),
     }
 }
 
@@ -4338,6 +4342,7 @@ fn push_term_value(col: &mut grafeo_core::execution::ValueVector, term: &Term) {
             // Numeric operations are handled by the filter evaluation
             col.push_string(lit.value().to_string());
         }
+        _ => col.push_value(Value::Null),
     }
 }
 
@@ -4567,6 +4572,7 @@ fn value_to_string(value: &Value) -> String {
             let neg_sum: i64 = neg.values().copied().map(|v| v as i64).sum();
             format!("OnCounter({})", pos_sum - neg_sum)
         }
+        _ => value.to_string(),
     }
 }
 

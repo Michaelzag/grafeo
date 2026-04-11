@@ -10,6 +10,7 @@ meta:
   section: "15.5"
   title: MERGE clause
   dataset: empty
+  iso: [GD01]
 
 tests:
 

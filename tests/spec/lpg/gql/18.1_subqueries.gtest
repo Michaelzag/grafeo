@@ -6,6 +6,7 @@ meta:
   section: "18.1"
   title: Subqueries
   dataset: empty
+  iso: [GQ18, GQ21, GQ22, GP01, GP02]
 
 tests:
 

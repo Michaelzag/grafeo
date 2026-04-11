@@ -38,7 +38,7 @@ fn insert_through_session_generates_create_event() {
         .unwrap();
     assert_eq!(result.row_count(), 1, "Node should exist after INSERT");
 
-    let node_id = match &result.rows[0][0] {
+    let node_id = match &result.rows()[0][0] {
         grafeo_common::types::Value::Int64(id) => grafeo_common::types::NodeId::new(*id as u64),
         other => panic!("Expected Int64 node ID, got: {other:?}"),
     };
@@ -64,7 +64,7 @@ fn set_through_session_generates_update_event() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN id(n)")
         .unwrap();
-    let node_id = match &result.rows[0][0] {
+    let node_id = match &result.rows()[0][0] {
         grafeo_common::types::Value::Int64(id) => grafeo_common::types::NodeId::new(*id as u64),
         other => panic!("Expected Int64, got: {other:?}"),
     };
@@ -94,7 +94,7 @@ fn delete_through_session_generates_delete_event() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN id(n)")
         .unwrap();
-    let node_id = match &result.rows[0][0] {
+    let node_id = match &result.rows()[0][0] {
         grafeo_common::types::Value::Int64(id) => grafeo_common::types::NodeId::new(*id as u64),
         other => panic!("Expected Int64, got: {other:?}"),
     };
@@ -128,7 +128,7 @@ fn rollback_discards_cdc_events() {
         .execute("MATCH (n:Person) RETURN count(n) AS cnt")
         .unwrap();
     assert_eq!(
-        result.rows[0][0],
+        result.rows()[0][0],
         grafeo_common::types::Value::Int64(0),
         "Rolled-back node should not exist"
     );
@@ -353,7 +353,7 @@ fn remove_property_through_session_generates_cdc() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN id(n)")
         .unwrap();
-    let node_id = match &result.rows[0][0] {
+    let node_id = match &result.rows()[0][0] {
         grafeo_common::types::Value::Int64(id) => grafeo_common::types::NodeId::new(*id as u64),
         other => panic!("Expected Int64, got: {other:?}"),
     };
@@ -382,7 +382,7 @@ fn set_label_through_session_generates_cdc() {
     let result = session
         .execute("MATCH (n:Person {name: 'Alix'}) RETURN id(n)")
         .unwrap();
-    let node_id = match &result.rows[0][0] {
+    let node_id = match &result.rows()[0][0] {
         grafeo_common::types::Value::Int64(id) => grafeo_common::types::NodeId::new(*id as u64),
         other => panic!("Expected Int64, got: {other:?}"),
     };

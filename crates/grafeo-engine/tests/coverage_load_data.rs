@@ -34,9 +34,9 @@ fn test_csv_with_utf8_bom() {
             "LOAD DATA FROM '{path}' FORMAT CSV WITH HEADERS AS row RETURN row.name AS name ORDER BY row.name"
         ))
         .unwrap();
-    assert_eq!(r.rows.len(), 2);
-    assert_eq!(r.rows[0][0], Value::String("Alix".into()));
-    assert_eq!(r.rows[1][0], Value::String("Gus".into()));
+    assert_eq!(r.rows().len(), 2);
+    assert_eq!(r.rows()[0][0], Value::String("Alix".into()));
+    assert_eq!(r.rows()[1][0], Value::String("Gus".into()));
 }
 
 // ---------------------------------------------------------------------------
@@ -54,8 +54,8 @@ fn test_csv_without_headers_returns_list() {
             "LOAD DATA FROM '{path}' FORMAT CSV AS row RETURN row[0] AS name"
         ))
         .unwrap();
-    assert_eq!(r.rows.len(), 2);
-    assert_eq!(r.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(r.rows().len(), 2);
+    assert_eq!(r.rows()[0][0], Value::String("Alix".into()));
 }
 
 // ---------------------------------------------------------------------------
@@ -73,8 +73,8 @@ fn test_csv_windows_line_endings() {
             "LOAD DATA FROM '{path}' FORMAT CSV WITH HEADERS AS row RETURN row.name AS n ORDER BY row.name"
         ))
         .unwrap();
-    assert_eq!(r.rows.len(), 2);
-    assert_eq!(r.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(r.rows().len(), 2);
+    assert_eq!(r.rows()[0][0], Value::String("Alix".into()));
 }
 
 // ---------------------------------------------------------------------------
@@ -92,7 +92,7 @@ fn test_csv_quoted_commas() {
             "LOAD DATA FROM '{path}' FORMAT CSV WITH HEADERS AS row RETURN row.bio AS bio ORDER BY row.name"
         ))
         .unwrap();
-    assert_eq!(r.rows[0][0], Value::String("likes cats, dogs".into()));
+    assert_eq!(r.rows()[0][0], Value::String("likes cats, dogs".into()));
 }
 
 // ---------------------------------------------------------------------------
@@ -110,7 +110,7 @@ fn test_csv_headers_only() {
             "LOAD DATA FROM '{path}' FORMAT CSV WITH HEADERS AS row RETURN row.name AS name"
         ))
         .unwrap();
-    assert_eq!(r.rows.len(), 0);
+    assert_eq!(r.rows().len(), 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -128,8 +128,8 @@ fn test_csv_pipe_delimiter() {
             "LOAD DATA FROM '{path}' FORMAT CSV WITH HEADERS AS row FIELDTERMINATOR '|' RETURN row.score AS s ORDER BY row.name"
         ))
         .unwrap();
-    assert_eq!(r.rows.len(), 2);
-    assert_eq!(r.rows[0][0], Value::String("100".into()));
+    assert_eq!(r.rows().len(), 2);
+    assert_eq!(r.rows()[0][0], Value::String("100".into()));
 }
 
 // ---------------------------------------------------------------------------
@@ -147,8 +147,8 @@ fn test_csv_semicolon_delimiter() {
             "LOAD DATA FROM '{path}' FORMAT CSV WITH HEADERS AS row FIELDTERMINATOR ';' RETURN row.city AS c ORDER BY row.name"
         ))
         .unwrap();
-    assert_eq!(r.rows[0][0], Value::String("Amsterdam".into()));
-    assert_eq!(r.rows[1][0], Value::String("Berlin".into()));
+    assert_eq!(r.rows()[0][0], Value::String("Amsterdam".into()));
+    assert_eq!(r.rows()[1][0], Value::String("Berlin".into()));
 }
 
 // ---------------------------------------------------------------------------
@@ -167,7 +167,7 @@ fn test_jsonl_blank_lines() {
             "LOAD DATA FROM '{path}' FORMAT JSONL AS row RETURN row.name AS name ORDER BY row.name"
         ))
         .unwrap();
-    assert_eq!(r.rows.len(), 2);
+    assert_eq!(r.rows().len(), 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -186,8 +186,8 @@ fn test_jsonl_nested_objects() {
             "LOAD DATA FROM '{path}' FORMAT JSONL AS row RETURN row.name AS name"
         ))
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
-    assert_eq!(r.rows[0][0], Value::String("Alix".into()));
+    assert_eq!(r.rows().len(), 1);
+    assert_eq!(r.rows()[0][0], Value::String("Alix".into()));
 }
 
 // ---------------------------------------------------------------------------
@@ -206,7 +206,7 @@ fn test_jsonl_arrays() {
             "LOAD DATA FROM '{path}' FORMAT JSONL AS row RETURN row.name AS name"
         ))
         .unwrap();
-    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows().len(), 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -225,10 +225,10 @@ fn test_jsonl_null_and_bool() {
             "LOAD DATA FROM '{path}' FORMAT JSONL AS row RETURN row.active AS a, row.note AS n ORDER BY row.name"
         ))
         .unwrap();
-    assert_eq!(r.rows.len(), 2);
-    assert_eq!(r.rows[0][0], Value::Bool(true));
-    assert_eq!(r.rows[0][1], Value::Null);
-    assert_eq!(r.rows[1][0], Value::Bool(false));
+    assert_eq!(r.rows().len(), 2);
+    assert_eq!(r.rows()[0][0], Value::Bool(true));
+    assert_eq!(r.rows()[0][1], Value::Null);
+    assert_eq!(r.rows()[1][0], Value::Bool(false));
 }
 
 // ---------------------------------------------------------------------------
@@ -263,9 +263,9 @@ fn test_csv_insert_nodes() {
     let r = session
         .execute("MATCH (p:Person) RETURN p.name AS name ORDER BY name")
         .unwrap();
-    assert_eq!(r.rows.len(), 2);
-    assert_eq!(r.rows[0][0], Value::String("Jules".into()));
-    assert_eq!(r.rows[1][0], Value::String("Vincent".into()));
+    assert_eq!(r.rows().len(), 2);
+    assert_eq!(r.rows()[0][0], Value::String("Jules".into()));
+    assert_eq!(r.rows()[1][0], Value::String("Vincent".into()));
 }
 
 // ---------------------------------------------------------------------------
@@ -284,7 +284,7 @@ fn test_ndjson_alias() {
             "LOAD DATA FROM '{path}' FORMAT NDJSON AS row RETURN row.name AS name ORDER BY row.name"
         ))
         .unwrap();
-    assert_eq!(r.rows.len(), 2);
+    assert_eq!(r.rows().len(), 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -303,7 +303,7 @@ fn test_csv_fewer_columns_than_header() {
             "LOAD DATA FROM '{path}' FORMAT CSV WITH HEADERS AS row RETURN row"
         ))
         .unwrap();
-    assert_eq!(r.rows.len(), 2, "both rows should be returned");
+    assert_eq!(r.rows().len(), 2, "both rows should be returned");
 }
 
 #[test]
@@ -318,7 +318,7 @@ fn test_csv_more_columns_than_header() {
             "LOAD DATA FROM '{path}' FORMAT CSV WITH HEADERS AS row RETURN row"
         ))
         .unwrap();
-    assert_eq!(r.rows.len(), 2, "both rows should be returned");
+    assert_eq!(r.rows().len(), 2, "both rows should be returned");
 }
 
 #[test]
@@ -332,7 +332,7 @@ fn test_csv_empty_file() {
             "LOAD DATA FROM '{path}' FORMAT CSV WITH HEADERS AS row RETURN row"
         ))
         .unwrap();
-    assert_eq!(r.rows.len(), 0, "empty CSV should return no rows");
+    assert_eq!(r.rows().len(), 0, "empty CSV should return no rows");
 }
 
 #[test]
@@ -365,5 +365,5 @@ fn test_csv_only_newlines() {
             "LOAD DATA FROM '{path}' FORMAT CSV WITH HEADERS AS row RETURN row"
         ))
         .unwrap();
-    assert_eq!(r.rows.len(), 0, "newlines-only CSV should return no rows");
+    assert_eq!(r.rows().len(), 0, "newlines-only CSV should return no rows");
 }

@@ -154,9 +154,9 @@ impl NodeTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::codec::BitPackedInts;
     use crate::graph::compact::id::decode_node_id;
     use crate::graph::compact::schema::{ColumnDef, ColumnType};
-    use crate::storage::BitPackedInts;
 
     /// Helper: build a `NodeTable` with 5 rows and two bit-packed columns
     /// ("rating" at 4 bits, "count" at 32 bits).

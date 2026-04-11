@@ -80,9 +80,9 @@ fn test_gql_inline_call_subquery() {
         )
         .unwrap();
 
-    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows().len(), 2);
     let friends: Vec<String> = result
-        .rows
+        .rows()
         .iter()
         .map(|r| match &r[1] {
             Value::String(s) => s.to_string(),
@@ -105,8 +105,8 @@ fn test_gql_inline_call_without_outer() {
         .execute("CALL { MATCH (n:Person) RETURN count(n) AS cnt } RETURN cnt")
         .unwrap();
 
-    assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0][0], Value::Int64(3));
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Int64(3));
 }
 
 // ============================================================================
@@ -133,7 +133,7 @@ mod cypher_subqueries {
 
         // WITH * scopes n=Alix from the outer MATCH, giving 2 results (Gus, Harm).
         assert_eq!(
-            result.rows.len(),
+            result.rows().len(),
             2,
             "WITH * should scope outer variable, expected 2 rows"
         );
@@ -153,7 +153,7 @@ mod cypher_subqueries {
             )
             .unwrap();
 
-        assert_eq!(result.rows.len(), 3);
+        assert_eq!(result.rows().len(), 3);
     }
 
     // ============================================================================
@@ -175,7 +175,7 @@ mod cypher_subqueries {
 
         // Alix->Gus->TechCorp path exists
         let mut names: Vec<String> = result
-            .rows
+            .rows()
             .iter()
             .map(|r| match &r[0] {
                 Value::String(s) => s.to_string(),
@@ -199,8 +199,8 @@ mod cypher_subqueries {
             )
             .unwrap();
 
-        assert_eq!(result.rows.len(), 1);
-        assert_eq!(result.rows[0][0], Value::String("Harm".into()));
+        assert_eq!(result.rows().len(), 1);
+        assert_eq!(result.rows()[0][0], Value::String("Harm".into()));
     }
 
     // ============================================================================
@@ -221,9 +221,9 @@ mod cypher_subqueries {
             )
             .unwrap();
 
-        assert_eq!(result.rows.len(), 3);
+        assert_eq!(result.rows().len(), 3);
         let harm_row = result
-            .rows
+            .rows()
             .iter()
             .find(|r| r[0] == Value::String("Harm".into()))
             .expect("Harm should be in results");

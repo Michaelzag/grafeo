@@ -886,27 +886,76 @@ jobs:
       # (vector, text, ring) so perf regressions are caught across all modules.
       - name: Bench base
         run: |
-          cargo bench --all-features \
-            --bench arena_bench \
-            --bench index_bench \
-            --bench query_bench \
-            -- --save-baseline base --noplot
+          cargo bench --all-features -p grafeo-common --bench arena_bench -- --save-baseline base --noplot
+          cargo bench --all-features -p grafeo-core --bench index_bench -- --save-baseline base --noplot
+          ENGINE_BENCHES="--bench query_bench --bench serialization_bench"
+          [ -f crates/grafeo-engine/benches/regression_bench.rs ] && ENGINE_BENCHES="$ENGINE_BENCHES --bench regression_bench"
+          [ -f crates/grafeo-engine/benches/memory_bench.rs ] && ENGINE_BENCHES="$ENGINE_BENCHES --bench memory_bench"
+          cargo bench --all-features -p grafeo-engine $ENGINE_BENCHES -- --save-baseline base --noplot
+
+      - name: Save base memory snapshot
+        run: |
+          if [ -f target/criterion/memory_snapshot.json ]; then
+            cp target/criterion/memory_snapshot.json target/criterion/memory_snapshot_base.json
+          fi
 
       - name: Checkout PR head
         run: git checkout ${{ github.event.pull_request.head.sha }}
 
       - name: Bench PR
         run: |
-          cargo bench --all-features \
-            --bench arena_bench \
-            --bench index_bench \
-            --bench query_bench \
-            -- --save-baseline pr --noplot
+          cargo bench --all-features -p grafeo-common --bench arena_bench -- --save-baseline pr --noplot
+          cargo bench --all-features -p grafeo-core --bench index_bench -- --save-baseline pr --noplot
+          ENGINE_BENCHES="--bench query_bench --bench serialization_bench"
+          [ -f crates/grafeo-engine/benches/regression_bench.rs ] && ENGINE_BENCHES="$ENGINE_BENCHES --bench regression_bench"
+          [ -f crates/grafeo-engine/benches/memory_bench.rs ] && ENGINE_BENCHES="$ENGINE_BENCHES --bench memory_bench"
+          cargo bench --all-features -p grafeo-engine $ENGINE_BENCHES -- --save-baseline pr --noplot
 
       - name: Compare and comment
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash scripts/bench-compare.sh base pr 15 ${{ github.event.pull_request.number }}
+        run: bash scripts/bench-compare.sh base pr bench-thresholds.toml ${{ github.event.pull_request.number }}
+
+  # Benchmark baseline persistence (main branch only)
+  #
+  # Runs on push to main and caches the baseline for future PR comparisons.
+  # This enables trend detection across releases.
+  benchmark-main:
+    name: Benchmark (main baseline)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-bench-
+
+      - name: Run all benchmarks
+        run: |
+          cargo bench --all-features -p grafeo-common --bench arena_bench -- --save-baseline main --noplot
+          cargo bench --all-features -p grafeo-core --bench index_bench -- --save-baseline main --noplot
+          ENGINE_BENCHES="--bench query_bench --bench serialization_bench"
+          [ -f crates/grafeo-engine/benches/regression_bench.rs ] && ENGINE_BENCHES="$ENGINE_BENCHES --bench regression_bench"
+          [ -f crates/grafeo-engine/benches/memory_bench.rs ] && ENGINE_BENCHES="$ENGINE_BENCHES --bench memory_bench"
+          cargo bench --all-features -p grafeo-engine $ENGINE_BENCHES -- --save-baseline main --noplot
+
+      - name: Save baseline cache
+        uses: actions/cache/save@v4
+        with:
+          path: target/criterion
+          key: grafeo-bench-main-${{ github.sha }}
 
   # Supply chain security (licenses, advisories, bans, sources)
   supply-chain:

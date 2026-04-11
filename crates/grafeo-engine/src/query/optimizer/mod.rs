@@ -81,6 +81,7 @@ impl Optimizer {
     /// Pre-populates the cardinality estimator with per-label row counts and
     /// edge type fanout. Feeds per-edge-type degree stats, label cardinalities,
     /// and graph totals into the cost model for accurate estimation.
+    #[cfg(feature = "lpg")]
     #[must_use]
     pub fn from_store(store: &grafeo_core::graph::lpg::LpgStore) -> Self {
         store.ensure_statistics_fresh();
@@ -104,7 +105,7 @@ impl Optimizer {
     ///
     /// Uses triple pattern cardinality estimates for cost-based optimization
     /// of SPARQL queries. Maps total triples to graph totals for the cost model.
-    #[cfg(feature = "rdf")]
+    #[cfg(feature = "triple-store")]
     #[must_use]
     pub fn from_rdf_statistics(rdf_stats: grafeo_core::statistics::RdfStatistics) -> Self {
         let total = rdf_stats.total_triples;
