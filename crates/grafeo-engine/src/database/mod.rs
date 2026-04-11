@@ -830,6 +830,9 @@ impl GrafeoDB {
         }
         self.read_only = true;
         self.query_cache = Arc::new(QueryCache::default());
+        // Projections hold Arc refs to the old store: clear them so they don't
+        // serve stale data or prevent the old store's memory from being freed.
+        self.projections.write().clear();
 
         Ok(())
     }

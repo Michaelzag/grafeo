@@ -146,6 +146,12 @@ impl GraphStore for GraphProjection {
             .filter(|n| self.node_matches(n))
     }
 
+    /// Returns a versioned edge if it passes projection filters.
+    ///
+    /// **Limitation**: `edge_matches` checks endpoint visibility via `get_node`
+    /// (current snapshot), not `get_node_versioned`, because `GraphProjection`
+    /// does not store epoch/transaction context. This means endpoint filtering
+    /// may reflect the current state rather than the requested version.
     fn get_edge_versioned(
         &self,
         id: EdgeId,
@@ -261,10 +267,12 @@ impl GraphStore for GraphProjection {
         if !self.node_id_matches(node) {
             return Vec::new();
         }
-        self.inner
-            .neighbors(node, direction)
+        // Use edges_from (which filters by edge type and endpoint visibility)
+        // and extract the target node IDs, so neighbors connected only via
+        // excluded edge types are not returned.
+        self.edges_from(node, direction)
             .into_iter()
-            .filter(|&n| self.node_id_matches(n))
+            .map(|(target, _)| target)
             .collect()
     }
 
@@ -354,6 +362,10 @@ impl GraphStore for GraphProjection {
         }
     }
 
+    /// Returns the type of a versioned edge if it passes projection filters.
+    ///
+    /// **Limitation**: endpoint visibility is checked via `get_node` (current
+    /// snapshot), not `get_node_versioned`. See `get_edge_versioned` for details.
     fn edge_type_versioned(
         &self,
         id: EdgeId,
@@ -586,6 +598,19 @@ mod tests {
 
         // With Person-only projection: Alix -> Gus only
         let spec = ProjectionSpec::new().with_node_labels(["Person"]);
+        let proj = GraphProjection::new(store, spec);
+        let neighbors = proj.neighbors(alix_id, Direction::Outgoing);
+        assert_eq!(neighbors.len(), 1);
+    }
+
+    #[test]
+    fn neighbors_filtered_by_edge_type() {
+        let store = setup_social_graph();
+        let alix_id = store.node_ids()[0];
+
+        // With edge-type filter: only KNOWS edges visible
+        // Alix KNOWS Gus, but LIVES_IN Amsterdam and CONTRIBUTES_TO Grafeo are excluded
+        let spec = ProjectionSpec::new().with_edge_types(["KNOWS"]);
         let proj = GraphProjection::new(store, spec);
         let neighbors = proj.neighbors(alix_id, Direction::Outgoing);
         assert_eq!(neighbors.len(), 1);

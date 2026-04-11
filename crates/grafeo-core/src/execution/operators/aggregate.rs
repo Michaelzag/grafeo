@@ -385,7 +385,7 @@ impl AggregateState {
     ///
     /// Uses the two-variable Welford online algorithm for numerically stable computation
     /// of covariance and related statistics. Skips the update if either value is null.
-    fn update_bivariate(&mut self, y_val: Option<Value>, x_val: Option<Value>) {
+    pub fn update_bivariate(&mut self, y_val: Option<Value>, x_val: Option<Value>) {
         if let AggregateState::Bivariate {
             count,
             mean_x,

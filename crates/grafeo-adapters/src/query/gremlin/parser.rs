@@ -49,51 +49,7 @@ impl<'a> Parser<'a> {
         while self.check(TokenKind::Dot) {
             self.advance(); // consume '.'
             let step = self.parse_step()?;
-
-            // If the step is Repeat, consume .times()/.until()/.emit() modifiers
-            if let Step::Repeat(_) = &step {
-                steps.push(step);
-                let repeat_idx = steps.len() - 1;
-                while self.check(TokenKind::Dot) {
-                    let saved = self.position;
-                    self.advance(); // consume '.'
-                    match self.current_kind().cloned() {
-                        Some(TokenKind::Times) => {
-                            self.advance(); // consume 'times'
-                            self.expect(TokenKind::LParen)?;
-                            let n = self.parse_integer()? as usize;
-                            self.expect(TokenKind::RParen)?;
-                            if let Step::Repeat(ref mut r) = steps[repeat_idx] {
-                                r.termination = Some(RepeatTermination::Times(n));
-                            }
-                        }
-                        Some(TokenKind::Until) => {
-                            self.advance(); // consume 'until'
-                            self.expect(TokenKind::LParen)?;
-                            let until_steps = self.parse_inner_steps()?;
-                            self.expect(TokenKind::RParen)?;
-                            if let Step::Repeat(ref mut r) = steps[repeat_idx] {
-                                r.termination = Some(RepeatTermination::Until(until_steps));
-                            }
-                        }
-                        Some(TokenKind::Emit) => {
-                            self.advance(); // consume 'emit'
-                            self.expect(TokenKind::LParen)?;
-                            self.expect(TokenKind::RParen)?;
-                            if let Step::Repeat(ref mut r) = steps[repeat_idx] {
-                                r.emit = true;
-                            }
-                        }
-                        _ => {
-                            // Not a repeat modifier, backtrack
-                            self.position = saved;
-                            break;
-                        }
-                    }
-                }
-            } else {
-                steps.push(step);
-            }
+            steps.push(step);
         }
 
         Ok(Statement { source, steps })
@@ -243,21 +199,21 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Limit => {
                 self.expect(TokenKind::LParen)?;
-                let n = self.parse_integer()? as usize;
+                let n = self.parse_non_negative_integer("limit")?;
                 self.expect(TokenKind::RParen)?;
                 Ok(Step::Limit(n))
             }
             TokenKind::Skip => {
                 self.expect(TokenKind::LParen)?;
-                let n = self.parse_integer()? as usize;
+                let n = self.parse_non_negative_integer("skip")?;
                 self.expect(TokenKind::RParen)?;
                 Ok(Step::Skip(n))
             }
             TokenKind::Range => {
                 self.expect(TokenKind::LParen)?;
-                let start = self.parse_integer()? as usize;
+                let start = self.parse_non_negative_integer("range")?;
                 self.expect(TokenKind::Comma)?;
-                let end = self.parse_integer()? as usize;
+                let end = self.parse_non_negative_integer("range")?;
                 self.expect(TokenKind::RParen)?;
                 Ok(Step::Range(start, end))
             }
@@ -535,16 +491,66 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::LParen)?;
                 let body = self.parse_inner_steps()?;
                 self.expect(TokenKind::RParen)?;
-                // Default: repeat once (will be overridden by .times()/.until())
-                Ok(Step::Repeat(RepeatStep {
+                let mut repeat = RepeatStep {
                     body,
                     termination: None,
                     emit: false,
-                }))
+                };
+                // Consume .times()/.until()/.emit() modifiers at any nesting level
+                self.parse_repeat_modifiers(&mut repeat)?;
+                Ok(Step::Repeat(repeat))
             }
 
             _ => Err(self.error(&format!("Unknown step: {:?}", token.kind))),
         }
+    }
+
+    /// Consumes `.times()`, `.until()`, and `.emit()` modifiers that follow a `repeat()` step.
+    fn parse_repeat_modifiers(&mut self, repeat: &mut RepeatStep) -> Result<()> {
+        while self.check(TokenKind::Dot) {
+            let saved = self.position;
+            self.advance(); // consume '.'
+            match self.current_kind().cloned() {
+                Some(TokenKind::Times) => {
+                    self.advance(); // consume 'times'
+                    self.expect(TokenKind::LParen)?;
+                    let n = self.parse_non_negative_integer("times")?;
+                    self.expect(TokenKind::RParen)?;
+                    repeat.termination = Some(RepeatTermination::Times(n));
+                }
+                Some(TokenKind::Until) => {
+                    self.advance(); // consume 'until'
+                    self.expect(TokenKind::LParen)?;
+                    let until_steps = self.parse_inner_steps()?;
+                    self.expect(TokenKind::RParen)?;
+                    repeat.termination = Some(RepeatTermination::Until(until_steps));
+                }
+                Some(TokenKind::Emit) => {
+                    self.advance(); // consume 'emit'
+                    self.expect(TokenKind::LParen)?;
+                    self.expect(TokenKind::RParen)?;
+                    repeat.emit = true;
+                }
+                _ => {
+                    // Not a repeat modifier, backtrack
+                    self.position = saved;
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Parses an integer and validates it is non-negative, returning it as `usize`.
+    fn parse_non_negative_integer(&mut self, context: &str) -> Result<usize> {
+        let n = self.parse_integer()?;
+        if n < 0 {
+            return Err(self.error(&format!(
+                "{context}() requires a non-negative integer, got {n}"
+            )));
+        }
+        #[allow(clippy::cast_sign_loss)]
+        Ok(n as usize)
     }
 
     fn parse_has_args(&mut self) -> Result<HasStep> {

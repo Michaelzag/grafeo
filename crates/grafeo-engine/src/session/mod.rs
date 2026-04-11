@@ -2600,10 +2600,25 @@ impl Session {
 
         use crate::query::processor::{QueryLanguage, QueryProcessor};
 
-        let has_mutations = Self::query_looks_like_mutation(query);
-        if has_mutations {
-            self.require_permission(crate::auth::StatementKind::Write)?;
-        }
+        // Reject writes if the identity lacks permission. Parse the query
+        // to determine mutation status reliably (the text heuristic has false
+        // negatives that could bypass authorization).
+        let has_mutations = if self.identity.can_write() {
+            // Fast path: identity can write, use heuristic for auto-commit only
+            Self::query_looks_like_mutation(query)
+        } else {
+            // Restricted identity: parse to check mutations reliably
+            use crate::query::translators::gql;
+            match gql::translate(query) {
+                Ok(plan) if plan.root.has_mutations() => {
+                    self.require_permission(crate::auth::StatementKind::Write)?;
+                    true
+                }
+                Ok(_) => false,
+                // Parse error: let the processor handle it below
+                Err(_) => Self::query_looks_like_mutation(query),
+            }
+        };
         let active = self.active_store();
 
         self.with_auto_commit(has_mutations, || {
@@ -3205,7 +3220,19 @@ impl Session {
         #[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
         let start_time = Instant::now();
 
-        let has_mutations = Self::query_looks_like_mutation(query);
+        let has_mutations = if self.identity.can_write() {
+            Self::query_looks_like_mutation(query)
+        } else {
+            use crate::query::translators::sql_pgq;
+            match sql_pgq::translate(query) {
+                Ok(plan) if plan.root.has_mutations() => {
+                    self.require_permission(crate::auth::StatementKind::Write)?;
+                    true
+                }
+                Ok(_) => false,
+                Err(_) => Self::query_looks_like_mutation(query),
+            }
+        };
         if has_mutations {
             self.require_permission(crate::auth::StatementKind::Write)?;
         }
@@ -3273,7 +3300,19 @@ impl Session {
                     #[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
                     let start_time = Instant::now();
 
-                    let has_mutations = Self::query_looks_like_mutation(query);
+                    let has_mutations = if self.identity.can_write() {
+                        Self::query_looks_like_mutation(query)
+                    } else {
+                        use crate::query::translators::cypher;
+                        match cypher::translate(query) {
+                            Ok(plan) if plan.root.has_mutations() => {
+                                self.require_permission(crate::auth::StatementKind::Write)?;
+                                true
+                            }
+                            Ok(_) => false,
+                            Err(_) => Self::query_looks_like_mutation(query),
+                        }
+                    };
                     let active = self.active_store();
                     let result = self.with_auto_commit(has_mutations, || {
                         let processor = QueryProcessor::for_stores_with_transaction(
