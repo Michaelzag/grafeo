@@ -437,7 +437,7 @@ fn serialize_group_state(state: &GroupState, w: &mut dyn Write) -> std::io::Resu
 /// Reconstructs the correct `AggregateState` variant from the tag byte so that
 /// reloaded groups can continue accumulating rows. Common variants (Count,
 /// SumInt, SumFloat, Avg, Min, Max, First, Last, Collect) are fully resumable.
-/// Rare/complex variants fall back to `First(Some(val))`.
+/// Rare/complex variants fall back to `Frozen(val)`.
 #[cfg(feature = "spill")]
 fn deserialize_group_state(r: &mut dyn Read) -> std::io::Result<GroupState> {
     use crate::execution::spill::deserialize_value;
@@ -540,7 +540,7 @@ fn deserialize_group_state(r: &mut dyn Read) -> std::io::Result<GroupState> {
             }
             _ => {
                 let val = deserialize_value(r)?;
-                AggregateState::First(Some(val))
+                AggregateState::Frozen(val)
             }
         };
 
@@ -1460,7 +1460,7 @@ mod tests {
         let mut buf = Vec::new();
         serialize_group_state(&state, &mut buf).unwrap();
         let restored = deserialize_group_state(&mut &buf[..]).unwrap();
-        // DISTINCT serializes as FINALIZED, deserialized as First(Some(val))
+        // DISTINCT serializes as FINALIZED, deserialized as Frozen(val)
         assert_eq!(restored.accumulators[0].finalize(), Value::Int64(3));
     }
 
@@ -1528,7 +1528,7 @@ mod tests {
         let mut buf = Vec::new();
         serialize_group_state(&state, &mut buf).unwrap();
         let restored = deserialize_group_state(&mut &buf[..]).unwrap();
-        // Complex variant stored as FINALIZED, restored as First(Some(val))
+        // Complex variant stored as FINALIZED, restored as Frozen(val)
         assert_eq!(restored.accumulators[0].finalize(), expected);
     }
 
@@ -1691,5 +1691,37 @@ mod tests {
             }
         }
         assert!(found_group2, "Group 2 with min/max not found");
+    }
+
+    #[test]
+    #[cfg(feature = "spill")]
+    fn spill_finalized_frozen_ignores_further_updates() {
+        let mut acc = AggregateState::new(AggregateFunction::StdDev, false, None, None);
+        acc.update(Some(Value::Float64(2.0)));
+        acc.update(Some(Value::Float64(4.0)));
+        acc.update(Some(Value::Float64(6.0)));
+        let expected = acc.finalize();
+
+        let state = GroupState {
+            key_values: vec![Value::Int64(1)],
+            accumulators: vec![acc],
+        };
+        let mut buf = Vec::new();
+        serialize_group_state(&state, &mut buf).unwrap();
+        let mut restored = deserialize_group_state(&mut &buf[..]).unwrap();
+
+        assert!(matches!(
+            restored.accumulators[0],
+            AggregateState::Frozen(_)
+        ));
+
+        restored
+            .accumulators[0]
+            .update(Some(Value::Float64(100.0)));
+        restored
+            .accumulators[0]
+            .update(Some(Value::Float64(200.0)));
+
+        assert_eq!(restored.accumulators[0].finalize(), expected);
     }
 }

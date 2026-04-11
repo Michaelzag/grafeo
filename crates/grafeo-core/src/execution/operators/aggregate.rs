@@ -86,6 +86,10 @@ pub enum AggregateState {
         m2_y: f64,
         c_xy: f64,
     },
+    /// Immutable finalized value restored from spill. Ignores further updates
+    /// so that reloaded groups that were serialized via the FINALIZED fallback
+    /// do not silently corrupt their result when more rows arrive.
+    Frozen(Value),
 }
 
 impl AggregateState {
@@ -378,6 +382,7 @@ impl AggregateState {
                 // Bivariate functions require two values; use update_bivariate() instead.
                 // Single-value update is a no-op for bivariate state.
             }
+            AggregateState::Frozen(_) => {}
         }
     }
 
@@ -522,6 +527,7 @@ impl AggregateState {
             }
             // SAMPLE: return the first non-null value seen
             AggregateState::Sample(sample) => sample.clone().unwrap_or(Value::Null),
+            AggregateState::Frozen(val) => val.clone(),
             // Binary set functions: dispatch on kind
             AggregateState::Bivariate {
                 kind,
