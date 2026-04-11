@@ -24,6 +24,14 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 ### Fixed
 
 - **Release workflow missing `grafeo-storage`**: the crate publish sequence now includes `grafeo-storage` before `grafeo-engine`, fixing cascading publish failures.
+- **Permission bypass in parameterized queries**: `_with_params` methods used a text heuristic to gate write permissions, which had false negatives for languages like GraphQL. Restricted identities now use plan-based mutation detection.
+- **Projection `neighbors()` ignored edge-type filter**: neighbors connected via excluded edge types were incorrectly returned.
+- **Projection `edge_type()` leaked hidden edges**: edges whose endpoints were excluded by label filtering could still have their type queried.
+- **Spill serialization dropped DISTINCT semantics**: DISTINCT aggregate variants are now serialized via finalized-value fallback to avoid corrupting results after reload.
+- **Gremlin `times()` accepted negative values**: negative loop counts silently wrapped to huge values, now returns a parse error.
+- **Gremlin nested repeat modifiers**: `.times()`/`.until()`/`.emit()` now work inside `union()`, `coalesce()`, and other nested traversals.
+- **Projections retained stale store after `compact()`**: `compact()` now clears all projections to prevent stale data and memory leaks.
+- **`rand` RUSTSEC-2026-0097**: updated to 0.10.1.
 
 ## [0.5.35] - 2026-04-11
 
