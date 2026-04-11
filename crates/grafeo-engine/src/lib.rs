@@ -46,7 +46,7 @@ pub use admin::{
     DumpMetadata, IndexInfo, LpgSchemaInfo, RdfSchemaInfo, SchemaInfo, ValidationError,
     ValidationResult, ValidationWarning, WalStatus,
 };
-pub use auth::{Identity, Role, StatementKind};
+pub use auth::{Grant, Identity, Role, StatementKind};
 pub use catalog::{Catalog, CatalogError, IndexDefinition, IndexType};
 pub use config::{AccessMode, Config, ConfigError, DurabilityMode, GraphModel};
 pub use database::GrafeoDB;

@@ -24,6 +24,41 @@ fn state_for_expr(expr: &AggregateExpr) -> AggregateState {
     )
 }
 
+/// Updates a single accumulator from a data chunk row, handling bivariate
+/// functions, `CountNonNull` null-skipping, and `COUNT(*)`.
+fn update_accumulator(
+    acc: &mut AggregateState,
+    expr: &AggregateExpr,
+    chunk: &DataChunk,
+    row: usize,
+) {
+    // Bivariate set functions (COVAR, CORR, REGR_*) need two column values
+    if expr.column2.is_some() {
+        let y_val = expr
+            .column
+            .and_then(|col| chunk.column(col).and_then(|c| c.get_value(row)));
+        let x_val = expr
+            .column2
+            .and_then(|col| chunk.column(col).and_then(|c| c.get_value(row)));
+        acc.update_bivariate(y_val, x_val);
+        return;
+    }
+
+    if let Some(col) = expr.column {
+        let val = chunk.column(col).and_then(|c| c.get_value(row));
+        // CountNonNull must skip null values
+        if expr.function == AggregateFunction::CountNonNull
+            && matches!(val, None | Some(Value::Null))
+        {
+            return;
+        }
+        acc.update(val);
+    } else {
+        // COUNT(*)
+        acc.update(None);
+    }
+}
+
 /// Hash key for grouping.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct GroupKey(Vec<u64>);
@@ -212,19 +247,7 @@ impl PushOperator for AggregatePushOperator {
                 // Global aggregation
                 if let Some(ref mut accumulators) = self.global_state {
                     for (acc, expr) in accumulators.iter_mut().zip(&self.aggregates) {
-                        if let Some(col) = expr.column {
-                            let val = chunk.column(col).and_then(|c| c.get_value(row));
-                            // CountNonNull must skip null values
-                            if expr.function == AggregateFunction::CountNonNull
-                                && matches!(val, None | Some(Value::Null))
-                            {
-                                continue;
-                            }
-                            acc.update(val);
-                        } else {
-                            // COUNT(*)
-                            acc.update(None);
-                        }
+                        update_accumulator(acc, expr, &chunk, row);
                     }
                 }
             } else {
@@ -250,19 +273,7 @@ impl PushOperator for AggregatePushOperator {
                 });
 
                 for (acc, expr) in state.accumulators.iter_mut().zip(&self.aggregates) {
-                    if let Some(col) = expr.column {
-                        let val = chunk.column(col).and_then(|c| c.get_value(row));
-                        // CountNonNull must skip null values
-                        if expr.function == AggregateFunction::CountNonNull
-                            && matches!(val, None | Some(Value::Null))
-                        {
-                            continue;
-                        }
-                        acc.update(val);
-                    } else {
-                        // COUNT(*)
-                        acc.update(None);
-                    }
+                    update_accumulator(acc, expr, &chunk, row);
                 }
             }
         }
@@ -684,17 +695,7 @@ impl PushOperator for SpillableAggregatePushOperator {
                 // Global aggregation - same as non-spillable
                 if let Some(ref mut accumulators) = self.global_state {
                     for (acc, expr) in accumulators.iter_mut().zip(&self.aggregates) {
-                        if let Some(col) = expr.column {
-                            let val = chunk.column(col).and_then(|c| c.get_value(row));
-                            if expr.function == AggregateFunction::CountNonNull
-                                && matches!(val, None | Some(Value::Null))
-                            {
-                                continue;
-                            }
-                            acc.update(val);
-                        } else {
-                            acc.update(None);
-                        }
+                        update_accumulator(acc, expr, &chunk, row);
                     }
                 }
             } else if self.using_partitioned {
@@ -720,17 +721,7 @@ impl PushOperator for SpillableAggregatePushOperator {
                         .map_err(|e| OperatorError::Execution(e.to_string()))?;
 
                     for (acc, expr) in state.accumulators.iter_mut().zip(&self.aggregates) {
-                        if let Some(col) = expr.column {
-                            let val = chunk.column(col).and_then(|c| c.get_value(row));
-                            if expr.function == AggregateFunction::CountNonNull
-                                && matches!(val, None | Some(Value::Null))
-                            {
-                                continue;
-                            }
-                            acc.update(val);
-                        } else {
-                            acc.update(None);
-                        }
+                        update_accumulator(acc, expr, &chunk, row);
                     }
                 }
             } else {
@@ -756,17 +747,7 @@ impl PushOperator for SpillableAggregatePushOperator {
                 });
 
                 for (acc, expr) in state.accumulators.iter_mut().zip(&self.aggregates) {
-                    if let Some(col) = expr.column {
-                        let val = chunk.column(col).and_then(|c| c.get_value(row));
-                        if expr.function == AggregateFunction::CountNonNull
-                            && matches!(val, None | Some(Value::Null))
-                        {
-                            continue;
-                        }
-                        acc.update(val);
-                    } else {
-                        acc.update(None);
-                    }
+                    update_accumulator(acc, expr, &chunk, row);
                 }
             }
         }

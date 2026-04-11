@@ -34,6 +34,30 @@
 use std::collections::HashSet;
 use std::fmt;
 
+/// A per-graph access grant.
+///
+/// When an identity has grants, it can only access the listed graphs at the
+/// specified role level. An identity with no grants has unrestricted access
+/// (governed only by its top-level roles).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Grant {
+    /// The graph name this grant applies to.
+    pub graph: String,
+    /// The maximum role level for this graph.
+    pub role: Role,
+}
+
+impl Grant {
+    /// Creates a new grant for the given graph and role.
+    #[must_use]
+    pub fn new(graph: impl Into<String>, role: Role) -> Self {
+        Self {
+            graph: graph.into(),
+            role,
+        }
+    }
+}
+
 /// A verified identity bound to a session.
 ///
 /// Created by the caller (typically a server or application layer) and
@@ -45,6 +69,9 @@ pub struct Identity {
     user_id: String,
     /// Roles assigned to this identity.
     roles: HashSet<Role>,
+    /// Per-graph access grants. Empty means unrestricted (all graphs accessible
+    /// at the identity's role level).
+    grants: Vec<Grant>,
 }
 
 impl Identity {
@@ -54,6 +81,7 @@ impl Identity {
         Self {
             user_id: user_id.into(),
             roles: roles.into_iter().collect(),
+            grants: Vec::new(),
         }
     }
 
@@ -66,7 +94,19 @@ impl Identity {
         Self {
             user_id: "anonymous".to_owned(),
             roles: [Role::Admin].into_iter().collect(),
+            grants: Vec::new(),
         }
+    }
+
+    /// Adds per-graph access grants to this identity.
+    ///
+    /// When grants are set, the identity can only access the listed graphs
+    /// at the specified role level. Graphs not in the grant list are
+    /// inaccessible regardless of the identity's top-level roles.
+    #[must_use]
+    pub fn with_grants(mut self, grants: impl IntoIterator<Item = Grant>) -> Self {
+        self.grants = grants.into_iter().collect();
+        self
     }
 
     /// Returns the user ID.
@@ -107,6 +147,45 @@ impl Identity {
     #[must_use]
     pub fn can_admin(&self) -> bool {
         self.has_role(Role::Admin)
+    }
+
+    /// Returns the per-graph grants, if any.
+    #[must_use]
+    pub fn grants(&self) -> &[Grant] {
+        &self.grants
+    }
+
+    /// Returns true if this identity has per-graph restrictions.
+    #[must_use]
+    pub fn has_grants(&self) -> bool {
+        !self.grants.is_empty()
+    }
+
+    /// Checks whether this identity can access the given graph at the
+    /// required role level.
+    ///
+    /// If no grants are configured, access is governed only by the
+    /// identity's top-level roles. If grants are configured, the graph
+    /// must appear in the grant list with a sufficient role.
+    #[must_use]
+    pub fn can_access_graph(&self, graph: &str, required: Role) -> bool {
+        if self.grants.is_empty() {
+            // No per-graph restrictions: use top-level role check
+            return match required {
+                Role::ReadOnly => self.can_read(),
+                Role::ReadWrite => self.can_write(),
+                Role::Admin => self.can_admin(),
+            };
+        }
+        // Check if any grant covers this graph at the required level
+        self.grants.iter().any(|g| {
+            g.graph.eq_ignore_ascii_case(graph)
+                && match required {
+                    Role::ReadOnly => true, // Any grant implies read access
+                    Role::ReadWrite => g.role == Role::ReadWrite || g.role == Role::Admin,
+                    Role::Admin => g.role == Role::Admin,
+                }
+        })
     }
 }
 
@@ -440,5 +519,53 @@ mod tests {
         let err = check_permission(&id, StatementKind::Write).unwrap_err();
         // Verify PermissionDenied implements std::error::Error
         let _: &dyn std::error::Error = &err;
+    }
+
+    // --- Grant tests ---
+
+    #[test]
+    fn no_grants_means_unrestricted() {
+        let id = Identity::new("alix", [Role::ReadWrite]);
+        assert!(id.can_access_graph("any_graph", Role::ReadWrite));
+        assert!(id.can_access_graph("other", Role::ReadOnly));
+        assert!(!id.has_grants());
+    }
+
+    #[test]
+    fn grant_restricts_to_listed_graphs() {
+        let id = Identity::new("gus", [Role::ReadWrite]).with_grants([
+            Grant::new("social", Role::ReadWrite),
+            Grant::new("analytics", Role::ReadOnly),
+        ]);
+        assert!(id.has_grants());
+        assert!(id.can_access_graph("social", Role::ReadWrite));
+        assert!(id.can_access_graph("social", Role::ReadOnly));
+        assert!(id.can_access_graph("analytics", Role::ReadOnly));
+        assert!(!id.can_access_graph("analytics", Role::ReadWrite));
+        assert!(!id.can_access_graph("secret", Role::ReadOnly));
+    }
+
+    #[test]
+    fn grant_admin_implies_all() {
+        let id =
+            Identity::new("admin", [Role::Admin]).with_grants([Grant::new("prod", Role::Admin)]);
+        assert!(id.can_access_graph("prod", Role::Admin));
+        assert!(id.can_access_graph("prod", Role::ReadWrite));
+        assert!(id.can_access_graph("prod", Role::ReadOnly));
+    }
+
+    #[test]
+    fn grant_case_insensitive() {
+        let id = Identity::new("alix", [Role::ReadWrite])
+            .with_grants([Grant::new("Social", Role::ReadWrite)]);
+        assert!(id.can_access_graph("social", Role::ReadOnly));
+        assert!(id.can_access_graph("SOCIAL", Role::ReadWrite));
+    }
+
+    #[test]
+    fn grant_display() {
+        let g = Grant::new("social", Role::ReadWrite);
+        assert_eq!(g.graph, "social");
+        assert_eq!(g.role, Role::ReadWrite);
     }
 }

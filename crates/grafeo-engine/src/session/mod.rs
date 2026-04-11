@@ -722,6 +722,28 @@ impl Session {
             _ => {} // Session state + transaction control: always allowed
         }
 
+        // Check per-graph grants for graph-scoped commands
+        if self.identity.has_grants() {
+            match &cmd {
+                SessionCommand::CreateGraph { name, .. }
+                | SessionCommand::DropGraph { name, .. } => {
+                    if !self
+                        .identity
+                        .can_access_graph(name, crate::auth::Role::ReadWrite)
+                    {
+                        return Err(Error::Query(QueryError::new(
+                            QueryErrorKind::Semantic,
+                            format!(
+                                "permission denied: no grant for graph '{name}' (user: {})",
+                                self.identity.user_id()
+                            ),
+                        )));
+                    }
+                }
+                _ => {}
+            }
+        }
+
         // Block DDL in read-only transactions (ISO/IEC 39075 Section 8)
         if *self.read_only_tx.lock() {
             match &cmd {
@@ -852,6 +874,21 @@ impl Session {
             }
             #[cfg(feature = "lpg")]
             SessionCommand::UseGraph(name) => {
+                // Check per-graph grant before switching
+                if self.identity.has_grants()
+                    && !name.eq_ignore_ascii_case("default")
+                    && !self
+                        .identity
+                        .can_access_graph(&name, crate::auth::Role::ReadOnly)
+                {
+                    return Err(Error::Query(QueryError::new(
+                        QueryErrorKind::Semantic,
+                        format!(
+                            "permission denied: no grant for graph '{name}' (user: {})",
+                            self.identity.user_id()
+                        ),
+                    )));
+                }
                 // Verify graph exists (resolve within current schema)
                 let effective_key = self.effective_graph_key(&name);
                 if !name.eq_ignore_ascii_case("default")

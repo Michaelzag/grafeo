@@ -66,9 +66,9 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 // Re-export the main database API
 pub use grafeo_engine::{
-    AccessMode, Catalog, CatalogError, Config, ConfigError, DurabilityMode, GrafeoDB, GraphModel,
-    GraphStore, GraphStoreMut, Identity, IndexDefinition, IndexType, Role, Session, StatementKind,
-    VERSION,
+    AccessMode, Catalog, CatalogError, Config, ConfigError, DurabilityMode, GrafeoDB, Grant,
+    GraphModel, GraphStore, GraphStoreMut, Identity, IndexDefinition, IndexType, Role, Session,
+    StatementKind, VERSION,
 };
 
 // Re-export the auth module for qualified access (e.g. grafeo::auth::Identity)
