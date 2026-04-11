@@ -907,6 +907,21 @@ impl Session {
             #[cfg(feature = "lpg")]
             SessionCommand::SessionSetGraph(name) => {
                 // ISO/IEC 39075 Section 7.1 GR2: set session graph (resolved within current schema)
+                // Check per-graph grant before switching (same as USE GRAPH)
+                if self.identity.has_grants()
+                    && !name.eq_ignore_ascii_case("default")
+                    && !self
+                        .identity
+                        .can_access_graph(&name, crate::auth::Role::ReadOnly)
+                {
+                    return Err(Error::Query(QueryError::new(
+                        QueryErrorKind::Semantic,
+                        format!(
+                            "permission denied: no grant for graph '{name}' (user: {})",
+                            self.identity.user_id()
+                        ),
+                    )));
+                }
                 let effective_key = self.effective_graph_key(&name);
                 if !name.eq_ignore_ascii_case("default")
                     && self.store.graph(&effective_key).is_none()

@@ -148,7 +148,7 @@ cargo add grafeo --features embed                            # ONNX embeddings (
 | `analytics` | Algorithms, parallel | Graph analytics pipelines |
 | `ai` | Vector, text, hybrid search, CDC | RAG, semantic search |
 | `edge` | GQL, compact, regex-lite | WASM, resource-constrained |
-| `enterprise` | All features | Full-featured deployments |
+| `enterprise` | Metrics, tracing, async I/O | Platform operators, observability |
 
 ### Node.js / TypeScript
 
@@ -286,7 +286,7 @@ db.set_schema("v1")
 db.current_schema()            # 'v1'
 
 # Graph projections (filtered virtual views)
-db.create_projection("people", {"node_labels": ["Person"], "edge_types": ["KNOWS"]})
+db.create_projection("people", node_labels=["Person"], edge_types=["KNOWS"])
 db.list_projections()          # ['people']
 db.drop_projection("people")
 

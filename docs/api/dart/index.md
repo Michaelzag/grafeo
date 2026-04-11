@@ -601,7 +601,7 @@ print(ids); // [0, 1, 2]
 
 !!! note "Requires `vector-index` feature"
     `batchCreateNodes` is only available when grafeo-c is built with
-    `--features vector-index` (included in the `lpg`, `ai` and `enterprise` profiles).
+    `--features vector-index` (included in the `ai` and `analytics` profiles).
 
 #### mmrSearch()
 

@@ -2075,6 +2075,14 @@ pub extern "C" fn grafeo_create_projection(
 
     let mut spec = ProjectionSpec::new();
 
+    // Reject null pointer with non-zero count (caller error)
+    if node_labels.is_null() && num_labels > 0 {
+        return false;
+    }
+    if edge_types.is_null() && num_types > 0 {
+        return false;
+    }
+
     if !node_labels.is_null() && num_labels > 0 {
         let mut labels = Vec::with_capacity(num_labels);
         for i in 0..num_labels {

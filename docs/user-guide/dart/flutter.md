@@ -10,8 +10,8 @@ covers building the native library and bundling it for each platform.
 
 ## Building grafeo-c
 
-Build the shared library with the `lpg` profile (includes GQL, AI indexes,
-algorithms, and parallel execution):
+Build the shared library with the `lpg` profile (includes GQL, Cypher,
+Gremlin, SQL/PGQ, and storage):
 
 ```bash
 cargo build --release -p grafeo-c --features lpg

@@ -149,10 +149,10 @@ Create filtered virtual views of your graph for algorithms or scoped queries:
 
 ```python
 # Create a projection with specific labels and edge types
-db.create_projection("people", {
-    "node_labels": ["Person"],
-    "edge_types": ["KNOWS", "WORKS_WITH"]
-})
+db.create_projection("people",
+    node_labels=["Person"],
+    edge_types=["KNOWS", "WORKS_WITH"]
+)
 
 print(db.list_projections())  # ['people']
 db.drop_projection("people")
