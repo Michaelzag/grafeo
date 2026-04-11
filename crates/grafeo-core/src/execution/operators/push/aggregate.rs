@@ -2,7 +2,7 @@
 
 use crate::execution::chunk::DataChunk;
 use crate::execution::operators::OperatorError;
-use crate::execution::operators::accumulator::{AggregateExpr, AggregateState};
+use crate::execution::operators::accumulator::{AggregateExpr, AggregateFunction, AggregateState};
 use crate::execution::pipeline::{ChunkSizeHint, PushOperator, Sink};
 #[cfg(feature = "spill")]
 use crate::execution::spill::{PartitionedState, SpillManager};
@@ -214,6 +214,12 @@ impl PushOperator for AggregatePushOperator {
                     for (acc, expr) in accumulators.iter_mut().zip(&self.aggregates) {
                         if let Some(col) = expr.column {
                             let val = chunk.column(col).and_then(|c| c.get_value(row));
+                            // CountNonNull must skip null values
+                            if expr.function == AggregateFunction::CountNonNull
+                                && matches!(val, None | Some(Value::Null))
+                            {
+                                continue;
+                            }
                             acc.update(val);
                         } else {
                             // COUNT(*)
@@ -246,6 +252,12 @@ impl PushOperator for AggregatePushOperator {
                 for (acc, expr) in state.accumulators.iter_mut().zip(&self.aggregates) {
                     if let Some(col) = expr.column {
                         let val = chunk.column(col).and_then(|c| c.get_value(row));
+                        // CountNonNull must skip null values
+                        if expr.function == AggregateFunction::CountNonNull
+                            && matches!(val, None | Some(Value::Null))
+                        {
+                            continue;
+                        }
                         acc.update(val);
                     } else {
                         // COUNT(*)
@@ -510,6 +522,11 @@ impl PushOperator for SpillableAggregatePushOperator {
                     for (acc, expr) in accumulators.iter_mut().zip(&self.aggregates) {
                         if let Some(col) = expr.column {
                             let val = chunk.column(col).and_then(|c| c.get_value(row));
+                            if expr.function == AggregateFunction::CountNonNull
+                                && matches!(val, None | Some(Value::Null))
+                            {
+                                continue;
+                            }
                             acc.update(val);
                         } else {
                             acc.update(None);
@@ -541,6 +558,11 @@ impl PushOperator for SpillableAggregatePushOperator {
                     for (acc, expr) in state.accumulators.iter_mut().zip(&self.aggregates) {
                         if let Some(col) = expr.column {
                             let val = chunk.column(col).and_then(|c| c.get_value(row));
+                            if expr.function == AggregateFunction::CountNonNull
+                                && matches!(val, None | Some(Value::Null))
+                            {
+                                continue;
+                            }
                             acc.update(val);
                         } else {
                             acc.update(None);
@@ -572,6 +594,11 @@ impl PushOperator for SpillableAggregatePushOperator {
                 for (acc, expr) in state.accumulators.iter_mut().zip(&self.aggregates) {
                     if let Some(col) = expr.column {
                         let val = chunk.column(col).and_then(|c| c.get_value(row));
+                        if expr.function == AggregateFunction::CountNonNull
+                            && matches!(val, None | Some(Value::Null))
+                        {
+                            continue;
+                        }
                         acc.update(val);
                     } else {
                         acc.update(None);
@@ -1055,15 +1082,15 @@ mod tests {
 
     #[test]
     fn aggregate_state_count_non_null_skips_nulls() {
+        // CountNonNull maps to the Count(0) state variant, which increments
+        // unconditionally. Callers (both push and pull operators) must filter
+        // null values before calling update. This test verifies the expected
+        // contract: only non-null values are fed to the accumulator.
         let mut state = AggregateState::new(AggregateFunction::CountNonNull, false, None, None);
-        state.update(Some(Value::Null));
+        // Simulate what the operator should do: skip nulls, update only non-nulls
+        // (Value::Null is skipped, Value::Int64(5) is the only non-null)
         state.update(Some(Value::Int64(5)));
-        state.update(Some(Value::Null));
-        // CountNonNull only counts non-null values via CountDistinct path
-        // which increments on insert. But CountNonNull without distinct uses Count variant.
-        // Let's just verify the finalized value is reasonable.
-        let result = state.finalize();
-        assert!(matches!(result, Value::Int64(_)));
+        assert_eq!(state.finalize(), Value::Int64(1));
     }
 
     #[test]

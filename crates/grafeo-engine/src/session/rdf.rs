@@ -137,31 +137,48 @@ impl Session {
         query: &str,
         params: std::collections::HashMap<String, Value>,
     ) -> Result<QueryResult> {
-        use crate::query::processor::{QueryLanguage, QueryProcessor};
+        use crate::query::{
+            Executor, optimizer::Optimizer, planner::rdf::RdfPlanner, processor::substitute_params,
+            translators::graphql_rdf,
+        };
 
         #[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
         let start_time = Instant::now();
 
-        let has_mutations = Self::query_looks_like_mutation(query);
-        if has_mutations {
+        // Parse and translate the query to a logical plan
+        let mut logical_plan = graphql_rdf::translate(query, "http://example.org/")?;
+
+        // Substitute parameters
+        substitute_params(&mut logical_plan, &params)?;
+
+        // Optimize the plan
+        let rdf_stats = self.rdf_store.get_or_collect_statistics();
+        let optimizer = Optimizer::from_rdf_statistics((*rdf_stats).clone());
+        let optimized_plan = optimizer.optimize(logical_plan)?;
+
+        // Check role-based permission for mutations
+        if optimized_plan.root.has_mutations() {
             self.require_permission(crate::auth::StatementKind::Write)?;
         }
-        let active = self.active_store();
 
-        let result = self.with_auto_commit(has_mutations, || {
-            let (viewing_epoch, transaction_id) = self.get_transaction_context();
-            let processor = QueryProcessor::for_stores_with_transaction(
-                Arc::clone(&active),
-                self.active_write_store(),
-                Arc::clone(&self.transaction_manager),
-            )?;
-            let processor = if let Some(transaction_id) = transaction_id {
-                processor.with_transaction_context(viewing_epoch, transaction_id)
-            } else {
-                processor
-            };
-            processor.process(query, QueryLanguage::GraphQLRdf, Some(&params))
-        });
+        // EXPLAIN: return the logical plan tree without executing
+        if optimized_plan.explain {
+            use crate::query::processor::explain_result;
+            return Ok(explain_result(&optimized_plan));
+        }
+
+        let planner = RdfPlanner::new(Arc::clone(&self.rdf_store))
+            .with_transaction_id(*self.current_transaction.lock());
+        #[cfg(feature = "wal")]
+        let planner = planner.with_wal(self.wal.clone());
+        #[cfg(all(feature = "cdc", feature = "lpg"))]
+        let planner =
+            planner.with_cdc_log(Some(Arc::clone(&self.cdc_log)), self.store.current_epoch());
+        let mut physical_plan = planner.plan(&optimized_plan)?;
+
+        let executor = Executor::with_columns(physical_plan.columns.clone())
+            .with_deadline(self.query_deadline());
+        let result = executor.execute(physical_plan.operator.as_mut());
 
         #[cfg(feature = "metrics")]
         {

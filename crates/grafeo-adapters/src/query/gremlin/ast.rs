@@ -134,6 +134,10 @@ pub enum Step {
     /// .choose(predicate, true_branch, false_branch)
     Choose(ChooseClause),
 
+    // === Looping Steps ===
+    /// .repeat(traversal).times(n) or .repeat(traversal).until(predicate)
+    Repeat(RepeatStep),
+
     // === Side Effect Steps ===
     /// .as(label)
     As(String),
@@ -301,6 +305,29 @@ pub enum ChooseCondition {
     Traversal(Vec<Step>),
     /// A `has(key)` existence check.
     HasKey(String),
+}
+
+/// Repeat loop configuration.
+///
+/// Combines the repeat body with its termination condition (times or until)
+/// and optional emit behavior.
+#[derive(Debug, Clone)]
+pub struct RepeatStep {
+    /// The traversal steps to repeat.
+    pub body: Vec<Step>,
+    /// How to terminate the loop. `None` means traverse until exhausted.
+    pub termination: Option<RepeatTermination>,
+    /// Whether to emit intermediate results.
+    pub emit: bool,
+}
+
+/// How a repeat loop terminates.
+#[derive(Debug, Clone)]
+pub enum RepeatTermination {
+    /// Repeat exactly N times.
+    Times(usize),
+    /// Repeat until a predicate is satisfied on the traverser.
+    Until(Vec<Step>),
 }
 
 /// Property step for setting properties.

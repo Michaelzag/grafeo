@@ -2900,30 +2900,42 @@ impl Session {
         query: &str,
         params: std::collections::HashMap<String, Value>,
     ) -> Result<QueryResult> {
-        use crate::query::processor::{QueryLanguage, QueryProcessor};
+        use crate::query::{
+            Executor, binder::Binder, optimizer::Optimizer, processor::substitute_params,
+            translators::gremlin,
+        };
 
         #[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
         let start_time = Instant::now();
 
-        let has_mutations = Self::query_looks_like_mutation(query);
+        // Parse and translate the query to a logical plan
+        let mut logical_plan = gremlin::translate(query)?;
+
+        // Substitute parameters
+        substitute_params(&mut logical_plan, &params)?;
+
+        // Semantic validation
+        let mut binder = Binder::new();
+        let _binding_context = binder.bind(&logical_plan)?;
+
+        // Optimize the plan
+        let active = self.active_store();
+        let optimizer = Optimizer::from_graph_store(&*active);
+        let optimized_plan = optimizer.optimize(logical_plan)?;
+
+        let has_mutations = optimized_plan.root.has_mutations();
         if has_mutations {
             self.require_permission(crate::auth::StatementKind::Write)?;
         }
-        let active = self.active_store();
 
         let result = self.with_auto_commit(has_mutations, || {
             let (viewing_epoch, transaction_id) = self.get_transaction_context();
-            let processor = QueryProcessor::for_stores_with_transaction(
-                Arc::clone(&active),
-                self.active_write_store(),
-                Arc::clone(&self.transaction_manager),
-            )?;
-            let processor = if let Some(transaction_id) = transaction_id {
-                processor.with_transaction_context(viewing_epoch, transaction_id)
-            } else {
-                processor
-            };
-            processor.process(query, QueryLanguage::Gremlin, Some(&params))
+            let planner =
+                self.create_planner_for_store(Arc::clone(&active), viewing_epoch, transaction_id);
+            let mut physical_plan = planner.plan(&optimized_plan)?;
+            let executor = Executor::with_columns(physical_plan.columns.clone())
+                .with_deadline(self.query_deadline());
+            executor.execute(physical_plan.operator.as_mut())
         });
 
         #[cfg(feature = "metrics")]
@@ -3023,30 +3035,48 @@ impl Session {
         query: &str,
         params: std::collections::HashMap<String, Value>,
     ) -> Result<QueryResult> {
-        use crate::query::processor::{QueryLanguage, QueryProcessor};
+        use crate::query::{
+            Executor, binder::Binder, optimizer::Optimizer, processor::substitute_params,
+            translators::graphql,
+        };
 
         #[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
         let start_time = Instant::now();
 
-        let has_mutations = Self::query_looks_like_mutation(query);
+        // Parse and translate the query to a logical plan
+        let mut logical_plan = graphql::translate(query)?;
+
+        // Merge default params with caller-supplied params
+        if !logical_plan.default_params.is_empty() {
+            let mut merged = logical_plan.default_params.clone();
+            merged.extend(params.iter().map(|(k, v)| (k.clone(), v.clone())));
+            substitute_params(&mut logical_plan, &merged)?;
+        } else {
+            substitute_params(&mut logical_plan, &params)?;
+        }
+
+        // Semantic validation
+        let mut binder = Binder::new();
+        let _binding_context = binder.bind(&logical_plan)?;
+
+        // Optimize the plan
+        let active = self.active_store();
+        let optimizer = Optimizer::from_graph_store(&*active);
+        let optimized_plan = optimizer.optimize(logical_plan)?;
+
+        let has_mutations = optimized_plan.root.has_mutations();
         if has_mutations {
             self.require_permission(crate::auth::StatementKind::Write)?;
         }
-        let active = self.active_store();
 
         let result = self.with_auto_commit(has_mutations, || {
             let (viewing_epoch, transaction_id) = self.get_transaction_context();
-            let processor = QueryProcessor::for_stores_with_transaction(
-                Arc::clone(&active),
-                self.active_write_store(),
-                Arc::clone(&self.transaction_manager),
-            )?;
-            let processor = if let Some(transaction_id) = transaction_id {
-                processor.with_transaction_context(viewing_epoch, transaction_id)
-            } else {
-                processor
-            };
-            processor.process(query, QueryLanguage::GraphQL, Some(&params))
+            let planner =
+                self.create_planner_for_store(Arc::clone(&active), viewing_epoch, transaction_id);
+            let mut physical_plan = planner.plan(&optimized_plan)?;
+            let executor = Executor::with_columns(physical_plan.columns.clone())
+                .with_deadline(self.query_deadline());
+            executor.execute(physical_plan.operator.as_mut())
         });
 
         #[cfg(feature = "metrics")]

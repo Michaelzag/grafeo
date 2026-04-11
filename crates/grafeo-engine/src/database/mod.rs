@@ -174,6 +174,9 @@ pub struct GrafeoDB {
     /// Whether this database is open in read-only mode.
     /// When true, sessions automatically enforce read-only transactions.
     read_only: bool,
+    /// Named graph projections (virtual subgraphs).
+    projections:
+        RwLock<std::collections::HashMap<String, Arc<grafeo_core::graph::GraphProjection>>>,
 }
 
 impl GrafeoDB {
@@ -572,6 +575,7 @@ impl GrafeoDB {
             current_graph: RwLock::new(None),
             current_schema: RwLock::new(None),
             read_only: is_read_only,
+            projections: RwLock::new(std::collections::HashMap::new()),
         };
 
         // Register storage sections as memory consumers for pressure tracking
@@ -705,6 +709,7 @@ impl GrafeoDB {
             current_graph: RwLock::new(None),
             current_schema: RwLock::new(None),
             read_only: false,
+            projections: RwLock::new(std::collections::HashMap::new()),
         })
     }
 
@@ -788,6 +793,7 @@ impl GrafeoDB {
             current_graph: RwLock::new(None),
             current_schema: RwLock::new(None),
             read_only: true,
+            projections: RwLock::new(std::collections::HashMap::new()),
         })
     }
 
@@ -1654,6 +1660,66 @@ impl GrafeoDB {
     #[must_use]
     pub fn list_graphs(&self) -> Vec<String> {
         self.lpg_store().graph_names()
+    }
+
+    // === Graph Projections ===
+
+    /// Creates a named graph projection (virtual subgraph).
+    ///
+    /// The projection filters the graph store to only include nodes with the
+    /// specified labels and edges with the specified types. Returns `true` if
+    /// created, `false` if a projection with that name already exists.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use grafeo_engine::GrafeoDB;
+    /// use grafeo_core::graph::ProjectionSpec;
+    ///
+    /// let db = GrafeoDB::new_in_memory();
+    /// let spec = ProjectionSpec::new()
+    ///     .with_node_labels(["Person", "City"])
+    ///     .with_edge_types(["LIVES_IN"]);
+    /// assert!(db.create_projection("social", spec));
+    /// ```
+    pub fn create_projection(
+        &self,
+        name: impl Into<String>,
+        spec: grafeo_core::graph::ProjectionSpec,
+    ) -> bool {
+        use grafeo_core::graph::GraphProjection;
+        use std::collections::hash_map::Entry;
+
+        let store = self.graph_store();
+        let projection = Arc::new(GraphProjection::new(store, spec));
+        let mut projections = self.projections.write();
+        match projections.entry(name.into()) {
+            Entry::Occupied(_) => false,
+            Entry::Vacant(e) => {
+                e.insert(projection);
+                true
+            }
+        }
+    }
+
+    /// Drops a named graph projection. Returns `true` if it existed.
+    pub fn drop_projection(&self, name: &str) -> bool {
+        self.projections.write().remove(name).is_some()
+    }
+
+    /// Returns the names of all graph projections.
+    #[must_use]
+    pub fn list_projections(&self) -> Vec<String> {
+        self.projections.read().keys().cloned().collect()
+    }
+
+    /// Returns a named projection as a [`GraphStore`] trait object.
+    #[must_use]
+    pub fn projection(&self, name: &str) -> Option<Arc<dyn GraphStore>> {
+        self.projections
+            .read()
+            .get(name)
+            .map(|p| Arc::clone(p) as Arc<dyn GraphStore>)
     }
 
     /// Returns the graph store as a trait object.

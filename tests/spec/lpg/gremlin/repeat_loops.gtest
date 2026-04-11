@@ -24,30 +24,71 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: repeat_times_one_hop
-    skip: "repeat/until not implemented"
     query: "g.V().has('Service', 'name', 'api-gateway').repeat(out('DEPENDS_ON')).times(1).values('name')"
     expect:
       count: 3
 
   - name: repeat_times_two_hops
-    skip: "repeat/until not implemented"
     query: "g.V().has('Service', 'name', 'api-gateway').repeat(out('DEPENDS_ON')).times(2).values('name')"
     expect:
-      count: 4
+      # Depth-2 from api-gateway: auth->cache, user->cache, order->user = 3 results
+      count: 3
 
   - name: repeat_times_zero
-    skip: "repeat/until not implemented"
     query: "g.V().has('Service', 'name', 'api-gateway').repeat(out('DEPENDS_ON')).times(0).values('name')"
     expect:
       rows:
         - [api-gateway]
+
+  - name: repeat_times_with_dedup
+    query: |
+      g.V().has('Service', 'name', 'api-gateway')
+        .repeat(out('DEPENDS_ON'))
+        .times(1)
+        .dedup()
+        .values('name')
+    expect:
+      count: 3
+
+  # ---------------------------------------------------------------------------
+  # repeat().emit() - emit at every step
+  # ---------------------------------------------------------------------------
+
+  - name: repeat_emit_all
+    query: |
+      g.V().has('Service', 'name', 'api-gateway')
+        .repeat(out('DEPENDS_ON'))
+        .emit()
+        .values('name')
+    expect:
+      count: 7
+
+  - name: all_downstream_services
+    query: |
+      g.V().has('Service', 'name', 'api-gateway')
+        .repeat(out('DEPENDS_ON'))
+        .emit()
+        .dedup()
+        .values('name')
+    expect:
+      count: 4
+
+  - name: all_upstream_services_of_cache
+    query: |
+      g.V().has('Service', 'name', 'cache-layer')
+        .repeat(in('DEPENDS_ON'))
+        .emit()
+        .dedup()
+        .values('name')
+    expect:
+      count: 4
 
   # ---------------------------------------------------------------------------
   # repeat().until() - condition-based termination
   # ---------------------------------------------------------------------------
 
   - name: repeat_until_reached_target
-    skip: "repeat/until not implemented"
+    skip: "until predicate evaluation during traversal not yet implemented"
     query: |
       g.V().has('Service', 'name', 'api-gateway')
         .repeat(out('DEPENDS_ON'))
@@ -57,7 +98,7 @@ tests:
       count: 2
 
   - name: repeat_until_no_outgoing
-    skip: "repeat/until not implemented"
+    skip: "until predicate evaluation during traversal not yet implemented"
     query: |
       g.V().has('Service', 'name', 'api-gateway')
         .repeat(out('DEPENDS_ON'))
@@ -70,7 +111,7 @@ tests:
         - [cache-layer]
 
   - name: repeat_until_with_max_loops
-    skip: "repeat/until not implemented"
+    skip: "until predicate evaluation during traversal not yet implemented"
     query: |
       g.V().has('Service', 'name', 'api-gateway')
         .repeat(out('DEPENDS_ON'))
@@ -80,21 +121,11 @@ tests:
       count: 2
 
   # ---------------------------------------------------------------------------
-  # repeat().emit() - emit at every step
+  # emit() variations (pre-repeat, filtered)
   # ---------------------------------------------------------------------------
 
-  - name: repeat_emit_all
-    skip: "repeat/until not implemented"
-    query: |
-      g.V().has('Service', 'name', 'api-gateway')
-        .repeat(out('DEPENDS_ON'))
-        .emit()
-        .values('name')
-    expect:
-      count: 7
-
   - name: emit_before_repeat
-    skip: "repeat/until not implemented"
+    skip: "emit-before-repeat ordering not yet implemented"
     query: |
       g.V().has('Service', 'name', 'api-gateway')
         .emit()
@@ -105,7 +136,7 @@ tests:
       count: 8
 
   - name: emit_with_filter
-    skip: "repeat/until not implemented"
+    skip: "emit with predicate filter not yet implemented"
     query: |
       g.V().has('Service', 'name', 'api-gateway')
         .repeat(out('DEPENDS_ON'))
@@ -114,12 +145,23 @@ tests:
     expect:
       count: 1
 
+  - name: repeat_emit_times_combination
+    skip: "emit-before-repeat ordering not yet implemented"
+    query: |
+      g.V().has('Service', 'name', 'api-gateway')
+        .emit()
+        .repeat(out('DEPENDS_ON'))
+        .times(1)
+        .values('name')
+    expect:
+      count: 4
+
   # ---------------------------------------------------------------------------
   # Path tracking with repeat
   # ---------------------------------------------------------------------------
 
   - name: repeat_path
-    skip: "repeat/until not implemented"
+    skip: "path() with repeat not yet implemented"
     query: |
       g.V().has('Service', 'name', 'api-gateway')
         .repeat(out('DEPENDS_ON'))
@@ -130,7 +172,7 @@ tests:
       count: 2
 
   - name: repeat_path_count_steps
-    skip: "repeat/until not implemented"
+    skip: "path() with repeat not yet implemented"
     query: |
       g.V().has('Service', 'name', 'api-gateway')
         .repeat(out('DEPENDS_ON'))
@@ -145,7 +187,7 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: repeat_simple_path
-    skip: "repeat/until not implemented"
+    skip: "simplePath() inside repeat not yet implemented"
     query: |
       g.V().has('Service', 'name', 'api-gateway')
         .repeat(out('DEPENDS_ON').simplePath())
@@ -160,7 +202,7 @@ tests:
   # ---------------------------------------------------------------------------
 
   - name: loops_count
-    skip: "repeat/until not implemented"
+    skip: "loops() step not yet implemented"
     query: |
       g.V().has('Service', 'name', 'api-gateway')
         .repeat(out('DEPENDS_ON'))
@@ -170,55 +212,3 @@ tests:
         .by(loops())
     expect:
       count: 7
-
-  # ---------------------------------------------------------------------------
-  # Real-world: find all downstream dependencies
-  # ---------------------------------------------------------------------------
-
-  - name: all_downstream_services
-    skip: "repeat/until not implemented"
-    query: |
-      g.V().has('Service', 'name', 'api-gateway')
-        .repeat(out('DEPENDS_ON'))
-        .emit()
-        .dedup()
-        .values('name')
-    expect:
-      count: 4
-
-  - name: all_upstream_services_of_cache
-    skip: "repeat/until not implemented"
-    query: |
-      g.V().has('Service', 'name', 'cache-layer')
-        .repeat(in('DEPENDS_ON'))
-        .emit()
-        .dedup()
-        .values('name')
-    expect:
-      count: 4
-
-  # ---------------------------------------------------------------------------
-  # Depth-limited traversal
-  # ---------------------------------------------------------------------------
-
-  - name: repeat_times_with_dedup
-    skip: "repeat/until not implemented"
-    query: |
-      g.V().has('Service', 'name', 'api-gateway')
-        .repeat(out('DEPENDS_ON'))
-        .times(1)
-        .dedup()
-        .values('name')
-    expect:
-      count: 3
-
-  - name: repeat_emit_times_combination
-    skip: "repeat/until not implemented"
-    query: |
-      g.V().has('Service', 'name', 'api-gateway')
-        .emit()
-        .repeat(out('DEPENDS_ON'))
-        .times(1)
-        .values('name')
-    expect:
-      count: 4

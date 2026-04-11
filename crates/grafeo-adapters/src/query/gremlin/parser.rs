@@ -49,7 +49,51 @@ impl<'a> Parser<'a> {
         while self.check(TokenKind::Dot) {
             self.advance(); // consume '.'
             let step = self.parse_step()?;
-            steps.push(step);
+
+            // If the step is Repeat, consume .times()/.until()/.emit() modifiers
+            if let Step::Repeat(_) = &step {
+                steps.push(step);
+                let repeat_idx = steps.len() - 1;
+                while self.check(TokenKind::Dot) {
+                    let saved = self.position;
+                    self.advance(); // consume '.'
+                    match self.current_kind().cloned() {
+                        Some(TokenKind::Times) => {
+                            self.advance(); // consume 'times'
+                            self.expect(TokenKind::LParen)?;
+                            let n = self.parse_integer()? as usize;
+                            self.expect(TokenKind::RParen)?;
+                            if let Step::Repeat(ref mut r) = steps[repeat_idx] {
+                                r.termination = Some(RepeatTermination::Times(n));
+                            }
+                        }
+                        Some(TokenKind::Until) => {
+                            self.advance(); // consume 'until'
+                            self.expect(TokenKind::LParen)?;
+                            let until_steps = self.parse_inner_steps()?;
+                            self.expect(TokenKind::RParen)?;
+                            if let Step::Repeat(ref mut r) = steps[repeat_idx] {
+                                r.termination = Some(RepeatTermination::Until(until_steps));
+                            }
+                        }
+                        Some(TokenKind::Emit) => {
+                            self.advance(); // consume 'emit'
+                            self.expect(TokenKind::LParen)?;
+                            self.expect(TokenKind::RParen)?;
+                            if let Step::Repeat(ref mut r) = steps[repeat_idx] {
+                                r.emit = true;
+                            }
+                        }
+                        _ => {
+                            // Not a repeat modifier, backtrack
+                            self.position = saved;
+                            break;
+                        }
+                    }
+                }
+            } else {
+                steps.push(step);
+            }
         }
 
         Ok(Statement { source, steps })
@@ -484,6 +528,19 @@ impl<'a> Parser<'a> {
                 let steps = self.parse_inner_steps()?;
                 self.expect(TokenKind::RParen)?;
                 Ok(Step::SideEffect(steps))
+            }
+
+            // Looping steps
+            TokenKind::Repeat => {
+                self.expect(TokenKind::LParen)?;
+                let body = self.parse_inner_steps()?;
+                self.expect(TokenKind::RParen)?;
+                // Default: repeat once (will be overridden by .times()/.until())
+                Ok(Step::Repeat(RepeatStep {
+                    body,
+                    termination: None,
+                    emit: false,
+                }))
             }
 
             _ => Err(self.error(&format!("Unknown step: {:?}", token.kind))),
