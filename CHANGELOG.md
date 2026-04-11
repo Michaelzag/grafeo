@@ -57,6 +57,7 @@ Breaking: `QueryResult.rows` is now private (use `rows()`/`into_rows()`), all pu
 - **WASM `setSchema`**: returns proper JS `Error` instead of plain string
 - **CI benchmark `--save-baseline`**: scoped to Criterion crates only
 - **Aggregate grouping hash collision**: wildcard arm now hashes `std::mem::discriminant` to distinguish future `Value` variants
+- **`edges_df()`/`nodes_df()` column overwrite**: properties named after structural columns (`source`, `target`, `type`, `id`, `labels`) no longer silently replace them ([#254](https://github.com/GrafeoDB/grafeo/issues/254))
 
 ## [0.5.34] - 2026-04-07
 
