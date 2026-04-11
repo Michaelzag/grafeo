@@ -10,6 +10,7 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 
 ### Changed
 
+- **Unified aggregate accumulator**: push-based aggregate operator now uses the same `AggregateState` as the pull-based operator, gaining support for all 30+ aggregate functions (COLLECT, LAST, STDEV, percentiles, regression, etc.) that previously returned NULL in push mode.
 - **`session_read_only()` deprecated**: use `session_with_role(Role::ReadOnly)` instead. The old method remains as an alias.
 
 ### Fixed
