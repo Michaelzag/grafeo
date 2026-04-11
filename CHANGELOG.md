@@ -11,6 +11,7 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 - **Graph projections**: `ProjectionSpec` and `GraphProjection` in grafeo-core provide read-only, filtered views of a graph store. Filter by node labels and edge types to create virtual subgraphs for algorithms and queries. Implements the full `GraphStore` trait.
 - **Gremlin `repeat().times()`/`.emit()`**: parse and execute `repeat(out()).times(n)` for fixed-depth traversal and `repeat(out()).emit()` for all-depths traversal. Maps to the existing `VariableLengthExpand` operator. `until()` predicates, `path()`, `simplePath()`, and `loops()` remain pending.
 - **GraphQL feature verification**: variable substitution (`$name`), directives (`@skip`/`@include`), aggregation (`sum`/`avg`), nested queries (4 levels), and multiple root fields all confirmed working with 29 spec tests.
+- **Graph projection API on GrafeoDB**: `create_projection(name, spec)`, `drop_projection(name)`, `list_projections()`, `projection(name)` for managing named virtual subgraphs at the database level.
 
 ### Changed
 

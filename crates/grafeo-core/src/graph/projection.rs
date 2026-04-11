@@ -344,9 +344,11 @@ impl GraphStore for GraphProjection {
     // --- Entity metadata ---
 
     fn edge_type(&self, id: EdgeId) -> Option<ArcStr> {
-        let et = self.inner.edge_type(id)?;
-        if self.edge_type_matches(&et) {
-            Some(et)
+        // Must check both the type filter and endpoint visibility,
+        // consistent with get_edge which uses edge_matches.
+        let edge = self.inner.get_edge(id)?;
+        if self.edge_matches(&edge) {
+            Some(edge.edge_type)
         } else {
             None
         }
@@ -358,9 +360,9 @@ impl GraphStore for GraphProjection {
         epoch: EpochId,
         transaction_id: TransactionId,
     ) -> Option<ArcStr> {
-        let et = self.inner.edge_type_versioned(id, epoch, transaction_id)?;
-        if self.edge_type_matches(&et) {
-            Some(et)
+        let edge = self.inner.get_edge_versioned(id, epoch, transaction_id)?;
+        if self.edge_matches(&edge) {
+            Some(edge.edge_type)
         } else {
             None
         }

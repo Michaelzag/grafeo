@@ -18,7 +18,7 @@ tests:
     query: "RETURN info() AS i"
     expect:
       columns: [i]
-      row_count: 1
+      count: 1
 
   - name: info node_count after inserts
     setup:
@@ -27,7 +27,7 @@ tests:
     query: "RETURN info() AS i"
     expect:
       columns: [i]
-      row_count: 1
+      count: 1
 
   # --- schema() ---
 
@@ -35,7 +35,7 @@ tests:
     query: "RETURN schema() AS s"
     expect:
       columns: [s]
-      row_count: 1
+      count: 1
 
   # --- CURRENT_SCHEMA ---
 
