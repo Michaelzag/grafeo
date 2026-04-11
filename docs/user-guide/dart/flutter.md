@@ -10,11 +10,11 @@ covers building the native library and bundling it for each platform.
 
 ## Building grafeo-c
 
-Build the shared library with the `embedded` profile (includes GQL, AI indexes,
+Build the shared library with the `lpg` profile (includes GQL, AI indexes,
 algorithms, and parallel execution):
 
 ```bash
-cargo build --release -p grafeo-c --features embedded
+cargo build --release -p grafeo-c --features lpg
 ```
 
 The output location depends on your host OS:

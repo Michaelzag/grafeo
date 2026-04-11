@@ -101,12 +101,12 @@ Grafeo 0.5.36 - Lpg mode, 42 nodes, 87 edges
 Type :help for commands, :quit to exit.
 
 grafeo> MATCH (n:Person) RETURN n.name, n.age
-Ã¢â€Å’Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€Â¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€Â
-Ã¢â€â€š n.name   Ã¢â€â€š n.age Ã¢â€â€š
-Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€Â¼Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€Â¤
-Ã¢â€â€š "Alix"  Ã¢â€â€š 30    Ã¢â€â€š
-Ã¢â€â€š "Gus"    Ã¢â€â€š 25    Ã¢â€â€š
-Ã¢â€â€Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€Â´Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€Ëœ
++----------+-------+
+| n.name   | n.age |
++----------+-------+
+| "Alix"   | 30    |
+| "Gus"    | 25    |
++----------+-------+
 2 rows (0.8ms)
 
 grafeo> :begin
@@ -169,15 +169,38 @@ grafeo index stats ./mydb
 ### Backup & Restore
 
 ```bash
+# Snapshot backup (single file)
 grafeo backup create ./mydb -o backup.grafeo
 grafeo backup restore backup.grafeo ./restored --force
+
+# Incremental backup (WAL-based, for production use)
+grafeo backup full ./mydb -o /backups/full
+grafeo backup incremental ./mydb -o /backups/incr
+grafeo backup status /backups/full
+grafeo backup restore-to-epoch /backups/full ./restored --epoch 100
 ```
 
-### Data Export & Import
+### Data Import
 
 ```bash
+# Import CSV as graph nodes
+grafeo import csv ./mydb data.csv --label Person
+grafeo import csv ./mydb data.csv --label Person --no-headers --separator ';'
+
+# Import JSON Lines as graph nodes
+grafeo import jsonl ./mydb events.jsonl --label Event
+```
+
+### Data Export
+
+```bash
+# Native dump/load
 grafeo data dump ./mydb -o ./export/
 grafeo data load ./export/ ./newdb
+
+# Graph interchange formats
+grafeo data dump ./mydb -o graph.gexf --export-format gexf
+grafeo data dump ./mydb -o graph.graphml --export-format graphml
 ```
 
 ### WAL Management

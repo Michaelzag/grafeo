@@ -63,13 +63,40 @@ The beta series focuses on correctness, completeness and real-world durability. 
 - **RDF streaming Turtle**: TripleSink-based streaming parser for large RDF datasets
 - **`RdfGraphStoreAdapter`**: bridges `RdfStore` to `GraphStore`, giving RDF graphs access to all 25+ graph algorithms
 
+### Delivered in 0.5.34
+
+- **GQL schema hierarchy** (ISO/IEC 39075 Section 4.2.5): `CREATE SCHEMA`/`DROP SCHEMA`, `SESSION SET SCHEMA`, full data isolation
+- **Streaming RDF triple sink**: `TripleSink` trait with `BatchInsertSink` and `CountSink`
+- **Golden fixture tests**: snapshot v4, `.grafeo` file format and WAL frame byte-equality checks
+- **Feature matrix CI**: per-profile build+test jobs (gql-only, gql+vector, gql+rdf, embedded, browser)
+
+### Delivered in 0.5.35
+
+- **Persona-based feature profiles**: `lpg`, `rdf`, `analytics`, `ai`, `edge`, `enterprise` replace deployment-target profiles. Old names (`embedded`, `browser`, `server`, `full`) kept as deprecated aliases, scheduled for removal in 0.7.0
+- **Section-based container format**: `.grafeo` files use a section directory with checksummed, independently addressable sections
+- **`grafeo-storage` crate**: persistence I/O extracted from `grafeo-adapters` as a sibling to `grafeo-core`
+- **Block-based LPG/RDF section format (v2)**: structured layout with string tables, packed arrays, columnar property blocks, per-block CRC
+- **Arrow IPC export**: zero-copy export for DuckDB, Polars, pandas, DataFusion interop
+- **GEXF + GraphML export**: graph interchange for Gephi, Cytoscape, NetworkX, yEd, igraph
+- **Incremental backup**: `backup_full()`, `backup_incremental()`, `restore_to_epoch()` with CLI commands
+- **CDC retention and eviction**: `CdcRetentionConfig` with epoch-based and count-based limits
+- **Python named graph management**: `create_graph()`, `drop_graph()`, `list_graphs()`, `set_graph()`, `set_schema()`
+- **Python per-transaction CDC override**: `begin_transaction_with_cdc(True|False)`
+- **Breaking changes**: `QueryResult.rows` now private (use `rows()`/`into_rows()`), 95 public enums are `#[non_exhaustive]`, storage format changed (databases from 0.5.34 or earlier must be re-created)
+
+### Delivered in 0.5.36
+
+- **Role-based access control (Auth M1)**: `Identity`, `Role` (`Admin`, `ReadWrite`, `ReadOnly`), `StatementKind` for session-level permission scoping
+- **Per-graph access grants**: `Grant` type restricts identity access to specific named graphs
+- **Graph projections**: `CREATE PROJECTION`, `DROP PROJECTION`, `SHOW PROJECTIONS` in GQL, plus API in Python, Node.js, WASM and C
+- **CSV/JSON Lines import**: CLI `grafeo import csv`/`grafeo import jsonl`, Python `import_csv()`/`import_jsonl()`, Node.js `importCsv()`/`importJsonl()`
+- **Gremlin `repeat().times()`/`.emit()`**: fixed-depth and all-depths traversal
+- **Unified aggregate accumulator**: push-based aggregate operator gains all 30+ aggregate functions
+
 ### Planned Releases
 
 | Version    | Focus                                                                                |
 |------------|--------------------------------------------------------------------------------------|
-| **0.5.34** | GQL schema hierarchy, golden fixture tests, format stability                         |
-| **0.5.35** | Section-based container, LPG/RDF split, persona feature profiles, breaking API prep  |
-| **0.5.36** | Role-based sessions (Auth M1), query language completeness, CSV/JSON import          |
 | **0.5.37** | RDF ecosystem: SPARQL HTTP Protocol, SHACL validation, bulk load                     |
 | **0.5.38** | Algorithms, streaming results, memory introspection, testing unification             |
 | **0.5.39** | API stability markers, feature profile deprecation warnings, C FFI parity            |
@@ -92,9 +119,8 @@ The goal is confidence: if something works in 0.6, it works in 1.0.
 
 ---
 
-## 0.7: Scoped Access + Pluggable Auth (Auth M2)
+## 0.7: Pluggable Auth + Profile Cleanup (Auth M2)
 
-- **Per-graph access control**: Identity gains grants scoped to schemas and graphs
 - **Pluggable auth providers**: `AuthProvider` trait with JWT and OIDC backends
 - **Audit logging**: structured request-level audit trail per identity
 - **Deprecated feature profile removal**: old names (`embedded`, `browser`, `server`, `full`) removed

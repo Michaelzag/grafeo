@@ -156,36 +156,47 @@ grafeo = "0.5"
 
 ### Feature Flags
 
-The `embedded` profile is enabled by default: GQL, AI features (vector/text/hybrid search, CDC), graph algorithms and parallel execution. Use feature groups or individual flags to customize:
+Grafeo uses **persona-based feature profiles** that describe use cases rather than deployment targets. Compose them freely to match your needs:
 
 ```toml
 [dependencies]
-# Default (embedded profile): GQL + AI + algorithms + parallel
+# Default (lpg profile): GQL + AI + algorithms + parallel
 grafeo = "0.5"
 
-# All languages + AI + storage + RDF
-grafeo = { version = "0.5", default-features = false, features = ["full"] }
+# Add RDF/SPARQL support
+grafeo = { version = "0.5", features = ["rdf"] }
 
-# Only query languages, no AI features
-grafeo = { version = "0.5", default-features = false, features = ["languages"] }
+# Graph analytics
+grafeo = { version = "0.5", features = ["analytics"] }
 
-# GQL with AI features
-grafeo = { version = "0.5", default-features = false, features = ["gql", "ai"] }
+# Full feature set
+grafeo = { version = "0.5", default-features = false, features = ["enterprise"] }
 
 # Minimal: GQL only
 grafeo = { version = "0.5", default-features = false, features = ["gql"] }
 
-# With ONNX embedding generation (opt-in, not in full)
+# With ONNX embedding generation (opt-in, ~17MB)
 grafeo = { version = "0.5", features = ["embed"] }
 ```
 
-#### Feature Groups
+#### Persona Profiles
 
-| Profile / Group | Contents | Description |
-|-----------------|----------|-------------|
-| `embedded` | gql, ai, algos, compact-store, parallel, regex | Default for libraries and bindings |
-| `browser` | gql, compact-store, regex-lite | Default for WASM |
-| `server` / `full` | embedded + languages + storage + rdf + cdc | Everything except embed |
+| Profile | Contents | Use case |
+|---------|----------|----------|
+| `lpg` | GQL, AI, algorithms, parallel | Default for libraries and apps |
+| `rdf` | SPARQL, triple-store, ring-index | Knowledge graphs, linked data |
+| `analytics` | Algorithms, parallel | Graph analytics pipelines |
+| `ai` | Vector, text, hybrid search, CDC | RAG, semantic search |
+| `edge` | GQL, compact, regex-lite | WASM, resource-constrained |
+| `enterprise` | All features | Full-featured deployments |
+
+!!! note "Deprecated profiles"
+    The old deployment-target profiles (`embedded`, `browser`, `server`, `full`) still work as aliases but are deprecated and scheduled for removal in 0.7.0. Migrate to persona profiles when convenient.
+
+#### Convenience Groups
+
+| Group | Contents | Description |
+|-------|----------|-------------|
 | `languages` | gql, cypher, sparql, gremlin, graphql, sql-pgq | All query language parsers |
 | `ai` | vector-index, text-index, hybrid-search, cdc | AI/RAG search + change tracking |
 | `storage` | wal, spill, mmap, grafeo-file | Persistence backends |

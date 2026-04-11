@@ -809,7 +809,7 @@ db.execute("INSERT (:Person {name: 'Vincent'})")        # raises error
 ```
 
 !!! note
-    Requires the `compact-store` feature (included in the default `embedded` profile).
+    Requires the `compact-store` feature (included in the default `lpg` profile).
 
 ### close()
 

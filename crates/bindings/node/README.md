@@ -106,6 +106,32 @@ result.nodes();          // extracted nodes
 result.edges();          // extracted edges
 ```
 
+### Graph Projections
+
+```typescript
+await db.createProjection('people', {
+  nodeLabels: ['Person'],
+  edgeTypes: ['KNOWS']
+});
+const projections = db.listProjections();  // ['people']
+db.dropProjection('people');
+```
+
+### Data Import
+
+```typescript
+const count = await db.importCsv('./users.csv', { label: 'Person', headers: true });
+const count2 = await db.importJsonl('./events.jsonl', 'Event');
+```
+
+### Backup and Restore
+
+```typescript
+await db.backupFull('/backups/full');
+await db.backupIncremental('/backups/incr');
+await GrafeoDB.restoreToEpoch('/backups/full', 100, './restored');
+```
+
 ### Vector Search
 
 ```typescript
@@ -125,6 +151,9 @@ const results = await db.vectorSearch('Document', 'embedding', queryVector, 10);
 - Full node/edge CRUD with property management
 - ACID transactions with automatic rollback
 - HNSW vector similarity search with batch operations
+- Graph projections (filtered virtual views)
+- CSV and JSON Lines import
+- Incremental backup and restore
 - Async/await API backed by Rust + Tokio
 - TypeScript definitions included
 

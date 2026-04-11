@@ -123,30 +123,32 @@ Grafeo uses a modular translator architecture where query languages are parsed i
 cargo add grafeo
 ```
 
-By default, the `embedded` profile is enabled: GQL, AI features (vector/text/hybrid search, CDC), graph algorithms and parallel execution. Use feature groups to customize:
+Grafeo uses persona-based feature profiles that describe use cases. Compose them freely:
 
 ```bash
-# Default (embedded profile): GQL + AI + algorithms + parallel
+# Default: LPG with GQL, AI, algorithms, parallel execution
 cargo add grafeo
 
-# All query languages + AI + algorithms + storage
-cargo add grafeo --no-default-features --features full
+# Compose profiles for your use case
+cargo add grafeo --features rdf          # Add RDF/SPARQL support
+cargo add grafeo --features analytics    # Add graph algorithms
+cargo add grafeo --features ai           # Add vector/text/hybrid search
+cargo add grafeo --features enterprise   # Full feature set
 
-# Only query languages, no AI features or algorithms
-cargo add grafeo --no-default-features --features languages
-
-# Only GQL with AI features
-cargo add grafeo --no-default-features --features gql,ai
-
-# Minimal: GQL only
-cargo add grafeo --no-default-features --features gql
-
-# With graph algorithms (SSSP, PageRank, centrality, community detection, etc.)
-cargo add grafeo --no-default-features --features gql,algos
-
-# With ONNX embedding generation (opt-in, ~17MB)
-cargo add grafeo --features embed
+# Or use individual flags
+cargo add grafeo --no-default-features --features gql       # Minimal: GQL only
+cargo add grafeo --no-default-features --features languages  # All query languages
+cargo add grafeo --features embed                            # ONNX embeddings (opt-in, ~17MB)
 ```
+
+| Profile | Contents | Use case |
+|---------|----------|----------|
+| `lpg` | GQL, AI, algorithms, parallel | Default for libraries and apps |
+| `rdf` | SPARQL, triple-store, ring-index | Knowledge graphs, linked data |
+| `analytics` | Algorithms, parallel | Graph analytics pipelines |
+| `ai` | Vector, text, hybrid search, CDC | RAG, semantic search |
+| `edge` | GQL, compact, regex-lite | WASM, resource-constrained |
+| `enterprise` | All features | Full-featured deployments |
 
 ### Node.js / TypeScript
 
@@ -177,7 +179,7 @@ dotnet add package Grafeo
 ```yaml
 # pubspec.yaml
 dependencies:
-  grafeo: ^0.5.34
+  grafeo: ^0.5.36
 ```
 
 ### Python
@@ -222,7 +224,7 @@ const result = await db.execute(`
     MATCH (p:Person)-[:KNOWS]->(friend)
     RETURN p.name, friend.name
 `);
-console.log(result.rows);
+console.log(result.toArray());
 
 await db.close();
 ```
@@ -276,6 +278,27 @@ db.detailed_stats() # Memory usage, index counts
 db.schema()         # Labels, edge types, property keys
 db.validate()       # Integrity check
 
+# Named graphs and schemas
+db.create_graph("social")
+db.set_graph("social")
+db.list_graphs()               # ['social']
+db.set_schema("v1")
+db.current_schema()            # 'v1'
+
+# Graph projections (filtered virtual views)
+db.create_projection("people", {"node_labels": ["Person"], "edge_types": ["KNOWS"]})
+db.list_projections()          # ['people']
+db.drop_projection("people")
+
+# Data import
+db.import_csv("users.csv", "Person", headers=True)
+db.import_jsonl("events.jsonl", "Event")
+
+# Backup and restore
+db.backup_full("/backups/full")
+db.backup_incremental("/backups/incr")
+GrafeoDB.restore_to_epoch("/backups/full", epoch=100, output_path="./restored")
+
 # Persistence control
 db.save("/path/to/backup")    # Save to disk
 db.to_memory()                # Create in-memory copy
@@ -302,7 +325,7 @@ fn main() {
     db.execute("INSERT (:Person {name: 'Alix'})").unwrap();
 
     let result = db.execute("MATCH (p:Person) RETURN p.name").unwrap();
-    for row in result.rows {
+    for row in result.rows() {
         println!("{:?}", row);
     }
 }
@@ -361,9 +384,21 @@ grafeo stats ./mydb             # Detailed statistics
 grafeo schema ./mydb            # Labels, edge types, property keys
 grafeo validate ./mydb          # Integrity check
 
+# Data import
+grafeo import csv ./mydb data.csv --label Person
+grafeo import jsonl ./mydb events.jsonl --label Event
+
 # Backup & restore
 grafeo backup create ./mydb -o backup
-grafeo backup restore backup ./copy --force
+grafeo backup full ./mydb -o /backups/full
+grafeo backup incremental ./mydb -o /backups/incr
+grafeo backup restore-to-epoch /backups/full ./restored --epoch 100
+grafeo backup status /backups/full
+
+# Data export
+grafeo data dump ./mydb -o ./export/
+grafeo data dump ./mydb -o graph.gexf --export-format gexf
+grafeo data dump ./mydb -o graph.graphml --export-format graphml
 
 # WAL management
 grafeo wal status ./mydb
