@@ -14,6 +14,7 @@ use std::sync::Mutex;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 
+use grafeo_common::types::Value;
 use grafeo_engine::GrafeoDB;
 
 // ============================================================================
@@ -72,30 +73,31 @@ fn recorder_flush() {
 // Setup helpers
 // ============================================================================
 
+/// Creates a social graph using the direct CRUD API for speed.
+///
+/// Using the query API (MATCH + CREATE) for edges is O(n) per edge due to
+/// property-based node lookup, making large graphs prohibitively slow.
+/// The CRUD API bypasses parsing and planning entirely.
 fn setup_social_graph(node_count: usize, edge_multiplier: usize) -> GrafeoDB {
     let db = GrafeoDB::new_in_memory();
-    let session = db.session();
 
+    // Create nodes via CRUD API, collecting their IDs
+    let mut node_ids = Vec::with_capacity(node_count);
     for i in 0..node_count {
-        let query = format!(
-            "INSERT (:Person {{id: {}, name: 'User{}', age: {}}})",
-            i,
-            i,
-            20 + (i % 50)
-        );
-        session.execute(&query).unwrap();
+        let id = db.create_node(&["Person"]);
+        db.set_node_property(id, "id", Value::Int64(i as i64));
+        db.set_node_property(id, "name", Value::String(format!("User{i}").into()));
+        db.set_node_property(id, "age", Value::Int64((20 + (i % 50)) as i64));
+        node_ids.push(id);
     }
 
+    // Create edges via CRUD API using collected IDs (O(1) per edge)
     let edge_count = node_count * edge_multiplier;
     for i in 0..edge_count {
         let src = i % node_count;
         let dst = (i * 7 + 13) % node_count;
         if src != dst {
-            let query = format!(
-                "MATCH (a:Person {{id: {}}}), (b:Person {{id: {}}}) CREATE (a)-[:KNOWS]->(b)",
-                src, dst
-            );
-            let _ = session.execute(&query);
+            db.create_edge(node_ids[src], node_ids[dst], "KNOWS");
         }
     }
 

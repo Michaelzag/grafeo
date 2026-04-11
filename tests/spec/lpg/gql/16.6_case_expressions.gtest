@@ -9,6 +9,7 @@ meta:
   section: "16.6"
   title: CASE expressions
   dataset: ecommerce
+  iso: [GA05]
 
 tests:
 

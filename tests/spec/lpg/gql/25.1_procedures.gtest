@@ -10,6 +10,7 @@ meta:
   title: Procedures
   dataset: empty
   requires: [algos]
+  iso: [GP01, GP04]
 
 tests:
 

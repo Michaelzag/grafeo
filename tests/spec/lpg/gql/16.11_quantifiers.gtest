@@ -24,6 +24,7 @@ meta:
   section: "16.11"
   title: Graph pattern quantifiers
   dataset: empty
+  iso: [G035, G036, G060, G061]
 
 tests:
 

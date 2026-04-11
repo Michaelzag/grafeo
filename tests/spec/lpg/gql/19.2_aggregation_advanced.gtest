@@ -10,6 +10,7 @@ meta:
   section: "19.2"
   title: Advanced aggregation
   dataset: empty
+  iso: [GF10, GF11, GF20]
 
 tests:
 

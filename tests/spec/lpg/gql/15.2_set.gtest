@@ -6,6 +6,7 @@ meta:
   section: "15.2"
   title: SET clause
   dataset: empty
+  iso: [GD01, GD02]
 
 tests:
 

@@ -6,6 +6,7 @@ meta:
   section: "14.2"
   title: Set operations
   dataset: empty
+  iso: [GQ03, GQ04, GQ05, GQ06, GQ07]
 
 tests:
 

@@ -9,6 +9,7 @@ meta:
   section: "16.5"
   title: List functions
   dataset: empty
+  iso: [GV50, GF12, GF13]
 
 tests:
 

@@ -6,6 +6,7 @@ meta:
   section: "15.3"
   title: REMOVE and DELETE clauses
   dataset: empty
+  iso: [GD01, GD02, GD04]
 
 tests:
 

@@ -10,6 +10,7 @@ meta:
   model: lpg
   section: "19.4"
   title: Statistical aggregation functions
+  iso: [GF11]
   dataset: empty
 
 tests:

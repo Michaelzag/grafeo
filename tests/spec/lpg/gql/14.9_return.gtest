@@ -6,6 +6,7 @@ meta:
   section: "14.9"
   title: RETURN clause
   dataset: social_network
+  iso: [GQ14]
 
 tests:
 

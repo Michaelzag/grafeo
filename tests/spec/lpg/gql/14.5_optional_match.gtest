@@ -9,6 +9,7 @@ meta:
   section: "14.5"
   title: OPTIONAL MATCH clause
   dataset: empty
+  iso: [GQ21]
 
 tests:
 

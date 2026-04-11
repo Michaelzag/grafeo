@@ -9,6 +9,7 @@ meta:
   section: "21.3"
   title: Temporal functions
   dataset: empty
+  iso: [GV39, GV40, GV41]
 
 tests:
 

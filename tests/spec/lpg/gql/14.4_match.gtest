@@ -9,6 +9,7 @@ meta:
   section: "14.4"
   title: MATCH clause
   dataset: social_network
+  iso: [G002, G043, G044, G045]
 
 tests:
 

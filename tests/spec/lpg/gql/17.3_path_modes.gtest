@@ -12,6 +12,7 @@ meta:
   section: "17.3"
   title: Path modes
   dataset: empty
+  iso: [G010, G011, G012, G013, G049, G050]
 
 tests:
 
