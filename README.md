@@ -1,7 +1,6 @@
 [![CI](https://github.com/GrafeoDB/grafeo/actions/workflows/ci.yml/badge.svg)](https://github.com/GrafeoDB/grafeo/actions/workflows/ci.yml)
 [![grafeo.dev](https://github.com/GrafeoDB/grafeo/actions/workflows/docs.yml/badge.svg)](https://grafeo.dev)
 [![codecov](https://codecov.io/gh/GrafeoDB/grafeo/graph/badge.svg)](https://codecov.io/gh/GrafeoDB/grafeo)
-
 [![Crates.io](https://img.shields.io/crates/v/grafeo.svg?color=00ADD8)](https://crates.io/crates/grafeo)
 [![PyPI](https://img.shields.io/pypi/v/grafeo.svg?color=00ADD8)](https://pypi.org/project/grafeo/)
 [![npm](https://img.shields.io/npm/v/@grafeo-db/js.svg?color=00ADD8)](https://www.npmjs.com/package/@grafeo-db/js)
@@ -9,10 +8,8 @@
 [![NuGet](https://img.shields.io/nuget/v/Grafeo.svg?color=00ADD8)](https://www.nuget.org/packages/Grafeo)
 [![pub.dev](https://img.shields.io/pub/v/grafeo.svg?color=00ADD8)](https://pub.dev/packages/grafeo)
 [![Go](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fproxy.golang.org%2Fgithub.com%2F!grafe!o!d!b%2Fgrafeo%2Fcrates%2Fbindings%2Fgo%2F%40latest&query=%24.Version&label=go&color=00ADD8&logo=go&logoColor=white)](https://pkg.go.dev/github.com/GrafeoDB/grafeo/crates/bindings/go)
-
 [![Web](https://img.shields.io/npm/v/@grafeo-db/web.svg?label=web&color=7c4dff)](https://www.npmjs.com/package/@grafeo-db/web)
 [![Server](https://img.shields.io/github/v/release/GrafeoDB/grafeo-server?label=server&color=7c4dff)](https://github.com/GrafeoDB/grafeo-server)
-
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![MSRV](https://img.shields.io/badge/MSRV-1.91.1-blue)](https://www.rust-lang.org)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org)
