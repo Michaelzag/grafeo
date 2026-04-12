@@ -7,7 +7,7 @@ use std::fmt;
 
 use crate::graph::rdf::Term;
 
-use super::shape::{PropertyPath, Severity, SH};
+use super::shape::{PropertyPath, SH, Severity};
 
 /// A SHACL validation report.
 #[derive(Debug, Clone)]
@@ -31,9 +31,7 @@ impl ValidationReport {
     /// Creates a report from a set of results. Conforms if no violations.
     #[must_use]
     pub fn from_results(results: Vec<ValidationResult>) -> Self {
-        let conforms = results
-            .iter()
-            .all(|r| r.severity != Severity::Violation);
+        let conforms = results.iter().all(|r| r.severity != Severity::Violation);
         Self { conforms, results }
     }
 }
@@ -153,7 +151,7 @@ impl ValidationReport {
             triples.push(Triple::new(
                 result_node.clone(),
                 Term::iri(SH::SOURCE_CONSTRAINT_COMPONENT),
-                Term::iri(&result.source_constraint_component),
+                Term::iri(&*result.source_constraint_component),
             ));
 
             // Source shape

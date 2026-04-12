@@ -686,8 +686,7 @@ impl Optimizer {
                     .as_variable()
                     .or_else(|| scan.predicate.as_variable())
                     .or_else(|| scan.object.as_variable())
-                    .map(String::from)
-                    .unwrap_or_else(|| format!("tp_{}", relations.len()));
+                    .map_or_else(|| format!("tp_{}", relations.len()), String::from);
                 relations.push((name, op.clone()));
                 true
             }

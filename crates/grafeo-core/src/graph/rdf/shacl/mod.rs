@@ -14,13 +14,17 @@
 //! - **Constraint evaluation** (`constraint.rs`): checks constraints against value nodes
 //! - **Report** (`report.rs`): validation results in W3C format
 
+pub mod constraint;
 mod parser;
-mod path;
+pub mod path;
+pub mod report;
 pub mod shape;
 mod target;
 
+pub use constraint::evaluate_constraint;
 pub use parser::parse_shapes;
 pub use path::evaluate_path;
+pub use report::{ValidationReport, ValidationResult};
 pub use shape::{
     Constraint, NodeKindValue, NodeShape, PropertyPath, PropertyShape, SH, Severity, ShaclError,
     Shape, Target,
