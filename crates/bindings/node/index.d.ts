@@ -84,6 +84,12 @@ export declare class GrafeoDB {
    * The original database remains unchanged.
    */
   save(path: string): void
+  /** Create a full backup of the database. */
+  backupFull(backupDir: string): void
+  /** Create an incremental backup (WAL records since last backup). */
+  backupIncremental(backupDir: string): void
+  /** Restore a database to a specific epoch from a backup chain. */
+  static restoreToEpoch(backupDir: string, epoch: number, outputPath: string): void
   /** Close the database. */
   close(): void
   /**
@@ -101,6 +107,18 @@ export declare class GrafeoDB {
   resetSchema(): void
   /** Returns the current schema name, or `null` if no schema is set. */
   currentSchema(): string | null
+  /**
+   * Creates a named graph projection. Returns `true` if created, `false`
+   * if a projection with that name already exists.
+   *
+   * A projection is a read-only, filtered view of the default graph.
+   * Only nodes with matching labels and edges with matching types are visible.
+   */
+  createProjection(name: string, nodeLabels?: Array<string> | undefined | null, edgeTypes?: Array<string> | undefined | null): boolean
+  /** Drops a named graph projection. Returns `true` if it existed. */
+  dropProjection(name: string): boolean
+  /** Returns the names of all graph projections. */
+  listProjections(): Array<string>
   /**
    * Drop a vector index for the given label and property.
    * Returns true if the index existed and was removed.
@@ -167,6 +185,20 @@ export declare class GrafeoDB {
   executeSparql(query: string, params?: any | undefined | null): Promise<QueryResult>
   /** Execute a query in a named language (e.g. `"graphql-rdf"`). */
   executeLanguage(language: string, query: string, params?: any | undefined | null): Promise<QueryResult>
+  /**
+   * Import a CSV file as graph nodes.
+   *
+   * Each row becomes a node with the given label. Column headers are used
+   * as property names. Returns the number of nodes created.
+   */
+  importCsv(path: string, options?: CsvImportOptions | undefined | null): Promise<number>
+  /**
+   * Import a JSON Lines file as graph nodes.
+   *
+   * Each line must be a valid JSON object. Object keys become property names.
+   * Returns the number of nodes created.
+   */
+  importJsonl(path: string, options?: JsonlImportOptions | undefined | null): Promise<number>
 }
 export type JsGrafeoDB = GrafeoDB
 
@@ -226,6 +258,16 @@ export declare class QueryResult {
   edges(): Array<JsEdge>
   /** Returns the result formatted as a Unicode table. */
   toString(): string
+  /**
+   * Returns the result as Arrow IPC stream bytes (Buffer).
+   *
+   * Use with the `apache-arrow` npm package:
+   * ```js
+   * import { tableFromIPC } from 'apache-arrow';
+   * const table = tableFromIPC(result.toArrowIPC());
+   * ```
+   */
+  toArrowIPC(): Buffer
   /** Get all rows as an array of arrays (no column names). */
   rows(): object
 }
@@ -260,6 +302,20 @@ export declare class Transaction {
   executeGraphql(query: string, params?: any | undefined | null): Promise<QueryResult>
   /** Execute a SPARQL query within this transaction. */
   executeSparql(query: string, params?: any | undefined | null): Promise<QueryResult>
+}
+
+/** Options for CSV import. */
+export interface CsvImportOptions {
+  /** Label to assign to created nodes (default: "Row") */
+  label?: string
+  /** Whether the first row contains headers (default: true) */
+  headers?: boolean
+}
+
+/** Options for JSON Lines import. */
+export interface JsonlImportOptions {
+  /** Label to assign to created nodes (default: "Row") */
+  label?: string
 }
 
 /** Returns the active SIMD instruction set for vector operations. */
