@@ -339,6 +339,10 @@ impl Session {
 
     /// Validates a named data graph against shapes in another named graph.
     ///
+    /// SHACL Core constraints evaluate against the named data graph. SHACL-SPARQL
+    /// constraints (`sh:sparql`) execute against the session's default dataset,
+    /// so they should use `GRAPH <name> { ... }` to target the named data graph.
+    ///
     /// # Errors
     ///
     /// Returns an error if shape parsing fails or either graph doesn't exist.
