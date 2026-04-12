@@ -2,36 +2,28 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
-## [0.5.37] - Unreleased
+## [0.5.37] - 2026-04-12
 
 ### Added
 
-- **SPARQL query execution overhaul**: major compliance pass closing 18 spec gaps. Composite indexes (SP, PO, OS) for O(1) two-bound and three-bound lookups. Batch insert with single-lock-per-index acquisition. Named graph CRUD (`CREATE GRAPH`, `DROP GRAPH`, `COPY`, `MOVE`, `ADD`, `CLEAR`). SPARQL UPDATE (`INSERT DATA`, `DELETE DATA`, `DELETE/INSERT WHERE`). `CONSTRUCT`, `BIND`, `OPTIONAL`, `MINUS`, `UNION`, `FILTER`, `EXISTS`/`NOT EXISTS` as semi/anti joins. 109 new W3C execution tests.
-- **Ring Index planner integration** (`ring-index`): wavelet-tree-based compact triple index wired into the SPARQL query planner. Leapfrog join operator (`RdfLeapfrogOperator`) provides worst-case optimal multi-way joins when all inputs are simple triple scans. Falls back to cascading hash joins when companion columns (LANG/DATATYPE) are needed.
-- **Ring Index persistence**: `save()`/`load()` via bincode serialization, `save_to_bytes()`/`load_from_bytes()` for container integration, `save_to_file()`/`load_from_file()` for standalone use. Comprehensive post-load validation (dictionary consistency, wavelet tree bounds, permutation lengths). `RdfRingSection` persists to `.grafeo` container during checkpoint, eliminating rebuild on restart.
-- **Dictionary encoding infrastructure**: `TermDictionary` maps RDF terms to compact u32 IDs for efficient join processing. `DictResolveOperator` converts IDs back to strings at result boundaries. Built lazily, invalidated on mutations.
-- **COUNT(\*) fast paths**: `COUNT(*)` over fully-unbound triple scans returns `store.len()` in O(1). Predicate-bound `COUNT(*)` uses per-predicate statistics. Graph-scoped `COUNT(*)` uses named graph length. Ring Index `count()` handles any partially-bound pattern in O(log sigma).
-- **RDF query optimizer**: `RdfStatistics` collector with per-predicate cardinality estimates. Cached statistics (invalidated on mutation). Cost-based join reordering for multi-way joins. Cardinality estimation for triple scan patterns.
-- **`EXPLAIN` / `EXPLAIN ANALYZE` for SPARQL**: `EXPLAIN SELECT ...` returns the physical plan tree without executing. `EXPLAIN ANALYZE SELECT ...` executes with profiling, showing actual row counts and timing per operator. Integrated into Python bindings.
-- **SPARQL WCOJ auto-detection**: `MultiWayJoin` operator detects star patterns sharing variables and routes them to Leapfrog join when the Ring Index is available, falling back to pairwise hash joins otherwise.
-- **SHACL validation** (`shacl` feature): W3C Shapes Constraint Language implementation for validating RDF data against shape definitions. SHACL Core supports all 28 constraint types (value type, cardinality, value range, string, property pair, logical, shape-based, closed, hasValue, in). SHACL-SPARQL enables `sh:sparql` constraints via the SPARQL query engine. Shape parser reads definitions from RDF triples, target resolver finds focus nodes, property path evaluator handles all 7 path types with cycle detection. `ValidationReport` materializes results as W3C-compliant RDF via `to_triples()`. API: `session.validate_shacl(shapes_graph)` in Rust, `db.validate_shacl("graph")` in Python. Included in the `rdf` persona profile and `server` deployment profile.
+- **SPARQL compliance pass**: 18 spec gaps closed. `CONSTRUCT`, `BIND`, `OPTIONAL`, `MINUS`, `UNION`, `FILTER`, `EXISTS`/`NOT EXISTS`. Named graph CRUD and SPARQL UPDATE. Composite indexes (SP, PO, OS) for O(1) multi-bound lookups. 109 new W3C tests.
+- **Ring Index planner** (`ring-index`): wavelet-tree compact triple index wired into SPARQL planner. Leapfrog WCOJ for multi-way star joins, hash join fallback when LANG/DATATYPE columns needed.
+- **Ring Index persistence**: bincode serialization with post-load invariant validation. `RdfRingSection` persists to `.grafeo` container, eliminating rebuild on restart.
+- **Dictionary encoding infrastructure**: `TermDictionary` maps terms to u32 IDs. `DictResolveOperator` resolves at result boundaries. Built lazily, invalidated on mutation.
+- **COUNT(\*) fast paths**: O(1) for unbound scans via `store.len()`, O(log sigma) for bound patterns via Ring Index.
+- **RDF query optimizer**: per-predicate cardinality estimates, cached statistics, cost-based join reordering.
+- **SPARQL EXPLAIN / EXPLAIN ANALYZE**: physical plan tree without executing, or profiled execution with per-operator timing. Python `explain_sparql()` binding.
+- **SHACL validation** (`shacl`): W3C Shapes Constraint Language with all 28 Core constraint types, SHACL-SPARQL (`sh:sparql`), 7 property path types with cycle detection, `ValidationReport` with `to_triples()` RDF materialization. `session.validate_shacl(shapes_graph)` in Rust, `db.validate_shacl("graph")` in Python. In `rdf` persona and `server` profiles.
 
 ### Changed
 
-- **RDF store indexes upgraded to `foldhash`**: replaced `ahash` hasher with `foldhash::fast::RandomState` for all HashMap-based indexes (subject, predicate, object, SP, PO, OS).
+- **RDF store indexes upgraded to `foldhash`**: replaced `ahash` with `foldhash::fast::RandomState` for all RDF HashMap indexes.
 - **`TxId` renamed to `TransactionId`**: consistent naming across the codebase.
 
 ### Fixed
 
-- **Stale dictionary/ring caches after `clear()`**: `RdfStore::clear()` now invalidates statistics, dictionary, and Ring Index caches, preventing stale data after graph clears or empty bulk loads.
-- **CONSTRUCT blank nodes dropped**: blank nodes in SPARQL CONSTRUCT templates were translated as variables, causing template triples with blank node subjects/objects to be silently dropped. Now correctly emits `TripleComponent::BlankNode`.
-- **Filter pushdown removed projected variables**: the SPARQL filter-into-TripleScan optimization replaced variables with literals, removing them from output columns and breaking downstream SELECT/ORDER BY. Optimization removed pending a correct implementation with `pushed_bindings`.
-- **LeapfrogRing omitted LANG/DATATYPE columns**: Ring-backed WCOJ joins skipped companion columns needed by `LANG()`/`DATATYPE()` functions. Now falls back to hash joins when companion columns are required.
-- **TripleRing deserialization without validation**: `load()`/`load_from_bytes()` now validate structural invariants (wavelet tree lengths, permutation sizes match `num_triples`) to prevent panics from corrupted `.grafeo` files.
-- **Missing `#[cfg(feature = "sparql")]` on `explain_sparql`**: Python binding method was exposed without the feature gate, causing runtime errors when SPARQL was not compiled in.
-- **Eager dictionary build in `RdfPlanner::new()`**: removed O(n) full-store dictionary construction on every query plan, which was unused in current code.
-- **Incremental backup could skip WAL records**: backup cursor was not advanced after incremental backup, causing duplicate replay on restore (#258).
-- **File manager leaked temp files on checkpoint failure**: temp files are now cleaned up in the error path (#258).
+- **Incremental backup could skip WAL records**: backup cursor was not advanced, causing duplicate replay on restore (#258).
+- **File manager leaked temp files on checkpoint failure**: temp files now cleaned up in the error path (#258).
 
 ## [0.5.36] - 2026-04-11
 
