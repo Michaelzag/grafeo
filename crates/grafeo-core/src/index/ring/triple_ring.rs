@@ -422,14 +422,56 @@ impl TripleRing {
         Ok(())
     }
 
+    /// Validates structural invariants after deserialization.
+    ///
+    /// Ensures that all internal arrays are consistent with `num_triples`
+    /// and the term dictionary, preventing panics from corrupted data.
+    fn validate(&self) -> std::io::Result<()> {
+        let n = self.num_triples;
+        if self.subjects.len() != n {
+            return Err(std::io::Error::other(format!(
+                "subjects wavelet tree length {} != num_triples {n}",
+                self.subjects.len()
+            )));
+        }
+        if self.predicates.len() != n {
+            return Err(std::io::Error::other(format!(
+                "predicates wavelet tree length {} != num_triples {n}",
+                self.predicates.len()
+            )));
+        }
+        if self.objects.len() != n {
+            return Err(std::io::Error::other(format!(
+                "objects wavelet tree length {} != num_triples {n}",
+                self.objects.len()
+            )));
+        }
+        if self.spo_to_pos.len() != n {
+            return Err(std::io::Error::other(format!(
+                "spo_to_pos permutation length {} != num_triples {n}",
+                self.spo_to_pos.len()
+            )));
+        }
+        if self.spo_to_osp.len() != n {
+            return Err(std::io::Error::other(format!(
+                "spo_to_osp permutation length {} != num_triples {n}",
+                self.spo_to_osp.len()
+            )));
+        }
+        Ok(())
+    }
+
     /// Deserializes a Ring from a reader.
     ///
     /// # Errors
     ///
     /// Returns an I/O error if reading fails or the data is malformed.
     pub fn load(mut reader: impl std::io::Read) -> std::io::Result<Self> {
-        bincode::serde::decode_from_std_read(&mut reader, bincode::config::standard())
-            .map_err(|e| std::io::Error::other(e.to_string()))
+        let ring: Self =
+            bincode::serde::decode_from_std_read(&mut reader, bincode::config::standard())
+                .map_err(|e| std::io::Error::other(e.to_string()))?;
+        ring.validate()?;
+        Ok(ring)
     }
 
     /// Saves the Ring to a file path.
@@ -474,9 +516,10 @@ impl TripleRing {
     ///
     /// Returns an I/O error if the data is malformed.
     pub fn load_from_bytes(data: &[u8]) -> std::io::Result<Self> {
-        let (ring, _bytes_read) =
+        let (ring, _bytes_read): (Self, _) =
             bincode::serde::decode_from_slice(data, bincode::config::standard())
                 .map_err(|e| std::io::Error::other(e.to_string()))?;
+        ring.validate()?;
         Ok(ring)
     }
 }

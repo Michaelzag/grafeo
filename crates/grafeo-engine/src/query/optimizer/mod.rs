@@ -945,12 +945,6 @@ impl Optimizer {
                 input: Box::new(LogicalOperator::NodeScan(scan)),
             }),
 
-            // For TripleScan, try to push equality filters into bound positions
-            #[cfg(feature = "triple-store")]
-            LogicalOperator::TripleScan(scan) => {
-                self.try_push_filter_into_triple_scan(predicate, scan)
-            }
-
             // For other operators, keep filter on top
             other => LogicalOperator::Filter(FilterOp {
                 predicate,
@@ -960,88 +954,11 @@ impl Optimizer {
         }
     }
 
-    /// Tries to push an equality filter into a TripleScan by converting a
-    /// variable position to a bound term.
-    ///
-    /// Example: `FILTER(?name = "Alix")` on `TripleScan(?person <name> ?name)`
-    /// becomes `TripleScan(?person <name> "Alix")` with no filter.
-    #[cfg(feature = "triple-store")]
-    fn try_push_filter_into_triple_scan(
-        &self,
-        predicate: LogicalExpression,
-        mut scan: crate::query::plan::TripleScanOp,
-    ) -> LogicalOperator {
-        use crate::query::plan::{BinaryOp, TripleComponent};
-
-        // Extract equality: Variable = Literal or Literal = Variable
-        let (var_name, value) = match &predicate {
-            LogicalExpression::Binary {
-                left,
-                op: BinaryOp::Eq,
-                right,
-            } => match (left.as_ref(), right.as_ref()) {
-                (LogicalExpression::Variable(v), LogicalExpression::Literal(lit)) => {
-                    (v.clone(), lit.clone())
-                }
-                (LogicalExpression::Literal(lit), LogicalExpression::Variable(v)) => {
-                    (v.clone(), lit.clone())
-                }
-                _ => {
-                    return LogicalOperator::Filter(FilterOp {
-                        predicate,
-                        pushdown_hint: None,
-                        input: Box::new(LogicalOperator::TripleScan(scan)),
-                    });
-                }
-            },
-            _ => {
-                return LogicalOperator::Filter(FilterOp {
-                    predicate,
-                    pushdown_hint: None,
-                    input: Box::new(LogicalOperator::TripleScan(scan)),
-                });
-            }
-        };
-
-        // Check if the variable matches a TripleScan position and bind it
-        let pushed = if scan.subject.as_variable() == Some(var_name.as_str()) {
-            match &value {
-                grafeo_common::types::Value::String(s) => {
-                    scan.subject = TripleComponent::Iri(s.to_string());
-                    true
-                }
-                _ => {
-                    scan.subject = TripleComponent::Literal(value);
-                    true
-                }
-            }
-        } else if scan.predicate.as_variable() == Some(var_name.as_str()) {
-            match &value {
-                grafeo_common::types::Value::String(s) => {
-                    scan.predicate = TripleComponent::Iri(s.to_string());
-                    true
-                }
-                _ => false,
-            }
-        } else if scan.object.as_variable() == Some(var_name.as_str()) {
-            scan.object = TripleComponent::Literal(value);
-            true
-        } else {
-            false
-        };
-
-        if pushed {
-            // Filter was absorbed into the scan
-            LogicalOperator::TripleScan(scan)
-        } else {
-            // Could not push, keep filter
-            LogicalOperator::Filter(FilterOp {
-                predicate,
-                pushdown_hint: None,
-                input: Box::new(LogicalOperator::TripleScan(scan)),
-            })
-        }
-    }
+    // NOTE: Filter-into-TripleScan pushdown is intentionally not implemented.
+    // Binding a variable position in the scan removes it from output columns,
+    // which breaks downstream operators (SELECT, ORDER BY) that reference it.
+    // A correct implementation needs a separate `pushed_bindings` field on
+    // TripleScanOp so the variable stays in output while the scan is constrained.
 
     /// Collects all output variable names from an operator.
     fn collect_output_variables(&self, op: &LogicalOperator) -> HashSet<String> {

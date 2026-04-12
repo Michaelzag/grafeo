@@ -151,12 +151,6 @@ impl RdfPlanner {
     /// Creates a new RDF planner with the given store.
     #[must_use]
     pub fn new(store: Arc<RdfStore>) -> Self {
-        // Build the term dictionary eagerly so plan_triple_scan() can use it.
-        let dictionary = if !store.is_empty() {
-            Some(store.get_or_build_dictionary())
-        } else {
-            None
-        };
         Self {
             store,
             chunk_size: DEFAULT_CHUNK_SIZE,
@@ -164,7 +158,7 @@ impl RdfPlanner {
             profiling: std::cell::Cell::new(false),
             profile_entries: std::cell::RefCell::new(Vec::new()),
             needs_companion_columns: std::cell::Cell::new(false),
-            dictionary,
+            dictionary: None,
             encoded_columns: std::cell::RefCell::new(std::collections::HashSet::new()),
             #[cfg(feature = "wal")]
             wal: None,
@@ -1170,9 +1164,13 @@ impl RdfPlanner {
             ));
         }
 
-        // Try Ring-backed LeapfrogRing (WCOJ) when all inputs are TripleScans
+        // Try Ring-backed LeapfrogRing (WCOJ) when all inputs are TripleScans.
+        // Skip when companion columns are needed (LANG/DATATYPE functions)
+        // because the leapfrog operator emits raw variable columns only.
         #[cfg(feature = "ring-index")]
-        if let Some(result) = self.try_leapfrog_ring(mwj) {
+        if !self.needs_companion_columns.get()
+            && let Some(result) = self.try_leapfrog_ring(mwj)
+        {
             return result;
         }
 

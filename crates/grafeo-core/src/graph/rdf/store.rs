@@ -564,6 +564,7 @@ impl RdfStore {
         self.sp_index.write().clear();
         self.po_index.write().clear();
         self.os_index.write().clear();
+        self.invalidate_statistics_cache();
     }
 
     /// Returns store statistics.

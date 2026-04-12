@@ -186,13 +186,9 @@ impl SparqlTranslator {
             plan = wrap_sort(plan, keys);
         }
 
-        // Apply DISTINCT/REDUCED (after projection, before OFFSET/LIMIT).
-        // REDUCED is treated identically to DISTINCT: the spec allows an
-        // implementation to eliminate all, some, or no duplicates.
-        if matches!(
-            select.modifier,
-            ast::SelectModifier::Distinct | ast::SelectModifier::Reduced
-        ) {
+        // Apply DISTINCT (after projection, before OFFSET/LIMIT).
+        // REDUCED is a no-op: the spec allows returning all rows unchanged.
+        if matches!(select.modifier, ast::SelectModifier::Distinct) {
             plan = wrap_distinct(plan);
         }
 
@@ -240,10 +236,13 @@ impl SparqlTranslator {
             plan = wrap_limit(plan, limit as usize);
         }
 
-        // Translate template triples: substitute variable bindings from WHERE
+        // Translate template triples: substitute variable bindings from WHERE.
+        // Use translate_data_term for subject/object so that blank nodes become
+        // TripleComponent::BlankNode (constants in output) rather than variables
+        // that would fail to bind against the WHERE clause results.
         let mut templates = Vec::new();
         for tp in &construct.template {
-            let subject = self.translate_triple_term(&tp.subject)?;
+            let subject = self.translate_data_term(&tp.subject)?;
             // CONSTRUCT templates use simple predicates (IRIs/variables), not paths
             let predicate = match &tp.predicate {
                 ast::PropertyPath::Predicate(iri) => TripleComponent::Iri(self.resolve_iri(iri)),
@@ -253,7 +252,7 @@ impl SparqlTranslator {
                 ),
                 _ => continue, // Skip complex property paths in templates
             };
-            let object = self.translate_triple_term(&tp.object)?;
+            let object = self.translate_data_term(&tp.object)?;
             templates.push(TripleTemplate {
                 subject,
                 predicate,

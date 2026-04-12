@@ -491,6 +491,7 @@ impl PyGrafeoDB {
     /// Return the physical execution plan for a SPARQL query without executing it.
     ///
     /// Equivalent to ``db.execute_sparql("EXPLAIN " + query)``.
+    #[cfg(feature = "sparql")]
     #[pyo3(signature = (query, params=None))]
     fn explain_sparql(
         &self,
