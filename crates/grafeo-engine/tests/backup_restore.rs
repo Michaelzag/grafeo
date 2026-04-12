@@ -275,3 +275,46 @@ fn backup_full_works_while_database_is_open() {
     assert_eq!(restored.node_count(), 2, "restored should have 2 nodes");
     restored.close().expect("close");
 }
+
+/// Two full backups into the same directory produce two distinct segments
+/// in the manifest. The second backup does not overwrite the first.
+#[test]
+fn backup_full_twice_produces_two_segments() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let db_path = dir.path().join("double.grafeo");
+    let backup_dir = dir.path().join("backups");
+
+    let db = GrafeoDB::open(&db_path).expect("open");
+    let session = db.session();
+    session
+        .execute("INSERT (:Person {name: 'Alix'})")
+        .expect("insert");
+
+    let seg1 = db.backup_full(&backup_dir).expect("first backup");
+    assert_eq!(seg1.filename, "backup_full_0000.grafeo");
+
+    // Add more data between backups
+    session
+        .execute("INSERT (:Person {name: 'Gus'})")
+        .expect("insert");
+
+    let seg2 = db.backup_full(&backup_dir).expect("second backup");
+    assert_eq!(seg2.filename, "backup_full_0001.grafeo");
+    assert!(seg2.end_epoch >= seg1.end_epoch);
+
+    let manifest = GrafeoDB::read_backup_manifest(&backup_dir)
+        .unwrap()
+        .unwrap();
+    assert_eq!(manifest.segments.len(), 2);
+
+    // Restore from the second backup (latest state)
+    let restore_path = dir.path().join("restored.grafeo");
+    GrafeoDB::restore_to_epoch(&backup_dir, seg2.end_epoch, &restore_path)
+        .expect("restore should succeed");
+
+    let restored = GrafeoDB::open(&restore_path).expect("open restored");
+    assert_eq!(restored.node_count(), 2);
+    restored.close().expect("close");
+
+    db.close().expect("close");
+}

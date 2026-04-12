@@ -74,6 +74,10 @@ impl GrafeoDB {
     pub async fn async_write_snapshot(self: &Arc<Self>) -> Result<()> {
         let db = Arc::clone(self);
         tokio::task::spawn_blocking(move || {
+            // Read-only databases have nothing to flush.
+            if db.read_only {
+                return Ok(());
+            }
             let Some(ref fm) = db.file_manager else {
                 return Err(Error::Internal(
                     "no file manager configured for snapshot write".to_string(),
@@ -124,6 +128,28 @@ mod tests {
 
         checkpoint_result.unwrap();
         assert_eq!(concurrent_result, 42);
+    }
+
+    /// Regression: async_write_snapshot on a read-only database should be a
+    /// no-op, not an error.
+    #[cfg(feature = "grafeo-file")]
+    #[tokio::test]
+    async fn async_write_snapshot_on_read_only_is_no_op() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ro_async.grafeo");
+
+        {
+            let db = GrafeoDB::open(&path).unwrap();
+            let session = db.session();
+            session.execute("INSERT (:Person {name: 'Alix'})").unwrap();
+            db.close().unwrap();
+        }
+
+        let db = Arc::new(GrafeoDB::open_read_only(&path).unwrap());
+        db.async_write_snapshot()
+            .await
+            .expect("async_write_snapshot on read-only should be a no-op");
+        assert_eq!(db.node_count(), 1);
     }
 
     #[cfg(feature = "grafeo-file")]

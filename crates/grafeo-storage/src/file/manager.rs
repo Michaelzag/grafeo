@@ -1297,4 +1297,59 @@ mod tests {
         let path = dir.path().join("beatrix_missing.grafeo");
         assert!(GrafeoFileManager::open_read_only(&path).is_err());
     }
+
+    #[test]
+    fn copy_to_produces_identical_file() {
+        let dir = test_dir();
+        let src = dir.path().join("copy_src.grafeo");
+        let dest = dir.path().join("copy_dest.grafeo");
+
+        let manager = GrafeoFileManager::create(&src).unwrap();
+        manager
+            .write_snapshot(b"copy test payload", 5, 3, 10, 20)
+            .unwrap();
+
+        // copy_to reads through the locked handle (no new open)
+        let bytes = manager.copy_to(&dest).unwrap();
+        assert!(bytes > 0);
+
+        // The original is still usable
+        let snap = manager.read_snapshot().unwrap();
+        assert_eq!(snap, b"copy test payload");
+        manager.close().unwrap();
+
+        // The copy is a valid .grafeo file
+        let copy = GrafeoFileManager::open(&dest).unwrap();
+        let snap = copy.read_snapshot().unwrap();
+        assert_eq!(snap, b"copy test payload");
+
+        let header = copy.active_header();
+        assert_eq!(header.epoch, 5);
+        assert_eq!(header.node_count, 10);
+        assert_eq!(header.edge_count, 20);
+        copy.close().unwrap();
+    }
+
+    #[test]
+    fn copy_to_from_read_only_manager() {
+        let dir = test_dir();
+        let src = dir.path().join("ro_copy_src.grafeo");
+        let dest = dir.path().join("ro_copy_dest.grafeo");
+
+        {
+            let manager = GrafeoFileManager::create(&src).unwrap();
+            manager
+                .write_snapshot(b"read-only copy data", 7, 4, 3, 1)
+                .unwrap();
+            manager.close().unwrap();
+        }
+
+        let ro = GrafeoFileManager::open_read_only(&src).unwrap();
+        let bytes = ro.copy_to(&dest).unwrap();
+        assert!(bytes > 0);
+
+        let copy = GrafeoFileManager::open(&dest).unwrap();
+        assert_eq!(copy.read_snapshot().unwrap(), b"read-only copy data");
+        copy.close().unwrap();
+    }
 }

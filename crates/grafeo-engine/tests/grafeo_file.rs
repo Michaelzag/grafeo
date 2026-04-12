@@ -1258,3 +1258,54 @@ fn wal_data_after_checkpoint_survives_drop() {
         db.close().unwrap();
     }
 }
+
+// ── Read-only checkpoint guard tests ─────────────────────────────
+
+/// Regression: wal_checkpoint() on a read-only database should be a no-op,
+/// not an error. Read-only databases have no WAL and the on-disk file is
+/// already a valid snapshot.
+#[cfg(all(feature = "wal", feature = "lpg"))]
+#[test]
+fn wal_checkpoint_on_read_only_is_no_op() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ro_checkpoint.grafeo");
+
+    {
+        let db = GrafeoDB::open(&path).unwrap();
+        let session = db.session();
+        session.execute("INSERT (:Person {name: 'Alix'})").unwrap();
+        db.close().unwrap();
+    }
+
+    let db = GrafeoDB::open_read_only(&path).unwrap();
+    // Should succeed (no-op), not fail with "read-only mode" error.
+    db.wal_checkpoint()
+        .expect("wal_checkpoint on read-only should be a no-op");
+    assert_eq!(db.node_count(), 1);
+}
+
+/// Regression: save() from a read-only database should succeed.
+/// save() creates a NEW file at the target path, reading from self.
+#[cfg(all(feature = "wal", feature = "lpg"))]
+#[test]
+fn save_from_read_only_database() {
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("ro_save_src.grafeo");
+    let dest_path = dir.path().join("ro_save_dest.grafeo");
+
+    {
+        let db = GrafeoDB::open(&src_path).unwrap();
+        let session = db.session();
+        session.execute("INSERT (:Person {name: 'Alix'})").unwrap();
+        session.execute("INSERT (:Person {name: 'Gus'})").unwrap();
+        db.close().unwrap();
+    }
+
+    let db = GrafeoDB::open_read_only(&src_path).unwrap();
+    db.save(&dest_path)
+        .expect("save from read-only should succeed");
+
+    let restored = GrafeoDB::open(&dest_path).unwrap();
+    assert_eq!(restored.node_count(), 2);
+    restored.close().unwrap();
+}
