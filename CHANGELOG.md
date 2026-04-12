@@ -14,6 +14,7 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 - **RDF query optimizer**: per-predicate cardinality estimates, cached statistics, cost-based join reordering.
 - **SPARQL EXPLAIN / EXPLAIN ANALYZE**: physical plan tree without executing, or profiled execution with per-operator timing. Python `explain_sparql()` binding.
 - **SHACL validation** (`shacl`): W3C Shapes Constraint Language with all 28 Core constraint types, SHACL-SPARQL (`sh:sparql`), 7 property path types with cycle detection, `ValidationReport` with `to_triples()` RDF materialization. `session.validate_shacl(shapes_graph)` in Rust, `db.validate_shacl("graph")` in Python. In `rdf` persona and `server` profiles.
+- **Arrow bulk export** (#260): `nodes_to_arrow()`/`edges_to_arrow()` (pyarrow Table), `nodes_to_polars()`/`edges_to_polars()` (Polars DataFrame), `nodes_to_pandas()`/`edges_to_pandas()` (pandas DataFrame via Arrow). Builds RecordBatch in Rust, serializes to IPC: ~10-100x faster than per-element `nodes_df()`/`edges_df()` at scale. Existing `nodes_df()`/`edges_df()` auto-use the Arrow fast path when pyarrow is available.
 
 ### Changed
 
