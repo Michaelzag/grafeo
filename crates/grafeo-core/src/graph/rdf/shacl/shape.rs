@@ -450,7 +450,7 @@ pub struct SparqlConstraint {
 pub struct PrefixDeclaration {
     /// The prefix (e.g., "ex").
     pub prefix: String,
-    /// The namespace IRI (e.g., "http://example.org/").
+    /// The namespace IRI (e.g., `http://example.org/`).
     pub namespace: String,
 }
 

@@ -6,7 +6,7 @@
 use std::cmp::Ordering;
 use std::collections::HashSet;
 
-use crate::graph::rdf::{RdfStore, Term, TriplePattern};
+use crate::graph::rdf::{Literal, RdfStore, Term, TriplePattern};
 
 use super::path::evaluate_path;
 use super::report::ValidationResult;
@@ -95,8 +95,8 @@ pub fn evaluate_constraint(
             shape,
             min_count,
             max_count,
-            disjoint: _,
-        } => eval_qualified(shape, *min_count, *max_count, value_nodes, ctx),
+            disjoint,
+        } => eval_qualified(shape, *min_count, *max_count, *disjoint, value_nodes, ctx),
 
         // -- Other --
         Constraint::Closed { ignored_properties } => eval_closed(ignored_properties, ctx),
@@ -265,19 +265,28 @@ fn eval_range(
     results
 }
 
+/// Returns true if the literal has a numeric XSD datatype.
+fn is_numeric_datatype(lit: &Literal) -> bool {
+    matches!(
+        lit.datatype(),
+        Literal::XSD_INTEGER | Literal::XSD_DECIMAL | Literal::XSD_DOUBLE
+    )
+}
+
 /// Compares two RDF terms for ordering.
 ///
-/// Numeric literals compare numerically, string literals lexicographically.
-/// Returns `None` if the terms are not comparable.
+/// Numeric literals (with numeric XSD datatypes) compare numerically,
+/// string literals compare lexicographically. Returns `None` if the terms
+/// are not comparable.
 fn compare_terms(a: &Term, b: &Term) -> Option<Ordering> {
     match (a, b) {
         (Term::Literal(la), Term::Literal(lb)) => {
-            // Try numeric comparison first
-            if let (Some(da), Some(db)) = (la.as_double(), lb.as_double()) {
+            // Only apply numeric comparison when both have numeric datatypes
+            if is_numeric_datatype(la)
+                && is_numeric_datatype(lb)
+                && let (Some(da), Some(db)) = (la.as_double(), lb.as_double())
+            {
                 return da.partial_cmp(&db);
-            }
-            if let (Some(ia), Some(ib)) = (la.as_integer(), lb.as_integer()) {
-                return Some(ia.cmp(&ib));
             }
             // Fall back to lexicographic comparison of values
             Some(la.value().cmp(lb.value()))
@@ -292,8 +301,8 @@ fn compare_terms(a: &Term, b: &Term) -> Option<Ordering> {
 
 fn term_string_len(term: &Term) -> Option<usize> {
     match term {
-        Term::Literal(lit) => Some(lit.value().len()),
-        Term::Iri(iri) => Some(iri.as_str().len()),
+        Term::Literal(lit) => Some(lit.value().chars().count()),
+        Term::Iri(iri) => Some(iri.as_str().chars().count()),
         _ => None,
     }
 }
@@ -646,14 +655,50 @@ fn eval_qualified(
     inner_shape: &Shape,
     min_count: Option<usize>,
     max_count: Option<usize>,
+    disjoint: bool,
     value_nodes: &[Term],
     ctx: &mut EvalContext<'_>,
 ) -> Vec<ValidationResult> {
+    // Collect sibling qualified shapes when disjoint is enabled
+    let sibling_shapes: Vec<&Shape> = if disjoint {
+        ctx.shape
+            .constraints()
+            .iter()
+            .filter_map(|c| {
+                if let Constraint::QualifiedValueShape { shape, .. } = c {
+                    // Exclude the current shape (compare by id)
+                    if shape.id() != inner_shape.id() {
+                        return Some(shape.as_ref());
+                    }
+                }
+                None
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
     let conforming = value_nodes
         .iter()
         .filter(|vn| {
             let inner = evaluate_shape_for_node(inner_shape, vn, ctx);
-            inner.iter().all(|r| r.severity != Severity::Violation)
+            let conforms = inner.iter().all(|r| r.severity != Severity::Violation);
+            if !conforms {
+                return false;
+            }
+            // When disjoint, exclude values that also conform to a sibling shape
+            if disjoint {
+                for sibling in &sibling_shapes {
+                    let sibling_results = evaluate_shape_for_node(sibling, vn, ctx);
+                    if sibling_results
+                        .iter()
+                        .all(|r| r.severity != Severity::Violation)
+                    {
+                        return false;
+                    }
+                }
+            }
+            true
         })
         .count();
 
