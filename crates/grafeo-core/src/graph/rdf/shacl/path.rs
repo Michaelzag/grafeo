@@ -90,8 +90,9 @@ fn evaluate_inverse(inner: &PropertyPath, focus: &Term, data_graph: &RdfStore) -
             // General case: find all nodes N such that evaluate_path(other, N, graph) contains focus
             // This is expensive but correct for arbitrary nested paths
             let mut results = Vec::new();
-            let all_subjects: HashSet<Term> = data_graph.subjects().into_iter().collect();
-            for candidate in &all_subjects {
+            let mut all_nodes: HashSet<Term> = data_graph.subjects().into_iter().collect();
+            all_nodes.extend(data_graph.objects());
+            for candidate in &all_nodes {
                 let reachable = evaluate_path(other, candidate, data_graph);
                 if reachable.contains(focus) {
                     results.push(candidate.clone());

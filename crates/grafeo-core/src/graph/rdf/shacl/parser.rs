@@ -65,8 +65,9 @@ pub fn parse_shapes(shapes_graph: &RdfStore) -> Result<Vec<Shape>, ShaclError> {
 
     // Parse each shape
     let mut shapes = Vec::new();
+    let mut visiting = HashSet::new();
     for shape_id in &shape_ids {
-        let shape = parse_shape(shapes_graph, shape_id, &shape_ids)?;
+        let shape = parse_shape(shapes_graph, shape_id, &shape_ids, &mut visiting)?;
         shapes.push(shape);
     }
 
@@ -78,6 +79,24 @@ fn parse_shape(
     graph: &RdfStore,
     shape_id: &Term,
     all_shape_ids: &HashSet<Term>,
+    visiting: &mut HashSet<Term>,
+) -> Result<Shape, ShaclError> {
+    if !visiting.insert(shape_id.clone()) {
+        return Err(ShaclError::InvalidShape(format!(
+            "Cyclic shape reference detected at {shape_id}"
+        )));
+    }
+
+    let result = parse_shape_inner(graph, shape_id, all_shape_ids, visiting);
+    visiting.remove(shape_id);
+    result
+}
+
+fn parse_shape_inner(
+    graph: &RdfStore,
+    shape_id: &Term,
+    all_shape_ids: &HashSet<Term>,
+    visiting: &mut HashSet<Term>,
 ) -> Result<Shape, ShaclError> {
     let rdf_type = Term::iri(RDF::TYPE);
 
@@ -89,7 +108,7 @@ fn parse_shape(
         // Property shape
         let path = parse_path(graph, path_triple.object())?;
         let targets = parse_targets(graph, shape_id);
-        let constraints = parse_constraints(graph, shape_id, all_shape_ids)?;
+        let constraints = parse_constraints(graph, shape_id, all_shape_ids, visiting)?;
         let severity = parse_severity(graph, shape_id);
         let deactivated = parse_deactivated(graph, shape_id);
         let messages = parse_messages(graph, shape_id);
@@ -126,8 +145,8 @@ fn parse_shape(
 
         // Node shape
         let targets = parse_targets(graph, shape_id);
-        let constraints = parse_constraints(graph, shape_id, all_shape_ids)?;
-        let property_shapes = parse_property_shapes(graph, shape_id, all_shape_ids)?;
+        let constraints = parse_constraints(graph, shape_id, all_shape_ids, visiting)?;
+        let property_shapes = parse_property_shapes(graph, shape_id, all_shape_ids, visiting)?;
         let severity = parse_severity(graph, shape_id);
         let deactivated = parse_deactivated(graph, shape_id);
         let messages = parse_messages(graph, shape_id);
@@ -182,6 +201,7 @@ fn parse_property_shapes(
     graph: &RdfStore,
     node_shape_id: &Term,
     all_shape_ids: &HashSet<Term>,
+    visiting: &mut HashSet<Term>,
 ) -> Result<Vec<PropertyShape>, ShaclError> {
     let property_pred = Term::iri(SH::PROPERTY);
     let mut result = Vec::new();
@@ -201,7 +221,7 @@ fn parse_property_shapes(
             }
         };
 
-        let constraints = parse_constraints(graph, prop_id, all_shape_ids)?;
+        let constraints = parse_constraints(graph, prop_id, all_shape_ids, visiting)?;
         let severity = parse_severity(graph, prop_id);
         let deactivated = parse_deactivated(graph, prop_id);
         let messages = parse_messages(graph, prop_id);
@@ -313,6 +333,7 @@ fn parse_constraints(
     graph: &RdfStore,
     shape_id: &Term,
     all_shape_ids: &HashSet<Term>,
+    visiting: &mut HashSet<Term>,
 ) -> Result<Vec<Constraint>, ShaclError> {
     let mut constraints = Vec::new();
 
@@ -415,17 +436,17 @@ fn parse_constraints(
     );
 
     // Logical constraints
-    parse_logical_constraints(graph, shape_id, all_shape_ids, &mut constraints)?;
+    parse_logical_constraints(graph, shape_id, all_shape_ids, visiting, &mut constraints)?;
 
     // Shape-based: sh:node
     let node_pred = Term::iri(SH::NODE);
     for triple in graph.find(&pat(Some(shape_id), Some(&node_pred), None)) {
-        let inner = parse_inline_shape(graph, triple.object(), all_shape_ids)?;
+        let inner = parse_inline_shape(graph, triple.object(), all_shape_ids, visiting)?;
         constraints.push(Constraint::ShapeNode(Box::new(inner)));
     }
 
     // sh:qualifiedValueShape
-    parse_qualified_value_shape(graph, shape_id, all_shape_ids, &mut constraints)?;
+    parse_qualified_value_shape(graph, shape_id, all_shape_ids, visiting, &mut constraints)?;
 
     // Other constraints
     parse_closed_constraint(graph, shape_id, &mut constraints);
@@ -468,24 +489,26 @@ fn parse_node_kind_constraints(
 ) -> Result<(), ShaclError> {
     let pred = Term::iri(SH::NODE_KIND);
     for triple in graph.find(&pat(Some(shape_id), Some(&pred), None)) {
-        let value = match term_as_str(triple.object()) {
-            Some(s) => match s {
-                SH::BLANK_NODE => NodeKindValue::BlankNode,
-                SH::IRI => NodeKindValue::Iri,
-                SH::LITERAL => NodeKindValue::Literal,
-                SH::BLANK_NODE_OR_IRI => NodeKindValue::BlankNodeOrIri,
-                SH::BLANK_NODE_OR_LITERAL => NodeKindValue::BlankNodeOrLiteral,
-                SH::IRI_OR_LITERAL => NodeKindValue::IriOrLiteral,
-                other => {
-                    return Err(ShaclError::InvalidShape(format!(
-                        "Unknown sh:nodeKind value: {other}"
-                    )));
-                }
-            },
-            None => {
+        // sh:nodeKind values must be IRIs per the SHACL spec
+        let iri_str = match triple.object() {
+            Term::Iri(iri) => iri.as_str(),
+            _ => {
                 return Err(ShaclError::InvalidShape(
-                    "sh:nodeKind value is not an IRI".to_string(),
+                    "sh:nodeKind value must be an IRI, not a literal or blank node".to_string(),
                 ));
+            }
+        };
+        let value = match iri_str {
+            SH::BLANK_NODE => NodeKindValue::BlankNode,
+            SH::IRI => NodeKindValue::Iri,
+            SH::LITERAL => NodeKindValue::Literal,
+            SH::BLANK_NODE_OR_IRI => NodeKindValue::BlankNodeOrIri,
+            SH::BLANK_NODE_OR_LITERAL => NodeKindValue::BlankNodeOrLiteral,
+            SH::IRI_OR_LITERAL => NodeKindValue::IriOrLiteral,
+            other => {
+                return Err(ShaclError::InvalidShape(format!(
+                    "Unknown sh:nodeKind value: {other}"
+                )));
             }
         };
         constraints.push(Constraint::NodeKind(value));
@@ -526,12 +549,13 @@ fn parse_logical_constraints(
     graph: &RdfStore,
     shape_id: &Term,
     all_shape_ids: &HashSet<Term>,
+    visiting: &mut HashSet<Term>,
     constraints: &mut Vec<Constraint>,
 ) -> Result<(), ShaclError> {
     // sh:not
     let not_pred = Term::iri(SH::NOT);
     for triple in graph.find(&pat(Some(shape_id), Some(&not_pred), None)) {
-        let inner = parse_inline_shape(graph, triple.object(), all_shape_ids)?;
+        let inner = parse_inline_shape(graph, triple.object(), all_shape_ids, visiting)?;
         constraints.push(Constraint::Not(Box::new(inner)));
     }
 
@@ -541,7 +565,7 @@ fn parse_logical_constraints(
         let items = collect_rdf_list(graph, triple.object());
         let mut shapes = Vec::new();
         for item in &items {
-            shapes.push(parse_inline_shape(graph, item, all_shape_ids)?);
+            shapes.push(parse_inline_shape(graph, item, all_shape_ids, visiting)?);
         }
         constraints.push(Constraint::And(shapes));
     }
@@ -552,7 +576,7 @@ fn parse_logical_constraints(
         let items = collect_rdf_list(graph, triple.object());
         let mut shapes = Vec::new();
         for item in &items {
-            shapes.push(parse_inline_shape(graph, item, all_shape_ids)?);
+            shapes.push(parse_inline_shape(graph, item, all_shape_ids, visiting)?);
         }
         constraints.push(Constraint::Or(shapes));
     }
@@ -563,7 +587,7 @@ fn parse_logical_constraints(
         let items = collect_rdf_list(graph, triple.object());
         let mut shapes = Vec::new();
         for item in &items {
-            shapes.push(parse_inline_shape(graph, item, all_shape_ids)?);
+            shapes.push(parse_inline_shape(graph, item, all_shape_ids, visiting)?);
         }
         constraints.push(Constraint::Xone(shapes));
     }
@@ -575,11 +599,12 @@ fn parse_qualified_value_shape(
     graph: &RdfStore,
     shape_id: &Term,
     all_shape_ids: &HashSet<Term>,
+    visiting: &mut HashSet<Term>,
     constraints: &mut Vec<Constraint>,
 ) -> Result<(), ShaclError> {
     let qvs_pred = Term::iri(SH::QUALIFIED_VALUE_SHAPE);
     for triple in graph.find(&pat(Some(shape_id), Some(&qvs_pred), None)) {
-        let inner = parse_inline_shape(graph, triple.object(), all_shape_ids)?;
+        let inner = parse_inline_shape(graph, triple.object(), all_shape_ids, visiting)?;
         let min_count =
             parse_integer_property(graph, shape_id, SH::QUALIFIED_MIN_COUNT).map(|n| n as usize);
         let max_count =
@@ -696,9 +721,10 @@ fn parse_inline_shape(
     graph: &RdfStore,
     term: &Term,
     all_shape_ids: &HashSet<Term>,
+    visiting: &mut HashSet<Term>,
 ) -> Result<Shape, ShaclError> {
     // Parse the shape definition from the graph (whether or not it was pre-identified)
-    parse_shape(graph, term, all_shape_ids)
+    parse_shape(graph, term, all_shape_ids, visiting)
 }
 
 // =========================================================================

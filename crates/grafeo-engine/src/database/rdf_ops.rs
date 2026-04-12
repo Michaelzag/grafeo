@@ -150,6 +150,26 @@ impl GrafeoDB {
 }
 
 // =========================================================================
+// SHACL validation
+// =========================================================================
+
+#[cfg(feature = "shacl")]
+impl GrafeoDB {
+    /// Validates the default graph against SHACL shapes in a named graph.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if shape parsing fails or the shapes graph doesn't exist.
+    pub fn validate_shacl(
+        &self,
+        shapes_graph: &str,
+    ) -> grafeo_common::utils::error::Result<grafeo_core::graph::rdf::shacl::ValidationReport> {
+        let session = self.session();
+        session.validate_shacl(shapes_graph)
+    }
+}
+
+// =========================================================================
 // WAL replay helper
 // =========================================================================
 

@@ -501,6 +501,53 @@ impl PyGrafeoDB {
         self.execute_language_impl("sparql", &format!("EXPLAIN {query}"), params)
     }
 
+    /// Validate the default graph against SHACL shapes in a named graph.
+    ///
+    /// Returns a dict with ``conforms`` (bool), ``results`` (list), and ``results_text`` (str).
+    ///
+    /// Example:
+    ///     report = db.validate_shacl("http://example.org/shapes")
+    ///     if not report["conforms"]:
+    ///         print(report["results_text"])
+    #[cfg(feature = "shacl")]
+    fn validate_shacl(
+        &self,
+        shapes_graph: &str,
+        py: Python<'_>,
+    ) -> PyResult<pyo3::Py<pyo3::PyAny>> {
+        let db = self.inner.read();
+        let session = db.session();
+        let report = session
+            .validate_shacl(shapes_graph)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("conforms", report.conforms)?;
+        dict.set_item("results_text", format!("{report}"))?;
+
+        let results_list = pyo3::types::PyList::empty(py);
+        for r in &report.results {
+            let rdict = pyo3::types::PyDict::new(py);
+            rdict.set_item("focus_node", r.focus_node.to_string())?;
+            rdict.set_item("severity", format!("{:?}", r.severity))?;
+            rdict.set_item(
+                "source_constraint_component",
+                &r.source_constraint_component,
+            )?;
+            rdict.set_item("source_shape", r.source_shape.to_string())?;
+            if let Some(ref v) = r.value {
+                rdict.set_item("value", v.to_string())?;
+            }
+            if let Some(ref msg) = r.message {
+                rdict.set_item("message", msg.as_str())?;
+            }
+            results_list.append(rdict)?;
+        }
+        dict.set_item("results", results_list)?;
+
+        Ok(dict.into())
+    }
+
     /// Execute a query in a named language (e.g. `"graphql-rdf"`).
     #[pyo3(signature = (language, query, params=None))]
     fn execute_language(
