@@ -37,6 +37,10 @@ Thank you for your interest in contributing to Grafeo!
 
 </div>
 
+## Community
+
+Join the [Grafeo Discord server](https://discord.gg/jrgMD2Zj3) to ask questions, share feedback and connect with other users and contributors.
+
 ## Code of Conduct
 
 Be respectful and constructive. The goal is to build something great together.

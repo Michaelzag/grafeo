@@ -20,6 +20,7 @@ hide:
 
 [Get Started](getting-started/index.md){ .md-button .md-button--primary }
 [View on GitHub](https://github.com/GrafeoDB/grafeo){ .md-button }
+[Join Discord](https://discord.gg/jrgMD2Zj3){ .md-button }
 
 </div>
 
