@@ -7,13 +7,13 @@
 [![wasm](https://img.shields.io/npm/v/@grafeo-db/wasm.svg?label=wasm)](https://www.npmjs.com/package/@grafeo-db/wasm)
 [![NuGet](https://img.shields.io/nuget/v/Grafeo.svg)](https://www.nuget.org/packages/Grafeo)
 [![pub.dev](https://img.shields.io/pub/v/grafeo.svg)](https://pub.dev/packages/grafeo)
-[![Web](https://img.shields.io/npm/v/@grafeo-db/web.svg?label=web)](https://www.npmjs.com/package/@grafeo-db/web)
 [![Go](https://img.shields.io/badge/go-1.22%2B-00ADD8)](https://pkg.go.dev/github.com/GrafeoDB/grafeo/crates/bindings/go)
+[![Web](https://img.shields.io/npm/v/@grafeo-db/web.svg?label=web)](https://www.npmjs.com/package/@grafeo-db/web)
 [![Docker](https://img.shields.io/docker/v/grafeo/grafeo-server?label=server)](https://hub.docker.com/r/grafeo/grafeo-server)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![MSRV](https://img.shields.io/badge/MSRV-1.91.1-blue)](https://www.rust-lang.org)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org)
-[![Discord](https://img.shields.io/discord/1361052722498076793?logo=discord&label=Discord)](https://discord.gg/jrgMD2Zj3)
+[![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/jrgMD2Zj3)
 
 # Grafeo
 
