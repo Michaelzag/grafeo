@@ -95,3 +95,76 @@ DPccp works by:
 | Hash Join | Large inputs, equality predicates |
 | Nested Loop | Small inner, indexed |
 | Merge Join | Sorted inputs |
+
+## RDF Query Optimization
+
+SPARQL queries over the RDF triple store use a specialized optimization path built on per-predicate statistics and, when available, the [Ring Index](../storage/ring-index.md).
+
+### RDF Statistics
+
+The `RdfStatistics` collector iterates all triples to compute:
+
+| Statistic | Scope | Purpose |
+| --------- | ----- | ------- |
+| Total triples | Store-wide | Base cardinality for unbound patterns |
+| Subject/predicate/object counts | Store-wide | Domain sizes for join selectivity |
+| Per-predicate triple count | Per predicate | Cardinality of `?s :pred ?o` patterns |
+| Distinct subjects per predicate | Per predicate | Fan-in estimation |
+| Distinct objects per predicate | Per predicate | Fan-out estimation |
+| Functional / inverse-functional flags | Per predicate | Detects 1:1 and N:1 relationships |
+| Object type distribution | Per predicate | Type-aware selectivity |
+| Subject and object histograms | Store-wide | Range and filter selectivity |
+
+### Statistics Caching
+
+Computing statistics requires a full scan of the triple store, which is expensive for large datasets. Grafeo caches the result behind `get_or_collect_statistics()`:
+
+1. **Fast path:** if a cached `Arc<RdfStatistics>` exists, return it immediately (read lock only)
+2. **Slow path:** compute statistics, store in cache, return
+3. **Invalidation:** any mutation (insert, delete, bulk load) clears the cache
+
+This ensures that a burst of read queries pays the collection cost at most once.
+
+### Triple Pattern Cardinality
+
+The optimizer estimates how many triples each pattern will produce:
+
+```text
+Pattern             Estimate
+------------------------------------------------------------
+?s ?p ?o            total_triples (full scan)
+<alix> ?p ?o        total_triples / subject_count
+?s <knows> ?o       predicate_stats.triple_count
+?s ?p <gus>         total_triples / object_count
+<alix> <knows> ?o   predicate_stats.avg_objects_per_subject
+?s <knows> <gus>    predicate_stats.avg_subjects_per_object
+<alix> ?p <gus>     predicate_count (rare pattern)
+<alix> <knows> <gus> 1.0 (existence check)
+```
+
+Join selectivity between two patterns sharing a variable is estimated as `1 / domain_size`, where the domain is the number of distinct values for the shared variable's position (subject, predicate, or object).
+
+### Ring Index Integration
+
+When the `ring-index` feature is enabled, the planner replaces statistical estimates with exact counts from the Ring's wavelet trees. This changes cardinality estimation from an approximation to a precise lookup in O(log sigma) time:
+
+```text
+// Statistical estimate: 10.0 (default for unknown predicates)
+// Ring exact count:     847  (wavelet tree rank operation)
+```
+
+Exact counts improve join ordering decisions, especially when predicates have highly skewed cardinalities that statistical defaults cannot capture.
+
+### Cost-Based Join Reordering
+
+For multi-way joins (queries with multiple triple patterns), the planner:
+
+1. Estimates cardinality for each pattern (via Ring counts or statistics)
+2. Sorts patterns by ascending cardinality
+3. Folds left-to-right with pairwise hash joins, building on the smallest intermediate results first
+
+When the Ring Index is available and all patterns are simple triple scans without `LANG()` / `DATATYPE()` dependencies, the planner upgrades to a leapfrog worst-case optimal join (WCOJ) that intersects sorted streams directly without materializing intermediates.
+
+### Dictionary Encoding
+
+The Ring Index's term dictionary maps every unique RDF term to a 32-bit integer ID. This provides compact in-memory representation during query execution: wavelet tree operations work on integer IDs rather than variable-length strings, and term resolution back to strings happens only at the result boundary.

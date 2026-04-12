@@ -55,4 +55,20 @@ marimo run examples/graph_visualization.py
 
     [:octicons-arrow-right-24: View Example](networkx-integration.md)
 
+-   :material-table-arrow-right:{ .lg .middle } **Arrow Export**
+
+    ---
+
+    Bulk export graph data to PyArrow, Polars and pandas. DuckDB integration, lazy evaluation, 10-100x faster at scale.
+
+    [:octicons-arrow-right-24: View Example](arrow-export-example.md)
+
+-   :material-duck:{ .lg .middle } **DuckDB Integration**
+
+    ---
+
+    Combine Grafeo graph storage with DuckDB analytical SQL queries via zero-copy Apache Arrow. JOIN nodes and edges, aggregate, and export to Parquet.
+
+    [:octicons-arrow-right-24: View Example](duckdb-integration.md)
+
 </div>

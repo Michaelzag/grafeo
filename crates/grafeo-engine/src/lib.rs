@@ -40,6 +40,8 @@ pub mod procedures;
 pub mod query;
 pub mod session;
 pub mod transaction;
+#[cfg(feature = "shacl")]
+pub mod validation;
 
 pub use admin::{
     AdminService, CompactionStats, DatabaseInfo, DatabaseMode, DatabaseStats, DumpFormat,

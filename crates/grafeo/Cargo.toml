@@ -46,6 +46,7 @@ algos = ["grafeo-engine/algos"]  # Graph algorithms (SSSP, PageRank, etc.)
 triple-store = ["grafeo-engine/triple-store"]  # RDF triple store
 regex = ["grafeo-engine/regex"]  # Full regex (default for non-WASM)
 regex-lite = ["grafeo-engine/regex-lite"]  # Lightweight regex (for WASM)
+shacl = ["grafeo-engine/shacl"]  # SHACL shapes constraint language (W3C validation)
 metrics = ["grafeo-engine/metrics"]  # Lock-free query, transaction, and session metrics
 tracing = ["grafeo-engine/tracing"]  # Observability spans and events
 arrow-export = ["grafeo-engine/arrow-export"]  # Arrow IPC zero-copy export
@@ -54,7 +55,7 @@ parquet-import = ["grafeo-engine/parquet-import"]  # Apache Parquet bulk import
 
 # Persona-based profiles
 lpg = ["grafeo-engine/lpg", "gql", "cypher", "gremlin", "sql-pgq", "storage", "regex"]  # Graph App Developer: LPG model + all LPG query languages
-rdf = ["triple-store", "gql", "sparql", "graphql", "storage", "regex"]  # Knowledge Engineer: RDF model + SPARQL/GraphQL
+rdf = ["triple-store", "gql", "sparql", "graphql", "storage", "regex", "shacl"]  # Knowledge Engineer: RDF model + SPARQL/GraphQL + SHACL validation
 analytics = ["algos", "vector-index", "text-index", "hybrid-search", "jsonl-import", "parquet-import"]  # Data Scientist: algorithms + search + bulk import
 ai = ["vector-index", "text-index", "hybrid-search", "cdc"]  # AI/Agent Developer: search + change tracking
 edge = ["grafeo-engine/lpg", "gql", "regex-lite"]  # Frontend/Edge: minimal WASM-friendly
@@ -63,7 +64,7 @@ enterprise = ["metrics", "tracing", "async-storage"]  # Platform Operator: obser
 # Deployment-based profiles (deprecated, use persona profiles instead)
 embedded = ["grafeo-engine/lpg", "gql", "ai", "algos", "parallel", "regex", "grafeo-file", "arrow-export"]  # Deprecated: use lpg + ai + algos
 browser = ["edge"]  # Deprecated: use edge
-server = ["embedded", "languages", "storage", "triple-store", "cdc", "async-storage", "tracing"]  # Deprecated: use lpg + rdf + ai + enterprise
+server = ["embedded", "languages", "storage", "triple-store", "cdc", "async-storage", "tracing", "shacl"]  # Deprecated: use lpg + rdf + ai + enterprise
 full = ["server"]  # Deprecated: use lpg + rdf + analytics + ai
 
 # Platform capabilities

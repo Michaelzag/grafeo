@@ -23,6 +23,10 @@ SPARQL uses triple patterns to match RDF data. It's designed for querying semant
 | Aggregate | `COUNT(?x)`, `SUM(?x)` |
 | Order results | `ORDER BY ?x` |
 | Limit results | `LIMIT 10` |
+| Insert triples | `INSERT DATA { ... }` |
+| Delete triples | `DELETE DATA { ... }` |
+| Explain plan | `EXPLAIN SELECT ...` |
+| Validate shapes | `db.validate_shacl(graph)` |
 
 ## RDF Data Model
 
@@ -125,5 +129,23 @@ SPARQL is enabled by default in Grafeo:
     ---
 
     Turtle, N-Triples, N-Quads import and streaming load.
+
+-   **[SPARQL Update](update.md)**
+
+    ---
+
+    INSERT DATA, DELETE DATA, pattern-based updates, and named graph operations.
+
+-   **[EXPLAIN and EXPLAIN ANALYZE](explain.md)**
+
+    ---
+
+    Inspect query execution plans and profile operator performance.
+
+-   **[SHACL Validation](shacl-validation.md)**
+
+    ---
+
+    Validate RDF data against SHACL shapes with 28 constraint types.
 
 </div>

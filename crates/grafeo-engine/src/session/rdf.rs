@@ -323,4 +323,47 @@ impl Session {
     pub(super) fn rollback_rdf_transaction(&self, transaction_id: TransactionId) {
         self.rdf_store.rollback_transaction(transaction_id);
     }
+
+    /// Validates the default graph against SHACL shapes in a named graph.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if shape parsing fails or the shapes graph doesn't exist.
+    #[cfg(feature = "shacl")]
+    pub fn validate_shacl(
+        &self,
+        shapes_graph: &str,
+    ) -> Result<grafeo_core::graph::rdf::shacl::ValidationReport> {
+        crate::validation::validate_shacl(self, &self.rdf_store, shapes_graph)
+    }
+
+    /// Validates a named data graph against shapes in another named graph.
+    ///
+    /// Both SHACL Core constraints and SHACL-SPARQL constraints are scoped to
+    /// the named data graph (SPARQL queries receive `FROM <data_graph_name>`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if shape parsing fails or either graph doesn't exist.
+    #[cfg(feature = "shacl")]
+    pub fn validate_shacl_graph(
+        &self,
+        data_graph_name: &str,
+        shapes_graph_name: &str,
+    ) -> Result<grafeo_core::graph::rdf::shacl::ValidationReport> {
+        let data_store = self.rdf_store.graph(data_graph_name).ok_or_else(|| {
+            grafeo_common::utils::error::Error::Internal(format!(
+                "Named graph '{data_graph_name}' not found"
+            ))
+        })?;
+        let shapes_store = self.rdf_store.graph(shapes_graph_name).ok_or_else(|| {
+            grafeo_common::utils::error::Error::Internal(format!(
+                "Named graph '{shapes_graph_name}' not found"
+            ))
+        })?;
+        let executor =
+            crate::validation::SessionSparqlExecutor::with_graph(self, data_graph_name.to_string());
+        grafeo_core::graph::rdf::shacl::validate(&data_store, &shapes_store, Some(&executor))
+            .map_err(|e| grafeo_common::utils::error::Error::Internal(e.to_string()))
+    }
 }

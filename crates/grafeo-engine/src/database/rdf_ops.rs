@@ -60,6 +60,8 @@ impl GrafeoDB {
         // EXPLAIN ANALYZE: execute with profiling, report actual stats
         if optimized_plan.profile {
             let planner = RdfPlanner::new(Arc::clone(&self.rdf_store));
+            #[cfg(feature = "wal")]
+            let planner = planner.with_wal(self.wal.as_ref().map(Arc::clone));
             let (mut physical_plan, entries) = planner.plan_profiled(&optimized_plan)?;
 
             let start = std::time::Instant::now();
@@ -144,6 +146,26 @@ impl GrafeoDB {
             subject_count: stats.subject_count,
             object_count: stats.object_count,
         })
+    }
+}
+
+// =========================================================================
+// SHACL validation
+// =========================================================================
+
+#[cfg(feature = "shacl")]
+impl GrafeoDB {
+    /// Validates the default graph against SHACL shapes in a named graph.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if shape parsing fails or the shapes graph doesn't exist.
+    pub fn validate_shacl(
+        &self,
+        shapes_graph: &str,
+    ) -> grafeo_common::utils::error::Result<grafeo_core::graph::rdf::shacl::ValidationReport> {
+        let session = self.session();
+        session.validate_shacl(shapes_graph)
     }
 }
 

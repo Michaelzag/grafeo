@@ -38,11 +38,19 @@ impl TermDictionary {
 
     /// Inserts a term and returns its ID. If the term already exists, returns
     /// the existing ID.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the dictionary exceeds `u32::MAX` entries.
     pub fn get_or_insert(&mut self, term: &Term) -> u32 {
         if let Some(&id) = self.term_to_id.get(term) {
             return id;
         }
-        let id = self.id_to_term.len() as u32;
+        let id: u32 = self
+            .id_to_term
+            .len()
+            .try_into()
+            .expect("TermDictionary exceeded u32::MAX entries");
         self.id_to_term.push(term.clone());
         self.term_to_id.insert(term.clone(), id);
         id

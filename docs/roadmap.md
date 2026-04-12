@@ -93,11 +93,21 @@ The beta series focuses on correctness, completeness and real-world durability. 
 - **Gremlin `repeat().times()`/`.emit()`**: fixed-depth and all-depths traversal
 - **Unified aggregate accumulator**: push-based aggregate operator gains all 30+ aggregate functions
 
+### Delivered in 0.5.37
+
+- **SPARQL compliance pass**: 18 spec gaps closed: `CONSTRUCT`, `BIND`, `OPTIONAL`, `MINUS`, `UNION`, `FILTER`, `EXISTS`/`NOT EXISTS`, named graph CRUD, SPARQL UPDATE. Composite indexes (SP, PO, OS) for O(1) multi-bound lookups. 109 new W3C tests
+- **Ring Index planner**: wavelet-tree compact triple index wired into the SPARQL planner with Leapfrog WCOJ for multi-way star joins and hash join fallback for LANG/DATATYPE columns. Ring Index persistence via bincode serialization to `.grafeo` container
+- **SHACL validation**: W3C Shapes Constraint Language with all 28 Core constraint types, SHACL-SPARQL (`sh:sparql`), 7 property path types with cycle detection, `ValidationReport` with `to_triples()` RDF materialization. Python: `db.validate_shacl("shapes_graph")`
+- **EXPLAIN ANALYZE**: physical plan tree without executing (`EXPLAIN`), or profiled execution with per-operator timing (`EXPLAIN ANALYZE`). Python `explain_sparql()` binding
+- **Arrow bulk export**: `nodes_to_arrow()`/`edges_to_arrow()` (pyarrow Table), `nodes_to_polars()`/`edges_to_polars()` (Polars DataFrame), `nodes_to_pandas()`/`edges_to_pandas()` (pandas DataFrame via Arrow). ~10-100x faster than per-element `nodes_df()`/`edges_df()` at scale
+- **RDF query optimizer**: per-predicate cardinality estimates, cached statistics, cost-based join reordering
+- **Dictionary encoding**: `TermDictionary` maps RDF terms to u32 IDs with lazy construction, `DictResolveOperator` resolves at result boundaries
+- **COUNT(\*) fast paths**: O(1) for unbound scans via `store.len()`, O(log sigma) for bound patterns via Ring Index
+
 ### Planned Releases
 
 | Version    | Focus                                                                                |
 |------------|--------------------------------------------------------------------------------------|
-| **0.5.37** | RDF ecosystem: SPARQL execution overhaul, Ring Index planner, WCOJ, EXPLAIN ANALYZE  |
 | **0.5.38** | Algorithms, streaming results, memory introspection, testing unification             |
 | **0.5.39** | API stability markers, feature profile deprecation warnings, C FFI parity            |
 

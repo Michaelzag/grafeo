@@ -20,6 +20,7 @@ rdf = ["triple-store"]  # Deprecated: use triple-store
 vector-index = []
 text-index = []
 algos = []
+shacl = ["triple-store", "grafeo-engine/shacl"]
 
 [dependencies]
 grafeo-engine = { workspace = true, features = ["embedded", "languages", "triple-store"] }

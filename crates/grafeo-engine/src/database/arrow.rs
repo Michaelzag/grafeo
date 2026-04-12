@@ -332,14 +332,210 @@ pub fn record_batch_to_ipc_stream(batch: &RecordBatch) -> Result<Vec<u8>, ArrowE
     Ok(buf)
 }
 
+// =========================================================================
+// Bulk export: nodes and edges to Arrow RecordBatch
+// =========================================================================
+
+#[cfg(feature = "lpg")]
+mod bulk_export {
+    use std::collections::HashSet;
+    use std::sync::Arc;
+
+    use arrow_array::builder::{ListBuilder, StringBuilder, StringBuilder as LB, UInt64Builder};
+    use arrow_array::{ArrayRef, RecordBatch};
+    use arrow_schema::{DataType, Field, Schema};
+    use grafeo_common::LogicalType;
+    use grafeo_common::types::Value;
+    use grafeo_core::graph::lpg::{Edge, Node};
+
+    use super::{ArrowExportError, build_array, infer_column_type, record_batch_to_ipc_stream};
+
+    /// Structural column names for nodes (property keys matching these are skipped).
+    const RESERVED_NODE_COLS: &[&str] = &["id", "labels"];
+
+    /// Structural column names for edges (property keys matching these are skipped).
+    const RESERVED_EDGE_COLS: &[&str] = &["id", "source", "target", "type"];
+
+    /// Discovers property keys in first-seen order, skipping reserved column names.
+    fn discover_property_keys<'a>(
+        properties_iter: impl Iterator<Item = impl Iterator<Item = &'a str>>,
+        reserved: &[&str],
+    ) -> Vec<String> {
+        let mut keys = Vec::new();
+        let mut seen = HashSet::new();
+        for prop_keys in properties_iter {
+            for key in prop_keys {
+                if seen.insert(key.to_owned()) && !reserved.contains(&key) {
+                    keys.push(key.to_owned());
+                }
+            }
+        }
+        keys
+    }
+
+    /// Converts a slice of [`Node`]s to an Arrow [`RecordBatch`].
+    ///
+    /// Schema: `id` (UInt64), `labels` (List\<Utf8\>), plus one nullable column per
+    /// unique property key. Property types are inferred from values; mixed-type
+    /// columns fall back to Utf8.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ArrowExportError`] on Arrow construction failure.
+    pub fn nodes_to_record_batch(nodes: &[Node]) -> Result<RecordBatch, ArrowExportError> {
+        let num_rows = nodes.len();
+
+        // Discover property keys in first-seen order
+        let prop_keys = discover_property_keys(
+            nodes
+                .iter()
+                .map(|n| n.properties.iter().map(|(k, _)| k.as_str())),
+            RESERVED_NODE_COLS,
+        );
+
+        // Build structural columns
+        let mut id_builder = UInt64Builder::with_capacity(num_rows);
+        let mut labels_builder = ListBuilder::new(LB::new());
+
+        for node in nodes {
+            id_builder.append_value(node.id.0);
+            for label in &node.labels {
+                labels_builder.values().append_value(&**label);
+            }
+            labels_builder.append(true);
+        }
+
+        let mut fields: Vec<Field> = vec![
+            Field::new("id", DataType::UInt64, false),
+            Field::new(
+                "labels",
+                DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
+                false,
+            ),
+        ];
+        let mut arrays: Vec<ArrayRef> = vec![
+            Arc::new(id_builder.finish()),
+            Arc::new(labels_builder.finish()),
+        ];
+
+        // Build property columns
+        for key in &prop_keys {
+            let prop_key = grafeo_common::types::PropertyKey::new(key.clone());
+            let values: Vec<&Value> = nodes
+                .iter()
+                .map(|n| n.properties.get(&prop_key).unwrap_or(&Value::Null))
+                .collect();
+            let arrow_type = infer_column_type(&LogicalType::Any, &values);
+            fields.push(Field::new(key.as_str(), arrow_type.clone(), true));
+            arrays.push(build_array(&values, &arrow_type)?);
+        }
+
+        let schema = Arc::new(Schema::new(fields));
+        Ok(RecordBatch::try_new(schema, arrays)?)
+    }
+
+    /// Converts a slice of [`Edge`]s to an Arrow [`RecordBatch`].
+    ///
+    /// Schema: `id` (UInt64), `type` (Utf8), `source` (UInt64), `target` (UInt64),
+    /// plus one nullable column per unique property key.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ArrowExportError`] on Arrow construction failure.
+    pub fn edges_to_record_batch(edges: &[Edge]) -> Result<RecordBatch, ArrowExportError> {
+        let num_rows = edges.len();
+
+        // Discover property keys in first-seen order
+        let prop_keys = discover_property_keys(
+            edges
+                .iter()
+                .map(|e| e.properties.iter().map(|(k, _)| k.as_str())),
+            RESERVED_EDGE_COLS,
+        );
+
+        // Build structural columns
+        let mut id_builder = UInt64Builder::with_capacity(num_rows);
+        let mut type_builder = StringBuilder::with_capacity(num_rows, num_rows * 16);
+        let mut source_builder = UInt64Builder::with_capacity(num_rows);
+        let mut target_builder = UInt64Builder::with_capacity(num_rows);
+
+        for edge in edges {
+            id_builder.append_value(edge.id.0);
+            type_builder.append_value(&*edge.edge_type);
+            source_builder.append_value(edge.src.0);
+            target_builder.append_value(edge.dst.0);
+        }
+
+        let mut fields: Vec<Field> = vec![
+            Field::new("id", DataType::UInt64, false),
+            Field::new("type", DataType::Utf8, false),
+            Field::new("source", DataType::UInt64, false),
+            Field::new("target", DataType::UInt64, false),
+        ];
+        let mut arrays: Vec<ArrayRef> = vec![
+            Arc::new(id_builder.finish()),
+            Arc::new(type_builder.finish()),
+            Arc::new(source_builder.finish()),
+            Arc::new(target_builder.finish()),
+        ];
+
+        // Build property columns
+        for key in &prop_keys {
+            let prop_key = grafeo_common::types::PropertyKey::new(key.clone());
+            let values: Vec<&Value> = edges
+                .iter()
+                .map(|e| e.properties.get(&prop_key).unwrap_or(&Value::Null))
+                .collect();
+            let arrow_type = infer_column_type(&LogicalType::Any, &values);
+            fields.push(Field::new(key.as_str(), arrow_type.clone(), true));
+            arrays.push(build_array(&values, &arrow_type)?);
+        }
+
+        let schema = Arc::new(Schema::new(fields));
+        Ok(RecordBatch::try_new(schema, arrays)?)
+    }
+
+    /// Serializes nodes to Arrow IPC stream format bytes.
+    ///
+    /// Convenience wrapper: `nodes_to_record_batch` + `record_batch_to_ipc_stream`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ArrowExportError`] on Arrow construction or IPC encoding failure.
+    pub fn nodes_to_ipc_stream(nodes: &[Node]) -> Result<Vec<u8>, ArrowExportError> {
+        let batch = nodes_to_record_batch(nodes)?;
+        record_batch_to_ipc_stream(&batch)
+    }
+
+    /// Serializes edges to Arrow IPC stream format bytes.
+    ///
+    /// Convenience wrapper: `edges_to_record_batch` + `record_batch_to_ipc_stream`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ArrowExportError`] on Arrow construction or IPC encoding failure.
+    pub fn edges_to_ipc_stream(edges: &[Edge]) -> Result<Vec<u8>, ArrowExportError> {
+        let batch = edges_to_record_batch(edges)?;
+        record_batch_to_ipc_stream(&batch)
+    }
+}
+
+#[cfg(feature = "lpg")]
+pub use bulk_export::{
+    edges_to_ipc_stream, edges_to_record_batch, nodes_to_ipc_stream, nodes_to_record_batch,
+};
+
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::BTreeMap;
     use std::sync::Arc as StdArc;
 
-    use grafeo_common::PropertyKey;
+    use arrow_array::Array;
+    use arrow_schema::DataType;
     use grafeo_common::types::{Date, Duration, Time, Timestamp, ZonedDatetime};
+    use grafeo_common::{LogicalType, PropertyKey, Value};
+
+    use super::{query_result_to_record_batch, record_batch_to_ipc_stream};
 
     fn make_result(
         columns: Vec<&str>,
@@ -636,5 +832,125 @@ mod tests {
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].num_rows(), 2);
         assert_eq!(batches[0].num_columns(), 2);
+    }
+
+    // =====================================================================
+    // Bulk export: nodes and edges
+    // =====================================================================
+
+    #[cfg(feature = "lpg")]
+    mod bulk_export_tests {
+        use super::*;
+        use grafeo_common::types::{EdgeId, NodeId};
+        use grafeo_core::graph::lpg::{Edge, Node};
+
+        fn make_node(id: u64, labels: &[&str]) -> Node {
+            let mut node = Node::new(NodeId(id));
+            for label in labels {
+                node.labels.push((*label).into());
+            }
+            node
+        }
+
+        fn make_edge(id: u64, src: u64, dst: u64, edge_type: &str) -> Edge {
+            Edge::new(EdgeId(id), NodeId(src), NodeId(dst), edge_type)
+        }
+
+        #[test]
+        fn test_nodes_empty() {
+            let batch = crate::database::arrow::nodes_to_record_batch(&[]).unwrap();
+            assert_eq!(batch.num_rows(), 0);
+            assert_eq!(batch.num_columns(), 2); // id, labels
+        }
+
+        #[test]
+        fn test_nodes_basic() {
+            let mut alix = make_node(1, &["Person"]);
+            alix.properties
+                .insert(PropertyKey::new("name"), Value::String("Alix".into()));
+            alix.properties
+                .insert(PropertyKey::new("age"), Value::Int64(30));
+
+            let mut gus = make_node(2, &["Person", "Developer"]);
+            gus.properties
+                .insert(PropertyKey::new("name"), Value::String("Gus".into()));
+
+            let batch = crate::database::arrow::nodes_to_record_batch(&[alix, gus]).unwrap();
+            assert_eq!(batch.num_rows(), 2);
+            // id, labels, name, age
+            assert_eq!(batch.num_columns(), 4);
+            assert_eq!(batch.schema().field(0).name(), "id");
+            assert_eq!(batch.schema().field(1).name(), "labels");
+            assert_eq!(batch.schema().field(2).name(), "name");
+            assert_eq!(batch.schema().field(3).name(), "age");
+        }
+
+        #[test]
+        fn test_nodes_reserved_column_skipped() {
+            let mut node = make_node(1, &["Test"]);
+            node.properties
+                .insert(PropertyKey::new("id"), Value::Int64(999)); // should be skipped
+            node.properties
+                .insert(PropertyKey::new("score"), Value::Float64(0.95));
+
+            let batch = crate::database::arrow::nodes_to_record_batch(&[node]).unwrap();
+            // id (structural), labels (structural), score (property)
+            assert_eq!(batch.num_columns(), 3);
+            assert_eq!(batch.schema().field(2).name(), "score");
+        }
+
+        #[test]
+        fn test_nodes_ipc_roundtrip() {
+            let mut node = make_node(1, &["Person"]);
+            node.properties
+                .insert(PropertyKey::new("name"), Value::String("Alix".into()));
+
+            let ipc_bytes = crate::database::arrow::nodes_to_ipc_stream(&[node]).unwrap();
+            assert!(!ipc_bytes.is_empty());
+
+            let cursor = std::io::Cursor::new(ipc_bytes);
+            let reader = arrow_ipc::reader::StreamReader::try_new(cursor, None).unwrap();
+            let batches: Vec<_> = reader.into_iter().map(|b| b.unwrap()).collect();
+            assert_eq!(batches.len(), 1);
+            assert_eq!(batches[0].num_rows(), 1);
+        }
+
+        #[test]
+        fn test_edges_empty() {
+            let batch = crate::database::arrow::edges_to_record_batch(&[]).unwrap();
+            assert_eq!(batch.num_rows(), 0);
+            assert_eq!(batch.num_columns(), 4); // id, type, source, target
+        }
+
+        #[test]
+        fn test_edges_basic() {
+            let mut edge = make_edge(1, 10, 20, "KNOWS");
+            edge.properties
+                .insert(PropertyKey::new("since"), Value::Int64(2020));
+
+            let batch = crate::database::arrow::edges_to_record_batch(&[edge]).unwrap();
+            assert_eq!(batch.num_rows(), 1);
+            // id, type, source, target, since
+            assert_eq!(batch.num_columns(), 5);
+            assert_eq!(batch.schema().field(0).name(), "id");
+            assert_eq!(batch.schema().field(1).name(), "type");
+            assert_eq!(batch.schema().field(2).name(), "source");
+            assert_eq!(batch.schema().field(3).name(), "target");
+            assert_eq!(batch.schema().field(4).name(), "since");
+        }
+
+        #[test]
+        fn test_edges_ipc_roundtrip() {
+            let edge = make_edge(1, 10, 20, "KNOWS");
+            let ipc_bytes = crate::database::arrow::edges_to_ipc_stream(&[edge]).unwrap();
+            assert!(!ipc_bytes.is_empty());
+
+            let cursor = std::io::Cursor::new(ipc_bytes);
+            let reader = arrow_ipc::reader::StreamReader::try_new(cursor, None).unwrap();
+            let batches: Vec<_> = reader.into_iter().map(|b| b.unwrap()).collect();
+            assert_eq!(batches.len(), 1);
+            assert_eq!(batches[0].num_rows(), 1);
+            assert_eq!(batches[0].num_columns(), 4);
+        }
     }
 }

@@ -76,4 +76,12 @@ The GrafeoDB ecosystem extends beyond the core database with AI/LLM integrations
 
     [:octicons-arrow-right-24: Learn more](grafeo-memory.md)
 
+-   :material-table-arrow-right:{ .lg .middle } **Arrow / Polars / pandas**
+
+    ---
+
+    Zero-copy bulk export via Arrow IPC for analytics workflows. `nodes_to_arrow()`, `nodes_to_polars()`, DuckDB integration.
+
+    [:octicons-arrow-right-24: Arrow export tutorial](../tutorials/examples/arrow-export-example.md)
+
 </div>

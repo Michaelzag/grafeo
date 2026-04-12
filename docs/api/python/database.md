@@ -115,6 +115,26 @@ Execute a SPARQL query.
 def execute_sparql(self, query: str, params: Optional[Dict] = None) -> QueryResult
 ```
 
+### explain_sparql()
+
+Execute a SPARQL query with `EXPLAIN` or `EXPLAIN ANALYZE` to inspect the physical plan tree. Returns a `QueryResult` containing the query plan as text rows. Use `EXPLAIN` for the plan without execution, or `EXPLAIN ANALYZE` for a profiled execution that includes timing and row counts.
+
+```python
+def explain_sparql(self, query: str) -> QueryResult
+```
+
+```python
+# View the query plan without executing
+result = db.explain_sparql("EXPLAIN SELECT ?name WHERE { ?p a :Person ; :name ?name }")
+for row in result:
+    print(row)
+
+# Profiled execution with timing
+result = db.explain_sparql("EXPLAIN ANALYZE SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 100")
+for row in result:
+    print(row)
+```
+
 ### execute_sql()
 
 Execute a SQL/PGQ query.
@@ -369,6 +389,96 @@ db.import_df(people, mode="nodes", label="Person")
 # Import edges (source/target are node IDs)
 edges = pd.DataFrame({"source": [0, 1], "target": [1, 0], "since": [2020, 2021]})
 db.import_df(edges, mode="edges", edge_type="KNOWS")
+```
+
+## Arrow Bulk Export
+
+Zero-copy bulk export using Apache Arrow. These methods are faster than `nodes_df()`/`edges_df()` for large graphs because they build Arrow record batches directly in Rust, avoiding row-by-row Python object creation.
+
+!!! note
+    `nodes_df()` and `edges_df()` now auto-detect pyarrow at runtime. When pyarrow is available, they use the Arrow fast path internally, so you get the same speed as `nodes_to_pandas()` without changing existing code.
+
+**Node schema:** `id` (uint64), `labels` (list&lt;utf8&gt;), plus one column per unique property key.
+
+**Edge schema:** `id` (uint64), `type` (utf8), `source` (uint64), `target` (uint64), plus one column per unique property key.
+
+### nodes_to_arrow()
+
+Export all nodes as a `pyarrow.Table`. Requires pyarrow (`uv add pyarrow`).
+
+```python
+def nodes_to_arrow(self) -> pyarrow.Table
+```
+
+```python
+table = db.nodes_to_arrow()
+print(table.schema)
+print(table.to_pandas())
+```
+
+### edges_to_arrow()
+
+Export all edges as a `pyarrow.Table`. Requires pyarrow (`uv add pyarrow`).
+
+```python
+def edges_to_arrow(self) -> pyarrow.Table
+```
+
+```python
+table = db.edges_to_arrow()
+print(table.filter(table.column("type") == "KNOWS"))
+```
+
+### nodes_to_polars()
+
+Export all nodes as a `polars.DataFrame`. Requires polars (`uv add polars`), but does not require pyarrow. Uses the Arrow IPC format internally for zero-copy transfer.
+
+```python
+def nodes_to_polars(self) -> polars.DataFrame
+```
+
+```python
+df = db.nodes_to_polars()
+print(df.filter(pl.col("labels").list.contains("Person")))
+```
+
+### edges_to_polars()
+
+Export all edges as a `polars.DataFrame`. Requires polars (`uv add polars`), but does not require pyarrow.
+
+```python
+def edges_to_polars(self) -> polars.DataFrame
+```
+
+```python
+df = db.edges_to_polars()
+print(df.filter(pl.col("type") == "KNOWS"))
+```
+
+### nodes_to_pandas()
+
+Export all nodes as a `pandas.DataFrame` via the Arrow fast path. Requires both pandas and pyarrow (`uv add pandas pyarrow`). Faster than `nodes_df()` on older versions, but equivalent now that `nodes_df()` auto-detects pyarrow.
+
+```python
+def nodes_to_pandas(self) -> pandas.DataFrame
+```
+
+```python
+df = db.nodes_to_pandas()
+print(df[df["labels"].apply(lambda l: "Person" in l)])
+```
+
+### edges_to_pandas()
+
+Export all edges as a `pandas.DataFrame` via the Arrow fast path. Requires both pandas and pyarrow (`uv add pandas pyarrow`).
+
+```python
+def edges_to_pandas(self) -> pandas.DataFrame
+```
+
+```python
+df = db.edges_to_pandas()
+print(df.groupby("type").size())
 ```
 
 ## Batch Operations
@@ -686,6 +796,60 @@ Returns the current schema name, or `None` if no schema is set.
 
 ```python
 def current_schema(self) -> Optional[str]
+```
+
+## SHACL Validation
+
+Validate graph data against [SHACL](https://www.w3.org/TR/shacl/) (Shapes Constraint Language) shapes. Requires the `triple-store` feature.
+
+### validate_shacl()
+
+Validate the current graph against a SHACL shapes graph provided as a Turtle string. Returns a dict with the validation report.
+
+```python
+def validate_shacl(self, shapes_graph: str) -> Dict[str, Any]
+```
+
+**Return value keys:**
+
+| Key | Type | Description |
+| --- | ---- | ----------- |
+| `conforms` | `bool` | `True` if no violations were found |
+| `results` | `list[dict]` | One dict per violation |
+| `results_text` | `str` | Human-readable summary of all violations |
+
+**Each result dict contains:**
+
+| Key | Type | Description |
+| --- | ---- | ----------- |
+| `focus_node` | `str` | The node that was validated |
+| `severity` | `str` | `"Violation"`, `"Warning"`, or `"Info"` |
+| `source_constraint_component` | `str` | The SHACL constraint that failed |
+| `source_shape` | `str` | The shape that triggered the violation |
+| `value` | `str` (optional) | The invalid value, if applicable |
+| `message` | `str` (optional) | A human-readable description of the violation |
+
+```python
+shapes = """
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix ex: <http://example.org/> .
+
+ex:PersonShape a sh:NodeShape ;
+    sh:targetClass ex:Person ;
+    sh:property [
+        sh:path ex:name ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+    ] .
+"""
+
+report = db.validate_shacl(shapes)
+if report["conforms"]:
+    print("All data is valid")
+else:
+    for r in report["results"]:
+        print(f"{r['severity']}: {r['focus_node']} - {r['source_constraint_component']}")
+    print(report["results_text"])
 ```
 
 ## Admin Methods

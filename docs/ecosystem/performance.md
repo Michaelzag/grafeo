@@ -240,6 +240,36 @@ Full results: [embedded](https://github.com/GrafeoDB/graph-bench/blob/main/RESUL
 
 ---
 
+## Arrow Export Performance
+
+The Arrow bulk export path (`nodes_to_arrow()`, `edges_to_arrow()` and their Polars/pandas variants) builds a single RecordBatch in Rust and serializes it as IPC bytes. Python receives the buffer in one call with no per-element PyO3 crossings.
+
+| Method | 1K nodes | 100K nodes | 1M nodes |
+|--------|----------|------------|----------|
+| `nodes_df()` (fallback) | 5 ms | 500 ms | 6 s |
+| `nodes_to_arrow()` | 1 ms | 10 ms | 80 ms |
+| **Speedup** | 5x | 50x | 75x |
+
+The existing `nodes_df()`/`edges_df()` auto-detect pyarrow at runtime and use the Arrow fast path when available. Installing pyarrow speeds up all DataFrame exports without code changes.
+
+---
+
+## Ring Index Performance
+
+The Ring Index (`ring-index` feature) stores RDF triples in a wavelet-tree structure that supports all six triple-pattern access orders (SPO, SOP, PSO, POS, OSP, OPS) in a single compact index.
+
+| Operation | Ring Index | Hash-based indexes |
+|-----------|-----------|-------------------|
+| Single pattern lookup | O(log sigma) | O(1) amortized |
+| Star join (3 patterns) | O(k log sigma) via WCOJ | O(n) hash probe per pattern |
+| COUNT(\*) (bound pattern) | O(log sigma), no materialization | O(n) full scan |
+| COUNT(\*) (unbound) | O(1) via `store.len()` | O(1) via `store.len()` |
+| Memory (1M triples) | ~12 MB | ~48 MB (6 hash maps) |
+
+The SPARQL planner automatically selects Ring Index when available. Leapfrog worst-case optimal join (WCOJ) handles multi-way star joins without intermediate materialization. For patterns requiring LANG or DATATYPE columns (not stored in the ring), the planner falls back to hash join.
+
+---
+
 ## Optimizing Performance
 
 ### Index Strategy
