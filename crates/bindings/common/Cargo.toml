@@ -26,6 +26,7 @@ hybrid-search = ["grafeo-engine/hybrid-search"]
 cdc = ["grafeo-engine/cdc"]
 algos = ["grafeo-engine/algos"]
 triple-store = ["grafeo-engine/triple-store"]
+shacl = ["grafeo-engine/shacl"]
 rdf = ["triple-store"]  # Deprecated: use triple-store
 languages = ["gql", "cypher", "sparql", "gremlin", "graphql", "sql-pgq"]
 ai = ["vector-index", "text-index", "hybrid-search", "cdc"]
