@@ -1470,7 +1470,7 @@ mod tests {
     }
 
     #[test]
-    fn select_reduced_deduplicates() {
+    fn select_reduced_returns_results() {
         let db = rdf_db();
         insert_foaf_data(&db);
         let r = db
@@ -1478,8 +1478,12 @@ mod tests {
                 "SELECT REDUCED ?type WHERE { ?s <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> ?type }",
             )
             .unwrap();
-        // Two distinct types: Person, City (REDUCED may deduplicate like DISTINCT)
-        assert_eq!(r.row_count(), 2);
+        // REDUCED may or may not eliminate duplicates (spec allows either).
+        // Our implementation treats REDUCED as a no-op, returning all rows.
+        assert!(
+            r.row_count() >= 2,
+            "REDUCED should return at least the distinct count"
+        );
     }
 
     #[test]
