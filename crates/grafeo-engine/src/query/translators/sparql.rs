@@ -25,24 +25,37 @@ static QUERY_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
 ///
 /// Returns an error if the query cannot be parsed or translated.
 pub fn translate(query: &str) -> Result<LogicalPlan> {
-    // Check for EXPLAIN prefix (case-insensitive, non-standard extension)
+    // Check for EXPLAIN [ANALYZE] prefix (case-insensitive, non-standard extension).
+    // EXPLAIN: show physical plan without executing.
+    // EXPLAIN ANALYZE: execute with profiling, show actual vs estimated stats.
     let trimmed = query.trim_start();
-    let (explain, actual_query) = if trimmed.len() >= 7
+    let (explain, profile, actual_query) = if trimmed.len() >= 7
         && trimmed[..7].eq_ignore_ascii_case("EXPLAIN")
         && trimmed
             .as_bytes()
             .get(7)
             .is_some_and(u8::is_ascii_whitespace)
     {
-        (true, trimmed[7..].trim_start())
+        let rest = trimmed[7..].trim_start();
+        if rest.len() >= 7
+            && rest[..7].eq_ignore_ascii_case("ANALYZE")
+            && rest.as_bytes().get(7).is_some_and(u8::is_ascii_whitespace)
+        {
+            // EXPLAIN ANALYZE: execute with profiling
+            (false, true, rest[7..].trim_start())
+        } else {
+            // EXPLAIN: show plan only
+            (true, false, rest)
+        }
     } else {
-        (false, query)
+        (false, false, query)
     };
 
     let sparql_query = sparql::parse(actual_query)?;
     let mut translator = SparqlTranslator::new();
     let mut plan = translator.translate_query(&sparql_query)?;
     plan.explain = explain;
+    plan.profile = profile;
     Ok(plan)
 }
 

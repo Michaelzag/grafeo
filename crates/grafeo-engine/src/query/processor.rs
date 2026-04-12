@@ -504,9 +504,29 @@ impl QueryProcessor {
         };
         let optimized_plan = rdf_optimizer.optimize(logical_plan)?;
 
-        // 3a. EXPLAIN: return the optimized plan tree without executing
+        // 3a. EXPLAIN: return the plan tree without executing.
+        // Includes physical operator names by planning with profiling to collect entries.
         if optimized_plan.explain {
-            return Ok(explain_result(&optimized_plan));
+            let planner = RdfPlanner::new(Arc::clone(rdf_store));
+            let (_, entries) = planner.plan_profiled(&optimized_plan)?;
+            return Ok(physical_explain_result(&optimized_plan, entries));
+        }
+
+        // 3b. EXPLAIN ANALYZE (PROFILE): execute with instrumentation, report stats.
+        if optimized_plan.profile {
+            let planner = RdfPlanner::new(Arc::clone(rdf_store));
+            let (mut physical_plan, entries) = planner.plan_profiled(&optimized_plan)?;
+
+            let start = std::time::Instant::now();
+            let executor = Executor::with_columns(physical_plan.columns.clone());
+            let _result = executor.execute(physical_plan.operator.as_mut())?;
+            let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+            let tree = crate::query::profile::build_profile_tree(
+                &optimized_plan.root,
+                &mut entries.into_iter(),
+            );
+            return Ok(crate::query::profile::profile_result(&tree, elapsed_ms));
         }
 
         // 4. Convert to physical plan (using RDF planner)
@@ -682,6 +702,38 @@ pub(crate) fn explain_result(plan: &LogicalPlan) -> QueryResult {
         rows_scanned: None,
         status_message: None,
         gql_status: grafeo_common::utils::GqlStatus::SUCCESS,
+    }
+}
+
+/// Formats a physical EXPLAIN result showing both the logical plan and the
+/// physical operator names mapped to each logical operator.
+pub(crate) fn physical_explain_result(
+    plan: &LogicalPlan,
+    entries: Vec<crate::query::profile::ProfileEntry>,
+) -> QueryResult {
+    let tree = crate::query::profile::build_profile_tree(&plan.root, &mut entries.into_iter());
+
+    let mut output = String::new();
+    format_physical_node(&mut output, &tree, 0);
+
+    QueryResult {
+        columns: vec!["plan".to_string()],
+        column_types: vec![grafeo_common::types::LogicalType::String],
+        rows: vec![vec![Value::String(output.into())]],
+        execution_time_ms: None,
+        rows_scanned: None,
+        status_message: None,
+        gql_status: grafeo_common::utils::GqlStatus::SUCCESS,
+    }
+}
+
+/// Recursively formats a physical plan node showing operator name and label.
+fn format_physical_node(out: &mut String, node: &crate::query::profile::ProfileNode, depth: usize) {
+    use std::fmt::Write;
+    let indent = "  ".repeat(depth);
+    let _ = writeln!(out, "{indent}{} {}", node.name, node.label);
+    for child in &node.children {
+        format_physical_node(out, child, depth + 1);
     }
 }
 

@@ -1481,4 +1481,45 @@ mod tests {
         // Two distinct types: Person, City (REDUCED may deduplicate like DISTINCT)
         assert_eq!(r.row_count(), 2);
     }
+
+    #[test]
+    fn physical_explain_shows_operator_names() {
+        let db = rdf_db();
+        insert_foaf_data(&db);
+        let r = db
+            .execute_sparql(
+                r#"EXPLAIN SELECT ?name WHERE {
+                    ?s <http://xmlns.com/foaf/0.1/name> ?name .
+                    ?s <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://xmlns.com/foaf/0.1/Person>
+                }"#,
+            )
+            .unwrap();
+        assert_eq!(r.row_count(), 1);
+        let plan = r.rows()[0][0].to_string();
+        // Physical plan should contain physical operator names
+        assert!(
+            plan.contains("RdfTripleScan") || plan.contains("HashJoin") || plan.contains("Project"),
+            "EXPLAIN should show physical operator names, got: {plan}"
+        );
+    }
+
+    #[test]
+    fn explain_analyze_shows_timing() {
+        let db = rdf_db();
+        insert_foaf_data(&db);
+        let r = db
+            .execute_sparql(
+                r#"EXPLAIN ANALYZE SELECT ?name WHERE {
+                    ?s <http://xmlns.com/foaf/0.1/name> ?name
+                }"#,
+            )
+            .unwrap();
+        assert!(r.row_count() >= 1);
+        let profile = r.rows()[0][0].to_string();
+        // EXPLAIN ANALYZE should show timing or operator stats
+        assert!(
+            profile.contains("time") || profile.contains("rows") || profile.contains("ms"),
+            "EXPLAIN ANALYZE should show execution stats, got: {profile}"
+        );
+    }
 }
