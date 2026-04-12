@@ -459,4 +459,294 @@ mod tests {
         assert!(text.contains("FAILED"));
         assert!(text.contains("Violation"));
     }
+
+    #[test]
+    fn validate_property_shape_with_datatype() {
+        let data = RdfStore::new();
+        data.insert(Triple::new(
+            Term::iri("http://ex.org/alix"),
+            Term::iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"),
+            Term::iri("http://ex.org/Person"),
+        ));
+        data.insert(Triple::new(
+            Term::iri("http://ex.org/alix"),
+            Term::iri("http://ex.org/age"),
+            Term::literal("not-a-number"), // wrong datatype
+        ));
+
+        let shapes = RdfStore::new();
+        let sid = Term::iri("http://ex.org/S");
+        shapes.insert(Triple::new(
+            sid.clone(),
+            Term::iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        shapes.insert(Triple::new(
+            sid.clone(),
+            Term::iri(SH::TARGET_CLASS),
+            Term::iri("http://ex.org/Person"),
+        ));
+        let prop = Term::blank("p");
+        shapes.insert(Triple::new(sid, Term::iri(SH::PROPERTY), prop.clone()));
+        shapes.insert(Triple::new(
+            prop.clone(),
+            Term::iri(SH::PATH),
+            Term::iri("http://ex.org/age"),
+        ));
+        shapes.insert(Triple::new(
+            prop,
+            Term::iri(SH::DATATYPE),
+            Term::iri("http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+
+        let report = validate(&data, &shapes, None).unwrap();
+        assert!(!report.conforms);
+        assert_eq!(report.results.len(), 1);
+        assert!(
+            report.results[0]
+                .source_constraint_component
+                .contains("Datatype")
+        );
+        assert!(
+            report.results[0].result_path.is_some(),
+            "Property shape results should include path"
+        );
+    }
+
+    #[test]
+    fn validate_multiple_property_shapes() {
+        let data = RdfStore::new();
+        data.insert(Triple::new(
+            Term::iri("http://ex.org/alix"),
+            Term::iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"),
+            Term::iri("http://ex.org/Person"),
+        ));
+        // Missing both name and email
+
+        let shapes = RdfStore::new();
+        let sid = Term::iri("http://ex.org/S");
+        shapes.insert(Triple::new(
+            sid.clone(),
+            Term::iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        shapes.insert(Triple::new(
+            sid.clone(),
+            Term::iri(SH::TARGET_CLASS),
+            Term::iri("http://ex.org/Person"),
+        ));
+        let p1 = Term::blank("p1");
+        shapes.insert(Triple::new(
+            sid.clone(),
+            Term::iri(SH::PROPERTY),
+            p1.clone(),
+        ));
+        shapes.insert(Triple::new(
+            p1.clone(),
+            Term::iri(SH::PATH),
+            Term::iri("http://ex.org/name"),
+        ));
+        shapes.insert(Triple::new(
+            p1,
+            Term::iri(SH::MIN_COUNT),
+            Term::typed_literal("1", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+        let p2 = Term::blank("p2");
+        shapes.insert(Triple::new(sid, Term::iri(SH::PROPERTY), p2.clone()));
+        shapes.insert(Triple::new(
+            p2.clone(),
+            Term::iri(SH::PATH),
+            Term::iri("http://ex.org/email"),
+        ));
+        shapes.insert(Triple::new(
+            p2,
+            Term::iri(SH::MIN_COUNT),
+            Term::typed_literal("1", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+
+        let report = validate(&data, &shapes, None).unwrap();
+        assert!(!report.conforms);
+        assert_eq!(
+            report.results.len(),
+            2,
+            "Should have violations for both name and email"
+        );
+    }
+
+    #[test]
+    fn validate_standalone_property_shape() {
+        let data = RdfStore::new();
+        data.insert(Triple::new(
+            Term::iri("http://ex.org/alix"),
+            Term::iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"),
+            Term::iri("http://ex.org/Person"),
+        ));
+
+        let shapes = RdfStore::new();
+        // A property shape with its own target (not nested under a node shape)
+        let sid = Term::iri("http://ex.org/PS");
+        shapes.insert(Triple::new(
+            sid.clone(),
+            Term::iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"),
+            Term::iri(SH::PROPERTY_SHAPE),
+        ));
+        shapes.insert(Triple::new(
+            sid.clone(),
+            Term::iri(SH::TARGET_CLASS),
+            Term::iri("http://ex.org/Person"),
+        ));
+        shapes.insert(Triple::new(
+            sid.clone(),
+            Term::iri(SH::PATH),
+            Term::iri("http://ex.org/name"),
+        ));
+        shapes.insert(Triple::new(
+            sid,
+            Term::iri(SH::MIN_COUNT),
+            Term::typed_literal("1", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+
+        let report = validate(&data, &shapes, None).unwrap();
+        assert!(
+            !report.conforms,
+            "Missing name should violate standalone property shape"
+        );
+        assert_eq!(report.results.len(), 1);
+    }
+
+    #[test]
+    fn validate_node_level_constraint() {
+        let data = RdfStore::new();
+        data.insert(Triple::new(
+            Term::iri("http://ex.org/alix"),
+            Term::iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"),
+            Term::iri("http://ex.org/Person"),
+        ));
+
+        let shapes = RdfStore::new();
+        let sid = Term::iri("http://ex.org/S");
+        shapes.insert(Triple::new(
+            sid.clone(),
+            Term::iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        shapes.insert(Triple::new(
+            sid.clone(),
+            Term::iri(SH::TARGET_CLASS),
+            Term::iri("http://ex.org/Person"),
+        ));
+        // Node-level constraint: focus node must be IRI
+        shapes.insert(Triple::new(
+            sid,
+            Term::iri(SH::NODE_KIND),
+            Term::iri(SH::IRI),
+        ));
+
+        let report = validate(&data, &shapes, None).unwrap();
+        assert!(report.conforms, "alix is an IRI: {report}");
+    }
+
+    #[test]
+    fn validate_with_mock_sparql_executor() {
+        use std::collections::HashMap;
+
+        struct MockExecutor;
+        impl SparqlExecutor for MockExecutor {
+            fn execute(
+                &self,
+                _query: &str,
+                _this_binding: &Term,
+            ) -> Result<Vec<HashMap<String, Term>>, ShaclError> {
+                // Return one violation row
+                let mut row = HashMap::new();
+                row.insert("value".to_string(), Term::literal("bad"));
+                row.insert("message".to_string(), Term::literal("Mock violation"));
+                Ok(vec![row])
+            }
+        }
+
+        let data = RdfStore::new();
+        data.insert(Triple::new(
+            Term::iri("http://ex.org/alix"),
+            Term::iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"),
+            Term::iri("http://ex.org/Person"),
+        ));
+
+        let shapes = RdfStore::new();
+        let sid = Term::iri("http://ex.org/S");
+        shapes.insert(Triple::new(
+            sid.clone(),
+            Term::iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        shapes.insert(Triple::new(
+            sid.clone(),
+            Term::iri(SH::TARGET_CLASS),
+            Term::iri("http://ex.org/Person"),
+        ));
+        let sq = Term::blank("sq");
+        shapes.insert(Triple::new(sid, Term::iri(SH::SPARQL), sq.clone()));
+        shapes.insert(Triple::new(
+            sq,
+            Term::iri(SH::SELECT),
+            Term::literal("SELECT $this ?value WHERE { $this ?p ?value }"),
+        ));
+
+        let executor = MockExecutor;
+        let report = validate(&data, &shapes, Some(&executor)).unwrap();
+        assert!(!report.conforms);
+        assert_eq!(report.results.len(), 1);
+        assert_eq!(report.results[0].message.as_deref(), Some("Mock violation"));
+        assert_eq!(report.results[0].value, Some(Term::literal("bad")));
+    }
+
+    #[test]
+    fn validate_sparql_error_propagates() {
+        use std::collections::HashMap;
+
+        struct FailingExecutor;
+        impl SparqlExecutor for FailingExecutor {
+            fn execute(
+                &self,
+                _query: &str,
+                _this_binding: &Term,
+            ) -> Result<Vec<HashMap<String, Term>>, ShaclError> {
+                Err(ShaclError::SparqlError("query failed".to_string()))
+            }
+        }
+
+        let data = RdfStore::new();
+        data.insert(Triple::new(
+            Term::iri("http://ex.org/alix"),
+            Term::iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"),
+            Term::iri("http://ex.org/Person"),
+        ));
+
+        let shapes = RdfStore::new();
+        let sid = Term::iri("http://ex.org/S");
+        shapes.insert(Triple::new(
+            sid.clone(),
+            Term::iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        shapes.insert(Triple::new(
+            sid.clone(),
+            Term::iri(SH::TARGET_CLASS),
+            Term::iri("http://ex.org/Person"),
+        ));
+        let sq = Term::blank("sq");
+        shapes.insert(Triple::new(sid, Term::iri(SH::SPARQL), sq.clone()));
+        shapes.insert(Triple::new(
+            sq,
+            Term::iri(SH::SELECT),
+            Term::literal("SELECT $this WHERE { $this ?p ?o }"),
+        ));
+
+        let executor = FailingExecutor;
+        let result = validate(&data, &shapes, Some(&executor));
+        assert!(
+            result.is_err(),
+            "SPARQL errors should propagate as ShaclError"
+        );
+    }
 }

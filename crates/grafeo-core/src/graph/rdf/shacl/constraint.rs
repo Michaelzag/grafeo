@@ -1369,4 +1369,884 @@ mod tests {
             "Shape B with disjoint should report a violation: 0 non-overlapping values, but minCount=1"
         );
     }
+
+    // =====================================================================
+    // Pattern constraint
+    // =====================================================================
+
+    #[test]
+    fn pattern_match_passes() {
+        let store = data_store();
+        let shape = dummy_shape();
+        let alix = Term::iri("http://ex.org/alix");
+        let mut visited = HashSet::new();
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let results = eval_pattern("^[A-Za-z]+$", None, &[Term::literal("Alix")], &ctx);
+        assert!(results.is_empty(), "Alix should match ^[A-Za-z]+$");
+    }
+
+    #[test]
+    fn pattern_no_match_fails() {
+        let store = data_store();
+        let shape = dummy_shape();
+        let alix = Term::iri("http://ex.org/alix");
+        let mut visited = HashSet::new();
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let results = eval_pattern("^[0-9]+$", None, &[Term::literal("Alix")], &ctx);
+        assert_eq!(results.len(), 1);
+        assert!(results[0].source_constraint_component.contains("Pattern"));
+        assert!(
+            results[0]
+                .message
+                .as_ref()
+                .unwrap()
+                .contains("does not match")
+        );
+    }
+
+    #[test]
+    fn pattern_with_case_insensitive_flag() {
+        let store = data_store();
+        let shape = dummy_shape();
+        let alix = Term::iri("http://ex.org/alix");
+        let mut visited = HashSet::new();
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        // Without flag: "alix" does not match ^ALIX$
+        let results = eval_pattern("^ALIX$", None, &[Term::literal("alix")], &ctx);
+        assert_eq!(results.len(), 1, "case-sensitive should fail");
+
+        // With flag: "alix" matches ^ALIX$ case-insensitively
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let results = eval_pattern("^ALIX$", Some("i"), &[Term::literal("alix")], &ctx);
+        assert!(results.is_empty(), "case-insensitive should pass");
+    }
+
+    // =====================================================================
+    // Language-in constraint
+    // =====================================================================
+
+    #[test]
+    fn language_in_allowed_tag() {
+        let store = data_store();
+        let shape = dummy_shape();
+        let alix = Term::iri("http://ex.org/alix");
+        let mut visited = HashSet::new();
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let val = Term::lang_literal("Alix", "en");
+        let results = eval_language_in(&["en".to_string(), "de".to_string()], &[val], &ctx);
+        assert!(results.is_empty(), "en should be in [en, de]");
+    }
+
+    #[test]
+    fn language_in_subtag_match() {
+        let store = data_store();
+        let shape = dummy_shape();
+        let alix = Term::iri("http://ex.org/alix");
+        let mut visited = HashSet::new();
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let val = Term::lang_literal("Alix", "en-US");
+        let results = eval_language_in(&["en".to_string()], &[val], &ctx);
+        assert!(results.is_empty(), "en-US should match base language en");
+    }
+
+    #[test]
+    fn language_in_disallowed_tag() {
+        let store = data_store();
+        let shape = dummy_shape();
+        let alix = Term::iri("http://ex.org/alix");
+        let mut visited = HashSet::new();
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let val = Term::lang_literal("Alix", "fr");
+        let results = eval_language_in(&["en".to_string(), "de".to_string()], &[val], &ctx);
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0]
+                .source_constraint_component
+                .contains("LanguageIn")
+        );
+    }
+
+    #[test]
+    fn language_in_no_lang_tag_fails() {
+        let store = data_store();
+        let shape = dummy_shape();
+        let alix = Term::iri("http://ex.org/alix");
+        let mut visited = HashSet::new();
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let val = Term::literal("Alix"); // no language tag
+        let results = eval_language_in(&["en".to_string()], &[val], &ctx);
+        assert_eq!(
+            results.len(),
+            1,
+            "literal without lang tag should fail languageIn"
+        );
+    }
+
+    // =====================================================================
+    // Unique-lang constraint
+    // =====================================================================
+
+    #[test]
+    fn unique_lang_distinct_tags() {
+        let store = data_store();
+        let shape = dummy_shape();
+        let alix = Term::iri("http://ex.org/alix");
+        let mut visited = HashSet::new();
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let values = vec![
+            Term::lang_literal("Alix", "en"),
+            Term::lang_literal("Alix", "de"),
+        ];
+        let results = eval_unique_lang(&values, &ctx);
+        assert!(results.is_empty(), "distinct lang tags should pass");
+    }
+
+    #[test]
+    fn unique_lang_duplicate_tags() {
+        let store = data_store();
+        let shape = dummy_shape();
+        let alix = Term::iri("http://ex.org/alix");
+        let mut visited = HashSet::new();
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let values = vec![
+            Term::lang_literal("Alix", "en"),
+            Term::lang_literal("Alex", "en"),
+        ];
+        let results = eval_unique_lang(&values, &ctx);
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0]
+                .source_constraint_component
+                .contains("UniqueLang")
+        );
+    }
+
+    // =====================================================================
+    // Equals constraint
+    // =====================================================================
+
+    #[test]
+    fn equals_matching_values() {
+        let store = RdfStore::new();
+        let alix = Term::iri("http://ex.org/alix");
+        let name = Term::iri("http://ex.org/name");
+        let label = Term::iri("http://ex.org/label");
+        store.insert(Triple::new(alix.clone(), name, Term::literal("Alix")));
+        store.insert(Triple::new(alix.clone(), label, Term::literal("Alix")));
+
+        let shape = dummy_shape();
+        let mut visited = HashSet::new();
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let results = eval_equals(
+            &Term::iri("http://ex.org/label"),
+            &[Term::literal("Alix")],
+            &ctx,
+        );
+        assert!(results.is_empty(), "name and label both have 'Alix'");
+    }
+
+    #[test]
+    fn equals_mismatched_values() {
+        let store = RdfStore::new();
+        let alix = Term::iri("http://ex.org/alix");
+        let name = Term::iri("http://ex.org/name");
+        let label = Term::iri("http://ex.org/label");
+        store.insert(Triple::new(alix.clone(), name, Term::literal("Alix")));
+        store.insert(Triple::new(alix.clone(), label, Term::literal("Alex")));
+
+        let shape = dummy_shape();
+        let mut visited = HashSet::new();
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let results = eval_equals(
+            &Term::iri("http://ex.org/label"),
+            &[Term::literal("Alix")],
+            &ctx,
+        );
+        assert_eq!(
+            results.len(),
+            2,
+            "Alix not in label values and Alex not in name values"
+        );
+        assert!(
+            results
+                .iter()
+                .all(|r| r.source_constraint_component.contains("Equals"))
+        );
+    }
+
+    // =====================================================================
+    // Disjoint constraint
+    // =====================================================================
+
+    #[test]
+    fn disjoint_no_overlap() {
+        let store = RdfStore::new();
+        let alix = Term::iri("http://ex.org/alix");
+        store.insert(Triple::new(
+            alix.clone(),
+            Term::iri("http://ex.org/name"),
+            Term::literal("Alix"),
+        ));
+        store.insert(Triple::new(
+            alix.clone(),
+            Term::iri("http://ex.org/nick"),
+            Term::literal("Al"),
+        ));
+
+        let shape = dummy_shape();
+        let mut visited = HashSet::new();
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let results = eval_disjoint(
+            &Term::iri("http://ex.org/nick"),
+            &[Term::literal("Alix")],
+            &ctx,
+        );
+        assert!(results.is_empty(), "Alix and Al are disjoint");
+    }
+
+    #[test]
+    fn disjoint_with_overlap() {
+        let store = RdfStore::new();
+        let alix = Term::iri("http://ex.org/alix");
+        store.insert(Triple::new(
+            alix.clone(),
+            Term::iri("http://ex.org/name"),
+            Term::literal("Alix"),
+        ));
+        store.insert(Triple::new(
+            alix.clone(),
+            Term::iri("http://ex.org/nick"),
+            Term::literal("Alix"),
+        ));
+
+        let shape = dummy_shape();
+        let mut visited = HashSet::new();
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let results = eval_disjoint(
+            &Term::iri("http://ex.org/nick"),
+            &[Term::literal("Alix")],
+            &ctx,
+        );
+        assert_eq!(results.len(), 1);
+        assert!(results[0].source_constraint_component.contains("Disjoint"));
+        assert_eq!(results[0].value.as_ref().unwrap(), &Term::literal("Alix"));
+    }
+
+    // =====================================================================
+    // Less-than constraint
+    // =====================================================================
+
+    #[test]
+    fn less_than_passes() {
+        let store = RdfStore::new();
+        let alix = Term::iri("http://ex.org/alix");
+        let start = Term::iri("http://ex.org/start");
+        let end = Term::iri("http://ex.org/end");
+        store.insert(Triple::new(
+            alix.clone(),
+            start,
+            Term::typed_literal("10", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+        store.insert(Triple::new(
+            alix.clone(),
+            end,
+            Term::typed_literal("20", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+
+        let shape = dummy_shape();
+        let mut visited = HashSet::new();
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let val = Term::typed_literal("10", "http://www.w3.org/2001/XMLSchema#integer");
+        let results = eval_less_than(&Term::iri("http://ex.org/end"), &[val], &ctx, false);
+        assert!(results.is_empty(), "10 < 20 should pass");
+    }
+
+    #[test]
+    fn less_than_fails() {
+        let store = RdfStore::new();
+        let alix = Term::iri("http://ex.org/alix");
+        let end = Term::iri("http://ex.org/end");
+        store.insert(Triple::new(
+            alix.clone(),
+            end,
+            Term::typed_literal("5", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+
+        let shape = dummy_shape();
+        let mut visited = HashSet::new();
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let val = Term::typed_literal("10", "http://www.w3.org/2001/XMLSchema#integer");
+        let results = eval_less_than(&Term::iri("http://ex.org/end"), &[val], &ctx, false);
+        assert_eq!(results.len(), 1, "10 < 5 should fail");
+        assert!(results[0].source_constraint_component.contains("LessThan"));
+    }
+
+    #[test]
+    fn less_than_or_equals_boundary() {
+        let store = RdfStore::new();
+        let alix = Term::iri("http://ex.org/alix");
+        let end = Term::iri("http://ex.org/end");
+        store.insert(Triple::new(
+            alix.clone(),
+            end,
+            Term::typed_literal("10", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+
+        let shape = dummy_shape();
+        let mut visited = HashSet::new();
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let val = Term::typed_literal("10", "http://www.w3.org/2001/XMLSchema#integer");
+        // lessThan: 10 < 10 fails
+        let results = eval_less_than(
+            &Term::iri("http://ex.org/end"),
+            std::slice::from_ref(&val),
+            &ctx,
+            false,
+        );
+        assert_eq!(results.len(), 1, "10 < 10 should fail for strict lessThan");
+
+        // lessThanOrEquals: 10 <= 10 passes
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let results = eval_less_than(&Term::iri("http://ex.org/end"), &[val], &ctx, true);
+        assert!(results.is_empty(), "10 <= 10 should pass");
+    }
+
+    // =====================================================================
+    // Logical constraints (not, and, or, xone)
+    // =====================================================================
+
+    #[allow(dead_code)]
+    fn int_datatype_shape() -> Shape {
+        use super::super::shape::{NodeShape, Severity};
+        Shape::Node(NodeShape {
+            id: Term::iri("http://ex.org/IntShape"),
+            targets: Vec::new(),
+            property_shapes: Vec::new(),
+            constraints: vec![Constraint::Datatype(Term::iri(
+                "http://www.w3.org/2001/XMLSchema#integer",
+            ))],
+            deactivated: false,
+            severity: Severity::Violation,
+            messages: Vec::new(),
+        })
+    }
+
+    fn string_node_kind_shape() -> Shape {
+        use super::super::shape::{NodeShape, Severity};
+        Shape::Node(NodeShape {
+            id: Term::iri("http://ex.org/LitShape"),
+            targets: Vec::new(),
+            property_shapes: Vec::new(),
+            constraints: vec![Constraint::NodeKind(NodeKindValue::Literal)],
+            deactivated: false,
+            severity: Severity::Violation,
+            messages: Vec::new(),
+        })
+    }
+
+    #[test]
+    fn not_passes_when_inner_fails() {
+        let store = data_store();
+        let shape = dummy_shape();
+        let alix = Term::iri("http://ex.org/alix");
+        let mut visited = HashSet::new();
+        let mut ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        // alix is an IRI, not a literal; inner shape requires Literal nodeKind
+        let inner = string_node_kind_shape();
+        let results = eval_not(&inner, &mut ctx);
+        assert!(
+            results.is_empty(),
+            "sh:not should pass when inner shape fails (alix is IRI, not Literal)"
+        );
+    }
+
+    #[test]
+    fn not_fails_when_inner_passes() {
+        let store = data_store();
+        let shape = dummy_shape();
+        let alix = Term::iri("http://ex.org/alix");
+        let mut visited = HashSet::new();
+        let mut ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        // alix is an IRI; inner shape requires IRI nodeKind
+        let inner = {
+            use super::super::shape::{NodeShape, Severity};
+            Shape::Node(NodeShape {
+                id: Term::iri("http://ex.org/IriShape"),
+                targets: Vec::new(),
+                property_shapes: Vec::new(),
+                constraints: vec![Constraint::NodeKind(NodeKindValue::Iri)],
+                deactivated: false,
+                severity: Severity::Violation,
+                messages: Vec::new(),
+            })
+        };
+        let results = eval_not(&inner, &mut ctx);
+        assert_eq!(
+            results.len(),
+            1,
+            "sh:not should fail when inner shape passes"
+        );
+        assert!(results[0].source_constraint_component.contains("Not"));
+    }
+
+    #[test]
+    fn and_all_pass() {
+        let store = data_store();
+        let shape = dummy_shape();
+        let alix = Term::iri("http://ex.org/alix");
+        let mut visited = HashSet::new();
+        let mut ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        // alix is IRI: both IRI-nodeKind and BlankNodeOrIRI should pass
+        let shapes = vec![
+            {
+                use super::super::shape::{NodeShape, Severity};
+                Shape::Node(NodeShape {
+                    id: Term::iri("http://ex.org/S1"),
+                    targets: Vec::new(),
+                    property_shapes: Vec::new(),
+                    constraints: vec![Constraint::NodeKind(NodeKindValue::Iri)],
+                    deactivated: false,
+                    severity: Severity::Violation,
+                    messages: Vec::new(),
+                })
+            },
+            {
+                use super::super::shape::{NodeShape, Severity};
+                Shape::Node(NodeShape {
+                    id: Term::iri("http://ex.org/S2"),
+                    targets: Vec::new(),
+                    property_shapes: Vec::new(),
+                    constraints: vec![Constraint::NodeKind(NodeKindValue::BlankNodeOrIri)],
+                    deactivated: false,
+                    severity: Severity::Violation,
+                    messages: Vec::new(),
+                })
+            },
+        ];
+        let results = eval_and(&shapes, &mut ctx);
+        assert!(
+            results.is_empty(),
+            "sh:and should pass when all shapes conform"
+        );
+    }
+
+    #[test]
+    fn and_one_fails() {
+        let store = data_store();
+        let shape = dummy_shape();
+        let alix = Term::iri("http://ex.org/alix");
+        let mut visited = HashSet::new();
+        let mut ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        // alix is IRI: IRI passes but Literal fails
+        let shapes = vec![
+            {
+                use super::super::shape::{NodeShape, Severity};
+                Shape::Node(NodeShape {
+                    id: Term::iri("http://ex.org/S1"),
+                    targets: Vec::new(),
+                    property_shapes: Vec::new(),
+                    constraints: vec![Constraint::NodeKind(NodeKindValue::Iri)],
+                    deactivated: false,
+                    severity: Severity::Violation,
+                    messages: Vec::new(),
+                })
+            },
+            string_node_kind_shape(),
+        ];
+        let results = eval_and(&shapes, &mut ctx);
+        assert_eq!(results.len(), 1);
+        assert!(results[0].source_constraint_component.contains("And"));
+    }
+
+    #[test]
+    fn or_one_passes() {
+        let store = data_store();
+        let shape = dummy_shape();
+        let alix = Term::iri("http://ex.org/alix");
+        let mut visited = HashSet::new();
+        let mut ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        // alix is IRI: Literal fails but IRI passes
+        let shapes = vec![string_node_kind_shape(), {
+            use super::super::shape::{NodeShape, Severity};
+            Shape::Node(NodeShape {
+                id: Term::iri("http://ex.org/IriShape"),
+                targets: Vec::new(),
+                property_shapes: Vec::new(),
+                constraints: vec![Constraint::NodeKind(NodeKindValue::Iri)],
+                deactivated: false,
+                severity: Severity::Violation,
+                messages: Vec::new(),
+            })
+        }];
+        let results = eval_or(&shapes, &mut ctx);
+        assert!(
+            results.is_empty(),
+            "sh:or should pass when at least one shape conforms"
+        );
+    }
+
+    #[test]
+    fn or_none_pass() {
+        let store = data_store();
+        let shape = dummy_shape();
+        let alix = Term::iri("http://ex.org/alix");
+        let mut visited = HashSet::new();
+        let mut ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        // alix is IRI: both Literal and BlankNode fail
+        let shapes = vec![string_node_kind_shape(), {
+            use super::super::shape::{NodeShape, Severity};
+            Shape::Node(NodeShape {
+                id: Term::iri("http://ex.org/BnShape"),
+                targets: Vec::new(),
+                property_shapes: Vec::new(),
+                constraints: vec![Constraint::NodeKind(NodeKindValue::BlankNode)],
+                deactivated: false,
+                severity: Severity::Violation,
+                messages: Vec::new(),
+            })
+        }];
+        let results = eval_or(&shapes, &mut ctx);
+        assert_eq!(results.len(), 1);
+        assert!(results[0].source_constraint_component.contains("Or"));
+    }
+
+    #[test]
+    fn xone_exactly_one() {
+        let store = data_store();
+        let shape = dummy_shape();
+        let alix = Term::iri("http://ex.org/alix");
+        let mut visited = HashSet::new();
+        let mut ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        // alix is IRI: IRI passes, Literal fails -> exactly 1
+        let shapes = vec![
+            {
+                use super::super::shape::{NodeShape, Severity};
+                Shape::Node(NodeShape {
+                    id: Term::iri("http://ex.org/IriShape"),
+                    targets: Vec::new(),
+                    property_shapes: Vec::new(),
+                    constraints: vec![Constraint::NodeKind(NodeKindValue::Iri)],
+                    deactivated: false,
+                    severity: Severity::Violation,
+                    messages: Vec::new(),
+                })
+            },
+            string_node_kind_shape(),
+        ];
+        let results = eval_xone(&shapes, &mut ctx);
+        assert!(
+            results.is_empty(),
+            "sh:xone should pass with exactly 1 conforming"
+        );
+    }
+
+    #[test]
+    fn xone_two_conform_fails() {
+        let store = data_store();
+        let shape = dummy_shape();
+        let alix = Term::iri("http://ex.org/alix");
+        let mut visited = HashSet::new();
+        let mut ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        // alix is IRI: both IRI and BlankNodeOrIRI pass -> 2 conforming
+        let shapes = vec![
+            {
+                use super::super::shape::{NodeShape, Severity};
+                Shape::Node(NodeShape {
+                    id: Term::iri("http://ex.org/S1"),
+                    targets: Vec::new(),
+                    property_shapes: Vec::new(),
+                    constraints: vec![Constraint::NodeKind(NodeKindValue::Iri)],
+                    deactivated: false,
+                    severity: Severity::Violation,
+                    messages: Vec::new(),
+                })
+            },
+            {
+                use super::super::shape::{NodeShape, Severity};
+                Shape::Node(NodeShape {
+                    id: Term::iri("http://ex.org/S2"),
+                    targets: Vec::new(),
+                    property_shapes: Vec::new(),
+                    constraints: vec![Constraint::NodeKind(NodeKindValue::BlankNodeOrIri)],
+                    deactivated: false,
+                    severity: Severity::Violation,
+                    messages: Vec::new(),
+                })
+            },
+        ];
+        let results = eval_xone(&shapes, &mut ctx);
+        assert_eq!(results.len(), 1);
+        assert!(results[0].message.as_ref().unwrap().contains('2'));
+    }
+
+    // =====================================================================
+    // Shape-node constraint
+    // =====================================================================
+
+    #[test]
+    fn shape_node_value_conforms() {
+        let store = RdfStore::new();
+        let rdf_type = Term::iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#type");
+        let alix = Term::iri("http://ex.org/alix");
+        let gus = Term::iri("http://ex.org/gus");
+        store.insert(Triple::new(
+            alix.clone(),
+            rdf_type.clone(),
+            Term::iri("http://ex.org/Person"),
+        ));
+        store.insert(Triple::new(
+            gus.clone(),
+            rdf_type,
+            Term::iri("http://ex.org/Person"),
+        ));
+
+        let shape = dummy_shape();
+        let inner = {
+            use super::super::shape::{NodeShape, Severity};
+            Shape::Node(NodeShape {
+                id: Term::iri("http://ex.org/IriShape"),
+                targets: Vec::new(),
+                property_shapes: Vec::new(),
+                constraints: vec![Constraint::NodeKind(NodeKindValue::Iri)],
+                deactivated: false,
+                severity: Severity::Violation,
+                messages: Vec::new(),
+            })
+        };
+
+        let mut visited = HashSet::new();
+        let mut ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let results = eval_shape_node(&inner, &[gus], &mut ctx);
+        assert!(
+            results.is_empty(),
+            "gus is an IRI, should conform to IRI shape"
+        );
+    }
+
+    #[test]
+    fn shape_node_value_fails() {
+        let store = data_store();
+        let shape = dummy_shape();
+        let alix = Term::iri("http://ex.org/alix");
+        let mut visited = HashSet::new();
+        let mut ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        // Validate a literal against an IRI-only shape
+        let inner = {
+            use super::super::shape::{NodeShape, Severity};
+            Shape::Node(NodeShape {
+                id: Term::iri("http://ex.org/IriShape"),
+                targets: Vec::new(),
+                property_shapes: Vec::new(),
+                constraints: vec![Constraint::NodeKind(NodeKindValue::Iri)],
+                deactivated: false,
+                severity: Severity::Violation,
+                messages: Vec::new(),
+            })
+        };
+        let results = eval_shape_node(&inner, &[Term::literal("not-an-iri")], &mut ctx);
+        assert_eq!(results.len(), 1);
+        assert!(results[0].source_constraint_component.contains("Node"));
+    }
+
+    // =====================================================================
+    // Closed constraint
+    // =====================================================================
+
+    #[test]
+    fn closed_all_allowed() {
+        let store = RdfStore::new();
+        let alix = Term::iri("http://ex.org/alix");
+        let rdf_type = Term::iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#type");
+        let name = Term::iri("http://ex.org/name");
+        store.insert(Triple::new(
+            alix.clone(),
+            rdf_type,
+            Term::iri("http://ex.org/Person"),
+        ));
+        store.insert(Triple::new(
+            alix.clone(),
+            name.clone(),
+            Term::literal("Alix"),
+        ));
+
+        use super::super::shape::{NodeShape, PropertyShape, Severity};
+        let shape = Shape::Node(NodeShape {
+            id: Term::iri("http://ex.org/ClosedShape"),
+            targets: Vec::new(),
+            property_shapes: vec![PropertyShape {
+                id: Term::blank("p"),
+                path: PropertyPath::Predicate(name),
+                targets: Vec::new(),
+                constraints: Vec::new(),
+                deactivated: false,
+                severity: Severity::Violation,
+                messages: Vec::new(),
+                name: None,
+                description: None,
+            }],
+            constraints: Vec::new(),
+            deactivated: false,
+            severity: Severity::Violation,
+            messages: Vec::new(),
+        });
+
+        let mut visited = HashSet::new();
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let results = eval_closed(&[], &ctx);
+        assert!(
+            results.is_empty(),
+            "only rdf:type and name used, both allowed"
+        );
+    }
+
+    #[test]
+    fn closed_extra_property_violates() {
+        let store = RdfStore::new();
+        let alix = Term::iri("http://ex.org/alix");
+        let name = Term::iri("http://ex.org/name");
+        let age = Term::iri("http://ex.org/age");
+        store.insert(Triple::new(
+            alix.clone(),
+            name.clone(),
+            Term::literal("Alix"),
+        ));
+        store.insert(Triple::new(
+            alix.clone(),
+            age,
+            Term::typed_literal("30", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+
+        use super::super::shape::{NodeShape, PropertyShape, Severity};
+        let shape = Shape::Node(NodeShape {
+            id: Term::iri("http://ex.org/ClosedShape"),
+            targets: Vec::new(),
+            property_shapes: vec![PropertyShape {
+                id: Term::blank("p"),
+                path: PropertyPath::Predicate(name),
+                targets: Vec::new(),
+                constraints: Vec::new(),
+                deactivated: false,
+                severity: Severity::Violation,
+                messages: Vec::new(),
+                name: None,
+                description: None,
+            }],
+            constraints: Vec::new(),
+            deactivated: false,
+            severity: Severity::Violation,
+            messages: Vec::new(),
+        });
+
+        let mut visited = HashSet::new();
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let results = eval_closed(&[], &ctx);
+        assert_eq!(
+            results.len(),
+            1,
+            "age predicate should violate closed shape"
+        );
+        assert!(results[0].source_constraint_component.contains("Closed"));
+        assert_eq!(
+            results[0].value.as_ref().unwrap(),
+            &Term::iri("http://ex.org/age")
+        );
+    }
+
+    #[test]
+    fn closed_with_ignored_properties() {
+        let store = RdfStore::new();
+        let alix = Term::iri("http://ex.org/alix");
+        let name = Term::iri("http://ex.org/name");
+        let age = Term::iri("http://ex.org/age");
+        store.insert(Triple::new(
+            alix.clone(),
+            name.clone(),
+            Term::literal("Alix"),
+        ));
+        store.insert(Triple::new(
+            alix.clone(),
+            age.clone(),
+            Term::typed_literal("30", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+
+        use super::super::shape::{NodeShape, PropertyShape, Severity};
+        let shape = Shape::Node(NodeShape {
+            id: Term::iri("http://ex.org/ClosedShape"),
+            targets: Vec::new(),
+            property_shapes: vec![PropertyShape {
+                id: Term::blank("p"),
+                path: PropertyPath::Predicate(name),
+                targets: Vec::new(),
+                constraints: Vec::new(),
+                deactivated: false,
+                severity: Severity::Violation,
+                messages: Vec::new(),
+                name: None,
+                description: None,
+            }],
+            constraints: Vec::new(),
+            deactivated: false,
+            severity: Severity::Violation,
+            messages: Vec::new(),
+        });
+
+        let mut visited = HashSet::new();
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let results = eval_closed(&[age], &ctx);
+        assert!(results.is_empty(), "age in ignoredProperties should pass");
+    }
+
+    // =====================================================================
+    // evaluate_constraint dispatcher
+    // =====================================================================
+
+    #[test]
+    fn evaluate_constraint_dispatches_correctly() {
+        let store = data_store();
+        let shape = dummy_shape();
+        let alix = Term::iri("http://ex.org/alix");
+        let mut visited = HashSet::new();
+        let mut ctx = make_ctx(&alix, &shape, &store, &mut visited);
+
+        // MinCount via the dispatcher
+        let results =
+            evaluate_constraint(&Constraint::MinCount(1), &[Term::literal("a")], &mut ctx);
+        assert!(results.is_empty());
+
+        let results =
+            evaluate_constraint(&Constraint::MinCount(5), &[Term::literal("a")], &mut ctx);
+        assert_eq!(results.len(), 1);
+
+        // MaxLength via the dispatcher
+        let results = evaluate_constraint(
+            &Constraint::MaxLength(10),
+            &[Term::literal("short")],
+            &mut ctx,
+        );
+        assert!(results.is_empty());
+
+        // HasValue via the dispatcher
+        let results = evaluate_constraint(
+            &Constraint::HasValue(Term::literal("a")),
+            &[Term::literal("a"), Term::literal("b")],
+            &mut ctx,
+        );
+        assert!(results.is_empty());
+
+        // SPARQL constraint returns empty (no executor in core tests)
+        let results = evaluate_constraint(
+            &Constraint::Sparql(super::super::shape::SparqlConstraint {
+                select: "SELECT ?this WHERE { ?this ?p ?o }".to_string(),
+                message: None,
+                prefixes: Vec::new(),
+                deactivated: false,
+            }),
+            &[],
+            &mut ctx,
+        );
+        assert!(
+            results.is_empty(),
+            "SPARQL constraints should be no-op in core"
+        );
+    }
 }

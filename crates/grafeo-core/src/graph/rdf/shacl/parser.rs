@@ -1451,4 +1451,772 @@ mod tests {
             assert_eq!(members.len(), 2, "sh:and list should contain two shapes");
         }
     }
+
+    #[test]
+    fn parse_zero_or_more_path() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://ex.org/S");
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::PROPERTY_SHAPE),
+        ));
+        let path_bnode = Term::blank("p1");
+        store.insert(Triple::new(shape, Term::iri(SH::PATH), path_bnode.clone()));
+        store.insert(Triple::new(
+            path_bnode,
+            Term::iri(SH::ZERO_OR_MORE_PATH),
+            Term::iri("http://ex.org/knows"),
+        ));
+
+        let shapes = parse_shapes(&store).unwrap();
+        assert_eq!(shapes.len(), 1);
+        if let Shape::Property(ps) = &shapes[0] {
+            assert!(
+                matches!(&ps.path, PropertyPath::ZeroOrMore(inner) if matches!(inner.as_ref(), PropertyPath::Predicate(_)))
+            );
+        } else {
+            panic!("Expected PropertyShape");
+        }
+    }
+
+    #[test]
+    fn parse_one_or_more_path() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://ex.org/S");
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::PROPERTY_SHAPE),
+        ));
+        let path_bnode = Term::blank("p1");
+        store.insert(Triple::new(shape, Term::iri(SH::PATH), path_bnode.clone()));
+        store.insert(Triple::new(
+            path_bnode,
+            Term::iri(SH::ONE_OR_MORE_PATH),
+            Term::iri("http://ex.org/knows"),
+        ));
+
+        let shapes = parse_shapes(&store).unwrap();
+        if let Shape::Property(ps) = &shapes[0] {
+            assert!(matches!(&ps.path, PropertyPath::OneOrMore(_)));
+        } else {
+            panic!("Expected PropertyShape");
+        }
+    }
+
+    #[test]
+    fn parse_zero_or_one_path() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://ex.org/S");
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::PROPERTY_SHAPE),
+        ));
+        let path_bnode = Term::blank("p1");
+        store.insert(Triple::new(shape, Term::iri(SH::PATH), path_bnode.clone()));
+        store.insert(Triple::new(
+            path_bnode,
+            Term::iri(SH::ZERO_OR_ONE_PATH),
+            Term::iri("http://ex.org/knows"),
+        ));
+
+        let shapes = parse_shapes(&store).unwrap();
+        if let Shape::Property(ps) = &shapes[0] {
+            assert!(matches!(&ps.path, PropertyPath::ZeroOrOne(_)));
+        } else {
+            panic!("Expected PropertyShape");
+        }
+    }
+
+    #[test]
+    fn parse_sequence_path() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://ex.org/S");
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::PROPERTY_SHAPE),
+        ));
+
+        // sh:path is an RDF list (sequence path): ( ex:knows ex:name )
+        let l1 = Term::blank("l1");
+        let l2 = Term::blank("l2");
+        let nil = Term::iri(RDF::NIL);
+        store.insert(Triple::new(shape, Term::iri(SH::PATH), l1.clone()));
+        store.insert(Triple::new(
+            l1.clone(),
+            Term::iri(RDF::FIRST),
+            Term::iri("http://ex.org/knows"),
+        ));
+        store.insert(Triple::new(l1, Term::iri(RDF::REST), l2.clone()));
+        store.insert(Triple::new(
+            l2.clone(),
+            Term::iri(RDF::FIRST),
+            Term::iri("http://ex.org/name"),
+        ));
+        store.insert(Triple::new(l2, Term::iri(RDF::REST), nil));
+
+        let shapes = parse_shapes(&store).unwrap();
+        if let Shape::Property(ps) = &shapes[0] {
+            if let PropertyPath::Sequence(steps) = &ps.path {
+                assert_eq!(steps.len(), 2);
+            } else {
+                panic!("Expected Sequence path, got {:?}", ps.path);
+            }
+        } else {
+            panic!("Expected PropertyShape");
+        }
+    }
+
+    #[test]
+    fn parse_alternative_path() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://ex.org/S");
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::PROPERTY_SHAPE),
+        ));
+
+        // sh:path [ sh:alternativePath ( ex:name ex:label ) ]
+        let path_bnode = Term::blank("p1");
+        store.insert(Triple::new(shape, Term::iri(SH::PATH), path_bnode.clone()));
+        let l1 = Term::blank("al1");
+        let l2 = Term::blank("al2");
+        let nil = Term::iri(RDF::NIL);
+        store.insert(Triple::new(
+            path_bnode,
+            Term::iri(SH::ALTERNATIVE_PATH),
+            l1.clone(),
+        ));
+        store.insert(Triple::new(
+            l1.clone(),
+            Term::iri(RDF::FIRST),
+            Term::iri("http://ex.org/name"),
+        ));
+        store.insert(Triple::new(l1, Term::iri(RDF::REST), l2.clone()));
+        store.insert(Triple::new(
+            l2.clone(),
+            Term::iri(RDF::FIRST),
+            Term::iri("http://ex.org/label"),
+        ));
+        store.insert(Triple::new(l2, Term::iri(RDF::REST), nil));
+
+        let shapes = parse_shapes(&store).unwrap();
+        if let Shape::Property(ps) = &shapes[0] {
+            if let PropertyPath::Alternative(alts) = &ps.path {
+                assert_eq!(alts.len(), 2);
+            } else {
+                panic!("Expected Alternative path, got {:?}", ps.path);
+            }
+        } else {
+            panic!("Expected PropertyShape");
+        }
+    }
+
+    #[test]
+    fn parse_pattern_with_flags() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://ex.org/S");
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::TARGET_NODE),
+            Term::iri("http://ex.org/x"),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::PATTERN),
+            Term::literal("^[a-z]+$"),
+        ));
+        store.insert(Triple::new(shape, Term::iri(SH::FLAGS), Term::literal("i")));
+
+        let shapes = parse_shapes(&store).unwrap();
+        let c = shapes[0]
+            .constraints()
+            .iter()
+            .find(|c| matches!(c, Constraint::Pattern { .. }));
+        assert!(c.is_some());
+        if let Some(Constraint::Pattern { pattern, flags }) = c {
+            assert_eq!(pattern, "^[a-z]+$");
+            assert_eq!(flags.as_deref(), Some("i"));
+        }
+    }
+
+    #[test]
+    fn parse_language_in() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://ex.org/S");
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::TARGET_NODE),
+            Term::iri("http://ex.org/x"),
+        ));
+
+        let l1 = Term::blank("ll1");
+        let l2 = Term::blank("ll2");
+        let nil = Term::iri(RDF::NIL);
+        store.insert(Triple::new(shape, Term::iri(SH::LANGUAGE_IN), l1.clone()));
+        store.insert(Triple::new(
+            l1.clone(),
+            Term::iri(RDF::FIRST),
+            Term::literal("en"),
+        ));
+        store.insert(Triple::new(l1, Term::iri(RDF::REST), l2.clone()));
+        store.insert(Triple::new(
+            l2.clone(),
+            Term::iri(RDF::FIRST),
+            Term::literal("de"),
+        ));
+        store.insert(Triple::new(l2, Term::iri(RDF::REST), nil));
+
+        let shapes = parse_shapes(&store).unwrap();
+        let c = shapes[0]
+            .constraints()
+            .iter()
+            .find(|c| matches!(c, Constraint::LanguageIn(_)));
+        assert!(c.is_some());
+        if let Some(Constraint::LanguageIn(langs)) = c {
+            assert_eq!(langs, &["en", "de"]);
+        }
+    }
+
+    #[test]
+    fn parse_unique_lang() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://ex.org/S");
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::TARGET_NODE),
+            Term::iri("http://ex.org/x"),
+        ));
+        store.insert(Triple::new(
+            shape,
+            Term::iri(SH::UNIQUE_LANG),
+            Term::typed_literal("true", "http://www.w3.org/2001/XMLSchema#boolean"),
+        ));
+
+        let shapes = parse_shapes(&store).unwrap();
+        assert!(
+            shapes[0]
+                .constraints()
+                .iter()
+                .any(|c| matches!(c, Constraint::UniqueLang))
+        );
+    }
+
+    #[test]
+    fn parse_closed_with_ignored() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://ex.org/S");
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::TARGET_NODE),
+            Term::iri("http://ex.org/x"),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::CLOSED),
+            Term::typed_literal("true", "http://www.w3.org/2001/XMLSchema#boolean"),
+        ));
+
+        let l1 = Term::blank("ig1");
+        let nil = Term::iri(RDF::NIL);
+        store.insert(Triple::new(
+            shape,
+            Term::iri(SH::IGNORED_PROPERTIES),
+            l1.clone(),
+        ));
+        store.insert(Triple::new(
+            l1.clone(),
+            Term::iri(RDF::FIRST),
+            Term::iri("http://ex.org/age"),
+        ));
+        store.insert(Triple::new(l1, Term::iri(RDF::REST), nil));
+
+        let shapes = parse_shapes(&store).unwrap();
+        let c = shapes[0]
+            .constraints()
+            .iter()
+            .find(|c| matches!(c, Constraint::Closed { .. }));
+        assert!(c.is_some());
+        if let Some(Constraint::Closed { ignored_properties }) = c {
+            assert_eq!(ignored_properties.len(), 1);
+        }
+    }
+
+    #[test]
+    fn parse_qualified_value_shape() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://ex.org/S");
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::TARGET_NODE),
+            Term::iri("http://ex.org/x"),
+        ));
+
+        let inner_shape = Term::blank("inner");
+        store.insert(Triple::new(
+            inner_shape.clone(),
+            Term::iri(SH::NODE_KIND),
+            Term::iri(SH::IRI),
+        ));
+
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::QUALIFIED_VALUE_SHAPE),
+            inner_shape,
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::QUALIFIED_MIN_COUNT),
+            Term::typed_literal("1", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+        store.insert(Triple::new(
+            shape,
+            Term::iri(SH::QUALIFIED_MAX_COUNT),
+            Term::typed_literal("3", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+
+        let shapes = parse_shapes(&store).unwrap();
+        let c = shapes[0]
+            .constraints()
+            .iter()
+            .find(|c| matches!(c, Constraint::QualifiedValueShape { .. }));
+        assert!(c.is_some());
+        if let Some(Constraint::QualifiedValueShape {
+            min_count,
+            max_count,
+            ..
+        }) = c
+        {
+            assert_eq!(*min_count, Some(1));
+            assert_eq!(*max_count, Some(3));
+        }
+    }
+
+    #[test]
+    fn parse_not_constraint() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://ex.org/S");
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::TARGET_NODE),
+            Term::iri("http://ex.org/x"),
+        ));
+
+        let inner = Term::blank("notShape");
+        store.insert(Triple::new(
+            inner.clone(),
+            Term::iri(SH::NODE_KIND),
+            Term::iri(SH::LITERAL),
+        ));
+        store.insert(Triple::new(shape, Term::iri(SH::NOT), inner));
+
+        let shapes = parse_shapes(&store).unwrap();
+        assert!(
+            shapes[0]
+                .constraints()
+                .iter()
+                .any(|c| matches!(c, Constraint::Not(_)))
+        );
+    }
+
+    #[test]
+    fn parse_or_constraint() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://ex.org/S");
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::TARGET_NODE),
+            Term::iri("http://ex.org/x"),
+        ));
+
+        let s1 = Term::blank("or1");
+        let s2 = Term::blank("or2");
+        store.insert(Triple::new(
+            s1.clone(),
+            Term::iri(SH::NODE_KIND),
+            Term::iri(SH::IRI),
+        ));
+        store.insert(Triple::new(
+            s2.clone(),
+            Term::iri(SH::NODE_KIND),
+            Term::iri(SH::LITERAL),
+        ));
+
+        let l1 = Term::blank("orl1");
+        let l2 = Term::blank("orl2");
+        let nil = Term::iri(RDF::NIL);
+        store.insert(Triple::new(shape, Term::iri(SH::OR), l1.clone()));
+        store.insert(Triple::new(l1.clone(), Term::iri(RDF::FIRST), s1));
+        store.insert(Triple::new(l1, Term::iri(RDF::REST), l2.clone()));
+        store.insert(Triple::new(l2.clone(), Term::iri(RDF::FIRST), s2));
+        store.insert(Triple::new(l2, Term::iri(RDF::REST), nil));
+
+        let shapes = parse_shapes(&store).unwrap();
+        let c = shapes[0]
+            .constraints()
+            .iter()
+            .find(|c| matches!(c, Constraint::Or(_)));
+        assert!(c.is_some());
+        if let Some(Constraint::Or(members)) = c {
+            assert_eq!(members.len(), 2);
+        }
+    }
+
+    #[test]
+    fn parse_xone_constraint() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://ex.org/S");
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::TARGET_NODE),
+            Term::iri("http://ex.org/x"),
+        ));
+
+        let s1 = Term::blank("x1");
+        store.insert(Triple::new(
+            s1.clone(),
+            Term::iri(SH::NODE_KIND),
+            Term::iri(SH::IRI),
+        ));
+
+        let l1 = Term::blank("xl1");
+        let nil = Term::iri(RDF::NIL);
+        store.insert(Triple::new(shape, Term::iri(SH::XONE), l1.clone()));
+        store.insert(Triple::new(l1.clone(), Term::iri(RDF::FIRST), s1));
+        store.insert(Triple::new(l1, Term::iri(RDF::REST), nil));
+
+        let shapes = parse_shapes(&store).unwrap();
+        assert!(
+            shapes[0]
+                .constraints()
+                .iter()
+                .any(|c| matches!(c, Constraint::Xone(_)))
+        );
+    }
+
+    #[test]
+    fn parse_sparql_constraint() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://ex.org/S");
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::TARGET_NODE),
+            Term::iri("http://ex.org/x"),
+        ));
+
+        let sparql_node = Term::blank("sq1");
+        store.insert(Triple::new(
+            shape,
+            Term::iri(SH::SPARQL),
+            sparql_node.clone(),
+        ));
+        store.insert(Triple::new(
+            sparql_node.clone(),
+            Term::iri(SH::SELECT),
+            Term::literal("SELECT $this WHERE { $this ?p ?o }"),
+        ));
+        store.insert(Triple::new(
+            sparql_node,
+            Term::iri(SH::MESSAGE),
+            Term::literal("Custom violation"),
+        ));
+
+        let shapes = parse_shapes(&store).unwrap();
+        let c = shapes[0]
+            .constraints()
+            .iter()
+            .find(|c| matches!(c, Constraint::Sparql(_)));
+        assert!(c.is_some());
+        if let Some(Constraint::Sparql(sc)) = c {
+            assert!(sc.select.contains("$this"));
+            assert_eq!(sc.message.as_deref(), Some("Custom violation"));
+        }
+    }
+
+    #[test]
+    fn parse_sparql_missing_select_errors() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://ex.org/S");
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::TARGET_NODE),
+            Term::iri("http://ex.org/x"),
+        ));
+
+        let sparql_node = Term::blank("sq1");
+        store.insert(Triple::new(shape, Term::iri(SH::SPARQL), sparql_node));
+        // Missing sh:select
+
+        let result = parse_shapes(&store);
+        assert!(result.is_err(), "sh:sparql without sh:select should error");
+    }
+
+    #[test]
+    fn parse_equals_disjoint_less_than() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://ex.org/S");
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::TARGET_NODE),
+            Term::iri("http://ex.org/x"),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::EQUALS),
+            Term::iri("http://ex.org/label"),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::DISJOINT),
+            Term::iri("http://ex.org/nick"),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::LESS_THAN),
+            Term::iri("http://ex.org/end"),
+        ));
+        store.insert(Triple::new(
+            shape,
+            Term::iri(SH::LESS_THAN_OR_EQUALS),
+            Term::iri("http://ex.org/max"),
+        ));
+
+        let shapes = parse_shapes(&store).unwrap();
+        let cs = shapes[0].constraints();
+        assert!(cs.iter().any(|c| matches!(c, Constraint::Equals(_))));
+        assert!(cs.iter().any(|c| matches!(c, Constraint::Disjoint(_))));
+        assert!(cs.iter().any(|c| matches!(c, Constraint::LessThan(_))));
+        assert!(
+            cs.iter()
+                .any(|c| matches!(c, Constraint::LessThanOrEquals(_)))
+        );
+    }
+
+    #[test]
+    fn parse_value_range_constraints() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://ex.org/S");
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::TARGET_NODE),
+            Term::iri("http://ex.org/x"),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::MIN_EXCLUSIVE),
+            Term::typed_literal("0", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::MAX_EXCLUSIVE),
+            Term::typed_literal("100", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::MIN_INCLUSIVE),
+            Term::typed_literal("1", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+        store.insert(Triple::new(
+            shape,
+            Term::iri(SH::MAX_INCLUSIVE),
+            Term::typed_literal("99", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+
+        let shapes = parse_shapes(&store).unwrap();
+        let cs = shapes[0].constraints();
+        assert!(cs.iter().any(|c| matches!(c, Constraint::MinExclusive(_))));
+        assert!(cs.iter().any(|c| matches!(c, Constraint::MaxExclusive(_))));
+        assert!(cs.iter().any(|c| matches!(c, Constraint::MinInclusive(_))));
+        assert!(cs.iter().any(|c| matches!(c, Constraint::MaxInclusive(_))));
+    }
+
+    #[test]
+    fn parse_min_max_length() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://ex.org/S");
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::TARGET_NODE),
+            Term::iri("http://ex.org/x"),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::MIN_LENGTH),
+            Term::typed_literal("3", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+        store.insert(Triple::new(
+            shape,
+            Term::iri(SH::MAX_LENGTH),
+            Term::typed_literal("50", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+
+        let shapes = parse_shapes(&store).unwrap();
+        let cs = shapes[0].constraints();
+        assert!(cs.iter().any(|c| matches!(c, Constraint::MinLength(3))));
+        assert!(cs.iter().any(|c| matches!(c, Constraint::MaxLength(50))));
+    }
+
+    #[test]
+    fn parse_has_value() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://ex.org/S");
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::TARGET_NODE),
+            Term::iri("http://ex.org/x"),
+        ));
+        store.insert(Triple::new(
+            shape,
+            Term::iri(SH::HAS_VALUE),
+            Term::literal("required"),
+        ));
+
+        let shapes = parse_shapes(&store).unwrap();
+        assert!(
+            shapes[0]
+                .constraints()
+                .iter()
+                .any(|c| matches!(c, Constraint::HasValue(_)))
+        );
+    }
+
+    #[test]
+    fn parse_shape_node_constraint() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://ex.org/S");
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::TARGET_NODE),
+            Term::iri("http://ex.org/x"),
+        ));
+
+        let inner = Term::blank("nodeRef");
+        store.insert(Triple::new(
+            inner.clone(),
+            Term::iri(SH::NODE_KIND),
+            Term::iri(SH::IRI),
+        ));
+        store.insert(Triple::new(shape, Term::iri(SH::NODE), inner));
+
+        let shapes = parse_shapes(&store).unwrap();
+        assert!(
+            shapes[0]
+                .constraints()
+                .iter()
+                .any(|c| matches!(c, Constraint::ShapeNode(_)))
+        );
+    }
+
+    #[test]
+    fn parse_name_and_description() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://ex.org/S");
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::PROPERTY_SHAPE),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::PATH),
+            Term::iri("http://ex.org/name"),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::NAME),
+            Term::literal("Full Name"),
+        ));
+        store.insert(Triple::new(
+            shape,
+            Term::iri(SH::DESCRIPTION),
+            Term::literal("The person's full name"),
+        ));
+
+        let shapes = parse_shapes(&store).unwrap();
+        if let Shape::Property(ps) = &shapes[0] {
+            assert_eq!(ps.name.as_deref(), Some("Full Name"));
+            assert_eq!(ps.description.as_deref(), Some("The person's full name"));
+        } else {
+            panic!("Expected PropertyShape");
+        }
+    }
 }

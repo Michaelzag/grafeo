@@ -713,3 +713,239 @@ fn nonexistent_shapes_graph_errors() {
     let result = session.validate_shacl("http://ex.org/nonexistent");
     assert!(result.is_err());
 }
+
+// =========================================================================
+// validate_shacl_graph (named data graph + named shapes graph)
+// =========================================================================
+
+#[test]
+fn validate_shacl_graph_both_named() {
+    let db = rdf_db();
+    let session = db.session();
+
+    session
+        .execute_sparql(
+            r#"INSERT DATA {
+                GRAPH <http://ex.org/data> {
+                    <http://ex.org/alix> a <http://ex.org/Person> ;
+                        <http://ex.org/name> "Alix" .
+                }
+            }"#,
+        )
+        .unwrap();
+
+    session
+        .execute_sparql(&format!(
+            r#"INSERT DATA {{ GRAPH <{SHAPES_GRAPH}> {{
+                <http://ex.org/S> a <http://www.w3.org/ns/shacl#NodeShape> ;
+                    <http://www.w3.org/ns/shacl#targetClass> <http://ex.org/Person> ;
+                    <http://www.w3.org/ns/shacl#property> [
+                        <http://www.w3.org/ns/shacl#path> <http://ex.org/name> ;
+                        <http://www.w3.org/ns/shacl#minCount> 1
+                    ] .
+            }} }}"#
+        ))
+        .unwrap();
+
+    let report = session
+        .validate_shacl_graph("http://ex.org/data", SHAPES_GRAPH)
+        .unwrap();
+    assert!(report.conforms, "Alix has a name: {report}");
+}
+
+#[test]
+fn validate_shacl_graph_violation_in_named_graph() {
+    let db = rdf_db();
+    let session = db.session();
+
+    session
+        .execute_sparql(
+            r#"INSERT DATA {
+                GRAPH <http://ex.org/data> {
+                    <http://ex.org/gus> a <http://ex.org/Person> .
+                }
+            }"#,
+        )
+        .unwrap();
+
+    session
+        .execute_sparql(&format!(
+            r#"INSERT DATA {{ GRAPH <{SHAPES_GRAPH}> {{
+                <http://ex.org/S> a <http://www.w3.org/ns/shacl#NodeShape> ;
+                    <http://www.w3.org/ns/shacl#targetClass> <http://ex.org/Person> ;
+                    <http://www.w3.org/ns/shacl#property> [
+                        <http://www.w3.org/ns/shacl#path> <http://ex.org/name> ;
+                        <http://www.w3.org/ns/shacl#minCount> 1
+                    ] .
+            }} }}"#
+        ))
+        .unwrap();
+
+    let report = session
+        .validate_shacl_graph("http://ex.org/data", SHAPES_GRAPH)
+        .unwrap();
+    assert!(!report.conforms, "Gus missing name in named data graph");
+    assert_eq!(report.results.len(), 1);
+}
+
+#[test]
+fn validate_shacl_graph_nonexistent_data_graph() {
+    let db = rdf_db();
+    let session = db.session();
+
+    // Create shapes graph
+    session
+        .execute_sparql(&format!(
+            r#"INSERT DATA {{ GRAPH <{SHAPES_GRAPH}> {{
+                <http://ex.org/S> a <http://www.w3.org/ns/shacl#NodeShape> .
+            }} }}"#
+        ))
+        .unwrap();
+
+    let result = session.validate_shacl_graph("http://ex.org/nonexistent", SHAPES_GRAPH);
+    assert!(result.is_err());
+}
+
+// =========================================================================
+// GrafeoDB convenience method
+// =========================================================================
+
+#[test]
+fn grafeo_db_validate_shacl() {
+    let db = setup_validation(
+        r#"INSERT DATA {
+            <http://ex.org/alix> a <http://ex.org/Person> ;
+                <http://ex.org/name> "Alix" .
+        }"#,
+        &format!(
+            r#"INSERT DATA {{ GRAPH <{SHAPES_GRAPH}> {{
+            <http://ex.org/S> a <http://www.w3.org/ns/shacl#NodeShape> ;
+                <http://www.w3.org/ns/shacl#targetClass> <http://ex.org/Person> ;
+                <http://www.w3.org/ns/shacl#property> [
+                    <http://www.w3.org/ns/shacl#path> <http://ex.org/name> ;
+                    <http://www.w3.org/ns/shacl#minCount> 1
+                ] .
+        }} }}"#
+        ),
+    );
+    let report = db.validate_shacl(SHAPES_GRAPH).unwrap();
+    assert!(report.conforms, "{report}");
+}
+
+// =========================================================================
+// Additional constraint coverage via integration
+// =========================================================================
+
+#[test]
+fn node_kind_blank_node_or_iri() {
+    let db = setup_validation(
+        r#"INSERT DATA {
+            <http://ex.org/alix> a <http://ex.org/Person> ;
+                <http://ex.org/knows> <http://ex.org/gus> .
+        }"#,
+        &format!(
+            r#"INSERT DATA {{ GRAPH <{SHAPES_GRAPH}> {{
+            <http://ex.org/S> a <http://www.w3.org/ns/shacl#NodeShape> ;
+                <http://www.w3.org/ns/shacl#targetClass> <http://ex.org/Person> ;
+                <http://www.w3.org/ns/shacl#property> [
+                    <http://www.w3.org/ns/shacl#path> <http://ex.org/knows> ;
+                    <http://www.w3.org/ns/shacl#nodeKind> <http://www.w3.org/ns/shacl#BlankNodeOrIRI>
+                ] .
+        }} }}"#
+        ),
+    );
+    let report = db.session().validate_shacl(SHAPES_GRAPH).unwrap();
+    assert!(report.conforms, "IRI matches BlankNodeOrIRI: {report}");
+}
+
+#[test]
+fn max_exclusive_pass_and_fail() {
+    let db = setup_validation(
+        r#"INSERT DATA {
+            <http://ex.org/alix> a <http://ex.org/Person> ;
+                <http://ex.org/age> "30"^^<http://www.w3.org/2001/XMLSchema#integer> .
+            <http://ex.org/gus> a <http://ex.org/Person> ;
+                <http://ex.org/age> "100"^^<http://www.w3.org/2001/XMLSchema#integer> .
+        }"#,
+        &format!(
+            r#"INSERT DATA {{ GRAPH <{SHAPES_GRAPH}> {{
+            <http://ex.org/S> a <http://www.w3.org/ns/shacl#NodeShape> ;
+                <http://www.w3.org/ns/shacl#targetClass> <http://ex.org/Person> ;
+                <http://www.w3.org/ns/shacl#property> [
+                    <http://www.w3.org/ns/shacl#path> <http://ex.org/age> ;
+                    <http://www.w3.org/ns/shacl#maxExclusive> "100"^^<http://www.w3.org/2001/XMLSchema#integer>
+                ] .
+        }} }}"#
+        ),
+    );
+    let report = db.session().validate_shacl(SHAPES_GRAPH).unwrap();
+    assert!(!report.conforms, "100 is not < 100");
+    assert_eq!(
+        report.results.len(),
+        1,
+        "Only gus (100) should fail maxExclusive 100"
+    );
+}
+
+#[test]
+fn maxlength_pass_and_fail() {
+    let db = setup_validation(
+        r#"INSERT DATA {
+            <http://ex.org/alix> a <http://ex.org/Person> ;
+                <http://ex.org/name> "Alix" .
+            <http://ex.org/gus> a <http://ex.org/Person> ;
+                <http://ex.org/name> "Gustav von Trapp" .
+        }"#,
+        &format!(
+            r#"INSERT DATA {{ GRAPH <{SHAPES_GRAPH}> {{
+            <http://ex.org/S> a <http://www.w3.org/ns/shacl#NodeShape> ;
+                <http://www.w3.org/ns/shacl#targetClass> <http://ex.org/Person> ;
+                <http://www.w3.org/ns/shacl#property> [
+                    <http://www.w3.org/ns/shacl#path> <http://ex.org/name> ;
+                    <http://www.w3.org/ns/shacl#maxLength> 10
+                ] .
+        }} }}"#
+        ),
+    );
+    let report = db.session().validate_shacl(SHAPES_GRAPH).unwrap();
+    assert!(!report.conforms);
+    assert_eq!(
+        report.results.len(),
+        1,
+        "Only Gustav von Trapp exceeds maxLength 10"
+    );
+}
+
+#[test]
+fn closed_shape_integration() {
+    let db = setup_validation(
+        r#"INSERT DATA {
+            <http://ex.org/alix> a <http://ex.org/Person> ;
+                <http://ex.org/name> "Alix" ;
+                <http://ex.org/secret> "hidden" .
+        }"#,
+        &format!(
+            r#"INSERT DATA {{ GRAPH <{SHAPES_GRAPH}> {{
+            <http://ex.org/S> a <http://www.w3.org/ns/shacl#NodeShape> ;
+                <http://www.w3.org/ns/shacl#targetClass> <http://ex.org/Person> ;
+                <http://www.w3.org/ns/shacl#closed> true ;
+                <http://www.w3.org/ns/shacl#property> [
+                    <http://www.w3.org/ns/shacl#path> <http://ex.org/name> ;
+                    <http://www.w3.org/ns/shacl#minCount> 1
+                ] .
+        }} }}"#
+        ),
+    );
+    let report = db.session().validate_shacl(SHAPES_GRAPH).unwrap();
+    assert!(
+        !report.conforms,
+        "secret property should violate closed shape"
+    );
+    assert!(
+        report
+            .results
+            .iter()
+            .any(|r| r.source_constraint_component.contains("Closed")),
+        "Should have a Closed violation"
+    );
+}
