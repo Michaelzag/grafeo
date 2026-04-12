@@ -108,8 +108,11 @@ The beta series focuses on correctness, completeness and real-world durability. 
 
 | Version    | Focus                                                                                |
 |------------|--------------------------------------------------------------------------------------|
-| **0.5.38** | Algorithms, streaming results, memory introspection, testing unification             |
-| **0.5.39** | API stability markers, feature profile deprecation warnings, C FFI parity            |
+| **0.5.38** | Performance and parallelism: Block-STM batch execution, WASM size optimization, cache-line aligned chunks, observability (metrics, spans, telemetry), graph analytics in Python/Node.js/WASM bindings |
+| **0.5.39** | API stability and developer experience: stable/beta/experimental tier annotations, cursor-based streaming results, memory introspection, contributor documentation |
+| **0.5.40** | Improved temporal queries: temporal indexes, GQL temporal syntax extensions, async storage server integration |
+| **0.5.41** | Offline-first sync protocol, cross-language query translation, final 0.6.x blocker audit |
+| **0.5.42** | Flutter/mobile builds (Android NDK, iOS xcframework), final feature profile audit and doc sweep |
 
 ---
 
@@ -157,7 +160,7 @@ Not scheduled, but on the radar:
 
 ## Contributing
 
-Interested in contributing? Check the [GitHub Issues](https://github.com/GrafeoDB/grafeo/issues) or join the [Discussions](https://github.com/orgs/GrafeoDB/discussions).
+Interested in contributing? Check the [GitHub Issues](https://github.com/GrafeoDB/grafeo/issues), join the [Discussions](https://github.com/orgs/GrafeoDB/discussions) or hop into the [Discord server](https://discord.gg/jrgMD2Zj3).
 
 ---
 

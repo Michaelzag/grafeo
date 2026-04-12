@@ -681,3 +681,48 @@ jobs:
         with:
           packages-dir: dist/
         continue-on-error: true
+
+  # Notify Discord about the new release
+  notify-discord:
+    name: Discord Release Notification
+    runs-on: ubuntu-latest
+    needs: [publish-crates, publish-npm, publish-wasm, publish-nuget, publish-cli]
+    if: always() && needs.publish-crates.result != 'cancelled'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Extract the section between this version header and the next version header
+          BODY=$(awk "/^## \\[${VERSION}\\]/{found=1; next} /^## \\[/{if(found) exit} found{print}" CHANGELOG.md | head -40)
+          # Truncate to fit Discord embed limit (4096 chars)
+          if [ ${#BODY} -gt 1800 ]; then
+            BODY="${BODY:0:1800}..."
+          fi
+          # Write to file to preserve newlines
+          echo "$BODY" > /tmp/changelog_body.txt
+
+      - name: Send Discord notification
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          BODY=$(cat /tmp/changelog_body.txt)
+          # Build JSON payload with embed
+          jq -n \
+            --arg title "Grafeo ${VERSION} released" \
+            --arg url "https://github.com/GrafeoDB/grafeo/releases/tag/${VERSION}" \
+            --arg desc "$BODY" \
+            '{
+              embeds: [{
+                title: $title,
+                url: $url,
+                description: $desc,
+                color: 5614830,
+                footer: { text: "grafeo.dev" }
+              }]
+            }' | curl -sf -X POST "$DISCORD_WEBHOOK" \
+              -H "Content-Type: application/json" \
+              -d @-
