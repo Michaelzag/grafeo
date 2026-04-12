@@ -369,8 +369,8 @@ impl LogicalOperator {
             | Self::Empty
             | Self::ParameterScan(_)
             | Self::CallProcedure(_)
-            | Self::Construct(_)
             | Self::LoadData(_) => false,
+            Self::Construct(op) => op.input.has_mutations(),
         }
     }
 

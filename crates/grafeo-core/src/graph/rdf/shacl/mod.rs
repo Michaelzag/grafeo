@@ -15,10 +15,14 @@
 //! - **Report** (`report.rs`): validation results in W3C format
 
 mod parser;
+mod path;
 pub mod shape;
+mod target;
 
 pub use parser::parse_shapes;
+pub use path::evaluate_path;
 pub use shape::{
     Constraint, NodeKindValue, NodeShape, PropertyPath, PropertyShape, SH, Severity, ShaclError,
     Shape, Target,
 };
+pub use target::resolve_targets;

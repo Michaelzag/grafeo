@@ -678,14 +678,16 @@ impl Optimizer {
             }
             #[cfg(feature = "triple-store")]
             LogicalOperator::TripleScan(scan) => {
-                // Use the first variable found as the relation name
+                // Use the first variable found as the relation name.
+                // For all-constant patterns, generate a unique fallback to
+                // avoid HashMap key collisions in `add_relation`.
                 let name = scan
                     .subject
                     .as_variable()
                     .or_else(|| scan.predicate.as_variable())
                     .or_else(|| scan.object.as_variable())
-                    .unwrap_or("tp")
-                    .to_string();
+                    .map(String::from)
+                    .unwrap_or_else(|| format!("tp_{}", relations.len()));
                 relations.push((name, op.clone()));
                 true
             }
