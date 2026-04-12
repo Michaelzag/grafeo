@@ -84,6 +84,16 @@ pub struct RdfStore {
     named_graphs: RwLock<HashMap<String, Arc<RdfStore>>>,
     /// Cached RDF statistics for query optimization. Invalidated on any mutation.
     statistics_cache: RwLock<Option<Arc<crate::statistics::RdfStatistics>>>,
+    /// Cached term dictionary for dictionary-encoded triple scans. Invalidated on any mutation.
+    dictionary_cache: RwLock<Option<Arc<super::dictionary::TermDictionary>>>,
+    /// Compact Ring Index for SPARQL query acceleration. Built during `bulk_load()`
+    /// or explicitly via `rebuild_ring()`. Marked stale on incremental mutations,
+    /// falling back to HashMap indexes until rebuilt.
+    #[cfg(feature = "ring-index")]
+    ring: RwLock<Option<Arc<crate::index::ring::TripleRing>>>,
+    /// Whether the Ring is stale (triples changed since last build).
+    #[cfg(feature = "ring-index")]
+    ring_stale: std::sync::atomic::AtomicBool,
 }
 
 impl RdfStore {
@@ -129,6 +139,11 @@ impl RdfStore {
             tx_buffer: RwLock::new(TransactionBuffer::default()),
             named_graphs: RwLock::new(HashMap::new()),
             statistics_cache: RwLock::new(None),
+            dictionary_cache: RwLock::new(None),
+            #[cfg(feature = "ring-index")]
+            ring: RwLock::new(None),
+            #[cfg(feature = "ring-index")]
+            ring_stale: std::sync::atomic::AtomicBool::new(false),
             config,
         }
     }
@@ -549,6 +564,7 @@ impl RdfStore {
         self.sp_index.write().clear();
         self.po_index.write().clear();
         self.os_index.write().clear();
+        self.invalidate_statistics_cache();
     }
 
     /// Returns store statistics.
@@ -603,9 +619,89 @@ impl RdfStore {
         stats
     }
 
-    /// Invalidates the cached RDF statistics. Called after any mutation.
+    /// Invalidates the cached RDF statistics and term dictionary. Called after any mutation.
     fn invalidate_statistics_cache(&self) {
         *self.statistics_cache.write() = None;
+        *self.dictionary_cache.write() = None;
+        #[cfg(feature = "ring-index")]
+        {
+            self.ring_stale
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            *self.ring.write() = None;
+        }
+    }
+
+    /// Returns a cached term dictionary, building it on first call.
+    ///
+    /// The dictionary maps each unique `Term` in the store to a compact `u32` ID.
+    /// It is invalidated by any mutation (insert, delete, bulk load).
+    #[must_use]
+    pub fn get_or_build_dictionary(&self) -> Arc<super::dictionary::TermDictionary> {
+        // Fast path: return cached dictionary
+        {
+            let cache = self.dictionary_cache.read();
+            if let Some(dict) = cache.as_ref() {
+                return Arc::clone(dict);
+            }
+        }
+
+        // Slow path: build dictionary from all triples
+        let triples = self.triples.read();
+        let mut dict =
+            super::dictionary::TermDictionary::with_capacity(triples.len().saturating_mul(3));
+        for triple in triples.iter() {
+            dict.get_or_insert(triple.subject());
+            dict.get_or_insert(triple.predicate());
+            dict.get_or_insert(triple.object());
+        }
+
+        let dict = Arc::new(dict);
+        *self.dictionary_cache.write() = Some(Arc::clone(&dict));
+        dict
+    }
+
+    /// Returns the cached term dictionary if it exists, without building it.
+    #[must_use]
+    pub fn term_dictionary(&self) -> Option<Arc<super::dictionary::TermDictionary>> {
+        self.dictionary_cache.read().clone()
+    }
+
+    /// Returns the Ring Index if it exists and is not stale.
+    #[cfg(feature = "ring-index")]
+    #[must_use]
+    pub fn ring(&self) -> Option<Arc<crate::index::ring::TripleRing>> {
+        if self.ring_stale.load(std::sync::atomic::Ordering::Relaxed) {
+            return None;
+        }
+        self.ring.read().clone()
+    }
+
+    /// Builds or rebuilds the Ring Index from current triples.
+    ///
+    /// The Ring provides ~3x memory reduction and O(log sigma) pattern counting.
+    /// It is automatically built during `bulk_load()` and can be rebuilt
+    /// explicitly after incremental mutations.
+    #[cfg(feature = "ring-index")]
+    pub fn rebuild_ring(&self) {
+        let triples = self.triples.read();
+        if triples.is_empty() {
+            *self.ring.write() = None;
+            return;
+        }
+        let ring = crate::index::ring::TripleRing::from_triples(
+            triples.iter().map(|t| t.as_ref().clone()),
+        );
+        *self.ring.write() = Some(Arc::new(ring));
+        self.ring_stale
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Sets the Ring Index directly (used during container deserialization).
+    #[cfg(feature = "ring-index")]
+    pub fn set_ring(&self, ring: crate::index::ring::TripleRing) {
+        *self.ring.write() = Some(Arc::new(ring));
+        self.ring_stale
+            .store(false, std::sync::atomic::Ordering::Relaxed);
     }
 
     // =========================================================================
@@ -701,6 +797,21 @@ impl RdfStore {
         let stats = stats_collector.build();
         // Cache the freshly-computed statistics from the bulk load pass.
         *self.statistics_cache.write() = Some(Arc::new(stats.clone()));
+        // Invalidate the dictionary cache: the old dictionary mapped terms
+        // from the previous dataset, not the newly loaded one.
+        *self.dictionary_cache.write() = None;
+
+        // Build Ring Index automatically during bulk load (when feature is enabled).
+        #[cfg(feature = "ring-index")]
+        {
+            let ring = crate::index::ring::TripleRing::from_triples(
+                self.triples.read().iter().map(|t| t.as_ref().clone()),
+            );
+            *self.ring.write() = Some(Arc::new(ring));
+            self.ring_stale
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+        }
+
         BulkLoadResult {
             triple_count: count,
             statistics: stats,
@@ -2192,5 +2303,266 @@ this is not valid ntriples
         // 1 (alix address _:b) + 2 (city, country) = 3
         assert_eq!(count, 3);
         assert_eq!(store.len(), 3);
+    }
+
+    #[test]
+    #[cfg(feature = "ring-index")]
+    fn test_ring_built_during_bulk_load() {
+        let store = RdfStore::new();
+        assert!(
+            store.ring().is_none(),
+            "ring should not exist before bulk load"
+        );
+
+        store.bulk_load(vec![
+            Triple::new(
+                Term::iri("http://ex.org/alix"),
+                Term::iri("http://ex.org/knows"),
+                Term::iri("http://ex.org/gus"),
+            ),
+            Triple::new(
+                Term::iri("http://ex.org/gus"),
+                Term::iri("http://ex.org/knows"),
+                Term::iri("http://ex.org/alix"),
+            ),
+        ]);
+
+        let ring = store.ring().expect("ring should exist after bulk load");
+        assert_eq!(ring.len(), 2);
+    }
+
+    #[test]
+    #[cfg(feature = "ring-index")]
+    fn test_ring_stale_after_insert() {
+        let store = RdfStore::new();
+        store.bulk_load(vec![Triple::new(
+            Term::iri("http://ex.org/a"),
+            Term::iri("http://ex.org/p"),
+            Term::iri("http://ex.org/b"),
+        )]);
+        assert!(store.ring().is_some());
+
+        // Incremental insert marks ring stale
+        store.insert(Triple::new(
+            Term::iri("http://ex.org/c"),
+            Term::iri("http://ex.org/p"),
+            Term::iri("http://ex.org/d"),
+        ));
+        assert!(
+            store.ring().is_none(),
+            "ring should be stale after incremental insert"
+        );
+
+        // Rebuild restores ring
+        store.rebuild_ring();
+        let ring = store.ring().expect("ring should exist after rebuild");
+        assert_eq!(ring.len(), 2);
+    }
+
+    #[test]
+    #[cfg(feature = "ring-index")]
+    fn test_ring_find_matches_store_find() {
+        let triples = vec![
+            Triple::new(
+                Term::iri("http://ex.org/alix"),
+                Term::iri("http://xmlns.com/foaf/0.1/name"),
+                Term::literal("Alix"),
+            ),
+            Triple::new(
+                Term::iri("http://ex.org/gus"),
+                Term::iri("http://xmlns.com/foaf/0.1/name"),
+                Term::literal("Gus"),
+            ),
+            Triple::new(
+                Term::iri("http://ex.org/alix"),
+                Term::iri("http://xmlns.com/foaf/0.1/knows"),
+                Term::iri("http://ex.org/gus"),
+            ),
+        ];
+
+        let store = RdfStore::new();
+        store.bulk_load(triples);
+
+        let ring = store.ring().expect("ring should exist");
+
+        // Fully unbound: ring.count should match store.len
+        let all_pattern = TriplePattern {
+            subject: None,
+            predicate: None,
+            object: None,
+        };
+        assert_eq!(ring.count(&all_pattern), store.len());
+
+        // Predicate-bound: count names
+        let name_pattern = TriplePattern {
+            subject: None,
+            predicate: Some(Term::iri("http://xmlns.com/foaf/0.1/name")),
+            object: None,
+        };
+        assert_eq!(ring.count(&name_pattern), 2);
+
+        // Subject-bound: triples about alix
+        let alix_pattern = TriplePattern {
+            subject: Some(Term::iri("http://ex.org/alix")),
+            predicate: None,
+            object: None,
+        };
+        assert_eq!(ring.count(&alix_pattern), 2);
+    }
+
+    #[test]
+    fn test_batch_insert_composite_indexes() {
+        let store = RdfStore::new();
+        let triples = vec![
+            Triple::new(
+                Term::iri("http://ex.org/alix"),
+                Term::iri("http://ex.org/name"),
+                Term::literal("Alix"),
+            ),
+            Triple::new(
+                Term::iri("http://ex.org/gus"),
+                Term::iri("http://ex.org/name"),
+                Term::literal("Gus"),
+            ),
+            Triple::new(
+                Term::iri("http://ex.org/alix"),
+                Term::iri("http://ex.org/age"),
+                Term::typed_literal("30", "http://www.w3.org/2001/XMLSchema#integer"),
+            ),
+        ];
+        let inserted = store.batch_insert(triples);
+        assert_eq!(inserted, 3);
+        assert_eq!(store.len(), 3);
+
+        // Verify composite indexes via find
+        let sp_result = store.find(&TriplePattern {
+            subject: Some(Term::iri("http://ex.org/alix")),
+            predicate: Some(Term::iri("http://ex.org/name")),
+            object: None,
+        });
+        assert_eq!(sp_result.len(), 1);
+        let po_result = store.find(&TriplePattern {
+            subject: None,
+            predicate: Some(Term::iri("http://ex.org/name")),
+            object: Some(Term::literal("Gus")),
+        });
+        assert_eq!(po_result.len(), 1);
+        let os_result = store.find(&TriplePattern {
+            subject: Some(Term::iri("http://ex.org/alix")),
+            predicate: None,
+            object: Some(Term::literal("Alix")),
+        });
+        assert_eq!(os_result.len(), 1);
+    }
+
+    #[test]
+    fn test_batch_insert_deduplication() {
+        let store = RdfStore::new();
+        let triple = Triple::new(
+            Term::iri("http://ex.org/a"),
+            Term::iri("http://ex.org/b"),
+            Term::literal("c"),
+        );
+        let inserted = store.batch_insert(vec![triple.clone(), triple.clone(), triple]);
+        assert_eq!(inserted, 1);
+        assert_eq!(store.len(), 1);
+    }
+
+    #[test]
+    fn test_composite_index_after_remove() {
+        let store = RdfStore::new();
+        let t1 = Triple::new(
+            Term::iri("http://ex.org/a"),
+            Term::iri("http://ex.org/p"),
+            Term::literal("v1"),
+        );
+        let t2 = Triple::new(
+            Term::iri("http://ex.org/a"),
+            Term::iri("http://ex.org/p"),
+            Term::literal("v2"),
+        );
+        store.insert(t1.clone());
+        store.insert(t2);
+        assert_eq!(
+            store
+                .find(&TriplePattern {
+                    subject: Some(Term::iri("http://ex.org/a")),
+                    predicate: Some(Term::iri("http://ex.org/p")),
+                    object: None
+                })
+                .len(),
+            2
+        );
+        store.remove(&t1);
+        assert_eq!(
+            store
+                .find(&TriplePattern {
+                    subject: Some(Term::iri("http://ex.org/a")),
+                    predicate: Some(Term::iri("http://ex.org/p")),
+                    object: None
+                })
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn test_named_graph_operations() {
+        let store = RdfStore::new();
+        assert!(store.create_graph("http://ex.org/g1"));
+        assert!(!store.create_graph("http://ex.org/g1")); // already exists
+        let g = store.graph("http://ex.org/g1").unwrap();
+        g.insert(Triple::new(
+            Term::iri("http://ex.org/a"),
+            Term::iri("http://ex.org/b"),
+            Term::literal("c"),
+        ));
+        assert_eq!(g.len(), 1);
+        assert!(store.drop_graph("http://ex.org/g1"));
+        assert!(store.graph("http://ex.org/g1").is_none());
+    }
+
+    #[test]
+    fn test_statistics_cache_invalidation() {
+        let store = RdfStore::new();
+        store.insert(Triple::new(
+            Term::iri("http://ex.org/a"),
+            Term::iri("http://ex.org/p"),
+            Term::literal("v"),
+        ));
+        let stats1 = store.get_or_collect_statistics();
+        // Term::iri.to_string() produces "<http://ex.org/p>"
+        assert!(stats1.get_predicate("<http://ex.org/p>").is_some());
+        // Insert more data: cache should be invalidated
+        store.insert(Triple::new(
+            Term::iri("http://ex.org/b"),
+            Term::iri("http://ex.org/q"),
+            Term::literal("w"),
+        ));
+        let stats2 = store.get_or_collect_statistics();
+        assert!(stats2.get_predicate("<http://ex.org/q>").is_some());
+    }
+
+    #[test]
+    fn test_find_three_bound() {
+        let store = RdfStore::new();
+        let t = Triple::new(
+            Term::iri("http://ex.org/a"),
+            Term::iri("http://ex.org/p"),
+            Term::literal("v"),
+        );
+        store.insert(t.clone());
+        store.insert(Triple::new(
+            Term::iri("http://ex.org/a"),
+            Term::iri("http://ex.org/p"),
+            Term::literal("other"),
+        ));
+        let result = store.find(&TriplePattern {
+            subject: Some(Term::iri("http://ex.org/a")),
+            predicate: Some(Term::iri("http://ex.org/p")),
+            object: Some(Term::literal("v")),
+        });
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].as_ref(), &t);
     }
 }

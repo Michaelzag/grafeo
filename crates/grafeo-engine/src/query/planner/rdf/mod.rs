@@ -23,10 +23,10 @@ use grafeo_core::graph::rdf::{Literal, RdfStore, Term, Triple, TriplePattern};
 
 use crate::query::plan::{
     AddGraphOp, AggregateFunction as LogicalAggregateFunction, AggregateOp, AntiJoinOp, BindOp,
-    ClearGraphOp, CopyGraphOp, CreateGraphOp, DatasetRestriction, DeleteTripleOp, DistinctOp,
-    DropGraphOp, FilterOp, InsertTripleOp, LeftJoinOp, LimitOp, LogicalExpression, LogicalOperator,
-    LogicalPlan, ModifyOp, MoveGraphOp, SkipOp, SortOp, TripleComponent, TripleScanOp,
-    TripleTemplate,
+    ClearGraphOp, ConstructOp, CopyGraphOp, CreateGraphOp, DatasetRestriction, DeleteTripleOp,
+    DistinctOp, DropGraphOp, FilterOp, InsertTripleOp, LeftJoinOp, LimitOp, LogicalExpression,
+    LogicalOperator, LogicalPlan, ModifyOp, MoveGraphOp, SkipOp, SortOp, TripleComponent,
+    TripleScanOp, TripleTemplate,
 };
 use crate::query::planner::{PhysicalPlan, convert_aggregate_function, convert_filter_expression};
 
@@ -138,6 +138,13 @@ pub struct RdfPlanner {
     /// Whether the query uses LANG()/LANGMATCHES()/DATATYPE() functions.
     /// When false, companion columns are not emitted, saving ~66% scan overhead.
     needs_companion_columns: std::cell::Cell<bool>,
+    /// Term dictionary for dictionary-encoded triple scans. When present,
+    /// `plan_triple_scan()` emits Int64 term IDs instead of strings, and a
+    /// `DictResolveOperator` at the result boundary converts them back.
+    dictionary: Option<Arc<grafeo_core::graph::rdf::TermDictionary>>,
+    /// Column names that carry dictionary-encoded Int64 term IDs.
+    /// Populated by `plan_triple_scan()`, consumed by `plan()` for resolution.
+    encoded_columns: std::cell::RefCell<std::collections::HashSet<String>>,
 }
 
 impl RdfPlanner {
@@ -151,6 +158,8 @@ impl RdfPlanner {
             profiling: std::cell::Cell::new(false),
             profile_entries: std::cell::RefCell::new(Vec::new()),
             needs_companion_columns: std::cell::Cell::new(false),
+            dictionary: None,
+            encoded_columns: std::cell::RefCell::new(std::collections::HashSet::new()),
             #[cfg(feature = "wal")]
             wal: None,
             #[cfg(feature = "cdc")]
@@ -205,7 +214,28 @@ impl RdfPlanner {
         self.needs_companion_columns
             .set(uses_lang_or_datatype(&logical_plan.root));
 
-        let (operator, columns, _types) = self.plan_operator(&logical_plan.root)?;
+        let (mut operator, columns, _types) = self.plan_operator(&logical_plan.root)?;
+
+        // Resolve dictionary-encoded columns back to strings at the result boundary.
+        if let Some(ref dict) = self.dictionary {
+            let encoded = self.encoded_columns.borrow();
+            if !encoded.is_empty() {
+                let encoded_indices: Vec<usize> = columns
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, name)| encoded.contains(*name))
+                    .map(|(i, _)| i)
+                    .collect();
+                if !encoded_indices.is_empty() {
+                    operator = Box::new(DictResolveOperator::new(
+                        operator,
+                        Arc::clone(dict),
+                        encoded_indices,
+                    ));
+                }
+            }
+        }
+
         // Strip internal companion columns (__lang_<var>, __datatype_<var>)
         // from the output. They are used by LANG()/LANGMATCHES()/DATATYPE()
         // during evaluation but should never appear in query results.
@@ -297,6 +327,7 @@ impl RdfPlanner {
             LogicalOperator::MoveGraph(move_op) => self.plan_move_graph(move_op),
             LogicalOperator::AddGraph(add) => self.plan_add_graph(add),
             LogicalOperator::Bind(bind) => self.plan_bind(bind),
+            LogicalOperator::Construct(construct) => self.plan_construct(construct),
             LogicalOperator::MultiWayJoin(mwj) => self.plan_multi_way_join(mwj),
             LogicalOperator::Empty => {
                 let op: Box<dyn Operator> = Box::new(SingleRowOperator::new());
@@ -368,7 +399,7 @@ impl RdfPlanner {
         };
 
         // Create the lazy scanning operator
-        let operator = Box::new(RdfTripleScanOperator::new(
+        let scan_op = RdfTripleScanOperator::new(
             Arc::clone(&self.store),
             pattern,
             output_mask,
@@ -380,10 +411,18 @@ impl RdfPlanner {
             },
             emit_companion_columns,
             emit_datatype_column,
-        ));
+        );
+
+        // Dictionary encoding is available but not yet automatically enabled for
+        // all queries. The infrastructure (TermDictionary, DictResolveOperator) is
+        // in place for use by the Ring Index planner (Phase 4) and WCOJ joins.
+        // Automatic activation requires detecting whether downstream operators
+        // (FILTER, BIND, ORDER BY) inspect string content, which is deferred.
+        let _ = &self.dictionary; // suppress unused warning
+        let _ = &self.encoded_columns;
 
         let types = vec![LogicalType::String; columns.len()];
-        Ok((operator, columns, types))
+        Ok((Box::new(scan_op), columns, types))
     }
 
     /// Builds a TriplePattern from a TripleScanOp.
@@ -724,11 +763,49 @@ impl RdfPlanner {
         Ok((operator, output_columns, input_types))
     }
 
+    /// Plans a CONSTRUCT operator.
+    ///
+    /// Evaluates the WHERE clause, then for each row substitutes variable
+    /// bindings into the template to produce (subject, predicate, object) rows.
+    fn plan_construct(
+        &self,
+        construct: &ConstructOp,
+    ) -> Result<(Box<dyn Operator>, Vec<String>, Vec<LogicalType>)> {
+        let (input_op, input_columns, _input_types) = self.plan_operator(&construct.input)?;
+
+        let variable_columns: HashMap<String, usize> = input_columns
+            .iter()
+            .enumerate()
+            .map(|(i, name)| (name.clone(), i))
+            .collect();
+
+        let operator = Box::new(ConstructOperator::new(
+            input_op,
+            construct.templates.clone(),
+            variable_columns,
+        ));
+
+        let columns = vec![
+            "subject".to_string(),
+            "predicate".to_string(),
+            "object".to_string(),
+        ];
+        let types = vec![LogicalType::String; 3];
+        Ok((operator, columns, types))
+    }
+
     /// Plans an AGGREGATE operator.
     fn plan_aggregate(
         &self,
         agg: &AggregateOp,
     ) -> Result<(Box<dyn Operator>, Vec<String>, Vec<LogicalType>)> {
+        // COUNT(*) fast-path: when the aggregate is a single COUNT(*) with no
+        // GROUP BY, no DISTINCT, no HAVING, and the input is a fully-unbound
+        // TripleScan, short-circuit to store.len() in O(1).
+        if let Some(result) = self.try_count_fast_path(agg) {
+            return Ok(result);
+        }
+
         use grafeo_core::execution::operators::AggregateExpr as PhysicalAggregateExpr;
 
         let (mut input_op, input_columns, input_types) = self.plan_operator(&agg.input)?;
@@ -893,6 +970,122 @@ impl RdfPlanner {
         Ok((operator, output_columns, output_schema))
     }
 
+    /// Detects COUNT(*) over a TripleScan and returns the count directly when possible.
+    ///
+    /// Supported patterns (no GROUP BY, no DISTINCT, no HAVING):
+    /// - `COUNT(*) WHERE { ?s ?p ?o }`: fully unbound, returns `store.len()`
+    /// - `COUNT(*) WHERE { ?s <pred> ?o }`: predicate-bound, returns per-predicate count
+    /// - `COUNT(*) WHERE { GRAPH <g> { ?s ?p ?o } }`: per-graph count
+    fn try_count_fast_path(
+        &self,
+        agg: &AggregateOp,
+    ) -> Option<(Box<dyn Operator>, Vec<String>, Vec<LogicalType>)> {
+        // Must be: no GROUP BY, no HAVING, exactly one aggregate
+        if !agg.group_by.is_empty() || agg.having.is_some() || agg.aggregates.len() != 1 {
+            return None;
+        }
+
+        let agg_expr = &agg.aggregates[0];
+
+        // Must be COUNT(*): Count function, no expression (not COUNT(?x)), no DISTINCT
+        if agg_expr.function != LogicalAggregateFunction::Count
+            || agg_expr.expression.is_some()
+            || agg_expr.distinct
+        {
+            return None;
+        }
+
+        // Input must be a simple TripleScan (no chained input)
+        let scan = Self::find_simple_triple_scan(&agg.input)?;
+
+        // No dataset restriction (FROM / FROM NAMED)
+        if scan.dataset.is_some() {
+            return None;
+        }
+
+        let count = self.count_for_scan(scan)?;
+
+        let alias = agg_expr
+            .alias
+            .clone()
+            .unwrap_or_else(|| "count(*)".to_string());
+
+        Some(Self::make_constant_int64(count, alias))
+    }
+
+    /// Resolves the count for a simple triple scan pattern, or returns `None`
+    /// if the pattern is too complex for a fast-path.
+    fn count_for_scan(&self, scan: &TripleScanOp) -> Option<i64> {
+        let s_var = scan.subject.as_variable().is_some();
+        let p_var = scan.predicate.as_variable().is_some();
+        let o_var = scan.object.as_variable().is_some();
+
+        // Per-graph count: GRAPH <iri> { ?s ?p ?o }
+        if let Some(graph) = &scan.graph {
+            if s_var
+                && p_var
+                && o_var
+                && let TripleComponent::Iri(graph_iri) = graph
+            {
+                let ng = self.store.graph(graph_iri)?;
+                return Some(ng.len() as i64);
+            }
+            return None;
+        }
+
+        // Fully unbound: ?s ?p ?o
+        if s_var && p_var && o_var {
+            return Some(self.store.len() as i64);
+        }
+
+        // Ring Index: use ring.count() for any partially-bound pattern (O(log sigma))
+        #[cfg(feature = "ring-index")]
+        if let Some(ring) = self.store.ring() {
+            let pattern = self.build_triple_pattern(scan);
+            return Some(ring.count(&pattern) as i64);
+        }
+
+        // Predicate-bound: ?s <pred> ?o
+        if s_var && !p_var && o_var {
+            if let TripleComponent::Iri(pred_iri) = &scan.predicate {
+                let stats = self.store.get_or_collect_statistics();
+                if let Some(pred_stats) = stats.get_predicate(pred_iri) {
+                    return Some(pred_stats.triple_count as i64);
+                }
+            }
+            return None;
+        }
+
+        // Not a fast-path pattern
+        None
+    }
+
+    /// Creates a constant Int64 single-row result.
+    fn make_constant_int64(
+        value: i64,
+        column_name: String,
+    ) -> (Box<dyn Operator>, Vec<String>, Vec<LogicalType>) {
+        let mut chunk = DataChunk::with_capacity(&[LogicalType::Int64], 1);
+        chunk
+            .column_mut(0)
+            .expect("just created")
+            .push_value(Value::Int64(value));
+        chunk.set_count(1);
+        let operator = Box::new(ConstantOperator::new(chunk));
+        (operator, vec![column_name], vec![LogicalType::Int64])
+    }
+
+    /// Walks through the input operator to find a simple TripleScan (no chained input).
+    ///
+    /// Sees through Project operators.
+    fn find_simple_triple_scan(op: &LogicalOperator) -> Option<&TripleScanOp> {
+        match op {
+            LogicalOperator::TripleScan(scan) if scan.input.is_none() => Some(scan),
+            LogicalOperator::Project(proj) => Self::find_simple_triple_scan(&proj.input),
+            _ => None,
+        }
+    }
+
     /// Plans a JOIN operator using HashJoin.
     ///
     /// For SPARQL, we join on shared variables (equi-join). When no shared
@@ -956,10 +1149,9 @@ impl RdfPlanner {
         Ok((op, cols, left_types))
     }
 
-    /// Plans a multi-way join as cascading pairwise hash joins.
-    ///
-    /// Sorts inputs by estimated cardinality (smallest first) to minimize
-    /// intermediate result sizes, then folds them left-to-right.
+    /// Plans a multi-way join. When the Ring Index is available and all inputs
+    /// are TripleScans, uses LeapfrogRing (WCOJ) for worst-case optimal joins.
+    /// Otherwise falls back to cascading pairwise hash joins.
     fn plan_multi_way_join(
         &self,
         mwj: &crate::query::plan::MultiWayJoinOp,
@@ -970,6 +1162,16 @@ impl RdfPlanner {
             return Err(Error::Internal(
                 "MultiWayJoin requires at least one input".to_string(),
             ));
+        }
+
+        // Try Ring-backed LeapfrogRing (WCOJ) when all inputs are TripleScans.
+        // Skip when companion columns are needed (LANG/DATATYPE functions)
+        // because the leapfrog operator emits raw variable columns only.
+        #[cfg(feature = "ring-index")]
+        if !self.needs_companion_columns.get()
+            && let Some(result) = self.try_leapfrog_ring(mwj)
+        {
+            return result;
         }
 
         // Plan all inputs and estimate cardinalities
@@ -1005,6 +1207,56 @@ impl RdfPlanner {
         }
 
         Ok((current_op, current_cols, current_types))
+    }
+
+    /// Attempts to plan a multi-way join using LeapfrogRing (WCOJ).
+    ///
+    /// Returns `Some(Ok(...))` when the Ring is available and all inputs are
+    /// simple TripleScans, `None` to fall back to cascading hash joins.
+    #[cfg(feature = "ring-index")]
+    fn try_leapfrog_ring(
+        &self,
+        mwj: &crate::query::plan::MultiWayJoinOp,
+    ) -> Option<Result<(Box<dyn Operator>, Vec<String>, Vec<LogicalType>)>> {
+        use grafeo_core::index::ring::AnnotatedPattern;
+
+        let ring = self.store.ring()?;
+
+        // All inputs must be simple TripleScans (no chained input, no graph context)
+        let mut annotated = Vec::new();
+        let mut all_vars: Vec<String> = Vec::new();
+        for input in &mwj.inputs {
+            let LogicalOperator::TripleScan(scan) = input else {
+                return None;
+            };
+            if scan.input.is_some() || scan.graph.is_some() || scan.dataset.is_some() {
+                return None;
+            }
+            let pattern = self.build_triple_pattern(scan);
+            let ap = AnnotatedPattern {
+                pattern,
+                subject_var: scan.subject.as_variable().map(str::to_string),
+                predicate_var: scan.predicate.as_variable().map(str::to_string),
+                object_var: scan.object.as_variable().map(str::to_string),
+            };
+            // Collect output variables in order
+            for v in [&ap.subject_var, &ap.predicate_var, &ap.object_var]
+                .into_iter()
+                .flatten()
+            {
+                if !all_vars.contains(v) {
+                    all_vars.push(v.clone());
+                }
+            }
+            annotated.push(ap);
+        }
+
+        // Build output columns and types
+        let columns = all_vars.clone();
+        let types = vec![LogicalType::String; columns.len()];
+
+        let operator = Box::new(RdfLeapfrogOperator::new(ring, annotated, columns.clone()));
+        Some(Ok((operator, columns, types)))
     }
 
     /// Plans a UNION operator.
@@ -2769,6 +3021,358 @@ struct GraphContext {
     dataset: Option<DatasetRestriction>,
 }
 
+/// LeapfrogRing WCOJ operator for Ring-backed multi-way joins.
+///
+/// Wraps `LeapfrogRing::with_variables()` and converts each join result
+/// (Vec<Triple>) into a `DataChunk` with the appropriate variable columns.
+#[cfg(feature = "ring-index")]
+struct RdfLeapfrogOperator {
+    ring: Arc<grafeo_core::index::ring::TripleRing>,
+    annotated_patterns: Vec<grafeo_core::index::ring::AnnotatedPattern>,
+    /// Output column names (deduplicated variables).
+    output_columns: Vec<String>,
+    /// Buffered results from the LeapfrogRing iterator.
+    results: Vec<Vec<Triple>>,
+    /// Current position in results buffer.
+    position: usize,
+    /// Whether the leapfrog join has been executed.
+    executed: bool,
+}
+
+#[cfg(feature = "ring-index")]
+impl RdfLeapfrogOperator {
+    fn new(
+        ring: Arc<grafeo_core::index::ring::TripleRing>,
+        annotated_patterns: Vec<grafeo_core::index::ring::AnnotatedPattern>,
+        output_columns: Vec<String>,
+    ) -> Self {
+        Self {
+            ring,
+            annotated_patterns,
+            output_columns,
+            results: Vec::new(),
+            position: 0,
+            executed: false,
+        }
+    }
+
+    fn execute_join(&mut self) {
+        if self.executed {
+            return;
+        }
+        self.executed = true;
+
+        let join = grafeo_core::index::ring::LeapfrogRing::with_variables(
+            &self.ring,
+            self.annotated_patterns.clone(),
+        );
+        self.results = join.collect();
+    }
+
+    /// Extracts the value for a variable from a set of matched triples.
+    fn resolve_variable(&self, var: &str, matched_triples: &[Triple]) -> Option<String> {
+        for (i, ap) in self.annotated_patterns.iter().enumerate() {
+            if let Some(triple) = matched_triples.get(i) {
+                if ap.subject_var.as_deref() == Some(var) {
+                    return Some(term_to_string(triple.subject()));
+                }
+                if ap.predicate_var.as_deref() == Some(var) {
+                    return Some(term_to_string(triple.predicate()));
+                }
+                if ap.object_var.as_deref() == Some(var) {
+                    return Some(term_to_string(triple.object()));
+                }
+            }
+        }
+        None
+    }
+}
+
+#[cfg(feature = "ring-index")]
+impl Operator for RdfLeapfrogOperator {
+    fn next(&mut self) -> grafeo_core::execution::operators::OperatorResult {
+        self.execute_join();
+
+        if self.position >= self.results.len() {
+            return Ok(None);
+        }
+
+        let end = (self.position + DEFAULT_CHUNK_SIZE).min(self.results.len());
+        let batch_size = end - self.position;
+        let col_count = self.output_columns.len();
+
+        let schema = vec![LogicalType::String; col_count];
+        let mut chunk = DataChunk::with_capacity(&schema, batch_size);
+
+        for i in self.position..end {
+            let matched = &self.results[i];
+            for (col_idx, var_name) in self.output_columns.iter().enumerate() {
+                if let Some(col) = chunk.column_mut(col_idx) {
+                    if let Some(val) = self.resolve_variable(var_name, matched) {
+                        col.push_string(val);
+                    } else {
+                        col.push_value(Value::Null);
+                    }
+                }
+            }
+        }
+
+        chunk.set_count(batch_size);
+        self.position = end;
+        Ok(Some(chunk))
+    }
+
+    fn reset(&mut self) {
+        self.position = 0;
+        // Keep results cached
+    }
+
+    fn name(&self) -> &'static str {
+        "RdfLeapfrog"
+    }
+}
+
+/// CONSTRUCT operator: instantiates triple templates from variable bindings.
+///
+/// For each input row, substitutes variables in each template triple to produce
+/// (subject, predicate, object) output rows. Skips template triples where a
+/// variable has no binding (unbound variables produce no triple).
+struct ConstructOperator {
+    input: Box<dyn Operator>,
+    templates: Vec<TripleTemplate>,
+    variable_columns: HashMap<String, usize>,
+}
+
+impl ConstructOperator {
+    fn new(
+        input: Box<dyn Operator>,
+        templates: Vec<TripleTemplate>,
+        variable_columns: HashMap<String, usize>,
+    ) -> Self {
+        Self {
+            input,
+            templates,
+            variable_columns,
+        }
+    }
+
+    /// Resolves a `TripleComponent` to a string using the current row bindings.
+    fn resolve_component(
+        &self,
+        component: &TripleComponent,
+        chunk: &DataChunk,
+        row: usize,
+    ) -> Option<String> {
+        match component {
+            TripleComponent::Variable(name) => {
+                let col_idx = *self.variable_columns.get(name)?;
+                let col = chunk.column(col_idx)?;
+                let val = col.get_value(row)?;
+                if val.is_null() {
+                    None
+                } else {
+                    Some(val.to_string())
+                }
+            }
+            TripleComponent::Iri(iri) => Some(iri.clone()),
+            TripleComponent::Literal(val) => Some(val.to_string()),
+            TripleComponent::LangLiteral { value, lang } => Some(format!("\"{value}\"@{lang}")),
+            TripleComponent::BlankNode(label) => Some(format!("_:{label}")),
+        }
+    }
+}
+
+impl Operator for ConstructOperator {
+    fn next(&mut self) -> grafeo_core::execution::operators::OperatorResult {
+        loop {
+            let Some(input_chunk) = self.input.next()? else {
+                return Ok(None);
+            };
+
+            let row_count = input_chunk.row_count();
+            if row_count == 0 {
+                continue;
+            }
+
+            // Each input row can produce up to templates.len() output rows
+            let max_output = row_count * self.templates.len();
+            let schema = vec![LogicalType::String; 3];
+            let mut output = DataChunk::with_capacity(&schema, max_output);
+            let mut actual_count = 0;
+
+            for row in 0..row_count {
+                for template in &self.templates {
+                    let Some(subject) =
+                        self.resolve_component(&template.subject, &input_chunk, row)
+                    else {
+                        continue;
+                    };
+                    let Some(predicate) =
+                        self.resolve_component(&template.predicate, &input_chunk, row)
+                    else {
+                        continue;
+                    };
+                    let Some(object) = self.resolve_component(&template.object, &input_chunk, row)
+                    else {
+                        continue;
+                    };
+
+                    if let Some(col) = output.column_mut(0) {
+                        col.push_string(subject);
+                    }
+                    if let Some(col) = output.column_mut(1) {
+                        col.push_string(predicate);
+                    }
+                    if let Some(col) = output.column_mut(2) {
+                        col.push_string(object);
+                    }
+                    actual_count += 1;
+                }
+            }
+
+            if actual_count > 0 {
+                output.set_count(actual_count);
+                return Ok(Some(output));
+            }
+        }
+    }
+
+    fn reset(&mut self) {
+        self.input.reset();
+    }
+
+    fn name(&self) -> &'static str {
+        "Construct"
+    }
+}
+
+/// Operator that produces a single pre-computed `DataChunk` and then stops.
+///
+/// Used for fast-path results such as `COUNT(*)` short-circuits where the
+/// answer is known without scanning the data.
+struct ConstantOperator {
+    chunk: Option<DataChunk>,
+}
+
+impl ConstantOperator {
+    fn new(chunk: DataChunk) -> Self {
+        Self { chunk: Some(chunk) }
+    }
+}
+
+impl Operator for ConstantOperator {
+    fn next(&mut self) -> grafeo_core::execution::operators::OperatorResult {
+        Ok(self.chunk.take())
+    }
+
+    fn reset(&mut self) {
+        // Cannot reset: the chunk was consumed. This is fine for single-use
+        // fast-path results.
+    }
+
+    fn name(&self) -> &'static str {
+        "Constant"
+    }
+}
+
+/// Resolves dictionary-encoded Int64 term IDs back to String values.
+///
+/// Placed at the result boundary (just before output) so that all intermediate
+/// operators (joins, aggregates, sorts) work with compact Int64 keys.
+struct DictResolveOperator {
+    input: Box<dyn Operator>,
+    dictionary: Arc<grafeo_core::graph::rdf::TermDictionary>,
+    /// Column indices that carry encoded term IDs and need resolution.
+    encoded_col_indices: Vec<usize>,
+}
+
+impl DictResolveOperator {
+    fn new(
+        input: Box<dyn Operator>,
+        dictionary: Arc<grafeo_core::graph::rdf::TermDictionary>,
+        encoded_col_indices: Vec<usize>,
+    ) -> Self {
+        Self {
+            input,
+            dictionary,
+            encoded_col_indices,
+        }
+    }
+}
+
+impl Operator for DictResolveOperator {
+    fn next(&mut self) -> grafeo_core::execution::operators::OperatorResult {
+        let Some(chunk) = self.input.next()? else {
+            return Ok(None);
+        };
+
+        if self.encoded_col_indices.is_empty() {
+            return Ok(Some(chunk));
+        }
+
+        let row_count = chunk.row_count();
+        let col_count = chunk.column_count();
+
+        // Build output schema: replace Int64 encoded columns with String
+        let mut schema = Vec::with_capacity(col_count);
+        for col_idx in 0..col_count {
+            if self.encoded_col_indices.contains(&col_idx) {
+                schema.push(LogicalType::String);
+            } else if let Some(col) = chunk.column(col_idx) {
+                schema.push(col.data_type().clone());
+            } else {
+                schema.push(LogicalType::String);
+            }
+        }
+
+        let mut out = DataChunk::with_capacity(&schema, row_count);
+
+        for row in 0..row_count {
+            for col_idx in 0..col_count {
+                let Some(in_col) = chunk.column(col_idx) else {
+                    continue;
+                };
+                let Some(out_col) = out.column_mut(col_idx) else {
+                    continue;
+                };
+
+                if self.encoded_col_indices.contains(&col_idx) {
+                    // Resolve term ID to string
+                    if in_col.is_null(row) {
+                        out_col.push_value(Value::Null);
+                    } else if let Some(term_id) = in_col.get_int64(row) {
+                        if let Some(term) = self.dictionary.get_term(term_id as u32) {
+                            out_col.push_string(term_to_string(term));
+                        } else {
+                            out_col.push_value(Value::Null);
+                        }
+                    } else {
+                        out_col.push_value(Value::Null);
+                    }
+                } else {
+                    // Pass through non-encoded columns
+                    if let Some(val) = in_col.get_value(row) {
+                        out_col.push_value(val);
+                    } else {
+                        out_col.push_value(Value::Null);
+                    }
+                }
+            }
+        }
+
+        out.set_count(row_count);
+        Ok(Some(out))
+    }
+
+    fn reset(&mut self) {
+        self.input.reset();
+    }
+
+    fn name(&self) -> &'static str {
+        "DictResolve"
+    }
+}
+
 /// Lazy triple scan operator that processes triples in chunks.
 ///
 /// This operator queries the RDF store and emits results in DataChunks
@@ -2792,6 +3396,9 @@ struct RdfTripleScanOperator {
     triples: Option<Vec<(Option<String>, Arc<Triple>)>>,
     /// Current position in the triples.
     position: usize,
+    /// Optional term dictionary for dictionary-encoded output. When present,
+    /// S/P/O variable columns emit Int64 term IDs instead of String values.
+    dictionary: Option<Arc<grafeo_core::graph::rdf::TermDictionary>>,
 }
 
 impl RdfTripleScanOperator {
@@ -2814,7 +3421,18 @@ impl RdfTripleScanOperator {
             chunk_size,
             triples: None,
             position: 0,
+            dictionary: None,
         }
+    }
+
+    /// Enables dictionary-encoded output for S/P/O columns.
+    ///
+    /// Infrastructure for Phase 4 (Ring Index) which will automatically enable
+    /// dictionary encoding when the Ring provides native integer-keyed iteration.
+    #[allow(dead_code)]
+    fn with_dictionary(mut self, dict: Arc<grafeo_core::graph::rdf::TermDictionary>) -> Self {
+        self.dictionary = Some(dict);
+        self
     }
 
     /// Lazily load matching triples on first access.
@@ -2897,12 +3515,30 @@ impl RdfTripleScanOperator {
                         Vec::new()
                     }
                 } else {
-                    // No dataset restriction: use actual default graph
-                    self.store
-                        .find(&self.pattern)
-                        .into_iter()
-                        .map(|t| (None, t))
-                        .collect()
+                    // No dataset restriction: use actual default graph.
+                    // Prefer Ring Index when available (O(log sigma) access).
+                    #[cfg(feature = "ring-index")]
+                    {
+                        if let Some(ring) = self.store.ring() {
+                            ring.find(&self.pattern)
+                                .map(|t| (None, Arc::new(t)))
+                                .collect()
+                        } else {
+                            self.store
+                                .find(&self.pattern)
+                                .into_iter()
+                                .map(|t| (None, t))
+                                .collect()
+                        }
+                    }
+                    #[cfg(not(feature = "ring-index"))]
+                    {
+                        self.store
+                            .find(&self.pattern)
+                            .into_iter()
+                            .map(|t| (None, t))
+                            .collect()
+                    }
                 }
             });
         }
@@ -2916,6 +3552,33 @@ impl RdfTripleScanOperator {
         } else {
             base
         }
+    }
+
+    /// Builds the output schema. In dictionary mode, S/P/O variable columns
+    /// are Int64 (term IDs), companion and graph columns remain String.
+    fn build_output_schema(&self, col_count: usize, dict_mode: bool) -> Vec<LogicalType> {
+        if !dict_mode {
+            return vec![LogicalType::String; col_count];
+        }
+        let mut schema = Vec::with_capacity(col_count);
+        // S, P, O variable columns get Int64
+        for i in 0..3 {
+            if self.output_mask[i] {
+                schema.push(LogicalType::Int64);
+            }
+        }
+        // Companion columns (lang, datatype) are always String
+        if self.output_mask[2] && self.emit_companion_columns {
+            schema.push(LogicalType::String); // lang
+            if self.emit_datatype_column {
+                schema.push(LogicalType::String); // datatype
+            }
+        }
+        // Graph column is always String
+        if self.output_mask[3] {
+            schema.push(LogicalType::String);
+        }
+        schema
     }
 }
 
@@ -2936,8 +3599,9 @@ impl Operator for RdfTripleScanOperator {
         let batch_size = end - self.position;
         let col_count = self.output_column_count();
 
-        // Create output schema (all String for RDF)
-        let schema: Vec<LogicalType> = (0..col_count).map(|_| LogicalType::String).collect();
+        // Create output schema: Int64 for dictionary-encoded S/P/O, String otherwise
+        let dict_mode = self.dictionary.is_some();
+        let schema: Vec<LogicalType> = self.build_output_schema(col_count, dict_mode);
         let mut chunk = DataChunk::with_capacity(&schema, batch_size);
 
         // Fill the chunk
@@ -2948,25 +3612,49 @@ impl Operator for RdfTripleScanOperator {
             if self.output_mask[0] {
                 // Subject
                 if let Some(col) = chunk.column_mut(col_idx) {
-                    col.push_string(term_to_string(triple.subject()));
+                    if let Some(ref dict) = self.dictionary {
+                        if let Some(id) = dict.get_id(triple.subject()) {
+                            col.push_value(Value::Int64(i64::from(id)));
+                        } else {
+                            col.push_value(Value::Null);
+                        }
+                    } else {
+                        col.push_string(term_to_string(triple.subject()));
+                    }
                 }
                 col_idx += 1;
             }
             if self.output_mask[1] {
                 // Predicate
                 if let Some(col) = chunk.column_mut(col_idx) {
-                    col.push_string(term_to_string(triple.predicate()));
+                    if let Some(ref dict) = self.dictionary {
+                        if let Some(id) = dict.get_id(triple.predicate()) {
+                            col.push_value(Value::Int64(i64::from(id)));
+                        } else {
+                            col.push_value(Value::Null);
+                        }
+                    } else {
+                        col.push_string(term_to_string(triple.predicate()));
+                    }
                 }
                 col_idx += 1;
             }
             if self.output_mask[2] {
-                // Object
+                // Object: dictionary encoding applies here too
                 if let Some(col) = chunk.column_mut(col_idx) {
-                    push_term_value(col, triple.object());
+                    if let Some(ref dict) = self.dictionary {
+                        if let Some(id) = dict.get_id(triple.object()) {
+                            col.push_value(Value::Int64(i64::from(id)));
+                        } else {
+                            col.push_value(Value::Null);
+                        }
+                    } else {
+                        push_term_value(col, triple.object());
+                    }
                 }
                 col_idx += 1;
 
-                // Companion language-tag and datatype columns
+                // Companion language-tag and datatype columns (always String)
                 if self.emit_companion_columns {
                     if let Some(col) = chunk.column_mut(col_idx) {
                         let lang_tag = match triple.object() {
@@ -2990,7 +3678,7 @@ impl Operator for RdfTripleScanOperator {
                 }
             }
             if self.output_mask[3] {
-                // Graph
+                // Graph (always String)
                 if let Some(col) = chunk.column_mut(col_idx) {
                     match graph_name {
                         Some(name) => col.push_string(name.clone()),
@@ -4414,8 +5102,9 @@ fn uses_lang_or_datatype(op: &LogicalOperator) -> bool {
         Skip(s) => uses_lang_or_datatype(&s.input),
         Unwind(u) => uses_lang_or_datatype(&u.input),
         TripleScan(t) => t.input.as_ref().is_some_and(|i| uses_lang_or_datatype(i)),
+        LogicalOperator::MultiWayJoin(mwj) => mwj.inputs.iter().any(uses_lang_or_datatype),
         // For any other operator, conservatively assume companion columns are needed
-        _ => false,
+        _ => true,
     }
 }
 
@@ -5118,5 +5807,1082 @@ mod tests {
         });
         let (_op, _cols, skip_types) = planner.plan_operator(&skipped).unwrap();
         assert_eq!(scan_types, skip_types, "Skip preserves types");
+    }
+
+    #[test]
+    fn test_plan_filter_with_comparison() {
+        let store = Arc::new(RdfStore::new());
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/age"),
+            Term::typed_literal("30", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+        store.insert(Triple::new(
+            Term::iri("http://example.org/gus"),
+            Term::iri("http://xmlns.com/foaf/0.1/age"),
+            Term::typed_literal("20", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let scan = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/age".to_string()),
+            object: TripleComponent::Variable("age".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+        let filter = LogicalOperator::Filter(FilterOp {
+            predicate: LogicalExpression::Binary {
+                left: Box::new(LogicalExpression::Variable("age".to_string())),
+                op: crate::query::plan::BinaryOp::Gt,
+                right: Box::new(LogicalExpression::Literal(Value::String("25".into()))),
+            },
+            input: Box::new(scan),
+            pushdown_hint: None,
+        });
+        let physical = planner.plan(&LogicalPlan::new(filter)).unwrap();
+        assert_eq!(physical.columns, vec!["s", "age"]);
+        let mut op = physical.operator;
+        let mut rows = 0;
+        while let Ok(Some(c)) = op.next() {
+            rows += c.row_count();
+        }
+        assert_eq!(rows, 1);
+    }
+
+    #[test]
+    fn test_plan_aggregate_count_star_fast_path() {
+        use crate::query::plan::{AggregateExpr, AggregateFunction, AggregateOp};
+        let store = Arc::new(RdfStore::new());
+        for i in 0..10 {
+            store.insert(Triple::new(
+                Term::iri(format!("http://example.org/item{i}")),
+                Term::iri("http://example.org/value"),
+                Term::literal(i.to_string()),
+            ));
+        }
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let scan = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Variable("p".to_string()),
+            object: TripleComponent::Variable("o".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+        let agg = LogicalOperator::Aggregate(AggregateOp {
+            input: Box::new(scan),
+            group_by: vec![],
+            aggregates: vec![AggregateExpr {
+                function: AggregateFunction::Count,
+                expression: None,
+                expression2: None,
+                distinct: false,
+                alias: Some("cnt".to_string()),
+                percentile: None,
+                separator: None,
+            }],
+            having: None,
+        });
+        let physical = planner.plan(&LogicalPlan::new(agg)).unwrap();
+        let mut op = physical.operator;
+        let chunk = op.next().unwrap().unwrap();
+        assert_eq!(
+            chunk.column(0).unwrap().get_value(0),
+            Some(Value::Int64(10))
+        );
+    }
+
+    #[test]
+    fn test_plan_aggregate_with_having() {
+        use crate::query::plan::{AggregateExpr, AggregateFunction, AggregateOp};
+        let store = Arc::new(RdfStore::new());
+        for i in 0..3 {
+            store.insert(Triple::new(
+                Term::iri("http://example.org/alix"),
+                Term::iri(format!("http://example.org/p{i}")),
+                Term::literal(format!("val{i}")),
+            ));
+        }
+        store.insert(Triple::new(
+            Term::iri("http://example.org/gus"),
+            Term::iri("http://example.org/p0"),
+            Term::literal("gus_val"),
+        ));
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let scan = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Variable("p".to_string()),
+            object: TripleComponent::Variable("o".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+        let agg = LogicalOperator::Aggregate(AggregateOp {
+            input: Box::new(scan),
+            group_by: vec![LogicalExpression::Variable("s".to_string())],
+            aggregates: vec![AggregateExpr {
+                function: AggregateFunction::Count,
+                expression: None,
+                expression2: None,
+                distinct: false,
+                alias: Some("cnt".to_string()),
+                percentile: None,
+                separator: None,
+            }],
+            having: Some(LogicalExpression::Binary {
+                left: Box::new(LogicalExpression::Variable("cnt".to_string())),
+                op: crate::query::plan::BinaryOp::Gt,
+                right: Box::new(LogicalExpression::Literal(Value::String("1".into()))),
+            }),
+        });
+        let physical = planner.plan(&LogicalPlan::new(agg)).unwrap();
+        let mut op = physical.operator;
+        let mut rows = 0;
+        while let Ok(Some(c)) = op.next() {
+            rows += c.row_count();
+        }
+        assert_eq!(rows, 1);
+    }
+
+    #[test]
+    fn test_plan_aggregate_sum_avg() {
+        use crate::query::plan::{AggregateExpr, AggregateFunction, AggregateOp};
+        let store = Arc::new(RdfStore::new());
+        for i in 1..=4 {
+            store.insert(Triple::new(
+                Term::iri("http://example.org/a"),
+                Term::iri("http://example.org/val"),
+                Term::typed_literal(i.to_string(), "http://www.w3.org/2001/XMLSchema#integer"),
+            ));
+        }
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let scan = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://example.org/val".to_string()),
+            object: TripleComponent::Variable("v".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+        let agg = LogicalOperator::Aggregate(AggregateOp {
+            input: Box::new(scan),
+            group_by: vec![],
+            aggregates: vec![
+                AggregateExpr {
+                    function: AggregateFunction::Sum,
+                    expression: Some(LogicalExpression::Variable("v".to_string())),
+                    expression2: None,
+                    distinct: false,
+                    alias: Some("total".to_string()),
+                    percentile: None,
+                    separator: None,
+                },
+                AggregateExpr {
+                    function: AggregateFunction::Avg,
+                    expression: Some(LogicalExpression::Variable("v".to_string())),
+                    expression2: None,
+                    distinct: false,
+                    alias: Some("average".to_string()),
+                    percentile: None,
+                    separator: None,
+                },
+            ],
+            having: None,
+        });
+        let physical = planner.plan(&LogicalPlan::new(agg)).unwrap();
+        assert_eq!(physical.columns, vec!["total", "average"]);
+    }
+
+    #[test]
+    fn test_plan_join_execution() {
+        use crate::query::plan::JoinOp;
+        let store = Arc::new(RdfStore::new());
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/name"),
+            Term::literal("Alix"),
+        ));
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/age"),
+            Term::typed_literal("30", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+        store.insert(Triple::new(
+            Term::iri("http://example.org/gus"),
+            Term::iri("http://xmlns.com/foaf/0.1/name"),
+            Term::literal("Gus"),
+        ));
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let left = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/name".to_string()),
+            object: TripleComponent::Variable("name".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+        let right = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/age".to_string()),
+            object: TripleComponent::Variable("age".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+        let join = LogicalOperator::Join(JoinOp {
+            left: Box::new(left),
+            right: Box::new(right),
+            join_type: JoinType::Inner,
+            conditions: vec![],
+        });
+        let physical = planner.plan(&LogicalPlan::new(join)).unwrap();
+        let mut op = physical.operator;
+        let mut rows = 0;
+        while let Ok(Some(c)) = op.next() {
+            rows += c.row_count();
+        }
+        assert_eq!(rows, 1);
+    }
+
+    #[test]
+    fn test_plan_left_join() {
+        use crate::query::plan::LeftJoinOp;
+        let store = Arc::new(RdfStore::new());
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/name"),
+            Term::literal("Alix"),
+        ));
+        store.insert(Triple::new(
+            Term::iri("http://example.org/gus"),
+            Term::iri("http://xmlns.com/foaf/0.1/name"),
+            Term::literal("Gus"),
+        ));
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/age"),
+            Term::typed_literal("30", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let left = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/name".to_string()),
+            object: TripleComponent::Variable("name".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+        let right = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/age".to_string()),
+            object: TripleComponent::Variable("age".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+        let join = LogicalOperator::LeftJoin(LeftJoinOp {
+            left: Box::new(left),
+            right: Box::new(right),
+            condition: None,
+        });
+        let physical = planner.plan(&LogicalPlan::new(join)).unwrap();
+        let mut op = physical.operator;
+        let mut rows = 0;
+        while let Ok(Some(c)) = op.next() {
+            rows += c.row_count();
+        }
+        assert_eq!(rows, 2);
+    }
+
+    #[test]
+    fn test_plan_anti_join() {
+        use crate::query::plan::AntiJoinOp;
+        let store = Arc::new(RdfStore::new());
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/name"),
+            Term::literal("Alix"),
+        ));
+        store.insert(Triple::new(
+            Term::iri("http://example.org/gus"),
+            Term::iri("http://xmlns.com/foaf/0.1/name"),
+            Term::literal("Gus"),
+        ));
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/age"),
+            Term::typed_literal("30", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let left = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/name".to_string()),
+            object: TripleComponent::Variable("name".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+        let right = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/age".to_string()),
+            object: TripleComponent::Variable("age".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+        let anti = LogicalOperator::AntiJoin(AntiJoinOp {
+            left: Box::new(left),
+            right: Box::new(right),
+        });
+        let physical = planner.plan(&LogicalPlan::new(anti)).unwrap();
+        let mut op = physical.operator;
+        let mut rows = 0;
+        while let Ok(Some(c)) = op.next() {
+            rows += c.row_count();
+        }
+        assert_eq!(rows, 1);
+    }
+
+    #[test]
+    fn test_plan_sort() {
+        use crate::query::plan::{SortKey, SortOp, SortOrder};
+        let store = Arc::new(RdfStore::new());
+        store.insert(Triple::new(
+            Term::iri("http://example.org/c"),
+            Term::iri("http://example.org/val"),
+            Term::literal("3"),
+        ));
+        store.insert(Triple::new(
+            Term::iri("http://example.org/a"),
+            Term::iri("http://example.org/val"),
+            Term::literal("1"),
+        ));
+        store.insert(Triple::new(
+            Term::iri("http://example.org/b"),
+            Term::iri("http://example.org/val"),
+            Term::literal("2"),
+        ));
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let scan = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://example.org/val".to_string()),
+            object: TripleComponent::Variable("v".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+        let sort = LogicalOperator::Sort(SortOp {
+            keys: vec![SortKey {
+                expression: LogicalExpression::Variable("v".to_string()),
+                order: SortOrder::Ascending,
+                nulls: None,
+            }],
+            input: Box::new(scan),
+        });
+        let physical = planner.plan(&LogicalPlan::new(sort)).unwrap();
+        assert_eq!(physical.columns, vec!["s", "v"]);
+        let mut op = physical.operator;
+        let mut vals = Vec::new();
+        while let Ok(Some(chunk)) = op.next() {
+            if let Some(col) = chunk.column(1) {
+                for row in 0..chunk.row_count() {
+                    if let Some(v) = col.get_value(row) {
+                        vals.push(v);
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            vals,
+            vec![
+                Value::String("1".into()),
+                Value::String("2".into()),
+                Value::String("3".into())
+            ]
+        );
+    }
+
+    #[test]
+    fn test_plan_insert_triple_concrete() {
+        let store = Arc::new(RdfStore::new());
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let insert = LogicalOperator::InsertTriple(InsertTripleOp {
+            subject: TripleComponent::Iri("http://example.org/alix".to_string()),
+            predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/name".to_string()),
+            object: TripleComponent::Literal(Value::String("Alix".into())),
+            graph: None,
+            input: None,
+        });
+        let physical = planner.plan(&LogicalPlan::new(insert)).unwrap();
+        let mut op = physical.operator;
+        while op.next().unwrap().is_some() {}
+        assert_eq!(store.len(), 1);
+    }
+
+    #[test]
+    fn test_plan_insert_triple_into_named_graph() {
+        let store = Arc::new(RdfStore::new());
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let insert = LogicalOperator::InsertTriple(InsertTripleOp {
+            subject: TripleComponent::Iri("http://example.org/alix".to_string()),
+            predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/name".to_string()),
+            object: TripleComponent::Literal(Value::String("Alix".into())),
+            graph: Some("http://example.org/g1".to_string()),
+            input: None,
+        });
+        let physical = planner.plan(&LogicalPlan::new(insert)).unwrap();
+        let mut op = physical.operator;
+        while op.next().unwrap().is_some() {}
+        assert_eq!(store.graph("http://example.org/g1").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_plan_delete_triple_concrete() {
+        let store = Arc::new(RdfStore::new());
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/name"),
+            Term::literal("Alix"),
+        ));
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let delete = LogicalOperator::DeleteTriple(DeleteTripleOp {
+            subject: TripleComponent::Iri("http://example.org/alix".to_string()),
+            predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/name".to_string()),
+            object: TripleComponent::Literal(Value::String("Alix".into())),
+            graph: None,
+            input: None,
+        });
+        let physical = planner.plan(&LogicalPlan::new(delete)).unwrap();
+        let mut op = physical.operator;
+        while op.next().unwrap().is_some() {}
+        assert_eq!(store.len(), 0);
+    }
+
+    #[test]
+    fn test_plan_insert_pattern_from_where() {
+        let store = Arc::new(RdfStore::new());
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/name"),
+            Term::literal("Alix"),
+        ));
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let where_scan = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/name".to_string()),
+            object: TripleComponent::Variable("name".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+        let insert = LogicalOperator::InsertTriple(InsertTripleOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://example.org/label".to_string()),
+            object: TripleComponent::Variable("name".to_string()),
+            graph: None,
+            input: Some(Box::new(where_scan)),
+        });
+        let physical = planner.plan(&LogicalPlan::new(insert)).unwrap();
+        let mut op = physical.operator;
+        while op.next().unwrap().is_some() {}
+        assert_eq!(store.len(), 2);
+    }
+
+    #[test]
+    fn test_plan_delete_pattern_from_where() {
+        let store = Arc::new(RdfStore::new());
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/name"),
+            Term::literal("Alix"),
+        ));
+        store.insert(Triple::new(
+            Term::iri("http://example.org/gus"),
+            Term::iri("http://xmlns.com/foaf/0.1/name"),
+            Term::literal("Gus"),
+        ));
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let where_scan = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Variable("p".to_string()),
+            object: TripleComponent::Variable("o".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+        let delete = LogicalOperator::DeleteTriple(DeleteTripleOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Variable("p".to_string()),
+            object: TripleComponent::Variable("o".to_string()),
+            graph: None,
+            input: Some(Box::new(where_scan)),
+        });
+        let physical = planner.plan(&LogicalPlan::new(delete)).unwrap();
+        let mut op = physical.operator;
+        while op.next().unwrap().is_some() {}
+        assert_eq!(store.len(), 0);
+    }
+
+    #[test]
+    fn test_plan_modify_delete_insert_where() {
+        let store = Arc::new(RdfStore::new());
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/name"),
+            Term::literal("Alix"),
+        ));
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let where_scan = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/name".to_string()),
+            object: TripleComponent::Variable("old".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+        let modify = LogicalOperator::Modify(ModifyOp {
+            delete_templates: vec![TripleTemplate {
+                subject: TripleComponent::Variable("s".to_string()),
+                predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/name".to_string()),
+                object: TripleComponent::Variable("old".to_string()),
+                graph: None,
+            }],
+            insert_templates: vec![TripleTemplate {
+                subject: TripleComponent::Variable("s".to_string()),
+                predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/name".to_string()),
+                object: TripleComponent::Literal(Value::String("Alix R.".into())),
+                graph: None,
+            }],
+            where_clause: Box::new(where_scan),
+            graph: None,
+        });
+        let physical = planner.plan(&LogicalPlan::new(modify)).unwrap();
+        let mut op = physical.operator;
+        while op.next().unwrap().is_some() {}
+        assert_eq!(store.len(), 1);
+        let all = store.find(&TriplePattern {
+            subject: None,
+            predicate: None,
+            object: None,
+        });
+        assert_eq!(all[0].object().to_string(), "\"Alix R.\"");
+    }
+
+    #[test]
+    fn test_plan_union() {
+        let store = Arc::new(RdfStore::new());
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/name"),
+            Term::literal("Alix"),
+        ));
+        store.insert(Triple::new(
+            Term::iri("http://example.org/gus"),
+            Term::iri("http://example.org/label"),
+            Term::literal("Gus"),
+        ));
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let scan1 = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/name".to_string()),
+            object: TripleComponent::Variable("o".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+        let scan2 = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://example.org/label".to_string()),
+            object: TripleComponent::Variable("o".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+        let union = LogicalOperator::Union(crate::query::plan::UnionOp {
+            inputs: vec![scan1, scan2],
+        });
+        let physical = planner.plan(&LogicalPlan::new(union)).unwrap();
+        let mut op = physical.operator;
+        let mut rows = 0;
+        while let Ok(Some(c)) = op.next() {
+            rows += c.row_count();
+        }
+        assert_eq!(rows, 2);
+    }
+
+    #[test]
+    fn test_plan_construct() {
+        let store = Arc::new(RdfStore::new());
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/name"),
+            Term::literal("Alix"),
+        ));
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let scan = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/name".to_string()),
+            object: TripleComponent::Variable("name".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+        let construct = LogicalOperator::Construct(ConstructOp {
+            templates: vec![TripleTemplate {
+                subject: TripleComponent::Variable("s".to_string()),
+                predicate: TripleComponent::Iri("http://example.org/label".to_string()),
+                object: TripleComponent::Variable("name".to_string()),
+                graph: None,
+            }],
+            input: Box::new(scan),
+        });
+        let physical = planner.plan(&LogicalPlan::new(construct)).unwrap();
+        assert_eq!(physical.columns, vec!["subject", "predicate", "object"]);
+        let mut op = physical.operator;
+        let mut rows = 0;
+        while let Ok(Some(c)) = op.next() {
+            rows += c.row_count();
+        }
+        assert_eq!(rows, 1);
+    }
+
+    #[test]
+    fn test_plan_bind_execution() {
+        let store = Arc::new(RdfStore::new());
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/name"),
+            Term::literal("Alix"),
+        ));
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let scan = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/name".to_string()),
+            object: TripleComponent::Variable("name".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+        let bind = LogicalOperator::Bind(BindOp {
+            input: Box::new(scan),
+            variable: "upper".to_string(),
+            expression: crate::query::plan::LogicalExpression::FunctionCall {
+                name: "UCASE".to_string(),
+                args: vec![crate::query::plan::LogicalExpression::Variable(
+                    "name".to_string(),
+                )],
+                distinct: false,
+            },
+        });
+        let physical = planner.plan(&LogicalPlan::new(bind)).unwrap();
+        assert!(physical.columns.contains(&"upper".to_string()));
+        let mut op = physical.operator;
+        let chunk = op.next().unwrap().unwrap();
+        let upper_idx = physical.columns.iter().position(|c| c == "upper").unwrap();
+        assert_eq!(
+            chunk.column(upper_idx).unwrap().get_value(0),
+            Some(Value::String("ALIX".into()))
+        );
+    }
+
+    #[test]
+    fn test_plan_project_with_expression() {
+        use crate::query::plan::{ProjectOp, Projection};
+        let store = Arc::new(RdfStore::new());
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/name"),
+            Term::literal("Alix"),
+        ));
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let scan = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/name".to_string()),
+            object: TripleComponent::Variable("name".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+        let project = LogicalOperator::Project(ProjectOp {
+            projections: vec![
+                Projection {
+                    expression: LogicalExpression::Variable("name".to_string()),
+                    alias: Some("n".to_string()),
+                },
+                Projection {
+                    expression: LogicalExpression::Literal(Value::String("const".into())),
+                    alias: Some("c".to_string()),
+                },
+            ],
+            input: Box::new(scan),
+            pass_through_input: false,
+        });
+        let physical = planner.plan(&LogicalPlan::new(project)).unwrap();
+        assert_eq!(physical.columns, vec!["n", "c"]);
+        let mut op = physical.operator;
+        let chunk = op.next().unwrap().unwrap();
+        assert_eq!(
+            chunk.column(0).unwrap().get_value(0),
+            Some(Value::String("Alix".into()))
+        );
+        assert_eq!(
+            chunk.column(1).unwrap().get_value(0),
+            Some(Value::String("const".into()))
+        );
+    }
+
+    #[test]
+    fn test_plan_create_graph() {
+        let store = Arc::new(RdfStore::new());
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let physical = planner
+            .plan(&LogicalPlan::new(LogicalOperator::CreateGraph(
+                CreateGraphOp {
+                    graph: "http://example.org/g1".to_string(),
+                    silent: false,
+                },
+            )))
+            .unwrap();
+        let mut op = physical.operator;
+        while op.next().unwrap().is_some() {}
+        assert!(store.graph("http://example.org/g1").is_some());
+    }
+
+    #[test]
+    fn test_plan_create_graph_already_exists_errors() {
+        let store = Arc::new(RdfStore::new());
+        store.create_graph("http://example.org/g1");
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let mut physical = planner
+            .plan(&LogicalPlan::new(LogicalOperator::CreateGraph(
+                CreateGraphOp {
+                    graph: "http://example.org/g1".to_string(),
+                    silent: false,
+                },
+            )))
+            .unwrap();
+        assert!(physical.operator.next().is_err());
+    }
+
+    #[test]
+    fn test_plan_create_graph_silent() {
+        let store = Arc::new(RdfStore::new());
+        store.create_graph("http://example.org/g1");
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let mut physical = planner
+            .plan(&LogicalPlan::new(LogicalOperator::CreateGraph(
+                CreateGraphOp {
+                    graph: "http://example.org/g1".to_string(),
+                    silent: true,
+                },
+            )))
+            .unwrap();
+        assert!(physical.operator.next().is_ok());
+    }
+
+    #[test]
+    fn test_plan_drop_graph() {
+        let store = Arc::new(RdfStore::new());
+        store.create_graph("http://example.org/g1");
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let physical = planner
+            .plan(&LogicalPlan::new(LogicalOperator::DropGraph(DropGraphOp {
+                graph: Some("http://example.org/g1".to_string()),
+                silent: false,
+            })))
+            .unwrap();
+        let mut op = physical.operator;
+        while op.next().unwrap().is_some() {}
+        assert!(store.graph("http://example.org/g1").is_none());
+    }
+
+    #[test]
+    fn test_plan_drop_nonexistent_graph_errors() {
+        let store = Arc::new(RdfStore::new());
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let mut physical = planner
+            .plan(&LogicalPlan::new(LogicalOperator::DropGraph(DropGraphOp {
+                graph: Some("http://example.org/nope".to_string()),
+                silent: false,
+            })))
+            .unwrap();
+        assert!(physical.operator.next().is_err());
+    }
+
+    #[test]
+    fn test_plan_drop_default_graph() {
+        let store = Arc::new(RdfStore::new());
+        store.insert(Triple::new(
+            Term::iri("http://example.org/a"),
+            Term::iri("http://example.org/b"),
+            Term::literal("c"),
+        ));
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let physical = planner
+            .plan(&LogicalPlan::new(LogicalOperator::DropGraph(DropGraphOp {
+                graph: None,
+                silent: false,
+            })))
+            .unwrap();
+        let mut op = physical.operator;
+        while op.next().unwrap().is_some() {}
+        assert_eq!(store.len(), 0);
+    }
+
+    #[test]
+    fn test_plan_clear_graph_default() {
+        let store = Arc::new(RdfStore::new());
+        store.insert(Triple::new(
+            Term::iri("http://example.org/a"),
+            Term::iri("http://example.org/b"),
+            Term::literal("c"),
+        ));
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let physical = planner
+            .plan(&LogicalPlan::new(LogicalOperator::ClearGraph(
+                ClearGraphOp {
+                    graph: None,
+                    silent: false,
+                },
+            )))
+            .unwrap();
+        let mut op = physical.operator;
+        while op.next().unwrap().is_some() {}
+        assert_eq!(store.len(), 0);
+    }
+
+    #[test]
+    fn test_plan_clear_all_graphs() {
+        let store = Arc::new(RdfStore::new());
+        store.insert(Triple::new(
+            Term::iri("http://example.org/a"),
+            Term::iri("http://example.org/b"),
+            Term::literal("c"),
+        ));
+        store.create_graph("http://example.org/g1");
+        store
+            .graph("http://example.org/g1")
+            .unwrap()
+            .insert(Triple::new(
+                Term::iri("http://example.org/x"),
+                Term::iri("http://example.org/y"),
+                Term::literal("z"),
+            ));
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let physical = planner
+            .plan(&LogicalPlan::new(LogicalOperator::ClearGraph(
+                ClearGraphOp {
+                    graph: Some(String::new()),
+                    silent: false,
+                },
+            )))
+            .unwrap();
+        let mut op = physical.operator;
+        while op.next().unwrap().is_some() {}
+        assert_eq!(store.len(), 0);
+    }
+
+    #[test]
+    fn test_plan_multi_way_join_hash_fallback() {
+        let store = Arc::new(RdfStore::new());
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/name"),
+            Term::literal("Alix"),
+        ));
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/age"),
+            Term::typed_literal("30", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/knows"),
+            Term::iri("http://example.org/gus"),
+        ));
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let scan1 = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/name".to_string()),
+            object: TripleComponent::Variable("name".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+        let scan2 = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/age".to_string()),
+            object: TripleComponent::Variable("age".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+        let scan3 = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://xmlns.com/foaf/0.1/knows".to_string()),
+            object: TripleComponent::Variable("friend".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+        let mwj = LogicalOperator::MultiWayJoin(crate::query::plan::MultiWayJoinOp {
+            inputs: vec![scan1, scan2, scan3],
+            conditions: vec![],
+            shared_variables: vec!["s".to_string()],
+        });
+        let physical = planner.plan(&LogicalPlan::new(mwj)).unwrap();
+        let mut op = physical.operator;
+        let mut rows = 0;
+        while let Ok(Some(c)) = op.next() {
+            rows += c.row_count();
+        }
+        assert_eq!(rows, 1);
+    }
+
+    #[test]
+    fn test_plan_profiled() {
+        let store = Arc::new(RdfStore::new());
+        store.insert(Triple::new(
+            Term::iri("http://example.org/alix"),
+            Term::iri("http://xmlns.com/foaf/0.1/name"),
+            Term::literal("Alix"),
+        ));
+        let planner = RdfPlanner::new(store);
+        let plan = LogicalPlan::new(LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Variable("p".to_string()),
+            object: TripleComponent::Variable("o".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        }));
+        let (physical, entries) = planner.plan_profiled(&plan).unwrap();
+        assert_eq!(physical.columns, vec!["s", "p", "o"]);
+        assert!(!entries.is_empty());
+    }
+
+    #[test]
+    fn test_plan_unsupported_operator_returns_error() {
+        let store = Arc::new(RdfStore::new());
+        let planner = RdfPlanner::new(store);
+        let map = LogicalOperator::MapCollect(crate::query::plan::MapCollectOp {
+            input: Box::new(LogicalOperator::Empty),
+            key_var: "k".to_string(),
+            value_var: "v".to_string(),
+            alias: "m".to_string(),
+        });
+        assert!(planner.plan(&LogicalPlan::new(map)).is_err());
+    }
+
+    #[test]
+    fn test_plan_empty_operator() {
+        let store = Arc::new(RdfStore::new());
+        let planner = RdfPlanner::new(store);
+        let physical = planner
+            .plan(&LogicalPlan::new(LogicalOperator::Empty))
+            .unwrap();
+        assert!(physical.columns.is_empty());
+    }
+
+    #[test]
+    fn test_component_to_term_conversions() {
+        let store = Arc::new(RdfStore::new());
+        let planner = RdfPlanner::new(store);
+        assert!(matches!(
+            planner
+                .component_to_term(&TripleComponent::Iri("http://example.org/x".to_string()))
+                .unwrap(),
+            Term::Iri(_)
+        ));
+        assert!(matches!(
+            planner
+                .component_to_term(&TripleComponent::Literal(Value::String("hello".into())))
+                .unwrap(),
+            Term::Literal(_)
+        ));
+        assert!(matches!(
+            planner
+                .component_to_term(&TripleComponent::Literal(Value::Int64(42)))
+                .unwrap(),
+            Term::Literal(_)
+        ));
+        assert!(matches!(
+            planner
+                .component_to_term(&TripleComponent::Literal(Value::Float64(2.72)))
+                .unwrap(),
+            Term::Literal(_)
+        ));
+        assert!(matches!(
+            planner
+                .component_to_term(&TripleComponent::Literal(Value::Bool(true)))
+                .unwrap(),
+            Term::Literal(_)
+        ));
+        assert!(matches!(
+            planner
+                .component_to_term(&TripleComponent::LangLiteral {
+                    value: "hello".to_string(),
+                    lang: "en".to_string()
+                })
+                .unwrap(),
+            Term::Literal(_)
+        ));
+        assert!(matches!(
+            planner
+                .component_to_term(&TripleComponent::BlankNode("b0".to_string()))
+                .unwrap(),
+            Term::BlankNode(_)
+        ));
+        assert!(
+            planner
+                .component_to_term(&TripleComponent::Variable("x".to_string()))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_count_fast_path_predicate_bound() {
+        use crate::query::plan::{AggregateExpr, AggregateFunction, AggregateOp};
+        let store = Arc::new(RdfStore::new());
+        for i in 0..5 {
+            store.insert(Triple::new(
+                Term::iri(format!("http://example.org/item{i}")),
+                Term::iri("http://example.org/type"),
+                Term::literal(format!("val{i}")),
+            ));
+        }
+        store.insert(Triple::new(
+            Term::iri("http://example.org/other"),
+            Term::iri("http://example.org/other_pred"),
+            Term::literal("x"),
+        ));
+        let planner = RdfPlanner::new(Arc::clone(&store));
+        let scan = LogicalOperator::TripleScan(TripleScanOp {
+            subject: TripleComponent::Variable("s".to_string()),
+            predicate: TripleComponent::Iri("http://example.org/type".to_string()),
+            object: TripleComponent::Variable("o".to_string()),
+            graph: None,
+            input: None,
+            dataset: None,
+        });
+        let agg = LogicalOperator::Aggregate(AggregateOp {
+            input: Box::new(scan),
+            group_by: vec![],
+            aggregates: vec![AggregateExpr {
+                function: AggregateFunction::Count,
+                expression: None,
+                expression2: None,
+                distinct: false,
+                alias: Some("cnt".to_string()),
+                percentile: None,
+                separator: None,
+            }],
+            having: None,
+        });
+        let physical = planner.plan(&LogicalPlan::new(agg)).unwrap();
+        let mut op = physical.operator;
+        let chunk = op.next().unwrap().unwrap();
+        assert_eq!(chunk.column(0).unwrap().get_value(0), Some(Value::Int64(5)));
     }
 }

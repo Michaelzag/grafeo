@@ -77,6 +77,7 @@ gremlin = ["grafeo-adapters/gremlin"]
 graphql = ["grafeo-adapters/graphql"]
 sql-pgq = ["grafeo-adapters/sql-pgq"]  # SQL/PGQ (SQL:2023 GRAPH_TABLE)
 triple-store = ["grafeo-core/triple-store", "grafeo-adapters/triple-store", "md5", "sha1", "sha2", "regex"]  # RDF triple store model and planner
+ring-index = ["grafeo-core/ring-index", "triple-store"]  # Ring Index for compact RDF (3x memory reduction)
 rdf = ["triple-store"]  # Deprecated: use triple-store
 parallel = ["rayon", "crossbeam", "grafeo-core/parallel", "grafeo-adapters/parallel"]  # Parallel execution
 algos = ["grafeo-adapters/algos"]  # Graph algorithm plugin (SSSP, PageRank, etc.)

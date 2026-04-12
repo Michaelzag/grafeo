@@ -2,6 +2,29 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
+## [0.5.37] - Unreleased
+
+### Added
+
+- **SPARQL query execution overhaul**: major compliance pass closing 18 spec gaps. Composite indexes (SP, PO, OS) for O(1) two-bound and three-bound lookups. Batch insert with single-lock-per-index acquisition. Named graph CRUD (`CREATE GRAPH`, `DROP GRAPH`, `COPY`, `MOVE`, `ADD`, `CLEAR`). SPARQL UPDATE (`INSERT DATA`, `DELETE DATA`, `DELETE/INSERT WHERE`). `CONSTRUCT`, `BIND`, `OPTIONAL`, `MINUS`, `UNION`, `FILTER`, `EXISTS`/`NOT EXISTS` as semi/anti joins. 109 new W3C execution tests.
+- **Ring Index planner integration** (`ring-index`): wavelet-tree-based compact triple index wired into the SPARQL query planner. Leapfrog join operator (`RdfLeapfrogOperator`) provides worst-case optimal multi-way joins when all inputs are simple triple scans. Falls back to cascading hash joins when companion columns (LANG/DATATYPE) are needed.
+- **Ring Index persistence**: `save()`/`load()` via bincode serialization, `save_to_bytes()`/`load_from_bytes()` for container integration, `save_to_file()`/`load_from_file()` for standalone use. Comprehensive post-load validation (dictionary consistency, wavelet tree bounds, permutation lengths). `RdfRingSection` persists to `.grafeo` container during checkpoint, eliminating rebuild on restart.
+- **Dictionary encoding infrastructure**: `TermDictionary` maps RDF terms to compact u32 IDs for efficient join processing. `DictResolveOperator` converts IDs back to strings at result boundaries. Built lazily, invalidated on mutations.
+- **COUNT(\*) fast paths**: `COUNT(*)` over fully-unbound triple scans returns `store.len()` in O(1). Predicate-bound `COUNT(*)` uses per-predicate statistics. Graph-scoped `COUNT(*)` uses named graph length. Ring Index `count()` handles any partially-bound pattern in O(log sigma).
+- **RDF query optimizer**: `RdfStatistics` collector with per-predicate cardinality estimates. Cached statistics (invalidated on mutation). Cost-based join reordering for multi-way joins. Cardinality estimation for triple scan patterns.
+- **`EXPLAIN` / `EXPLAIN ANALYZE` for SPARQL**: `EXPLAIN SELECT ...` returns the physical plan tree without executing. `EXPLAIN ANALYZE SELECT ...` executes with profiling, showing actual row counts and timing per operator. Integrated into Python bindings.
+- **SPARQL WCOJ auto-detection**: `MultiWayJoin` operator detects star patterns sharing variables and routes them to Leapfrog join when the Ring Index is available, falling back to pairwise hash joins otherwise.
+
+### Changed
+
+- **RDF store indexes upgraded to `foldhash`**: replaced `ahash` hasher with `foldhash::fast::RandomState` for all HashMap-based indexes (subject, predicate, object, SP, PO, OS).
+- **`TxId` renamed to `TransactionId`**: consistent naming across the codebase.
+
+### Fixed
+
+- **Incremental backup could skip WAL records**: backup cursor was not advanced after incremental backup, causing duplicate replay on restore.
+- **File manager leaked temp files on checkpoint failure**: temp files are now cleaned up in the error path.
+
 ## [0.5.36] - 2026-04-11
 
 ### Added

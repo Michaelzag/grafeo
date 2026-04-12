@@ -50,7 +50,7 @@ const SELECT_SAMPLE_RATE: usize = 4096;
 /// // Find position of 50th 1-bit (0-indexed)
 /// assert_eq!(sbv.select1(49), Some(245));
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct SuccinctBitVector {
     /// Underlying bit storage.
     inner: BitVector,
@@ -73,6 +73,37 @@ pub struct SuccinctBitVector {
 
     /// Total number of 1-bits (cached for efficiency).
     ones_count: usize,
+}
+
+/// Custom deserialization that accepts the full serialized format (for backward
+/// compatibility) but rebuilds all auxiliary index structures from the raw bit
+/// data. This prevents crafted input from producing inconsistent rank/select
+/// caches that could cause panics or incorrect results.
+impl<'de> serde::Deserialize<'de> for SuccinctBitVector {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        /// Helper struct that mirrors the serialized layout so existing data
+        /// round-trips correctly. The cached fields are read and discarded.
+        #[derive(serde::Deserialize)]
+        struct Raw {
+            inner: BitVector,
+            #[allow(dead_code)]
+            superblock_ranks: Vec<u32>,
+            #[allow(dead_code)]
+            block_ranks: Vec<u8>,
+            #[allow(dead_code)]
+            select1_samples: Vec<u32>,
+            #[allow(dead_code)]
+            select0_samples: Vec<u32>,
+            #[allow(dead_code)]
+            ones_count: usize,
+        }
+
+        let raw = Raw::deserialize(deserializer)?;
+        Ok(Self::from_bitvec(raw.inner))
+    }
 }
 
 impl SuccinctBitVector {

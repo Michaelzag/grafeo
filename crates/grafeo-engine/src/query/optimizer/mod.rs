@@ -676,6 +676,19 @@ impl Optimizer {
                 relations.push((expand.to_variable.clone(), op.clone()));
                 true
             }
+            #[cfg(feature = "triple-store")]
+            LogicalOperator::TripleScan(scan) => {
+                // Use the first variable found as the relation name
+                let name = scan
+                    .subject
+                    .as_variable()
+                    .or_else(|| scan.predicate.as_variable())
+                    .or_else(|| scan.object.as_variable())
+                    .unwrap_or("tp")
+                    .to_string();
+                relations.push((name, op.clone()));
+                true
+            }
             _ => false,
         }
     }
@@ -941,6 +954,12 @@ impl Optimizer {
         }
     }
 
+    // NOTE: Filter-into-TripleScan pushdown is intentionally not implemented.
+    // Binding a variable position in the scan removes it from output columns,
+    // which breaks downstream operators (SELECT, ORDER BY) that reference it.
+    // A correct implementation needs a separate `pushed_bindings` field on
+    // TripleScanOp so the variable stays in output while the scan is constrained.
+
     /// Collects all output variable names from an operator.
     fn collect_output_variables(&self, op: &LogicalOperator) -> HashSet<String> {
         let mut vars = HashSet::new();
@@ -1003,6 +1022,23 @@ impl Optimizer {
             }
             LogicalOperator::Distinct(distinct) => {
                 Self::collect_output_variables_recursive(&distinct.input, vars);
+            }
+            #[cfg(feature = "triple-store")]
+            LogicalOperator::TripleScan(scan) => {
+                if let Some(v) = scan.subject.as_variable() {
+                    vars.insert(v.to_string());
+                }
+                if let Some(v) = scan.predicate.as_variable() {
+                    vars.insert(v.to_string());
+                }
+                if let Some(v) = scan.object.as_variable() {
+                    vars.insert(v.to_string());
+                }
+                if let Some(ref g) = scan.graph
+                    && let Some(v) = g.as_variable()
+                {
+                    vars.insert(v.to_string());
+                }
             }
             _ => {}
         }

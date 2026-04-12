@@ -200,6 +200,10 @@ pub enum LogicalOperator {
     /// Anti-join for MINUS patterns.
     AntiJoin(AntiJoinOp),
 
+    /// SPARQL CONSTRUCT: evaluate WHERE, substitute bindings into template,
+    /// output (subject, predicate, object) columns.
+    Construct(ConstructOp),
+
     /// Bind a variable to an expression.
     Bind(BindOp),
 
@@ -365,6 +369,7 @@ impl LogicalOperator {
             | Self::Empty
             | Self::ParameterScan(_)
             | Self::CallProcedure(_)
+            | Self::Construct(_)
             | Self::LoadData(_) => false,
         }
     }
@@ -397,6 +402,7 @@ impl LogicalOperator {
             Self::Return(op) => vec![&*op.input],
             Self::Unwind(op) => vec![&*op.input],
             Self::Bind(op) => vec![&*op.input],
+            Self::Construct(op) => vec![&*op.input],
             Self::MapCollect(op) => vec![&*op.input],
             Self::ShortestPath(op) => vec![&*op.input],
             Self::Merge(op) => vec![&*op.input],
@@ -1482,6 +1488,17 @@ pub enum TripleComponent {
     BlankNode(String),
 }
 
+impl TripleComponent {
+    /// Returns the variable name if this component is a `Variable`, or `None`.
+    #[must_use]
+    pub fn as_variable(&self) -> Option<&str> {
+        match self {
+            Self::Variable(v) => Some(v),
+            _ => None,
+        }
+    }
+}
+
 /// Union of multiple result sets.
 #[derive(Debug, Clone)]
 pub struct UnionOp {
@@ -1743,6 +1760,18 @@ pub struct TripleTemplate {
     pub object: TripleComponent,
     /// Named graph (optional).
     pub graph: Option<String>,
+}
+
+/// SPARQL CONSTRUCT: evaluate WHERE, substitute bindings into template.
+///
+/// Produces rows with columns `subject`, `predicate`, `object` by instantiating
+/// the template once per binding from the WHERE clause.
+#[derive(Debug, Clone)]
+pub struct ConstructOp {
+    /// Triple templates to instantiate.
+    pub templates: Vec<TripleTemplate>,
+    /// Input operator (WHERE clause evaluation).
+    pub input: Box<LogicalOperator>,
 }
 
 /// Clear all triples from a graph.

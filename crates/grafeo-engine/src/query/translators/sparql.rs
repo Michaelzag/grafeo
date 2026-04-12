@@ -5,10 +5,10 @@
 use super::common::{wrap_distinct, wrap_filter, wrap_limit, wrap_skip, wrap_sort};
 use crate::query::plan::{
     AddGraphOp, AggregateExpr, AggregateFunction, AggregateOp, AntiJoinOp, BinaryOp, BindOp,
-    ClearGraphOp, CopyGraphOp, CreateGraphOp, DatasetRestriction, DeleteTripleOp, DropGraphOp,
-    InsertTripleOp, JoinOp, JoinType, LeftJoinOp, LoadGraphOp, LogicalExpression, LogicalOperator,
-    LogicalPlan, ModifyOp, MoveGraphOp, ProjectOp, Projection, SortKey, SortOrder, TripleComponent,
-    TripleScanOp, TripleTemplate, UnaryOp, UnionOp,
+    ClearGraphOp, ConstructOp, CopyGraphOp, CreateGraphOp, DatasetRestriction, DeleteTripleOp,
+    DropGraphOp, InsertTripleOp, JoinCondition, JoinOp, JoinType, LeftJoinOp, LoadGraphOp,
+    LogicalExpression, LogicalOperator, LogicalPlan, ModifyOp, MoveGraphOp, ProjectOp, Projection,
+    SortKey, SortOrder, TripleComponent, TripleScanOp, TripleTemplate, UnaryOp, UnionOp,
 };
 use grafeo_adapters::query::sparql::{self, ast};
 use grafeo_common::types::Value;
@@ -25,24 +25,37 @@ static QUERY_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
 ///
 /// Returns an error if the query cannot be parsed or translated.
 pub fn translate(query: &str) -> Result<LogicalPlan> {
-    // Check for EXPLAIN prefix (case-insensitive, non-standard extension)
+    // Check for EXPLAIN [ANALYZE] prefix (case-insensitive, non-standard extension).
+    // EXPLAIN: show physical plan without executing.
+    // EXPLAIN ANALYZE: execute with profiling, show actual vs estimated stats.
     let trimmed = query.trim_start();
-    let (explain, actual_query) = if trimmed.len() >= 7
+    let (explain, profile, actual_query) = if trimmed.len() >= 7
         && trimmed[..7].eq_ignore_ascii_case("EXPLAIN")
         && trimmed
             .as_bytes()
             .get(7)
             .is_some_and(u8::is_ascii_whitespace)
     {
-        (true, trimmed[7..].trim_start())
+        let rest = trimmed[7..].trim_start();
+        if rest.len() >= 7
+            && rest[..7].eq_ignore_ascii_case("ANALYZE")
+            && rest.as_bytes().get(7).is_some_and(u8::is_ascii_whitespace)
+        {
+            // EXPLAIN ANALYZE: execute with profiling
+            (false, true, rest[7..].trim_start())
+        } else {
+            // EXPLAIN: show plan only
+            (true, false, rest)
+        }
     } else {
-        (false, query)
+        (false, false, query)
     };
 
     let sparql_query = sparql::parse(actual_query)?;
     let mut translator = SparqlTranslator::new();
     let mut plan = translator.translate_query(&sparql_query)?;
     plan.explain = explain;
+    plan.profile = profile;
     Ok(plan)
 }
 
@@ -173,8 +186,9 @@ impl SparqlTranslator {
             plan = wrap_sort(plan, keys);
         }
 
-        // Apply DISTINCT/REDUCED (after projection, before OFFSET/LIMIT)
-        if select.modifier == ast::SelectModifier::Distinct {
+        // Apply DISTINCT (after projection, before OFFSET/LIMIT).
+        // REDUCED is a no-op: the spec allows returning all rows unchanged.
+        if matches!(select.modifier, ast::SelectModifier::Distinct) {
             plan = wrap_distinct(plan);
         }
 
@@ -211,21 +225,46 @@ impl SparqlTranslator {
         // Apply dataset restriction from FROM / FROM NAMED clauses
         self.dataset = self.translate_dataset_clause(&construct.dataset);
 
-        // For CONSTRUCT, we need to evaluate the WHERE pattern and then
-        // produce triples according to the template
-        let plan = self.translate_graph_pattern(&construct.where_clause)?;
+        // Evaluate the WHERE pattern to produce variable bindings
+        let mut plan = self.translate_graph_pattern(&construct.where_clause)?;
 
         // Clear dataset after translating the WHERE clause
         self.dataset = None;
 
-        // Apply solution modifiers
-        let mut plan = plan;
+        // Apply solution modifiers to the WHERE output
         if let Some(limit) = construct.solution_modifiers.limit {
             plan = wrap_limit(plan, limit as usize);
         }
 
-        // The template will be processed at execution time
-        Ok(LogicalPlan::new(plan))
+        // Translate template triples: substitute variable bindings from WHERE.
+        // Use translate_data_term for subject/object so that blank nodes become
+        // TripleComponent::BlankNode (constants in output) rather than variables
+        // that would fail to bind against the WHERE clause results.
+        let mut templates = Vec::new();
+        for tp in &construct.template {
+            let subject = self.translate_data_term(&tp.subject)?;
+            // CONSTRUCT templates use simple predicates (IRIs/variables), not paths
+            let predicate = match &tp.predicate {
+                ast::PropertyPath::Predicate(iri) => TripleComponent::Iri(self.resolve_iri(iri)),
+                ast::PropertyPath::Variable(name) => TripleComponent::Variable(name.clone()),
+                ast::PropertyPath::RdfType => TripleComponent::Iri(
+                    "http://www.w3.org/1999/02/22-rdf-syntax-ns#type".to_string(),
+                ),
+                _ => continue, // Skip complex property paths in templates
+            };
+            let object = self.translate_data_term(&tp.object)?;
+            templates.push(TripleTemplate {
+                subject,
+                predicate,
+                object,
+                graph: None,
+            });
+        }
+
+        Ok(LogicalPlan::new(LogicalOperator::Construct(ConstructOp {
+            templates,
+            input: Box::new(plan),
+        })))
     }
 
     fn translate_describe(&mut self, describe: &ast::DescribeQuery) -> Result<LogicalPlan> {
@@ -1293,8 +1332,9 @@ impl SparqlTranslator {
     fn translate_unary_op(&self, op: ast::UnaryOperator) -> UnaryOp {
         match op {
             ast::UnaryOperator::Not => UnaryOp::Not,
-            // Plus is handled as a no-op at the call site; this arm is unreachable
-            ast::UnaryOperator::Plus => UnaryOp::Not,
+            ast::UnaryOperator::Plus => {
+                unreachable!("unary plus is handled as a no-op at the call site")
+            }
             ast::UnaryOperator::Minus => UnaryOp::Neg,
         }
     }
@@ -1529,13 +1569,96 @@ impl SparqlTranslator {
             return left;
         }
 
-        // For basic patterns, use inner join on shared variables
+        // Collect output variables from each side and build explicit join
+        // conditions for shared variables. This enables the DPccp optimizer
+        // to reorder SPARQL triple patterns by selectivity.
+        let left_vars = Self::collect_operator_variables(&left);
+        let right_vars = Self::collect_operator_variables(&right);
+
+        let mut conditions = Vec::new();
+        for var in &left_vars {
+            if right_vars.contains(var) {
+                conditions.push(JoinCondition {
+                    left: LogicalExpression::Variable(var.clone()),
+                    right: LogicalExpression::Variable(var.clone()),
+                });
+            }
+        }
+
         LogicalOperator::Join(JoinOp {
             left: Box::new(left),
             right: Box::new(right),
             join_type: JoinType::Inner,
-            conditions: vec![], // Shared variables are implicit join conditions
+            conditions,
         })
+    }
+
+    /// Collects all variable names produced by an operator subtree.
+    ///
+    /// Walks `TripleScan`, `Join`, `LeftJoin`, `Union`, `Filter`, `Bind`,
+    /// and `Project` operators to gather the set of variable names that
+    /// appear in the output.
+    fn collect_operator_variables(op: &LogicalOperator) -> Vec<String> {
+        let mut vars = Vec::new();
+        Self::collect_variables_recursive(op, &mut vars);
+        vars
+    }
+
+    fn collect_variables_recursive(op: &LogicalOperator, vars: &mut Vec<String>) {
+        match op {
+            LogicalOperator::TripleScan(scan) => {
+                if let TripleComponent::Variable(v) = &scan.subject
+                    && !vars.contains(v)
+                {
+                    vars.push(v.clone());
+                }
+                if let TripleComponent::Variable(v) = &scan.predicate
+                    && !vars.contains(v)
+                {
+                    vars.push(v.clone());
+                }
+                if let TripleComponent::Variable(v) = &scan.object
+                    && !vars.contains(v)
+                {
+                    vars.push(v.clone());
+                }
+                if let Some(TripleComponent::Variable(v)) = &scan.graph
+                    && !vars.contains(v)
+                {
+                    vars.push(v.clone());
+                }
+                if let Some(input) = &scan.input {
+                    Self::collect_variables_recursive(input, vars);
+                }
+            }
+            LogicalOperator::Join(join) => {
+                Self::collect_variables_recursive(&join.left, vars);
+                Self::collect_variables_recursive(&join.right, vars);
+            }
+            LogicalOperator::LeftJoin(join) => {
+                Self::collect_variables_recursive(&join.left, vars);
+                Self::collect_variables_recursive(&join.right, vars);
+            }
+            LogicalOperator::Union(union) => {
+                // Union outputs variables from both branches
+                for input in &union.inputs {
+                    Self::collect_variables_recursive(input, vars);
+                }
+            }
+            LogicalOperator::Filter(filter) => {
+                Self::collect_variables_recursive(&filter.input, vars);
+            }
+            LogicalOperator::Bind(bind) => {
+                Self::collect_variables_recursive(&bind.input, vars);
+                if !vars.contains(&bind.variable) {
+                    vars.push(bind.variable.clone());
+                }
+            }
+            LogicalOperator::Project(proj) => {
+                Self::collect_variables_recursive(&proj.input, vars);
+            }
+            _ => {}
+        }
     }
 
     fn resolve_iri(&self, iri: &ast::Iri) -> String {

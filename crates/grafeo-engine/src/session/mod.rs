@@ -691,7 +691,15 @@ impl Session {
 
     /// Checks that the session's identity is permitted to execute the given
     /// statement kind. Returns an error if the role is insufficient.
+    ///
+    /// Short-circuits for Admin identities (the common case for embedded use
+    /// and benchmarks) to avoid any overhead on the hot path.
+    #[inline]
     fn require_permission(&self, kind: crate::auth::StatementKind) -> Result<()> {
+        // Fast path: Admin can do everything
+        if self.identity.can_admin() {
+            return Ok(());
+        }
         crate::auth::check_permission(&self.identity, kind).map_err(|denied| {
             grafeo_common::utils::error::Error::Query(grafeo_common::utils::error::QueryError::new(
                 grafeo_common::utils::error::QueryErrorKind::Semantic,
@@ -2531,12 +2539,17 @@ impl Session {
                 return self.execute_schema_command(cmd);
             }
             gql::GqlTranslationResult::Plan(plan) => {
-                // Check role-based permission before read-only transaction check
-                if plan.root.has_mutations() {
+                // Only walk the operator tree when it matters: non-admin
+                // identities need permission checks, read-only transactions
+                // need mutation blocking. Admin sessions in auto-commit mode
+                // skip the tree walk entirely.
+                let read_only = *self.read_only_tx.lock();
+                let need_check = read_only || !self.identity.can_admin();
+                let is_mutation = need_check && plan.root.has_mutations();
+                if is_mutation {
                     self.require_permission(crate::auth::StatementKind::Write)?;
                 }
-                // Block mutations in read-only transactions
-                if *self.read_only_tx.lock() && plan.root.has_mutations() {
+                if read_only && is_mutation {
                     return Err(grafeo_common::utils::error::Error::Transaction(
                         grafeo_common::utils::error::TransactionError::ReadOnly,
                     ));

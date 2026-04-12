@@ -49,10 +49,29 @@ impl GrafeoDB {
         let optimizer = Optimizer::from_rdf_statistics((*rdf_stats).clone());
         let optimized_plan = optimizer.optimize(logical_plan)?;
 
-        // EXPLAIN: return the logical plan tree without executing
+        // EXPLAIN: return the physical plan tree without executing
         if optimized_plan.explain {
-            use crate::query::processor::explain_result;
-            return Ok(explain_result(&optimized_plan));
+            let planner = RdfPlanner::new(Arc::clone(&self.rdf_store));
+            let (_, entries) = planner.plan_profiled(&optimized_plan)?;
+            use crate::query::processor::physical_explain_result;
+            return Ok(physical_explain_result(&optimized_plan, entries));
+        }
+
+        // EXPLAIN ANALYZE: execute with profiling, report actual stats
+        if optimized_plan.profile {
+            let planner = RdfPlanner::new(Arc::clone(&self.rdf_store));
+            let (mut physical_plan, entries) = planner.plan_profiled(&optimized_plan)?;
+
+            let start = std::time::Instant::now();
+            let executor = Executor::with_columns(physical_plan.columns.clone());
+            let _result = executor.execute(physical_plan.operator.as_mut())?;
+            let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+            let tree = crate::query::profile::build_profile_tree(
+                &optimized_plan.root,
+                &mut entries.into_iter(),
+            );
+            return Ok(crate::query::profile::profile_result(&tree, elapsed_ms));
         }
 
         // Convert to physical plan using RDF planner

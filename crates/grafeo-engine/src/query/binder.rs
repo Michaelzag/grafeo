@@ -737,6 +737,7 @@ impl Binder {
                 );
                 Ok(())
             }
+            LogicalOperator::Construct(construct) => self.bind_operator(&construct.input),
         }
     }
 

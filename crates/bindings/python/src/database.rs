@@ -488,6 +488,19 @@ impl PyGrafeoDB {
         self.execute_language_impl("sparql", query, params)
     }
 
+    /// Return the physical execution plan for a SPARQL query without executing it.
+    ///
+    /// Equivalent to ``db.execute_sparql("EXPLAIN " + query)``.
+    #[cfg(feature = "sparql")]
+    #[pyo3(signature = (query, params=None))]
+    fn explain_sparql(
+        &self,
+        query: &str,
+        params: Option<&Bound<'_, pyo3::types::PyDict>>,
+    ) -> PyResult<PyQueryResult> {
+        self.execute_language_impl("sparql", &format!("EXPLAIN {query}"), params)
+    }
+
     /// Execute a query in a named language (e.g. `"graphql-rdf"`).
     #[pyo3(signature = (language, query, params=None))]
     fn execute_language(

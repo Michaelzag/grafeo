@@ -347,6 +347,12 @@ impl super::GrafeoDB {
     ///
     /// Returns an error if the checkpoint fails.
     pub fn wal_checkpoint(&self) -> Result<()> {
+        // Read-only databases have no WAL and the on-disk file is already a
+        // valid snapshot: nothing to checkpoint.
+        if self.read_only {
+            return Ok(());
+        }
+
         #[cfg(feature = "wal")]
         if let Some(ref wal) = self.wal {
             let epoch = self.lpg_store().current_epoch();

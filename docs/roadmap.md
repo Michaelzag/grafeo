@@ -97,7 +97,7 @@ The beta series focuses on correctness, completeness and real-world durability. 
 
 | Version    | Focus                                                                                |
 |------------|--------------------------------------------------------------------------------------|
-| **0.5.37** | RDF ecosystem: SPARQL HTTP Protocol, SHACL validation, bulk load                     |
+| **0.5.37** | RDF ecosystem: SPARQL execution overhaul, Ring Index planner, WCOJ, EXPLAIN ANALYZE  |
 | **0.5.38** | Algorithms, streaming results, memory introspection, testing unification             |
 | **0.5.39** | API stability markers, feature profile deprecation warnings, C FFI parity            |
 

@@ -11,7 +11,7 @@ use hashbrown::HashMap;
 use std::sync::Arc;
 
 /// Term dictionary mapping terms to compact integer IDs.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct TermDictionary {
     /// Term to ID mapping.
     term_to_id: HashMap<Arc<Term>, u32, foldhash::fast::RandomState>,
@@ -107,7 +107,7 @@ struct CompactTriple {
 /// - Term dictionary for string → ID mapping
 /// - Wavelet trees for each triple component
 /// - Succinct permutations for navigating between orderings
-#[derive(Debug)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TripleRing {
     /// Term dictionary.
     dict: TermDictionary,
@@ -406,6 +406,170 @@ impl TripleRing {
         let spo_to_osp = self.spo_to_osp.size_bytes();
 
         base + dict + subjects + predicates + objects + spo_to_pos + spo_to_osp
+    }
+
+    /// Serializes the Ring to a writer using bincode.
+    ///
+    /// The output contains the complete state: term dictionary, wavelet trees,
+    /// and permutations. Use [`TripleRing::load`] to restore.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error if writing fails or bincode encoding fails.
+    pub fn save(&self, mut writer: impl std::io::Write) -> std::io::Result<()> {
+        bincode::serde::encode_into_std_write(self, &mut writer, bincode::config::standard())
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Validates structural invariants after deserialization.
+    ///
+    /// Ensures that all internal arrays are consistent with `num_triples`
+    /// and the term dictionary, preventing panics from corrupted data.
+    fn validate(&self) -> std::io::Result<()> {
+        let n = self.num_triples;
+
+        // --- Term dictionary consistency ---
+        if self.dict.term_to_id.len() != self.dict.id_to_term.len() {
+            return Err(std::io::Error::other(format!(
+                "term dictionary inconsistent: term_to_id has {} entries, id_to_term has {}",
+                self.dict.term_to_id.len(),
+                self.dict.id_to_term.len()
+            )));
+        }
+
+        // --- Wavelet tree lengths must match num_triples ---
+        if self.subjects.len() != n {
+            return Err(std::io::Error::other(format!(
+                "subjects wavelet tree length {} != num_triples {n}",
+                self.subjects.len()
+            )));
+        }
+        if self.predicates.len() != n {
+            return Err(std::io::Error::other(format!(
+                "predicates wavelet tree length {} != num_triples {n}",
+                self.predicates.len()
+            )));
+        }
+        if self.objects.len() != n {
+            return Err(std::io::Error::other(format!(
+                "objects wavelet tree length {} != num_triples {n}",
+                self.objects.len()
+            )));
+        }
+
+        // --- Wavelet tree internal consistency ---
+        self.subjects
+            .validate()
+            .map_err(|e| std::io::Error::other(format!("subjects wavelet tree: {e}")))?;
+        self.predicates
+            .validate()
+            .map_err(|e| std::io::Error::other(format!("predicates wavelet tree: {e}")))?;
+        self.objects
+            .validate()
+            .map_err(|e| std::io::Error::other(format!("objects wavelet tree: {e}")))?;
+
+        // --- Wavelet tree symbols must reference valid dictionary IDs ---
+        let dict_len = self.dict.len() as u64;
+        for sym in self.subjects.alphabet() {
+            if sym >= dict_len {
+                return Err(std::io::Error::other(format!(
+                    "subjects wavelet tree contains symbol {sym} >= dict size {dict_len}"
+                )));
+            }
+        }
+        for sym in self.predicates.alphabet() {
+            if sym >= dict_len {
+                return Err(std::io::Error::other(format!(
+                    "predicates wavelet tree contains symbol {sym} >= dict size {dict_len}"
+                )));
+            }
+        }
+        for sym in self.objects.alphabet() {
+            if sym >= dict_len {
+                return Err(std::io::Error::other(format!(
+                    "objects wavelet tree contains symbol {sym} >= dict size {dict_len}"
+                )));
+            }
+        }
+
+        // --- Permutation lengths must match num_triples ---
+        if self.spo_to_pos.len() != n {
+            return Err(std::io::Error::other(format!(
+                "spo_to_pos permutation length {} != num_triples {n}",
+                self.spo_to_pos.len()
+            )));
+        }
+        if self.spo_to_osp.len() != n {
+            return Err(std::io::Error::other(format!(
+                "spo_to_osp permutation length {} != num_triples {n}",
+                self.spo_to_osp.len()
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Deserializes a Ring from a reader.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error if reading fails or the data is malformed.
+    pub fn load(mut reader: impl std::io::Read) -> std::io::Result<Self> {
+        let ring: Self =
+            bincode::serde::decode_from_std_read(&mut reader, bincode::config::standard())
+                .map_err(|e| std::io::Error::other(e.to_string()))?;
+        ring.validate()?;
+        Ok(ring)
+    }
+
+    /// Saves the Ring to a file path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error if the file cannot be created or writing fails.
+    pub fn save_to_file(&self, path: impl AsRef<std::path::Path>) -> std::io::Result<()> {
+        let file = std::fs::File::create(path)?;
+        let writer = std::io::BufWriter::new(file);
+        self.save(writer)
+    }
+
+    /// Loads a Ring from a file path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error if the file cannot be opened or the data is malformed.
+    pub fn load_from_file(path: impl AsRef<std::path::Path>) -> std::io::Result<Self> {
+        let file = std::fs::File::open(path)?;
+        let reader = std::io::BufReader::new(file);
+        Self::load(reader)
+    }
+
+    /// Serializes the Ring to a byte vector.
+    ///
+    /// Used by the Section trait for container persistence.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error if encoding fails.
+    pub fn save_to_bytes(&self) -> std::io::Result<Vec<u8>> {
+        bincode::serde::encode_to_vec(self, bincode::config::standard())
+            .map_err(|e| std::io::Error::other(e.to_string()))
+    }
+
+    /// Deserializes a Ring from a byte slice.
+    ///
+    /// Used by the Section trait when loading from the container.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error if the data is malformed.
+    pub fn load_from_bytes(data: &[u8]) -> std::io::Result<Self> {
+        let (ring, _bytes_read): (Self, _) =
+            bincode::serde::decode_from_slice(data, bincode::config::standard())
+                .map_err(|e| std::io::Error::other(e.to_string()))?;
+        ring.validate()?;
+        Ok(ring)
     }
 }
 
@@ -919,5 +1083,197 @@ mod tests {
         // Find on empty ring
         let results: Vec<Triple> = ring.find(&TriplePattern::any()).collect();
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_serialization_roundtrip() {
+        let triples = vec![
+            Triple::new(
+                Term::iri("http://ex.org/alix"),
+                Term::iri("http://xmlns.com/foaf/0.1/name"),
+                Term::literal("Alix"),
+            ),
+            Triple::new(
+                Term::iri("http://ex.org/gus"),
+                Term::iri("http://xmlns.com/foaf/0.1/name"),
+                Term::literal("Gus"),
+            ),
+            Triple::new(
+                Term::iri("http://ex.org/alix"),
+                Term::iri("http://xmlns.com/foaf/0.1/knows"),
+                Term::iri("http://ex.org/gus"),
+            ),
+        ];
+
+        let ring = TripleRing::from_triples(triples.into_iter());
+        assert_eq!(ring.len(), 3);
+
+        // Save to buffer
+        let mut buf = Vec::new();
+        ring.save(&mut buf).expect("save should succeed");
+        assert!(!buf.is_empty());
+
+        // Load from buffer
+        let loaded = TripleRing::load(&buf[..]).expect("load should succeed");
+        assert_eq!(loaded.len(), ring.len());
+        assert_eq!(loaded.num_terms(), ring.num_terms());
+
+        // Verify all triples round-trip
+        let original: Vec<Triple> = ring.find(&TriplePattern::any()).collect();
+        let restored: Vec<Triple> = loaded.find(&TriplePattern::any()).collect();
+        assert_eq!(original.len(), restored.len());
+
+        // Verify count operations work on loaded ring
+        let name_pattern = TriplePattern {
+            subject: None,
+            predicate: Some(Term::iri("http://xmlns.com/foaf/0.1/name")),
+            object: None,
+        };
+        assert_eq!(loaded.count(&name_pattern), 2);
+    }
+
+    #[test]
+    fn test_save_load_file() {
+        let triples = vec![
+            Triple::new(
+                Term::iri("http://ex.org/a"),
+                Term::iri("http://ex.org/p"),
+                Term::iri("http://ex.org/b"),
+            ),
+            Triple::new(
+                Term::iri("http://ex.org/b"),
+                Term::iri("http://ex.org/p"),
+                Term::iri("http://ex.org/c"),
+            ),
+        ];
+
+        let ring = TripleRing::from_triples(triples.into_iter());
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("test.ring");
+
+        ring.save_to_file(&path).expect("save_to_file");
+        let loaded = TripleRing::load_from_file(&path).expect("load_from_file");
+
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded.count(&TriplePattern::any()), 2);
+    }
+
+    #[test]
+    fn test_load_rejects_truncated_data() {
+        let triples = vec![make_triple("s1", "p1", "o1")];
+        let ring = TripleRing::from_triples(triples.into_iter());
+
+        let bytes = ring.save_to_bytes().expect("save_to_bytes");
+        // Truncate to half the data
+        let truncated = &bytes[..bytes.len() / 2];
+        let result = TripleRing::load_from_bytes(truncated);
+        assert!(result.is_err(), "truncated data should fail to load");
+    }
+
+    #[test]
+    fn test_load_rejects_empty_bytes() {
+        let result = TripleRing::load_from_bytes(&[]);
+        assert!(result.is_err(), "empty bytes should fail to load");
+    }
+
+    #[test]
+    fn test_load_rejects_garbage_bytes() {
+        let garbage = vec![0xFF; 256];
+        let result = TripleRing::load_from_bytes(&garbage);
+        assert!(result.is_err(), "garbage bytes should fail to load");
+    }
+
+    #[test]
+    fn test_load_from_bytes_roundtrip() {
+        let triples = vec![make_triple("s1", "p1", "o1"), make_triple("s2", "p2", "o2")];
+        let ring = TripleRing::from_triples(triples.into_iter());
+
+        let bytes = ring.save_to_bytes().expect("save_to_bytes");
+        let loaded = TripleRing::load_from_bytes(&bytes).expect("load_from_bytes");
+
+        assert_eq!(loaded.len(), ring.len());
+        assert_eq!(loaded.num_terms(), ring.num_terms());
+    }
+
+    #[test]
+    fn test_validate_passes_for_valid_ring() {
+        let triples = vec![
+            make_triple("alix", "knows", "gus"),
+            make_triple("alix", "likes", "vincent"),
+            make_triple("gus", "knows", "vincent"),
+        ];
+        let ring = TripleRing::from_triples(triples.into_iter());
+
+        // Validation should pass for a freshly constructed ring
+        assert!(ring.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_passes_for_empty_ring() {
+        let ring = TripleRing::from_triples(std::iter::empty());
+        assert!(ring.validate().is_ok());
+    }
+
+    #[test]
+    fn test_save_load_bytes_roundtrip() {
+        let triples = vec![
+            make_triple("alix", "knows", "gus"),
+            make_triple("alix", "likes", "vincent"),
+            make_triple("gus", "knows", "vincent"),
+        ];
+        let ring = TripleRing::from_triples(triples.into_iter());
+        let bytes = ring.save_to_bytes().unwrap();
+        let loaded = TripleRing::load_from_bytes(&bytes).unwrap();
+        assert_eq!(loaded.len(), ring.len());
+        // Verify query results match
+        let pattern = TriplePattern {
+            subject: None,
+            predicate: None,
+            object: None,
+        };
+        assert_eq!(loaded.count(&pattern), ring.count(&pattern));
+    }
+
+    #[test]
+    fn test_save_load_writer_reader_roundtrip() {
+        let triples = vec![
+            make_triple("alix", "knows", "gus"),
+            make_triple("gus", "likes", "vincent"),
+        ];
+        let ring = TripleRing::from_triples(triples.into_iter());
+        let mut buf = Vec::new();
+        ring.save(&mut buf).unwrap();
+        let loaded = TripleRing::load(&buf[..]).unwrap();
+        assert_eq!(loaded.len(), ring.len());
+    }
+
+    #[test]
+    fn test_load_from_bytes_corrupt_data_fails() {
+        let result = TripleRing::load_from_bytes(&[0xFF, 0xFE, 0xFD, 0xFC]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_save_load_file_roundtrip() {
+        let triples = vec![
+            make_triple("alix", "knows", "gus"),
+            make_triple("gus", "knows", "vincent"),
+        ];
+        let ring = TripleRing::from_triples(triples.into_iter());
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("ring_roundtrip.bin");
+        ring.save_to_file(&path).unwrap();
+        let loaded = TripleRing::load_from_file(&path).unwrap();
+        assert_eq!(loaded.len(), ring.len());
+        // dir dropped here: automatic cleanup even on panic
+    }
+
+    #[test]
+    fn test_save_load_empty_ring() {
+        let ring = TripleRing::from_triples(std::iter::empty());
+        let bytes = ring.save_to_bytes().unwrap();
+        let loaded = TripleRing::load_from_bytes(&bytes).unwrap();
+        assert_eq!(loaded.len(), 0);
     }
 }

@@ -1243,6 +1243,14 @@ impl GrafeoDB {
             section.deserialize(&data)?;
         }
 
+        // Restore Ring Index (if persisted)
+        #[cfg(feature = "ring-index")]
+        if let Some(entry) = dir.find(SectionType::RdfRing) {
+            let data = fm.read_section_data(entry)?;
+            let mut section = grafeo_core::index::ring::RdfRingSection::new(Arc::clone(rdf_store));
+            section.deserialize(&data)?;
+        }
+
         // Restore HNSW topology (if vector indexes exist in both catalog and section)
         #[cfg(feature = "vector-index")]
         if let Some(entry) = dir.find(SectionType::VectorStore) {
@@ -1988,6 +1996,15 @@ impl GrafeoDB {
             ));
         }
 
+        // Ring Index: only when Ring has been built
+        #[cfg(feature = "ring-index")]
+        if self.rdf_store.ring().is_some() {
+            let ring = grafeo_core::index::ring::RdfRingSection::new(Arc::clone(&self.rdf_store));
+            self.buffer_manager.register_consumer(Arc::new(
+                section_consumer::SectionConsumer::new(Arc::new(ring)),
+            ));
+        }
+
         // Vector indexes: dynamic consumer that re-queries the store on each
         // memory_usage() call, so dropped indexes are freed and new ones tracked.
         #[cfg(all(
@@ -2161,6 +2178,12 @@ impl GrafeoDB {
             sections.push(Box::new(rdf));
         }
 
+        #[cfg(feature = "ring-index")]
+        if self.rdf_store.ring().is_some() {
+            let ring = grafeo_core::index::ring::RdfRingSection::new(Arc::clone(&self.rdf_store));
+            sections.push(Box::new(ring));
+        }
+
         sections
     }
 
@@ -2184,11 +2207,15 @@ impl GrafeoDB {
             .as_ref()
             .ok_or_else(|| Error::Internal("backup requires a persistent database".to_string()))?;
 
-        // Checkpoint first to ensure the container has latest data
-        let _ = self.checkpoint_to_file(fm, flush::FlushReason::Explicit)?;
+        // Checkpoint to ensure the container has the latest data.
+        // Skip for read-only databases: the on-disk file is already a valid
+        // snapshot and the file manager rejects writes.
+        if !self.read_only {
+            let _ = self.checkpoint_to_file(fm, flush::FlushReason::Explicit)?;
+        }
 
         let current_epoch = self.transaction_manager.current_epoch();
-        backup::do_backup_full(backup_dir, fm.path(), self.wal.as_deref(), current_epoch)
+        backup::do_backup_full(backup_dir, fm, self.wal.as_deref(), current_epoch)
     }
 
     /// Creates an incremental backup containing WAL records since the last backup.
