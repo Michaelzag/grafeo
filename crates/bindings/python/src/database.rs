@@ -192,6 +192,28 @@ impl PyGrafeoDB {
         Ok(Some(map))
     }
 
+    /// Builds Arrow IPC bytes for all nodes (Rust-only helper).
+    #[cfg(feature = "arrow-export")]
+    fn nodes_ipc_bytes(&self) -> PyResult<Vec<u8>> {
+        let db = self.inner.read();
+        let store = db.store();
+        let nodes: Vec<_> = store.all_nodes().collect();
+        grafeo_engine::database::arrow::nodes_to_ipc_stream(&nodes).map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!("Arrow export failed: {e}"))
+        })
+    }
+
+    /// Builds Arrow IPC bytes for all edges (Rust-only helper).
+    #[cfg(feature = "arrow-export")]
+    fn edges_ipc_bytes(&self) -> PyResult<Vec<u8>> {
+        let db = self.inner.read();
+        let store = db.store();
+        let edges: Vec<_> = store.all_edges().collect();
+        grafeo_engine::database::arrow::edges_to_ipc_stream(&edges).map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!("Arrow export failed: {e}"))
+        })
+    }
+
     /// Executes a query in the given language, converting Python params and
     /// extracting entities from the result.
     fn execute_language_impl(
@@ -2262,6 +2284,84 @@ impl PyGrafeoDB {
         db.edge_count()
     }
 
+    // =====================================================================
+    // Arrow-based bulk export (nodes)
+    // =====================================================================
+
+    /// Export all nodes as a PyArrow Table.
+    ///
+    /// Schema: `id` (uint64), `labels` (list\<utf8\>), plus one column per
+    /// unique property key. Returns an Arrow Table directly, no per-element
+    /// PyO3 crossings.
+    ///
+    /// Requires pyarrow (`uv add pyarrow`).
+    ///
+    /// Example:
+    /// ```python
+    /// table = db.nodes_to_arrow()
+    /// # Use with DuckDB: duckdb.from_arrow(table)
+    /// ```
+    #[cfg(feature = "arrow-export")]
+    #[pyo3(signature = ())]
+    fn nodes_to_arrow(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let pa = py.import("pyarrow").map_err(|_| {
+            pyo3::exceptions::PyModuleNotFoundError::new_err(
+                "pyarrow is required for nodes_to_arrow(). Install it with: uv add pyarrow",
+            )
+        })?;
+        let ipc_mod = pa.getattr("ipc")?;
+        let ipc_bytes = self.nodes_ipc_bytes()?;
+        let py_bytes = pyo3::types::PyBytes::new(py, &ipc_bytes);
+        let reader = ipc_mod.call_method1("open_stream", (py_bytes,))?;
+        let table = reader.call_method0("read_all")?;
+        Ok(table.unbind())
+    }
+
+    /// Export all nodes as a Polars DataFrame.
+    ///
+    /// Requires polars (`uv add polars`). Does not require pyarrow.
+    ///
+    /// Example:
+    /// ```python
+    /// df = db.nodes_to_polars()
+    /// print(df.filter(pl.col("labels").list.contains("Person")))
+    /// ```
+    #[cfg(feature = "arrow-export")]
+    #[pyo3(signature = ())]
+    fn nodes_to_polars(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let pl = py.import("polars").map_err(|_| {
+            pyo3::exceptions::PyModuleNotFoundError::new_err(
+                "polars is required for nodes_to_polars(). Install it with: uv add polars",
+            )
+        })?;
+        let io = py.import("io")?;
+        let ipc_bytes = self.nodes_ipc_bytes()?;
+        let py_bytes = pyo3::types::PyBytes::new(py, &ipc_bytes);
+        let buf = io.call_method1("BytesIO", (py_bytes,))?;
+        let df = pl.call_method1("read_ipc", (buf,))?;
+        Ok(df.unbind())
+    }
+
+    /// Export all nodes as a pandas DataFrame (via Arrow).
+    ///
+    /// Requires pandas and pyarrow (`uv add pandas pyarrow`).
+    /// This is the fast path: builds an Arrow RecordBatch in Rust, serializes
+    /// to IPC, then converts to pandas via pyarrow. ~10-100x faster than the
+    /// element-by-element `nodes_df()` fallback at scale.
+    ///
+    /// Example:
+    /// ```python
+    /// df = db.nodes_to_pandas()
+    /// print(df[df["labels"].apply(lambda l: "Person" in l)])
+    /// ```
+    #[cfg(feature = "arrow-export")]
+    #[pyo3(signature = ())]
+    fn nodes_to_pandas(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let table = self.nodes_to_arrow(py)?;
+        let df = table.call_method0(py, "to_pandas")?;
+        Ok(df)
+    }
+
     /// Export all nodes as a pandas DataFrame.
     ///
     /// Columns: `id` (int), `labels` (list[str]), plus one column per unique
@@ -2276,6 +2376,13 @@ impl PyGrafeoDB {
     /// ```
     #[pyo3(signature = ())]
     fn nodes_df(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        // Fast path: use Arrow IPC when pyarrow is available
+        #[cfg(feature = "arrow-export")]
+        if py.import("pyarrow").is_ok() {
+            return self.nodes_to_pandas(py);
+        }
+
+        // Slow fallback: element-by-element via PyO3
         let pd = py.import("pandas").map_err(|_| {
             pyo3::exceptions::PyModuleNotFoundError::new_err(
                 "pandas is required for nodes_df(). Install it with: uv add pandas",
@@ -2338,6 +2445,74 @@ impl PyGrafeoDB {
         Ok(df.unbind())
     }
 
+    // =====================================================================
+    // Arrow-based bulk export (edges)
+    // =====================================================================
+
+    /// Export all edges as a PyArrow Table.
+    ///
+    /// Schema: `id` (uint64), `type` (utf8), `source` (uint64), `target` (uint64),
+    /// plus one column per unique property key.
+    ///
+    /// Requires pyarrow (`uv add pyarrow`).
+    ///
+    /// Example:
+    /// ```python
+    /// table = db.edges_to_arrow()
+    /// # Use with DuckDB: duckdb.from_arrow(table)
+    /// ```
+    #[cfg(feature = "arrow-export")]
+    #[pyo3(signature = ())]
+    fn edges_to_arrow(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let pa = py.import("pyarrow").map_err(|_| {
+            pyo3::exceptions::PyModuleNotFoundError::new_err(
+                "pyarrow is required for edges_to_arrow(). Install it with: uv add pyarrow",
+            )
+        })?;
+        let ipc_mod = pa.getattr("ipc")?;
+        let ipc_bytes = self.edges_ipc_bytes()?;
+        let py_bytes = pyo3::types::PyBytes::new(py, &ipc_bytes);
+        let reader = ipc_mod.call_method1("open_stream", (py_bytes,))?;
+        let table = reader.call_method0("read_all")?;
+        Ok(table.unbind())
+    }
+
+    /// Export all edges as a Polars DataFrame.
+    ///
+    /// Requires polars (`uv add polars`). Does not require pyarrow.
+    ///
+    /// Example:
+    /// ```python
+    /// df = db.edges_to_polars()
+    /// print(df.filter(pl.col("type") == "KNOWS"))
+    /// ```
+    #[cfg(feature = "arrow-export")]
+    #[pyo3(signature = ())]
+    fn edges_to_polars(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let pl = py.import("polars").map_err(|_| {
+            pyo3::exceptions::PyModuleNotFoundError::new_err(
+                "polars is required for edges_to_polars(). Install it with: uv add polars",
+            )
+        })?;
+        let io = py.import("io")?;
+        let ipc_bytes = self.edges_ipc_bytes()?;
+        let py_bytes = pyo3::types::PyBytes::new(py, &ipc_bytes);
+        let buf = io.call_method1("BytesIO", (py_bytes,))?;
+        let df = pl.call_method1("read_ipc", (buf,))?;
+        Ok(df.unbind())
+    }
+
+    /// Export all edges as a pandas DataFrame (via Arrow).
+    ///
+    /// Requires pandas and pyarrow (`uv add pandas pyarrow`).
+    #[cfg(feature = "arrow-export")]
+    #[pyo3(signature = ())]
+    fn edges_to_pandas(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let table = self.edges_to_arrow(py)?;
+        let df = table.call_method0(py, "to_pandas")?;
+        Ok(df)
+    }
+
     /// Export all edges as a pandas DataFrame.
     ///
     /// Columns: `id` (int), `source` (int), `target` (int), `type` (str),
@@ -2352,6 +2527,13 @@ impl PyGrafeoDB {
     /// ```
     #[pyo3(signature = ())]
     fn edges_df(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        // Fast path: use Arrow IPC when pyarrow is available
+        #[cfg(feature = "arrow-export")]
+        if py.import("pyarrow").is_ok() {
+            return self.edges_to_pandas(py);
+        }
+
+        // Slow fallback: element-by-element via PyO3
         let pd = py.import("pandas").map_err(|_| {
             pyo3::exceptions::PyModuleNotFoundError::new_err(
                 "pandas is required for edges_df(). Install it with: uv add pandas",

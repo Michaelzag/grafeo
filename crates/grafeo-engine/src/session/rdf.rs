@@ -339,9 +339,8 @@ impl Session {
 
     /// Validates a named data graph against shapes in another named graph.
     ///
-    /// SHACL Core constraints evaluate against the named data graph. SHACL-SPARQL
-    /// constraints (`sh:sparql`) execute against the session's default dataset,
-    /// so they should use `GRAPH <name> { ... }` to target the named data graph.
+    /// Both SHACL Core constraints and SHACL-SPARQL constraints are scoped to
+    /// the named data graph (SPARQL queries receive `FROM <data_graph_name>`).
     ///
     /// # Errors
     ///
@@ -362,7 +361,8 @@ impl Session {
                 "Named graph '{shapes_graph_name}' not found"
             ))
         })?;
-        let executor = crate::validation::SessionSparqlExecutor::new(self);
+        let executor =
+            crate::validation::SessionSparqlExecutor::with_graph(self, data_graph_name.to_string());
         grafeo_core::graph::rdf::shacl::validate(&data_store, &shapes_store, Some(&executor))
             .map_err(|e| grafeo_common::utils::error::Error::Internal(e.to_string()))
     }

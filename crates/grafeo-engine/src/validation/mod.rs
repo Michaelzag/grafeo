@@ -18,12 +18,26 @@ use crate::session::Session;
 /// SHACL-SPARQL constraints to be evaluated via the engine's SPARQL pipeline.
 pub struct SessionSparqlExecutor<'a> {
     session: &'a Session,
+    /// When set, wraps queries in `GRAPH <name> { ... }` to scope execution
+    /// to a named data graph (used by `validate_shacl_graph`).
+    graph_name: Option<String>,
 }
 
 impl<'a> SessionSparqlExecutor<'a> {
-    /// Creates a new executor wrapping the given session.
+    /// Creates a new executor wrapping the given session (default graph scope).
     pub fn new(session: &'a Session) -> Self {
-        Self { session }
+        Self {
+            session,
+            graph_name: None,
+        }
+    }
+
+    /// Creates an executor scoped to a named graph.
+    pub fn with_graph(session: &'a Session, graph_name: String) -> Self {
+        Self {
+            session,
+            graph_name: Some(graph_name),
+        }
     }
 }
 
@@ -50,7 +64,15 @@ impl SparqlExecutor for SessionSparqlExecutor<'_> {
             _ => return Ok(Vec::new()),
         };
 
-        let substituted = query.replace("$this", &this_str);
+        let mut substituted = query.replace("$this", &this_str);
+
+        // Scope to named data graph via FROM clause when configured
+        if let Some(ref graph) = self.graph_name {
+            // Insert FROM <graph> after SELECT (and optional DISTINCT/REDUCED)
+            if let Some(pos) = substituted.find("WHERE") {
+                substituted.insert_str(pos, &format!("FROM <{graph}> "));
+            }
+        }
 
         let result = self
             .session
