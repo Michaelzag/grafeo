@@ -1261,12 +1261,12 @@ mod tests {
             make_triple("gus", "knows", "vincent"),
         ];
         let ring = TripleRing::from_triples(triples.into_iter());
-        let dir = std::env::temp_dir();
-        let path = dir.join("grafeo_test_ring.bin");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("ring_roundtrip.bin");
         ring.save_to_file(&path).unwrap();
         let loaded = TripleRing::load_from_file(&path).unwrap();
         assert_eq!(loaded.len(), ring.len());
-        std::fs::remove_file(&path).ok();
+        // dir dropped here: automatic cleanup even on panic
     }
 
     #[test]
