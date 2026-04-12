@@ -13,6 +13,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![MSRV](https://img.shields.io/badge/MSRV-1.91.1-blue)](https://www.rust-lang.org)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org)
+[![Discord](https://img.shields.io/discord/1361052722498076793?logo=discord&label=Discord)](https://discord.gg/jrgMD2Zj3)
 
 # Grafeo
 

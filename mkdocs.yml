@@ -169,6 +169,9 @@ extra:
     - icon: simple/rust
       link: https://crates.io/crates/grafeo
       name: crates.io
+    - icon: fontawesome/brands/discord
+      link: https://discord.gg/jrgMD2Zj3
+      name: Discord
 
   version:
     provider: mike
