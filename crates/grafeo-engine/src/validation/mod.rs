@@ -38,12 +38,13 @@ impl SparqlExecutor for SessionSparqlExecutor<'_> {
             Term::Iri(iri) => format!("<{}>", iri.as_str()),
             Term::BlankNode(bnode) => format!("_:{}", bnode.id()),
             Term::Literal(lit) => {
+                let escaped = escape_ntriples(lit.value());
                 if let Some(lang) = lit.language() {
-                    format!("\"{}\"@{}", lit.value(), lang)
+                    format!("\"{escaped}\"@{}", lang)
                 } else if lit.datatype() != "http://www.w3.org/2001/XMLSchema#string" {
-                    format!("\"{}\"^^<{}>", lit.value(), lit.datatype())
+                    format!("\"{escaped}\"^^<{}>", lit.datatype())
                 } else {
-                    format!("\"{}\"", lit.value())
+                    format!("\"{escaped}\"")
                 }
             }
             _ => return Ok(Vec::new()),
@@ -73,6 +74,22 @@ impl SparqlExecutor for SessionSparqlExecutor<'_> {
 
         Ok(rows)
     }
+}
+
+/// Escapes a string for N-Triples literal representation.
+fn escape_ntriples(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 /// Converts a `grafeo_common::types::Value` to an RDF `Term`.

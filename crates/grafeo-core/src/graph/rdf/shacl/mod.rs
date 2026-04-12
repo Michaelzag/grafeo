@@ -91,7 +91,7 @@ pub fn validate(
 
         let focus_nodes = resolve_targets(shape, data_graph);
         for focus_node in &focus_nodes {
-            let results = validate_shape(shape, focus_node, data_graph, &shapes, sparql_executor);
+            let results = validate_shape(shape, focus_node, data_graph, &shapes, sparql_executor)?;
             all_results.extend(results);
         }
     }
@@ -106,7 +106,7 @@ fn validate_shape(
     data_graph: &RdfStore,
     all_shapes: &[Shape],
     sparql_executor: Option<&dyn SparqlExecutor>,
-) -> Vec<ValidationResult> {
+) -> Result<Vec<ValidationResult>, ShaclError> {
     let mut visited = HashSet::new();
     let mut results = Vec::new();
 
@@ -133,8 +133,9 @@ fn validate_shape(
                         sc,
                         focus_node,
                         shape,
+                        None,
                         sparql_executor,
-                    ));
+                    )?);
                 }
             }
 
@@ -159,8 +160,9 @@ fn validate_shape(
                             sc,
                             focus_node,
                             &ps_shape,
+                            Some(&ps.path),
                             sparql_executor,
-                        ));
+                        )?);
                     } else {
                         results.extend(evaluate_constraint(c, &path_values, &mut ps_ctx));
                     }
@@ -183,8 +185,9 @@ fn validate_shape(
                         sc,
                         focus_node,
                         shape,
+                        Some(&ps.path),
                         sparql_executor,
-                    ));
+                    )?);
                 } else {
                     results.extend(evaluate_constraint(c, &path_values, &mut ctx));
                 }
@@ -192,7 +195,7 @@ fn validate_shape(
         }
     }
 
-    results
+    Ok(results)
 }
 
 /// Evaluates a SHACL-SPARQL constraint using the optional executor.
@@ -200,15 +203,16 @@ fn evaluate_sparql_constraint(
     sc: &shape::SparqlConstraint,
     focus_node: &Term,
     shape: &Shape,
+    result_path: Option<&PropertyPath>,
     sparql_executor: Option<&dyn SparqlExecutor>,
-) -> Vec<ValidationResult> {
+) -> Result<Vec<ValidationResult>, ShaclError> {
     if sc.deactivated {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
     let Some(executor) = sparql_executor else {
         // No executor provided: skip SPARQL constraints silently
-        return Vec::new();
+        return Ok(Vec::new());
     };
 
     // Build the full query with prefix declarations
@@ -219,21 +223,8 @@ fn evaluate_sparql_constraint(
     }
     query.push_str(&sc.select);
 
-    // Execute the query
-    let rows = match executor.execute(&query, focus_node) {
-        Ok(rows) => rows,
-        Err(e) => {
-            return vec![ValidationResult {
-                focus_node: focus_node.clone(),
-                source_constraint_component: format!("{}SPARQLConstraintComponent", SH::NS),
-                source_shape: shape.id().clone(),
-                value: None,
-                result_path: None,
-                severity: shape.severity(),
-                message: Some(format!("SPARQL constraint failed: {e}")),
-            }];
-        }
-    };
+    // Execute the query, propagating errors instead of swallowing them
+    let rows = executor.execute(&query, focus_node)?;
 
     // Each result row is a violation
     let mut results = Vec::new();
@@ -252,13 +243,13 @@ fn evaluate_sparql_constraint(
             source_constraint_component: format!("{}SPARQLConstraintComponent", SH::NS),
             source_shape: shape.id().clone(),
             value,
-            result_path: None,
+            result_path: result_path.cloned(),
             severity: shape.severity(),
             message,
         });
     }
 
-    results
+    Ok(results)
 }
 
 // =========================================================================

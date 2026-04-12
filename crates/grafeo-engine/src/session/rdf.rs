@@ -353,6 +353,13 @@ impl Session {
                 "Named graph '{data_graph_name}' not found"
             ))
         })?;
-        crate::validation::validate_shacl(self, &data_store, shapes_graph_name)
+        let shapes_store = self.rdf_store.graph(shapes_graph_name).ok_or_else(|| {
+            grafeo_common::utils::error::Error::Internal(format!(
+                "Named graph '{shapes_graph_name}' not found"
+            ))
+        })?;
+        let executor = crate::validation::SessionSparqlExecutor::new(self);
+        grafeo_core::graph::rdf::shacl::validate(&data_store, &shapes_store, Some(&executor))
+            .map_err(|e| grafeo_common::utils::error::Error::Internal(e.to_string()))
     }
 }
