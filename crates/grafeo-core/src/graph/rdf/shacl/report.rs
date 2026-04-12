@@ -171,8 +171,9 @@ impl ValidationReport {
             }
 
             // Result path (optional)
+            let mut path_counter = 0;
             if let Some(ref path) = result.result_path {
-                let path_node = serialize_path(path, i, &mut triples);
+                let path_node = serialize_path(path, i, &mut triples, &mut path_counter);
                 triples.push(Triple::new(
                     result_node.clone(),
                     Term::iri(SH::RESULT_PATH),
@@ -209,24 +210,28 @@ impl ValidationReport {
 /// Serializes a [`PropertyPath`] as RDF triples and returns the term representing it.
 ///
 /// Simple predicate paths return the IRI directly. Complex paths produce blank-node
-/// structures following the SHACL path vocabulary.
+/// structures following the SHACL path vocabulary. The `counter` parameter ensures
+/// deterministic blank-node IDs within a single `to_triples()` call.
 fn serialize_path(
     path: &PropertyPath,
     result_idx: usize,
     triples: &mut Vec<crate::graph::rdf::Triple>,
+    counter: &mut usize,
 ) -> Term {
     use crate::graph::rdf::Triple;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    /// Allocates a fresh blank node scoped to this result.
+    fn next_bnode(result_idx: usize, counter: &mut usize) -> Term {
+        let id = *counter;
+        *counter += 1;
+        Term::blank(format!("path_{result_idx}_{id}"))
+    }
 
     match path {
         PropertyPath::Predicate(iri) => iri.clone(),
         PropertyPath::Inverse(inner) => {
-            let bnode = Term::blank(format!(
-                "path_{result_idx}_{}",
-                COUNTER.fetch_add(1, Ordering::Relaxed)
-            ));
-            let inner_term = serialize_path(inner, result_idx, triples);
+            let bnode = next_bnode(result_idx, counter);
+            let inner_term = serialize_path(inner, result_idx, triples, counter);
             triples.push(Triple::new(
                 bnode.clone(),
                 Term::iri(SH::INVERSE_PATH),
@@ -235,11 +240,8 @@ fn serialize_path(
             bnode
         }
         PropertyPath::ZeroOrMore(inner) => {
-            let bnode = Term::blank(format!(
-                "path_{result_idx}_{}",
-                COUNTER.fetch_add(1, Ordering::Relaxed)
-            ));
-            let inner_term = serialize_path(inner, result_idx, triples);
+            let bnode = next_bnode(result_idx, counter);
+            let inner_term = serialize_path(inner, result_idx, triples, counter);
             triples.push(Triple::new(
                 bnode.clone(),
                 Term::iri(SH::ZERO_OR_MORE_PATH),
@@ -248,11 +250,8 @@ fn serialize_path(
             bnode
         }
         PropertyPath::OneOrMore(inner) => {
-            let bnode = Term::blank(format!(
-                "path_{result_idx}_{}",
-                COUNTER.fetch_add(1, Ordering::Relaxed)
-            ));
-            let inner_term = serialize_path(inner, result_idx, triples);
+            let bnode = next_bnode(result_idx, counter);
+            let inner_term = serialize_path(inner, result_idx, triples, counter);
             triples.push(Triple::new(
                 bnode.clone(),
                 Term::iri(SH::ONE_OR_MORE_PATH),
@@ -261,11 +260,8 @@ fn serialize_path(
             bnode
         }
         PropertyPath::ZeroOrOne(inner) => {
-            let bnode = Term::blank(format!(
-                "path_{result_idx}_{}",
-                COUNTER.fetch_add(1, Ordering::Relaxed)
-            ));
-            let inner_term = serialize_path(inner, result_idx, triples);
+            let bnode = next_bnode(result_idx, counter);
+            let inner_term = serialize_path(inner, result_idx, triples, counter);
             triples.push(Triple::new(
                 bnode.clone(),
                 Term::iri(SH::ZERO_OR_ONE_PATH),
@@ -273,13 +269,10 @@ fn serialize_path(
             ));
             bnode
         }
-        PropertyPath::Sequence(paths) => serialize_rdf_list(paths, result_idx, triples),
+        PropertyPath::Sequence(paths) => serialize_rdf_list(paths, result_idx, triples, counter),
         PropertyPath::Alternative(paths) => {
-            let bnode = Term::blank(format!(
-                "path_{result_idx}_{}",
-                COUNTER.fetch_add(1, Ordering::Relaxed)
-            ));
-            let list_head = serialize_rdf_list(paths, result_idx, triples);
+            let bnode = next_bnode(result_idx, counter);
+            let list_head = serialize_rdf_list(paths, result_idx, triples, counter);
             triples.push(Triple::new(
                 bnode.clone(),
                 Term::iri(SH::ALTERNATIVE_PATH),
@@ -295,10 +288,9 @@ fn serialize_rdf_list(
     paths: &[PropertyPath],
     result_idx: usize,
     triples: &mut Vec<crate::graph::rdf::Triple>,
+    counter: &mut usize,
 ) -> Term {
     use crate::graph::rdf::Triple;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
     if paths.is_empty() {
         return Term::iri(RDF::NIL);
@@ -308,11 +300,10 @@ fn serialize_rdf_list(
     let mut prev: Option<Term> = None;
 
     for path in paths {
-        let node = Term::blank(format!(
-            "list_{result_idx}_{}",
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
-        let item = serialize_path(path, result_idx, triples);
+        let id = *counter;
+        *counter += 1;
+        let node = Term::blank(format!("list_{result_idx}_{id}"));
+        let item = serialize_path(path, result_idx, triples, counter);
         triples.push(Triple::new(node.clone(), Term::iri(RDF::FIRST), item));
 
         if let Some(prev_node) = prev {
