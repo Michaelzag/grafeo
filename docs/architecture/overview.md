@@ -58,7 +58,7 @@ sequenceDiagram
 
 1. **LPG Store** - Node and edge storage
 2. **Property Store** - Columnar property storage
-3. **Indexes** - Hash, adjacency, trie, vector (HNSW), text (BM25), ring
+3. **Indexes** - Hash, adjacency, trie, vector (HNSW), text (BM25), [ring](storage/ring-index.md) (wavelet-tree compact RDF triple index)
 4. **WAL** - Durability and recovery
 
 ### Memory

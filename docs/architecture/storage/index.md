@@ -71,4 +71,10 @@ graph TB
 
     `.grafeo` file format: section-based container with crash safety.
 
+-   **[Ring Index](ring-index.md)**
+
+    ---
+
+    Wavelet-tree based compact triple index for RDF data (~3x space reduction).
+
 </div>

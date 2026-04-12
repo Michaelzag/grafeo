@@ -166,6 +166,48 @@ for row in result:
     print(f"  {row['a1.name']} and {row['a2.name']} in {row['m.title']}")
 ```
 
+## Validate with SHACL
+
+Use [SHACL](https://www.w3.org/TR/shacl/) (Shapes Constraint Language) to validate that nodes in the knowledge graph conform to expected shapes. SHACL validation requires the `rdf` persona profile.
+
+First, load your shapes into a named graph using SPARQL:
+
+```python
+db.execute_sparql("""
+    INSERT DATA {
+        GRAPH <http://example.org/shapes> {
+            <http://example.org/shapes/MovieShape>
+                a <http://www.w3.org/ns/shacl#NodeShape> ;
+                <http://www.w3.org/ns/shacl#targetClass> <http://example.org/Movie> ;
+                <http://www.w3.org/ns/shacl#property> [
+                    <http://www.w3.org/ns/shacl#path> <http://example.org/title> ;
+                    <http://www.w3.org/ns/shacl#datatype> <http://www.w3.org/2001/XMLSchema#string> ;
+                    <http://www.w3.org/ns/shacl#minCount> 1
+                ] ;
+                <http://www.w3.org/ns/shacl#property> [
+                    <http://www.w3.org/ns/shacl#path> <http://example.org/year> ;
+                    <http://www.w3.org/ns/shacl#datatype> <http://www.w3.org/2001/XMLSchema#integer> ;
+                    <http://www.w3.org/ns/shacl#minCount> 1
+                ] .
+        }
+    }
+""")
+```
+
+Run validation against the shapes graph:
+
+```python
+report = db.validate_shacl("http://example.org/shapes")
+
+if report["conforms"]:
+    print("All data conforms to the shapes.")
+else:
+    print(f"Validation failed with {len(report['results'])} violations:")
+    print(report["results_text"])
+```
+
+Each result in `report["results"]` is a dict with `focus_node`, `severity`, `source_shape`, `source_constraint_component`, and optionally `value` and `message`.
+
 ## Next Steps
 
 - [Recommendation Engine Tutorial](recommendations.md)
