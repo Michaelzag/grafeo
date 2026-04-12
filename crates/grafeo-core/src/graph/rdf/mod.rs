@@ -44,6 +44,9 @@ mod term;
 mod triple;
 pub mod turtle;
 
+#[cfg(feature = "shacl")]
+pub mod shacl;
+
 pub use dictionary::TermDictionary;
 pub use graph_store_adapter::RdfGraphStoreAdapter;
 pub use section::RdfStoreSection;
