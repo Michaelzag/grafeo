@@ -692,6 +692,14 @@ impl RdfStore {
             .store(false, std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// Sets the Ring Index directly (used during container deserialization).
+    #[cfg(feature = "ring-index")]
+    pub fn set_ring(&self, ring: crate::index::ring::TripleRing) {
+        *self.ring.write() = Some(Arc::new(ring));
+        self.ring_stale
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+
     // =========================================================================
     // Bulk loading
     // =========================================================================

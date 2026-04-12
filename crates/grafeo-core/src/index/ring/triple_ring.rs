@@ -453,6 +453,32 @@ impl TripleRing {
         let reader = std::io::BufReader::new(file);
         Self::load(reader)
     }
+
+    /// Serializes the Ring to a byte vector.
+    ///
+    /// Used by the Section trait for container persistence.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error if encoding fails.
+    pub fn save_to_bytes(&self) -> std::io::Result<Vec<u8>> {
+        bincode::serde::encode_to_vec(self, bincode::config::standard())
+            .map_err(|e| std::io::Error::other(e.to_string()))
+    }
+
+    /// Deserializes a Ring from a byte slice.
+    ///
+    /// Used by the Section trait when loading from the container.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error if the data is malformed.
+    pub fn load_from_bytes(data: &[u8]) -> std::io::Result<Self> {
+        let (ring, _bytes_read) =
+            bincode::serde::decode_from_slice(data, bincode::config::standard())
+                .map_err(|e| std::io::Error::other(e.to_string()))?;
+        Ok(ring)
+    }
 }
 
 /// Iterator over triples matching a pattern.

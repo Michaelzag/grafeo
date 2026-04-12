@@ -197,6 +197,12 @@ impl CheckpointTimer {
             sections.push(Box::new(rdf));
         }
 
+        #[cfg(feature = "ring-index")]
+        if rdf_store.ring().is_some() {
+            let ring = grafeo_core::index::ring::RdfRingSection::new(Arc::clone(rdf_store));
+            sections.push(Box::new(ring));
+        }
+
         #[cfg(feature = "vector-index")]
         {
             let indexes = store.vector_index_entries();

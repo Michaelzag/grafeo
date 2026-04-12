@@ -1243,6 +1243,14 @@ impl GrafeoDB {
             section.deserialize(&data)?;
         }
 
+        // Restore Ring Index (if persisted)
+        #[cfg(feature = "ring-index")]
+        if let Some(entry) = dir.find(SectionType::RdfRing) {
+            let data = fm.read_section_data(entry)?;
+            let mut section = grafeo_core::index::ring::RdfRingSection::new(Arc::clone(rdf_store));
+            section.deserialize(&data)?;
+        }
+
         // Restore HNSW topology (if vector indexes exist in both catalog and section)
         #[cfg(feature = "vector-index")]
         if let Some(entry) = dir.find(SectionType::VectorStore) {
@@ -1988,6 +1996,15 @@ impl GrafeoDB {
             ));
         }
 
+        // Ring Index: only when Ring has been built
+        #[cfg(feature = "ring-index")]
+        if self.rdf_store.ring().is_some() {
+            let ring = grafeo_core::index::ring::RdfRingSection::new(Arc::clone(&self.rdf_store));
+            self.buffer_manager.register_consumer(Arc::new(
+                section_consumer::SectionConsumer::new(Arc::new(ring)),
+            ));
+        }
+
         // Vector indexes: dynamic consumer that re-queries the store on each
         // memory_usage() call, so dropped indexes are freed and new ones tracked.
         #[cfg(all(
@@ -2159,6 +2176,12 @@ impl GrafeoDB {
         if !self.rdf_store.is_empty() || self.rdf_store.graph_count() > 0 {
             let rdf = grafeo_core::graph::rdf::RdfStoreSection::new(Arc::clone(&self.rdf_store));
             sections.push(Box::new(rdf));
+        }
+
+        #[cfg(feature = "ring-index")]
+        if self.rdf_store.ring().is_some() {
+            let ring = grafeo_core::index::ring::RdfRingSection::new(Arc::clone(&self.rdf_store));
+            sections.push(Box::new(ring));
         }
 
         sections
