@@ -646,4 +646,55 @@ mod tests {
         let wt = WaveletTree::new(&seq);
         assert!(wt.validate().is_ok());
     }
+
+    #[test]
+    fn test_validate_bad_height() {
+        // sigma=4 expects height=2. Corrupt height to 5 and pad levels
+        // so the levels-count check passes but height/sigma check catches it.
+        let wt = WaveletTree::new(&[0, 1, 2, 3]);
+        let mut json_val: serde_json::Value = serde_json::to_value(&wt).unwrap();
+        let first_level = json_val["levels"][0].clone();
+        let levels = json_val["levels"].as_array_mut().unwrap();
+        // Pad to 5 levels so levels.len() == height
+        while levels.len() < 5 {
+            levels.push(first_level.clone());
+        }
+        json_val["height"] = serde_json::json!(5);
+        let corrupted: WaveletTree = serde_json::from_value(json_val).unwrap();
+        let err = corrupted.validate().unwrap_err();
+        assert!(
+            err.contains("height") && err.contains("inconsistent"),
+            "expected height-inconsistent error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_bad_level_count() {
+        let wt = WaveletTree::new(&[0, 1, 2, 3]);
+        let mut json_val: serde_json::Value = serde_json::to_value(&wt).unwrap();
+        // Remove one level so levels.len() != height
+        let levels = json_val["levels"].as_array_mut().unwrap();
+        levels.pop();
+        let corrupted: WaveletTree = serde_json::from_value(json_val).unwrap();
+        let err = corrupted.validate().unwrap_err();
+        assert!(
+            err.contains("levels count") && err.contains("height"),
+            "expected levels/height mismatch error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_mismatched_symbols() {
+        let wt = WaveletTree::new(&[0, 1, 2, 3]);
+        let mut json_val: serde_json::Value = serde_json::to_value(&wt).unwrap();
+        // Remove one symbol so symbols.len() != sigma
+        let symbols = json_val["symbols"].as_array_mut().unwrap();
+        symbols.pop();
+        let corrupted: WaveletTree = serde_json::from_value(json_val).unwrap();
+        let err = corrupted.validate().unwrap_err();
+        assert!(
+            err.contains("symbols count") && err.contains("sigma"),
+            "expected symbols/sigma mismatch error, got: {err}"
+        );
+    }
 }

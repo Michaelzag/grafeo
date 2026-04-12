@@ -844,6 +844,7 @@ fn generate_single_test(
         "tiered-storage",
         "succinct-indexes",
         "ring-index",
+        "shacl",
         "block-stm",
         "wal",
         "spill",

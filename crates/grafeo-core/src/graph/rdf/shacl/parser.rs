@@ -1179,4 +1179,276 @@ mod tests {
         let result = parse_shapes(&store);
         assert!(result.is_err());
     }
+
+    // =================================================================
+    // Cycle detection tests
+    // =================================================================
+
+    #[test]
+    fn test_cyclic_shape_reference_detected() {
+        let store = RdfStore::new();
+
+        // Shape A: a node shape with sh:node pointing to shape B
+        let shape_a = Term::iri("http://example.org/ShapeA");
+        let shape_b = Term::iri("http://example.org/ShapeB");
+
+        store.insert(Triple::new(
+            shape_a.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        store.insert(Triple::new(
+            shape_a.clone(),
+            Term::iri(SH::TARGET_NODE),
+            Term::iri("http://example.org/x"),
+        ));
+        store.insert(Triple::new(
+            shape_a.clone(),
+            Term::iri(SH::NODE),
+            shape_b.clone(),
+        ));
+
+        // Shape B: a node shape with sh:node pointing back to shape A
+        store.insert(Triple::new(
+            shape_b.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        store.insert(Triple::new(
+            shape_b.clone(),
+            Term::iri(SH::TARGET_NODE),
+            Term::iri("http://example.org/y"),
+        ));
+        store.insert(Triple::new(shape_b, Term::iri(SH::NODE), shape_a));
+
+        let result = parse_shapes(&store);
+        assert!(result.is_err(), "Should detect cyclic reference");
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("Cyclic"),
+            "Error should mention 'Cyclic', got: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn test_self_referencing_shape_detected() {
+        let store = RdfStore::new();
+
+        // Shape A has sh:not pointing to itself
+        let shape_a = Term::iri("http://example.org/SelfShape");
+
+        store.insert(Triple::new(
+            shape_a.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        store.insert(Triple::new(
+            shape_a.clone(),
+            Term::iri(SH::TARGET_NODE),
+            Term::iri("http://example.org/x"),
+        ));
+        store.insert(Triple::new(shape_a.clone(), Term::iri(SH::NOT), shape_a));
+
+        let result = parse_shapes(&store);
+        assert!(result.is_err(), "Should detect self-referencing shape");
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("Cyclic"),
+            "Error should mention 'Cyclic', got: {err_msg}"
+        );
+    }
+
+    // =================================================================
+    // sh:nodeKind IRI validation tests
+    // =================================================================
+
+    #[test]
+    fn test_node_kind_rejects_literal_value() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://example.org/S");
+
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::TARGET_NODE),
+            Term::iri("http://example.org/x"),
+        ));
+        // Provide sh:nodeKind as a literal string instead of an IRI
+        store.insert(Triple::new(
+            shape,
+            Term::iri(SH::NODE_KIND),
+            Term::literal("http://www.w3.org/ns/shacl#IRI"),
+        ));
+
+        let result = parse_shapes(&store);
+        assert!(result.is_err(), "Literal sh:nodeKind should be rejected");
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("must be an IRI"),
+            "Error should mention 'must be an IRI', got: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn test_node_kind_accepts_iri_value() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://example.org/S");
+
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::TARGET_NODE),
+            Term::iri("http://example.org/x"),
+        ));
+        // Correctly provide sh:nodeKind as an IRI
+        store.insert(Triple::new(
+            shape,
+            Term::iri(SH::NODE_KIND),
+            Term::iri(SH::IRI),
+        ));
+
+        let shapes = parse_shapes(&store).expect("IRI-valued sh:nodeKind should parse");
+        let constraints = shapes[0].constraints();
+        assert!(
+            constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::NodeKind(NodeKindValue::Iri))),
+            "Should contain NodeKind::Iri constraint"
+        );
+    }
+
+    // =================================================================
+    // Logical constraint parsing with visiting
+    // =================================================================
+
+    #[test]
+    fn test_parse_sh_not_with_inline_shape() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://example.org/OuterShape");
+        let inner = Term::blank("inner_not");
+
+        // Outer shape
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::TARGET_CLASS),
+            Term::iri("http://example.org/Person"),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::NOT),
+            inner.clone(),
+        ));
+
+        // Inline shape referenced by sh:not, with a minCount constraint
+        store.insert(Triple::new(
+            inner.clone(),
+            Term::iri(SH::MIN_COUNT),
+            Term::typed_literal("2", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+
+        let shapes = parse_shapes(&store).expect("sh:not with inline shape should parse");
+
+        // Find the outer shape (the one with a target)
+        let outer = shapes
+            .iter()
+            .find(|s| {
+                matches!(s.id(), Term::Iri(iri) if iri.as_str() == "http://example.org/OuterShape")
+            })
+            .expect("Should find OuterShape");
+
+        let has_not = outer
+            .constraints()
+            .iter()
+            .any(|c| matches!(c, Constraint::Not(_)));
+        assert!(has_not, "OuterShape should have a sh:not constraint");
+    }
+
+    #[test]
+    fn test_parse_sh_and_with_list() {
+        let store = RdfStore::new();
+        let shape = Term::iri("http://example.org/CombinedShape");
+
+        // Two inline shapes referenced in the RDF list
+        let inner_a = Term::blank("andA");
+        let inner_b = Term::blank("andB");
+
+        // Main shape
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(RDF::TYPE),
+            Term::iri(SH::NODE_SHAPE),
+        ));
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::TARGET_CLASS),
+            Term::iri("http://example.org/Person"),
+        ));
+
+        // sh:and points to the head of an RDF list
+        let list1 = Term::blank("list1");
+        let list2 = Term::blank("list2");
+        let nil = Term::iri(RDF::NIL);
+
+        store.insert(Triple::new(
+            shape.clone(),
+            Term::iri(SH::AND),
+            list1.clone(),
+        ));
+        store.insert(Triple::new(
+            list1.clone(),
+            Term::iri(RDF::FIRST),
+            inner_a.clone(),
+        ));
+        store.insert(Triple::new(list1, Term::iri(RDF::REST), list2.clone()));
+        store.insert(Triple::new(
+            list2.clone(),
+            Term::iri(RDF::FIRST),
+            inner_b.clone(),
+        ));
+        store.insert(Triple::new(list2, Term::iri(RDF::REST), nil));
+
+        // Give each inline shape a distinct constraint so we can verify both are parsed
+        store.insert(Triple::new(
+            inner_a,
+            Term::iri(SH::MIN_COUNT),
+            Term::typed_literal("1", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+        store.insert(Triple::new(
+            inner_b,
+            Term::iri(SH::MAX_COUNT),
+            Term::typed_literal("5", "http://www.w3.org/2001/XMLSchema#integer"),
+        ));
+
+        let shapes = parse_shapes(&store).expect("sh:and with RDF list should parse");
+
+        let combined = shapes
+            .iter()
+            .find(|s| {
+                matches!(s.id(), Term::Iri(iri) if iri.as_str() == "http://example.org/CombinedShape")
+            })
+            .expect("Should find CombinedShape");
+
+        let and_constraint = combined
+            .constraints()
+            .iter()
+            .find(|c| matches!(c, Constraint::And(_)));
+        assert!(and_constraint.is_some(), "Should have a sh:and constraint");
+
+        if let Some(Constraint::And(members)) = and_constraint {
+            assert_eq!(members.len(), 2, "sh:and list should contain two shapes");
+        }
+    }
 }

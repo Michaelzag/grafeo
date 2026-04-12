@@ -1144,4 +1144,229 @@ mod tests {
         let results = eval_in(&allowed, &[Term::literal("z")], &ctx);
         assert_eq!(results.len(), 1);
     }
+
+    // =====================================================================
+    // compare_terms datatype guard tests
+    // =====================================================================
+
+    #[test]
+    fn test_compare_terms_numeric_datatypes() {
+        // Two xsd:integer literals should compare numerically: 10 > 9
+        let ten = Term::typed_literal("10", Literal::XSD_INTEGER);
+        let nine = Term::typed_literal("9", Literal::XSD_INTEGER);
+        assert_eq!(compare_terms(&ten, &nine), Some(Ordering::Greater));
+        assert_eq!(compare_terms(&nine, &ten), Some(Ordering::Less));
+    }
+
+    #[test]
+    fn test_compare_terms_string_with_numeric_value() {
+        // xsd:string literals compare lexicographically, NOT numerically.
+        // Lexicographically "42" < "9" because '4' < '9'.
+        let forty_two = Term::typed_literal("42", Literal::XSD_STRING);
+        let nine = Term::typed_literal("9", Literal::XSD_STRING);
+        assert_eq!(compare_terms(&forty_two, &nine), Some(Ordering::Less));
+    }
+
+    #[test]
+    fn test_compare_terms_mixed_numeric_string() {
+        // One xsd:integer and one xsd:string: only one is numeric, so
+        // the comparison falls back to lexicographic ordering.
+        let integer_val = Term::typed_literal("10", Literal::XSD_INTEGER);
+        let string_val = Term::typed_literal("9", Literal::XSD_STRING);
+        // Lexicographically "10" < "9" because '1' < '9'.
+        assert_eq!(
+            compare_terms(&integer_val, &string_val),
+            Some(Ordering::Less)
+        );
+    }
+
+    // =====================================================================
+    // minLength / maxLength character count (non-ASCII) tests
+    // =====================================================================
+
+    #[test]
+    fn test_min_length_non_ascii() {
+        // "café" is 4 characters but 5 UTF-8 bytes.
+        let store = data_store();
+        let shape = dummy_shape();
+        let alix = Term::iri("http://ex.org/alix");
+        let mut visited = HashSet::new();
+
+        let cafe = Term::literal("calf\u{00e9}");
+
+        // sh:minLength 4 should pass (4 chars >= 4)
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let results = eval_min_length(4, std::slice::from_ref(&cafe), &ctx);
+        assert!(results.is_empty(), "café (4 chars) should pass minLength 4");
+
+        // sh:minLength 5 should fail (4 chars < 5)
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let results = eval_min_length(5, &[cafe], &ctx);
+        assert_eq!(results.len(), 1, "café (4 chars) should fail minLength 5");
+    }
+
+    #[test]
+    fn test_max_length_non_ascii() {
+        // "Ωmega" is 5 characters but 6 UTF-8 bytes (Ω is 2 bytes).
+        let store = data_store();
+        let shape = dummy_shape();
+        let alix = Term::iri("http://ex.org/alix");
+        let mut visited = HashSet::new();
+
+        let omega = Term::literal("\u{03a9}mega");
+
+        // sh:maxLength 5 should pass (5 chars <= 5)
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let results = eval_max_length(5, std::slice::from_ref(&omega), &ctx);
+        assert!(
+            results.is_empty(),
+            "Ωmega (5 chars) should pass maxLength 5"
+        );
+
+        // sh:maxLength 4 should fail (5 chars > 4)
+        let ctx = make_ctx(&alix, &shape, &store, &mut visited);
+        let results = eval_max_length(4, &[omega], &ctx);
+        assert_eq!(results.len(), 1, "Ωmega (5 chars) should fail maxLength 4");
+    }
+
+    // =====================================================================
+    // QualifiedValueShape disjoint tests
+    // =====================================================================
+
+    #[test]
+    fn test_qualified_disjoint_excludes_overlapping() {
+        use super::super::shape::{Constraint, NodeShape, PropertyShape, Severity};
+
+        // Setup: a data graph with Alix who has two scores, 80 and 95.
+        let store = RdfStore::new();
+        let alix = Term::iri("http://ex.org/alix");
+        let score_pred = Term::iri("http://ex.org/score");
+        store.insert(Triple::new(
+            alix.clone(),
+            score_pred.clone(),
+            Term::typed_literal("80", Literal::XSD_INTEGER),
+        ));
+        store.insert(Triple::new(
+            alix.clone(),
+            score_pred.clone(),
+            Term::typed_literal("95", Literal::XSD_INTEGER),
+        ));
+
+        // Sibling shape A: sh:minInclusive 70, sh:maxInclusive 100
+        // Matches values in [70..100], so both 80 and 95 conform.
+        let sibling_shape_a = Shape::Node(NodeShape {
+            id: Term::iri("http://ex.org/ShapeA"),
+            targets: Vec::new(),
+            property_shapes: Vec::new(),
+            constraints: vec![
+                Constraint::MinInclusive(Term::typed_literal("70", Literal::XSD_INTEGER)),
+                Constraint::MaxInclusive(Term::typed_literal("100", Literal::XSD_INTEGER)),
+            ],
+            deactivated: false,
+            severity: Severity::Violation,
+            messages: Vec::new(),
+        });
+
+        // Sibling shape B: sh:minInclusive 90, sh:maxInclusive 100
+        // Matches values in [90..100], so only 95 conforms (not 80).
+        let sibling_shape_b = Shape::Node(NodeShape {
+            id: Term::iri("http://ex.org/ShapeB"),
+            targets: Vec::new(),
+            property_shapes: Vec::new(),
+            constraints: vec![
+                Constraint::MinInclusive(Term::typed_literal("90", Literal::XSD_INTEGER)),
+                Constraint::MaxInclusive(Term::typed_literal("100", Literal::XSD_INTEGER)),
+            ],
+            deactivated: false,
+            severity: Severity::Violation,
+            messages: Vec::new(),
+        });
+
+        // The owning property shape has two QualifiedValueShape constraints
+        // with disjoint=true. Shape A claims [70..100], shape B claims [90..100].
+        // Value 95 conforms to BOTH, so disjoint mode should exclude it from
+        // each shape's count. Value 80 conforms to A but not B, so A should
+        // count it. Net: shape A conforming=1 (only 80), shape B conforming=0.
+        let prop_shape = PropertyShape {
+            id: Term::iri("http://ex.org/ScoreShape"),
+            path: PropertyPath::Predicate(score_pred),
+            targets: Vec::new(),
+            constraints: vec![
+                Constraint::QualifiedValueShape {
+                    shape: Box::new(sibling_shape_a.clone()),
+                    min_count: Some(2),
+                    max_count: None,
+                    disjoint: true,
+                },
+                Constraint::QualifiedValueShape {
+                    shape: Box::new(sibling_shape_b.clone()),
+                    min_count: Some(1),
+                    max_count: None,
+                    disjoint: true,
+                },
+            ],
+            deactivated: false,
+            severity: Severity::Violation,
+            messages: Vec::new(),
+            name: None,
+            description: None,
+        };
+
+        let owner_shape = Shape::Property(prop_shape);
+        let value_nodes = vec![
+            Term::typed_literal("80", Literal::XSD_INTEGER),
+            Term::typed_literal("95", Literal::XSD_INTEGER),
+        ];
+        let mut visited = HashSet::new();
+
+        // Evaluate shape A with disjoint=true.
+        // 80 conforms to A and does NOT conform to sibling B, so counted.
+        // 95 conforms to A and ALSO conforms to sibling B, so excluded.
+        // conforming=1, qualifiedMinCount=2 => violation expected.
+        let mut ctx_a = EvalContext {
+            focus_node: &alix,
+            shape: &owner_shape,
+            path: None,
+            data_graph: &store,
+            all_shapes: &[],
+            visited: &mut visited,
+        };
+        let results_a = eval_qualified(
+            &sibling_shape_a,
+            Some(2),
+            None,
+            true,
+            &value_nodes,
+            &mut ctx_a,
+        );
+        assert!(
+            !results_a.is_empty(),
+            "Shape A with disjoint should report a violation: only 1 non-overlapping value, but minCount=2"
+        );
+
+        // Evaluate shape B with disjoint=true.
+        // 80 does not conform to B, so not counted.
+        // 95 conforms to B and ALSO conforms to sibling A, so excluded.
+        // conforming=0, qualifiedMinCount=1 => violation expected.
+        let mut ctx_b = EvalContext {
+            focus_node: &alix,
+            shape: &owner_shape,
+            path: None,
+            data_graph: &store,
+            all_shapes: &[],
+            visited: &mut visited,
+        };
+        let results_b = eval_qualified(
+            &sibling_shape_b,
+            Some(1),
+            None,
+            true,
+            &value_nodes,
+            &mut ctx_b,
+        );
+        assert!(
+            !results_b.is_empty(),
+            "Shape B with disjoint should report a violation: 0 non-overlapping values, but minCount=1"
+        );
+    }
 }

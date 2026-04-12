@@ -331,3 +331,257 @@ fn serialize_rdf_list(
 
     head.unwrap_or_else(|| Term::iri(RDF::NIL))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::shape::{PropertyPath, RDF, SH, Severity};
+    use super::*;
+    use crate::graph::rdf::Triple;
+
+    /// Creates a minimal `ValidationResult` with the given `result_path`.
+    fn result_with_path(path: PropertyPath) -> ValidationResult {
+        ValidationResult {
+            focus_node: Term::iri("http://ex.org/alix"),
+            source_constraint_component: format!("{}MinCountConstraintComponent", SH::NS),
+            source_shape: Term::iri("http://ex.org/PersonShape"),
+            severity: Severity::Violation,
+            result_path: Some(path),
+            value: None,
+            message: None,
+        }
+    }
+
+    /// Returns true if any triple in `triples` has the given predicate and object.
+    fn has_triple_po(triples: &[Triple], predicate: &str, object: &Term) -> bool {
+        let pred = Term::iri(predicate);
+        triples
+            .iter()
+            .any(|t| *t.predicate() == pred && *t.object() == *object)
+    }
+
+    /// Returns true if any triple in `triples` has the given predicate IRI.
+    fn has_predicate(triples: &[Triple], predicate: &str) -> bool {
+        let pred = Term::iri(predicate);
+        triples.iter().any(|t| *t.predicate() == pred)
+    }
+
+    /// Finds the object of the first triple with the given subject and predicate.
+    fn find_object(triples: &[Triple], subject: &Term, predicate: &str) -> Option<Term> {
+        let pred = Term::iri(predicate);
+        triples
+            .iter()
+            .find(|t| *t.subject() == *subject && *t.predicate() == pred)
+            .map(|t| t.object().clone())
+    }
+
+    #[test]
+    fn test_serialize_predicate_path() {
+        let name_iri = Term::iri("http://ex.org/name");
+        let report = ValidationReport::from_results(vec![result_with_path(
+            PropertyPath::Predicate(name_iri.clone()),
+        )]);
+
+        let triples = report.to_triples();
+
+        // sh:resultPath should point directly to the predicate IRI
+        assert!(
+            has_triple_po(&triples, SH::RESULT_PATH, &name_iri),
+            "Expected sh:resultPath pointing to <http://ex.org/name>"
+        );
+
+        // No blank-node indirection for a simple predicate path
+        assert!(
+            !has_predicate(&triples, SH::INVERSE_PATH),
+            "Simple predicate path should not produce sh:inversePath"
+        );
+    }
+
+    #[test]
+    fn test_serialize_inverse_path() {
+        let name_iri = Term::iri("http://ex.org/name");
+        let report = ValidationReport::from_results(vec![result_with_path(PropertyPath::Inverse(
+            Box::new(PropertyPath::Predicate(name_iri.clone())),
+        ))]);
+
+        let triples = report.to_triples();
+
+        // sh:resultPath should point to a blank node (the inverse wrapper)
+        let result_node = Term::blank("result_0");
+        let path_bnode = find_object(&triples, &result_node, SH::RESULT_PATH)
+            .expect("Missing sh:resultPath triple");
+        assert!(
+            path_bnode.is_blank_node(),
+            "Inverse path should be represented by a blank node"
+        );
+
+        // That blank node should have sh:inversePath -> name IRI
+        let inner = find_object(&triples, &path_bnode, SH::INVERSE_PATH)
+            .expect("Missing sh:inversePath triple");
+        assert_eq!(inner, name_iri);
+    }
+
+    #[test]
+    fn test_serialize_sequence_path() {
+        let knows = Term::iri("http://ex.org/knows");
+        let name = Term::iri("http://ex.org/name");
+        let report =
+            ValidationReport::from_results(vec![result_with_path(PropertyPath::Sequence(vec![
+                PropertyPath::Predicate(knows.clone()),
+                PropertyPath::Predicate(name.clone()),
+            ]))]);
+
+        let triples = report.to_triples();
+
+        // sh:resultPath should point to the head of an rdf:list
+        let result_node = Term::blank("result_0");
+        let list_head = find_object(&triples, &result_node, SH::RESULT_PATH)
+            .expect("Missing sh:resultPath triple");
+        assert!(
+            list_head.is_blank_node(),
+            "Sequence path should start with a blank node (rdf:list head)"
+        );
+
+        // First element: rdf:first -> knows
+        let first =
+            find_object(&triples, &list_head, RDF::FIRST).expect("Missing rdf:first on list head");
+        assert_eq!(first, knows);
+
+        // rdf:rest -> second node
+        let rest =
+            find_object(&triples, &list_head, RDF::REST).expect("Missing rdf:rest on list head");
+        assert!(
+            rest.is_blank_node(),
+            "rdf:rest should point to a blank node"
+        );
+
+        // Second element: rdf:first -> name
+        let second = find_object(&triples, &rest, RDF::FIRST)
+            .expect("Missing rdf:first on second list node");
+        assert_eq!(second, name);
+
+        // rdf:rest -> rdf:nil (end of list)
+        let nil =
+            find_object(&triples, &rest, RDF::REST).expect("Missing rdf:rest on last list node");
+        assert_eq!(nil, Term::iri(RDF::NIL));
+    }
+
+    #[test]
+    fn test_serialize_alternative_path() {
+        let knows = Term::iri("http://ex.org/knows");
+        let name = Term::iri("http://ex.org/name");
+        let report = ValidationReport::from_results(vec![result_with_path(
+            PropertyPath::Alternative(vec![
+                PropertyPath::Predicate(knows.clone()),
+                PropertyPath::Predicate(name.clone()),
+            ]),
+        )]);
+
+        let triples = report.to_triples();
+
+        // sh:resultPath -> blank node (the alternative wrapper)
+        let result_node = Term::blank("result_0");
+        let alt_bnode = find_object(&triples, &result_node, SH::RESULT_PATH)
+            .expect("Missing sh:resultPath triple");
+        assert!(alt_bnode.is_blank_node());
+
+        // That blank node has sh:alternativePath -> head of rdf:list
+        let list_head = find_object(&triples, &alt_bnode, SH::ALTERNATIVE_PATH)
+            .expect("Missing sh:alternativePath triple");
+        assert!(
+            list_head.is_blank_node(),
+            "sh:alternativePath should point to an rdf:list head"
+        );
+
+        // Verify the list contains both IRIs
+        let first = find_object(&triples, &list_head, RDF::FIRST)
+            .expect("Missing rdf:first on alternative list");
+        assert_eq!(first, knows);
+
+        let rest = find_object(&triples, &list_head, RDF::REST)
+            .expect("Missing rdf:rest on alternative list head");
+        let second = find_object(&triples, &rest, RDF::FIRST)
+            .expect("Missing rdf:first on second alternative list node");
+        assert_eq!(second, name);
+    }
+
+    #[test]
+    fn test_serialize_zero_or_more_path() {
+        let knows = Term::iri("http://ex.org/knows");
+        let report = ValidationReport::from_results(vec![result_with_path(
+            PropertyPath::ZeroOrMore(Box::new(PropertyPath::Predicate(knows.clone()))),
+        )]);
+
+        let triples = report.to_triples();
+
+        let result_node = Term::blank("result_0");
+        let path_bnode = find_object(&triples, &result_node, SH::RESULT_PATH)
+            .expect("Missing sh:resultPath triple");
+        assert!(path_bnode.is_blank_node());
+
+        let inner = find_object(&triples, &path_bnode, SH::ZERO_OR_MORE_PATH)
+            .expect("Missing sh:zeroOrMorePath triple");
+        assert_eq!(inner, knows);
+    }
+
+    #[test]
+    fn test_serialize_one_or_more_path() {
+        let knows = Term::iri("http://ex.org/knows");
+        let report = ValidationReport::from_results(vec![result_with_path(
+            PropertyPath::OneOrMore(Box::new(PropertyPath::Predicate(knows.clone()))),
+        )]);
+
+        let triples = report.to_triples();
+
+        let result_node = Term::blank("result_0");
+        let path_bnode = find_object(&triples, &result_node, SH::RESULT_PATH)
+            .expect("Missing sh:resultPath triple");
+        assert!(path_bnode.is_blank_node());
+
+        let inner = find_object(&triples, &path_bnode, SH::ONE_OR_MORE_PATH)
+            .expect("Missing sh:oneOrMorePath triple");
+        assert_eq!(inner, knows);
+    }
+
+    #[test]
+    fn test_serialize_zero_or_one_path() {
+        let knows = Term::iri("http://ex.org/knows");
+        let report = ValidationReport::from_results(vec![result_with_path(
+            PropertyPath::ZeroOrOne(Box::new(PropertyPath::Predicate(knows.clone()))),
+        )]);
+
+        let triples = report.to_triples();
+
+        let result_node = Term::blank("result_0");
+        let path_bnode = find_object(&triples, &result_node, SH::RESULT_PATH)
+            .expect("Missing sh:resultPath triple");
+        assert!(path_bnode.is_blank_node());
+
+        let inner = find_object(&triples, &path_bnode, SH::ZERO_OR_ONE_PATH)
+            .expect("Missing sh:zeroOrOnePath triple");
+        assert_eq!(inner, knows);
+    }
+
+    #[test]
+    fn test_serialize_empty_sequence() {
+        let report =
+            ValidationReport::from_results(vec![result_with_path(PropertyPath::Sequence(vec![]))]);
+
+        let triples = report.to_triples();
+
+        // Empty sequence should serialize as rdf:nil directly
+        assert!(
+            has_triple_po(&triples, SH::RESULT_PATH, &Term::iri(RDF::NIL)),
+            "Empty sequence should produce sh:resultPath -> rdf:nil"
+        );
+
+        // No rdf:first or rdf:rest triples for an empty list
+        assert!(
+            !has_predicate(&triples, RDF::FIRST),
+            "Empty sequence should not produce any rdf:first triples"
+        );
+        assert!(
+            !has_predicate(&triples, RDF::REST),
+            "Empty sequence should not produce any rdf:rest triples"
+        );
+    }
+}

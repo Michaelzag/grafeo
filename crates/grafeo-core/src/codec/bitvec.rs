@@ -633,4 +633,60 @@ mod tests {
         assert_eq!(bitvec.get(1), Some(false));
         assert_eq!(bitvec.get(2), Some(true));
     }
+
+    #[test]
+    fn test_bitvec_deserialize_roundtrip() {
+        let bools = vec![true, false, true, true, false, false, true, false];
+        let original = BitVector::from_bools(&bools);
+        let json = serde_json::to_string(&original).unwrap();
+        let restored: BitVector = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, restored);
+    }
+
+    #[test]
+    fn test_bitvec_deserialize_invalid_len_too_large() {
+        // len=200 requires ceil(200/64) = 4 words, but we only provide 1
+        let json = r#"{"data":[42],"len":200}"#;
+        let result: Result<BitVector, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("invariant violated"),
+            "expected invariant error, got: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn test_bitvec_deserialize_invalid_len_data_mismatch() {
+        // len=10 requires ceil(10/64) = 1 word, but we provide 3
+        let json = r#"{"data":[1,2,3],"len":10}"#;
+        let result: Result<BitVector, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("invariant violated"),
+            "expected invariant error, got: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn test_bitvec_deserialize_valid_edge_cases() {
+        // len=0 with empty data
+        let json = r#"{"data":[],"len":0}"#;
+        let bv: BitVector = serde_json::from_str(json).unwrap();
+        assert_eq!(bv.len(), 0);
+        assert!(bv.is_empty());
+
+        // len=1 with one u64
+        let json = r#"{"data":[1],"len":1}"#;
+        let bv: BitVector = serde_json::from_str(json).unwrap();
+        assert_eq!(bv.len(), 1);
+        assert_eq!(bv.get(0), Some(true));
+
+        // len=64 with one u64 (exactly fills one word)
+        let json = r#"{"data":[18446744073709551615],"len":64}"#;
+        let bv: BitVector = serde_json::from_str(json).unwrap();
+        assert_eq!(bv.len(), 64);
+        assert_eq!(bv.count_ones(), 64);
+    }
 }
