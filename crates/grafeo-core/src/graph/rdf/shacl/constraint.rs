@@ -1192,7 +1192,7 @@ mod tests {
         let alix = Term::iri("http://ex.org/alix");
         let mut visited = HashSet::new();
 
-        let cafe = Term::literal("calf\u{00e9}");
+        let cafe = Term::literal("café");
 
         // sh:minLength 4 should pass (4 chars >= 4)
         let ctx = make_ctx(&alix, &shape, &store, &mut visited);
