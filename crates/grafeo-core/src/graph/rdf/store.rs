@@ -624,8 +624,11 @@ impl RdfStore {
         *self.statistics_cache.write() = None;
         *self.dictionary_cache.write() = None;
         #[cfg(feature = "ring-index")]
-        self.ring_stale
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+        {
+            self.ring_stale
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            *self.ring.write() = None;
+        }
     }
 
     /// Returns a cached term dictionary, building it on first call.
@@ -794,6 +797,9 @@ impl RdfStore {
         let stats = stats_collector.build();
         // Cache the freshly-computed statistics from the bulk load pass.
         *self.statistics_cache.write() = Some(Arc::new(stats.clone()));
+        // Invalidate the dictionary cache: the old dictionary mapped terms
+        // from the previous dataset, not the newly loaded one.
+        *self.dictionary_cache.write() = None;
 
         // Build Ring Index automatically during bulk load (when feature is enabled).
         #[cfg(feature = "ring-index")]
@@ -2402,5 +2408,161 @@ this is not valid ntriples
             object: None,
         };
         assert_eq!(ring.count(&alix_pattern), 2);
+    }
+
+    #[test]
+    fn test_batch_insert_composite_indexes() {
+        let store = RdfStore::new();
+        let triples = vec![
+            Triple::new(
+                Term::iri("http://ex.org/alix"),
+                Term::iri("http://ex.org/name"),
+                Term::literal("Alix"),
+            ),
+            Triple::new(
+                Term::iri("http://ex.org/gus"),
+                Term::iri("http://ex.org/name"),
+                Term::literal("Gus"),
+            ),
+            Triple::new(
+                Term::iri("http://ex.org/alix"),
+                Term::iri("http://ex.org/age"),
+                Term::typed_literal("30", "http://www.w3.org/2001/XMLSchema#integer"),
+            ),
+        ];
+        let inserted = store.batch_insert(triples);
+        assert_eq!(inserted, 3);
+        assert_eq!(store.len(), 3);
+
+        // Verify composite indexes via find
+        let sp_result = store.find(&TriplePattern {
+            subject: Some(Term::iri("http://ex.org/alix")),
+            predicate: Some(Term::iri("http://ex.org/name")),
+            object: None,
+        });
+        assert_eq!(sp_result.len(), 1);
+        let po_result = store.find(&TriplePattern {
+            subject: None,
+            predicate: Some(Term::iri("http://ex.org/name")),
+            object: Some(Term::literal("Gus")),
+        });
+        assert_eq!(po_result.len(), 1);
+        let os_result = store.find(&TriplePattern {
+            subject: Some(Term::iri("http://ex.org/alix")),
+            predicate: None,
+            object: Some(Term::literal("Alix")),
+        });
+        assert_eq!(os_result.len(), 1);
+    }
+
+    #[test]
+    fn test_batch_insert_deduplication() {
+        let store = RdfStore::new();
+        let triple = Triple::new(
+            Term::iri("http://ex.org/a"),
+            Term::iri("http://ex.org/b"),
+            Term::literal("c"),
+        );
+        let inserted = store.batch_insert(vec![triple.clone(), triple.clone(), triple]);
+        assert_eq!(inserted, 1);
+        assert_eq!(store.len(), 1);
+    }
+
+    #[test]
+    fn test_composite_index_after_remove() {
+        let store = RdfStore::new();
+        let t1 = Triple::new(
+            Term::iri("http://ex.org/a"),
+            Term::iri("http://ex.org/p"),
+            Term::literal("v1"),
+        );
+        let t2 = Triple::new(
+            Term::iri("http://ex.org/a"),
+            Term::iri("http://ex.org/p"),
+            Term::literal("v2"),
+        );
+        store.insert(t1.clone());
+        store.insert(t2);
+        assert_eq!(
+            store
+                .find(&TriplePattern {
+                    subject: Some(Term::iri("http://ex.org/a")),
+                    predicate: Some(Term::iri("http://ex.org/p")),
+                    object: None
+                })
+                .len(),
+            2
+        );
+        store.remove(&t1);
+        assert_eq!(
+            store
+                .find(&TriplePattern {
+                    subject: Some(Term::iri("http://ex.org/a")),
+                    predicate: Some(Term::iri("http://ex.org/p")),
+                    object: None
+                })
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn test_named_graph_operations() {
+        let store = RdfStore::new();
+        assert!(store.create_graph("http://ex.org/g1"));
+        assert!(!store.create_graph("http://ex.org/g1")); // already exists
+        let g = store.graph("http://ex.org/g1").unwrap();
+        g.insert(Triple::new(
+            Term::iri("http://ex.org/a"),
+            Term::iri("http://ex.org/b"),
+            Term::literal("c"),
+        ));
+        assert_eq!(g.len(), 1);
+        assert!(store.drop_graph("http://ex.org/g1"));
+        assert!(store.graph("http://ex.org/g1").is_none());
+    }
+
+    #[test]
+    fn test_statistics_cache_invalidation() {
+        let store = RdfStore::new();
+        store.insert(Triple::new(
+            Term::iri("http://ex.org/a"),
+            Term::iri("http://ex.org/p"),
+            Term::literal("v"),
+        ));
+        let stats1 = store.get_or_collect_statistics();
+        // Term::iri.to_string() produces "<http://ex.org/p>"
+        assert!(stats1.get_predicate("<http://ex.org/p>").is_some());
+        // Insert more data: cache should be invalidated
+        store.insert(Triple::new(
+            Term::iri("http://ex.org/b"),
+            Term::iri("http://ex.org/q"),
+            Term::literal("w"),
+        ));
+        let stats2 = store.get_or_collect_statistics();
+        assert!(stats2.get_predicate("<http://ex.org/q>").is_some());
+    }
+
+    #[test]
+    fn test_find_three_bound() {
+        let store = RdfStore::new();
+        let t = Triple::new(
+            Term::iri("http://ex.org/a"),
+            Term::iri("http://ex.org/p"),
+            Term::literal("v"),
+        );
+        store.insert(t.clone());
+        store.insert(Triple::new(
+            Term::iri("http://ex.org/a"),
+            Term::iri("http://ex.org/p"),
+            Term::literal("other"),
+        ));
+        let result = store.find(&TriplePattern {
+            subject: Some(Term::iri("http://ex.org/a")),
+            predicate: Some(Term::iri("http://ex.org/p")),
+            object: Some(Term::literal("v")),
+        });
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].as_ref(), &t);
     }
 }

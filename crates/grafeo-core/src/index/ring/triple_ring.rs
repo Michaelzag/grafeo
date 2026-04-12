@@ -428,6 +428,17 @@ impl TripleRing {
     /// and the term dictionary, preventing panics from corrupted data.
     fn validate(&self) -> std::io::Result<()> {
         let n = self.num_triples;
+
+        // --- Term dictionary consistency ---
+        if self.dict.term_to_id.len() != self.dict.id_to_term.len() {
+            return Err(std::io::Error::other(format!(
+                "term dictionary inconsistent: term_to_id has {} entries, id_to_term has {}",
+                self.dict.term_to_id.len(),
+                self.dict.id_to_term.len()
+            )));
+        }
+
+        // --- Wavelet tree lengths must match num_triples ---
         if self.subjects.len() != n {
             return Err(std::io::Error::other(format!(
                 "subjects wavelet tree length {} != num_triples {n}",
@@ -446,6 +457,43 @@ impl TripleRing {
                 self.objects.len()
             )));
         }
+
+        // --- Wavelet tree internal consistency ---
+        self.subjects
+            .validate()
+            .map_err(|e| std::io::Error::other(format!("subjects wavelet tree: {e}")))?;
+        self.predicates
+            .validate()
+            .map_err(|e| std::io::Error::other(format!("predicates wavelet tree: {e}")))?;
+        self.objects
+            .validate()
+            .map_err(|e| std::io::Error::other(format!("objects wavelet tree: {e}")))?;
+
+        // --- Wavelet tree symbols must reference valid dictionary IDs ---
+        let dict_len = self.dict.len() as u64;
+        for sym in self.subjects.alphabet() {
+            if sym >= dict_len {
+                return Err(std::io::Error::other(format!(
+                    "subjects wavelet tree contains symbol {sym} >= dict size {dict_len}"
+                )));
+            }
+        }
+        for sym in self.predicates.alphabet() {
+            if sym >= dict_len {
+                return Err(std::io::Error::other(format!(
+                    "predicates wavelet tree contains symbol {sym} >= dict size {dict_len}"
+                )));
+            }
+        }
+        for sym in self.objects.alphabet() {
+            if sym >= dict_len {
+                return Err(std::io::Error::other(format!(
+                    "objects wavelet tree contains symbol {sym} >= dict size {dict_len}"
+                )));
+            }
+        }
+
+        // --- Permutation lengths must match num_triples ---
         if self.spo_to_pos.len() != n {
             return Err(std::io::Error::other(format!(
                 "spo_to_pos permutation length {} != num_triples {n}",
@@ -458,6 +506,7 @@ impl TripleRing {
                 self.spo_to_osp.len()
             )));
         }
+
         Ok(())
     }
 
@@ -1108,5 +1157,123 @@ mod tests {
 
         assert_eq!(loaded.len(), 2);
         assert_eq!(loaded.count(&TriplePattern::any()), 2);
+    }
+
+    #[test]
+    fn test_load_rejects_truncated_data() {
+        let triples = vec![make_triple("s1", "p1", "o1")];
+        let ring = TripleRing::from_triples(triples.into_iter());
+
+        let bytes = ring.save_to_bytes().expect("save_to_bytes");
+        // Truncate to half the data
+        let truncated = &bytes[..bytes.len() / 2];
+        let result = TripleRing::load_from_bytes(truncated);
+        assert!(result.is_err(), "truncated data should fail to load");
+    }
+
+    #[test]
+    fn test_load_rejects_empty_bytes() {
+        let result = TripleRing::load_from_bytes(&[]);
+        assert!(result.is_err(), "empty bytes should fail to load");
+    }
+
+    #[test]
+    fn test_load_rejects_garbage_bytes() {
+        let garbage = vec![0xFF; 256];
+        let result = TripleRing::load_from_bytes(&garbage);
+        assert!(result.is_err(), "garbage bytes should fail to load");
+    }
+
+    #[test]
+    fn test_load_from_bytes_roundtrip() {
+        let triples = vec![make_triple("s1", "p1", "o1"), make_triple("s2", "p2", "o2")];
+        let ring = TripleRing::from_triples(triples.into_iter());
+
+        let bytes = ring.save_to_bytes().expect("save_to_bytes");
+        let loaded = TripleRing::load_from_bytes(&bytes).expect("load_from_bytes");
+
+        assert_eq!(loaded.len(), ring.len());
+        assert_eq!(loaded.num_terms(), ring.num_terms());
+    }
+
+    #[test]
+    fn test_validate_passes_for_valid_ring() {
+        let triples = vec![
+            make_triple("alix", "knows", "gus"),
+            make_triple("alix", "likes", "vincent"),
+            make_triple("gus", "knows", "vincent"),
+        ];
+        let ring = TripleRing::from_triples(triples.into_iter());
+
+        // Validation should pass for a freshly constructed ring
+        assert!(ring.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_passes_for_empty_ring() {
+        let ring = TripleRing::from_triples(std::iter::empty());
+        assert!(ring.validate().is_ok());
+    }
+
+    #[test]
+    fn test_save_load_bytes_roundtrip() {
+        let triples = vec![
+            make_triple("alix", "knows", "gus"),
+            make_triple("alix", "likes", "vincent"),
+            make_triple("gus", "knows", "vincent"),
+        ];
+        let ring = TripleRing::from_triples(triples.into_iter());
+        let bytes = ring.save_to_bytes().unwrap();
+        let loaded = TripleRing::load_from_bytes(&bytes).unwrap();
+        assert_eq!(loaded.len(), ring.len());
+        // Verify query results match
+        let pattern = TriplePattern {
+            subject: None,
+            predicate: None,
+            object: None,
+        };
+        assert_eq!(loaded.count(&pattern), ring.count(&pattern));
+    }
+
+    #[test]
+    fn test_save_load_writer_reader_roundtrip() {
+        let triples = vec![
+            make_triple("alix", "knows", "gus"),
+            make_triple("gus", "likes", "vincent"),
+        ];
+        let ring = TripleRing::from_triples(triples.into_iter());
+        let mut buf = Vec::new();
+        ring.save(&mut buf).unwrap();
+        let loaded = TripleRing::load(&buf[..]).unwrap();
+        assert_eq!(loaded.len(), ring.len());
+    }
+
+    #[test]
+    fn test_load_from_bytes_corrupt_data_fails() {
+        let result = TripleRing::load_from_bytes(&[0xFF, 0xFE, 0xFD, 0xFC]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_save_load_file_roundtrip() {
+        let triples = vec![
+            make_triple("alix", "knows", "gus"),
+            make_triple("gus", "knows", "vincent"),
+        ];
+        let ring = TripleRing::from_triples(triples.into_iter());
+        let dir = std::env::temp_dir();
+        let path = dir.join("grafeo_test_ring.bin");
+        ring.save_to_file(&path).unwrap();
+        let loaded = TripleRing::load_from_file(&path).unwrap();
+        assert_eq!(loaded.len(), ring.len());
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_save_load_empty_ring() {
+        let ring = TripleRing::from_triples(std::iter::empty());
+        let bytes = ring.save_to_bytes().unwrap();
+        let loaded = TripleRing::load_from_bytes(&bytes).unwrap();
+        assert_eq!(loaded.len(), 0);
     }
 }

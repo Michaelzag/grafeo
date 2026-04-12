@@ -111,4 +111,50 @@ mod tests {
         assert_eq!(dict.get_id(&Term::iri("http://unknown")), None);
         assert_eq!(dict.get_term(999), None);
     }
+
+    #[test]
+    fn with_capacity_works() {
+        let dict = TermDictionary::with_capacity(100);
+        assert!(dict.is_empty());
+        assert_eq!(dict.len(), 0);
+    }
+
+    #[test]
+    fn default_creates_empty() {
+        let dict = TermDictionary::default();
+        assert!(dict.is_empty());
+    }
+
+    #[test]
+    fn stable_ids_across_inserts() {
+        let mut dict = TermDictionary::new();
+        let t1 = Term::iri("http://example.org/a");
+        let t2 = Term::literal("value");
+        let id1 = dict.get_or_insert(&t1);
+        let id2 = dict.get_or_insert(&t2);
+        // IDs should be sequential starting from 0
+        assert_eq!(id1, 0);
+        assert_eq!(id2, 1);
+        // Re-insert should return same IDs
+        assert_eq!(dict.get_or_insert(&t1), 0);
+        assert_eq!(dict.get_or_insert(&t2), 1);
+        assert_eq!(dict.len(), 2);
+    }
+
+    #[test]
+    fn mixed_term_types() {
+        let mut dict = TermDictionary::new();
+        let iri = Term::iri("http://example.org/x");
+        let lit = Term::literal("hello");
+        let blank = Term::blank("b0");
+        let lang = Term::lang_literal("bonjour".to_string(), "fr".to_string());
+        dict.get_or_insert(&iri);
+        dict.get_or_insert(&lit);
+        dict.get_or_insert(&blank);
+        dict.get_or_insert(&lang);
+        assert_eq!(dict.len(), 4);
+        assert!(dict.get_id(&iri).is_some());
+        assert!(dict.get_id(&blank).is_some());
+        assert!(dict.get_id(&lang).is_some());
+    }
 }

@@ -1,6 +1,6 @@
 //! Ring Index section for `.grafeo` container persistence.
 //!
-//! Serializes and deserializes the [`TripleRing`] via the [`Section`] trait,
+//! Serializes and deserializes the [`super::TripleRing`] via the [`Section`] trait,
 //! enabling the Ring to survive database restarts without rebuilding from
 //! triples. Uses bincode for encoding.
 
