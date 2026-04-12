@@ -4,9 +4,11 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 
 ## [0.5.37] - 2026-04-12
 
+RDF Semantic Web overhaul with improved SPARQL support, RDF performance improvements and SHACL validation.
+
 ### Added
 
-- **SPARQL compliance pass**: 18 spec gaps closed. `CONSTRUCT`, `BIND`, `OPTIONAL`, `MINUS`, `UNION`, `FILTER`, `EXISTS`/`NOT EXISTS`. Named graph CRUD and SPARQL UPDATE. Composite indexes (SP, PO, OS) for O(1) multi-bound lookups. 109 new W3C tests.
+- **SPARQL compliance pass**: spec gaps closed. `CONSTRUCT`, `BIND`, `OPTIONAL`, `MINUS`, `UNION`, `FILTER`, `EXISTS`/`NOT EXISTS`. Named graph CRUD and SPARQL UPDATE. Composite indexes (SP, PO, OS) for O(1) multi-bound lookups. new W3C tests.
 - **Ring Index planner** (`ring-index`): wavelet-tree compact triple index wired into SPARQL planner. Leapfrog WCOJ for multi-way star joins, hash join fallback when LANG/DATATYPE columns needed.
 - **Ring Index persistence**: bincode serialization with post-load invariant validation. `RdfRingSection` persists to `.grafeo` container, eliminating rebuild on restart.
 - **Dictionary encoding infrastructure**: `TermDictionary` maps terms to u32 IDs. `DictResolveOperator` resolves at result boundaries. Built lazily, invalidated on mutation.
@@ -27,6 +29,8 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 - **File manager leaked temp files on checkpoint failure**: temp files now cleaned up in the error path (#258).
 
 ## [0.5.36] - 2026-04-11
+
+Authentication at engine level with RBAC, per graph access grants and several query language improvements.
 
 ### Added
 
