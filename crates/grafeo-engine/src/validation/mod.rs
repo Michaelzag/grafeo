@@ -68,9 +68,13 @@ impl SparqlExecutor for SessionSparqlExecutor<'_> {
 
         // Scope to named data graph via FROM clause when configured
         if let Some(ref graph) = self.graph_name {
-            // Insert FROM <graph> after SELECT (and optional DISTINCT/REDUCED)
-            if let Some(pos) = substituted.find("WHERE") {
-                substituted.insert_str(pos, &format!("FROM <{graph}> "));
+            // Reject graph names containing characters that would break IRI syntax
+            if !graph.contains('>') && !graph.contains('<') && !graph.contains('"') {
+                // Case-insensitive WHERE detection
+                let upper = substituted.to_uppercase();
+                if let Some(pos) = upper.find("WHERE") {
+                    substituted.insert_str(pos, &format!("FROM <{graph}> "));
+                }
             }
         }
 
