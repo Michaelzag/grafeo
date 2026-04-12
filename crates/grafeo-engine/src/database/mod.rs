@@ -2184,11 +2184,15 @@ impl GrafeoDB {
             .as_ref()
             .ok_or_else(|| Error::Internal("backup requires a persistent database".to_string()))?;
 
-        // Checkpoint first to ensure the container has latest data
-        let _ = self.checkpoint_to_file(fm, flush::FlushReason::Explicit)?;
+        // Checkpoint to ensure the container has the latest data.
+        // Skip for read-only databases: the on-disk file is already a valid
+        // snapshot and the file manager rejects writes.
+        if !self.read_only {
+            let _ = self.checkpoint_to_file(fm, flush::FlushReason::Explicit)?;
+        }
 
         let current_epoch = self.transaction_manager.current_epoch();
-        backup::do_backup_full(backup_dir, fm.path(), self.wal.as_deref(), current_epoch)
+        backup::do_backup_full(backup_dir, fm, self.wal.as_deref(), current_epoch)
     }
 
     /// Creates an incremental backup containing WAL records since the last backup.

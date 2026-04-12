@@ -3,11 +3,6 @@
 //! Covers: full backup, incremental backup, restore to epoch, and the
 //! backup chain model.
 //!
-//! Note: `backup_full()` copies the .grafeo file while it is open, which
-//! fails on Windows due to file locking. Tests that call `backup_full()`
-//! are gated to non-Windows platforms. The `restore_to_epoch` and manifest
-//! tests work on all platforms.
-//!
 //! ```bash
 //! cargo test -p grafeo-engine --features full --test backup_restore
 //! ```
@@ -17,9 +12,8 @@
 use grafeo_common::types::EpochId;
 use grafeo_engine::GrafeoDB;
 
-// ── Full backup roundtrip (Linux/macOS only: Windows file locking) ──
+// ── Full backup roundtrip ─────────────────────────────────────────
 
-#[cfg(not(target_os = "windows"))]
 #[test]
 fn full_backup_and_restore_to_epoch() {
     let dir = tempfile::tempdir().expect("create temp dir");
@@ -64,9 +58,8 @@ fn full_backup_and_restore_to_epoch() {
     restored.close().expect("close");
 }
 
-// ── Full + incremental backup cycle (Linux/macOS only) ────────────
+// ── Full + incremental backup cycle ───────────────────────────────
 
-#[cfg(not(target_os = "windows"))]
 #[test]
 fn incremental_backup_captures_new_data() {
     let dir = tempfile::tempdir().expect("create temp dir");
@@ -115,9 +108,8 @@ fn incremental_backup_captures_new_data() {
     assert_eq!(manifest.segments.len(), 2);
 }
 
-// ── Backup cursor tracking (Linux/macOS only) ─────────────────────
+// ── Backup cursor tracking ────────────────────────────────────────
 
-#[cfg(not(target_os = "windows"))]
 #[test]
 fn backup_cursor_updated_after_full_backup() {
     let dir = tempfile::tempdir().expect("create temp dir");
@@ -148,9 +140,8 @@ fn backup_cursor_updated_after_full_backup() {
     db.close().expect("close");
 }
 
-// ── Backup manifest metadata (Linux/macOS only) ───────────────────
+// ── Backup manifest metadata ──────────────────────────────────────
 
-#[cfg(not(target_os = "windows"))]
 #[test]
 fn backup_manifest_tracks_segments() {
     let dir = tempfile::tempdir().expect("create temp dir");
@@ -197,4 +188,90 @@ fn restore_nonexistent_backup_fails() {
 
     let result = GrafeoDB::restore_to_epoch(&backup_dir, EpochId::new(100), &restore_path);
     assert!(result.is_err(), "restore from empty dir should fail");
+}
+
+// ── Bug regression tests ─────────────────────────────────────────
+
+/// Regression: backup_full() on a read-only database should succeed.
+///
+/// The on-disk `.grafeo` file is already a valid snapshot, so there is
+/// nothing to flush. Previously, backup_full() unconditionally called
+/// checkpoint_to_file() which rejects writes on read-only file managers.
+#[test]
+fn backup_full_on_read_only_database() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let db_path = dir.path().join("readonly_backup.grafeo");
+    let backup_dir = dir.path().join("backups");
+
+    // Create and populate a database, then close it so the file is complete.
+    {
+        let db = GrafeoDB::open(&db_path).expect("open");
+        let session = db.session();
+        session
+            .execute("INSERT (:Person {name: 'Alix'})")
+            .expect("insert");
+        session
+            .execute("INSERT (:Person {name: 'Gus'})")
+            .expect("insert");
+        db.close().expect("close");
+    }
+
+    // Re-open in read-only mode and take a full backup.
+    let db = GrafeoDB::open_read_only(&db_path).expect("open read-only");
+    let segment = db
+        .backup_full(&backup_dir)
+        .expect("backup_full on read-only should succeed");
+
+    assert_eq!(segment.start_epoch, EpochId::new(0));
+    assert!(segment.size_bytes > 0, "backup file should not be empty");
+
+    // Verify the backup is a valid database by restoring and querying.
+    let restore_path = dir.path().join("restored.grafeo");
+    GrafeoDB::restore_to_epoch(&backup_dir, segment.end_epoch, &restore_path)
+        .expect("restore should succeed");
+
+    let restored = GrafeoDB::open(&restore_path).expect("open restored");
+    assert_eq!(restored.node_count(), 2, "restored should have 2 nodes");
+    restored.close().expect("close");
+}
+
+/// Regression: backup_full() must work on Windows where the .grafeo file
+/// is held open with an exclusive lock.
+///
+/// Previously, do_backup_full() used std::fs::copy() which tries to open
+/// the source file with a new handle. On Windows, that fails because the
+/// GrafeoFileManager already holds an exclusive lock.
+#[test]
+fn backup_full_works_while_database_is_open() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let db_path = dir.path().join("open_backup.grafeo");
+    let backup_dir = dir.path().join("backups");
+
+    let db = GrafeoDB::open(&db_path).expect("open");
+    let session = db.session();
+    session
+        .execute("INSERT (:Person {name: 'Alix'})")
+        .expect("insert");
+    session
+        .execute("INSERT (:Person {name: 'Gus'})")
+        .expect("insert");
+
+    // This should succeed on ALL platforms, including Windows.
+    let segment = db
+        .backup_full(&backup_dir)
+        .expect("backup_full on open database should work on all platforms");
+
+    assert_eq!(segment.start_epoch, EpochId::new(0));
+    assert!(segment.size_bytes > 0);
+
+    db.close().expect("close");
+
+    // Verify the backup is restorable.
+    let restore_path = dir.path().join("restored.grafeo");
+    GrafeoDB::restore_to_epoch(&backup_dir, segment.end_epoch, &restore_path)
+        .expect("restore should succeed");
+
+    let restored = GrafeoDB::open(&restore_path).expect("open restored");
+    assert_eq!(restored.node_count(), 2, "restored should have 2 nodes");
+    restored.close().expect("close");
 }

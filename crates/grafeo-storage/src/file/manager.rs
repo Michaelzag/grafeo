@@ -642,6 +642,25 @@ impl GrafeoFileManager {
         ))
     }
 
+    /// Copies the database file to `dest` using the already-locked file handle.
+    ///
+    /// `std::fs::copy()` opens the source with a new handle, which fails on
+    /// Windows when an exclusive lock is held. This method reads through the
+    /// existing handle, avoiding lock conflicts.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the read or write fails.
+    pub fn copy_to(&self, dest: &Path) -> Result<u64> {
+        let mut file = self.file.lock();
+        file.seek(SeekFrom::Start(0))?;
+
+        let mut dest_file = fs::File::create(dest)?;
+        let bytes = std::io::copy(&mut *file, &mut dest_file).map_err(Error::Io)?;
+        dest_file.sync_all()?;
+        Ok(bytes)
+    }
+
     /// Releases the file lock and syncs.
     ///
     /// # Errors

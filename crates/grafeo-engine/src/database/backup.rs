@@ -289,20 +289,24 @@ pub(super) fn now_ms() -> u64 {
 
 // ── Backup operations (called from GrafeoDB) ───────────────────────
 
+use grafeo_storage::file::GrafeoFileManager;
 use grafeo_storage::wal::LpgWal;
 
 /// Creates a full backup by copying the .grafeo container file.
 ///
-/// 1. Forces a checkpoint so the container has the latest data.
-/// 2. Copies the container file to the backup directory.
-/// 3. Updates the manifest and backup cursor.
+/// 1. Copies the container file to the backup directory via the locked handle.
+/// 2. Updates the manifest and backup cursor.
+///
+/// Uses [`GrafeoFileManager::copy_to`] instead of `std::fs::copy()` so the
+/// copy reads through the already-locked file handle. `std::fs::copy()` opens
+/// a new handle, which fails on Windows when an exclusive lock is held.
 ///
 /// # Errors
 ///
 /// Returns an error if the database has no file manager, or if I/O fails.
 pub(super) fn do_backup_full(
     backup_dir: &Path,
-    grafeo_file_path: &Path,
+    fm: &GrafeoFileManager,
     wal: Option<&LpgWal>,
     current_epoch: EpochId,
 ) -> Result<BackupSegment> {
@@ -315,9 +319,8 @@ pub(super) fn do_backup_full(
     let filename = format!("backup_full_{segment_idx:04}.grafeo");
     let dest_path = backup_dir.join(&filename);
 
-    // Copy the .grafeo file to the backup directory
-    std::fs::copy(grafeo_file_path, &dest_path)
-        .map_err(|e| Error::Internal(format!("failed to copy database file for backup: {e}")))?;
+    // Copy the .grafeo file to the backup directory through the locked handle
+    fm.copy_to(&dest_path)?;
 
     let file_size = std::fs::metadata(&dest_path).map(|m| m.len()).unwrap_or(0);
     let file_data = std::fs::read(&dest_path)
