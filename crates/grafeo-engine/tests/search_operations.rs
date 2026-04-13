@@ -221,10 +221,17 @@ mod vector {
             .vector_search("Doc", "emb", query, 4, None, None)
             .expect("search after rebuild");
 
-        // Same nodes, same distances (within floating point tolerance)
+        // Same nodes, same distances (within floating point tolerance).
+        // Sort by node ID because HNSW does not guarantee ordering for
+        // equal-distance ties, and rebuild changes the internal graph.
         assert_eq!(before.len(), after.len(), "same result count after rebuild");
 
-        for (b, a) in before.iter().zip(after.iter()) {
+        let mut before_sorted: Vec<_> = before.iter().collect();
+        let mut after_sorted: Vec<_> = after.iter().collect();
+        before_sorted.sort_by_key(|(id, _)| *id);
+        after_sorted.sort_by_key(|(id, _)| *id);
+
+        for (b, a) in before_sorted.iter().zip(after_sorted.iter()) {
             assert_eq!(b.0, a.0, "same node IDs after rebuild");
             assert!(
                 (b.1 - a.1).abs() < 1e-5,
