@@ -1090,10 +1090,14 @@ mod tests {
 
         assert!(result.all_succeeded(), "all operations should succeed");
         assert!(result.parallel_executed, "should use parallel execution");
-        // Conflicts should have been detected and re-executed
+        // Conflicts must have been detected and re-executed
         assert!(
-            result.reexecution_count > 0 || result.conflict_cluster_count == 0,
-            "either conflicts resolved via clusters or no conflicts arose"
+            result.conflict_cluster_count > 0,
+            "should detect conflict clusters for shared entities"
+        );
+        assert!(
+            result.reexecution_count > 0,
+            "should re-execute conflicting operations"
         );
     }
 
@@ -1112,8 +1116,16 @@ mod tests {
             result.record_write(shared);
         });
 
-        // Should succeed (via either cluster or round-based fallback)
-        assert!(result.all_succeeded() || !result.parallel_executed);
+        assert!(result.all_succeeded(), "all operations should succeed");
+        // With 100% conflicts on a single entity, the cluster covers all invalid
+        // indices and exceeds the 80% threshold, triggering round-based fallback.
+        if result.parallel_executed {
+            assert!(
+                result.largest_cluster_size >= 8,
+                "largest cluster should exceed 80% threshold, got {}",
+                result.largest_cluster_size
+            );
+        }
     }
 
     #[test]
@@ -1130,8 +1142,14 @@ mod tests {
             result.record_write(shared);
         });
 
-        // With 100% conflict rate, should either fall back to sequential
-        // or succeed through re-execution
-        assert!(result.all_succeeded());
+        // With 100% conflict rate (>30% threshold), should fall back to sequential
+        // or succeed through re-execution with conflict detection
+        assert!(result.all_succeeded(), "all operations should succeed");
+        if result.parallel_executed {
+            assert!(
+                result.reexecution_count > 0,
+                "parallel path with 100% conflicts must trigger re-execution"
+            );
+        }
     }
 }

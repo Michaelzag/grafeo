@@ -1251,7 +1251,12 @@ mod crash_tests {
         let mut recovery = WalRecovery::new(dir.path());
         recovery.set_encryptor(wrong_chain.encryptor_for("grafeo-wal", &0u64.to_be_bytes()));
 
-        let records = recovery.recover().unwrap_or_default();
+        let result = recovery.recover();
+        assert!(
+            result.is_ok(),
+            "recovery should succeed (best-effort), got: {result:?}"
+        );
+        let records = result.unwrap();
         assert!(
             records.is_empty(),
             "wrong key should produce no recoverable records, got {}",

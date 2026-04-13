@@ -383,12 +383,18 @@ mod tests {
     fn convert_sort_key_maps_directions() {
         use crate::execution::operators::{NullOrder, SortDirection};
 
+        use crate::execution::operators::push::{
+            NullOrder as PushNullOrder, SortDirection as PushSortDirection,
+        };
+
         let asc = super::convert_sort_key(&SortKey {
             column: 3,
             direction: SortDirection::Ascending,
             null_order: NullOrder::NullsFirst,
         });
         assert_eq!(asc.column, 3);
+        assert_eq!(asc.direction, PushSortDirection::Ascending);
+        assert_eq!(asc.null_order, PushNullOrder::First);
 
         let desc = super::convert_sort_key(&SortKey {
             column: 7,
@@ -396,5 +402,7 @@ mod tests {
             null_order: NullOrder::NullsLast,
         });
         assert_eq!(desc.column, 7);
+        assert_eq!(desc.direction, PushSortDirection::Descending);
+        assert_eq!(desc.null_order, PushNullOrder::Last);
     }
 }

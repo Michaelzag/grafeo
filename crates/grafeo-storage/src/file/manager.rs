@@ -445,16 +445,25 @@ impl GrafeoFileManager {
         // Write each section at page-aligned offsets
         let page_size = 4096u64;
         let mut current_offset = SECTION_DATA_OFFSET;
+        // Next checkpoint iteration, used as the high part of the nonce so that
+        // the same (section_type, offset) pair produces a different nonce across
+        // checkpoints. Without this, identical section layouts would reuse nonces.
+        #[cfg(feature = "encryption")]
+        let nonce_generation = (active_header.iteration + 1) as u32;
 
         for (section_type, data) in sections {
             // Encrypt section data if encryption is enabled.
-            // Nonce uses the page-aligned write offset, which is unique per section
-            // within a checkpoint (even if duplicate section types were passed).
+            // Nonce high bits: checkpoint iteration XORed with section type
+            // (iteration alone is unique across checkpoints, XOR with section
+            // type adds defense-in-depth if two sections land at the same offset).
+            // Nonce low bits: page-aligned write offset (unique within a checkpoint).
             // AAD binds the ciphertext to the section type, preventing relocation.
             #[cfg(feature = "encryption")]
             let (write_data, checksum, length) = if let Some(ref enc) = self.section_encryptor {
-                let nonce =
-                    grafeo_common::encryption::build_nonce(*section_type as u32, current_offset);
+                let nonce = grafeo_common::encryption::build_nonce(
+                    nonce_generation ^ (*section_type as u32),
+                    current_offset,
+                );
                 let aad = format!("grafeo-section:{}", *section_type as u32);
                 let encrypted = enc
                     .encrypt(data, &nonce, aad.as_bytes())
