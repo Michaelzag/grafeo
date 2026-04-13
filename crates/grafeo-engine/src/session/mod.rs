@@ -959,6 +959,7 @@ impl Session {
                 self.set_time_zone(&tz);
                 Ok(QueryResult::empty())
             }
+            #[cfg(feature = "gql")]
             SessionCommand::SessionSetParameter(key, expr) => {
                 if key.eq_ignore_ascii_case("viewing_epoch") {
                     match Self::eval_integer_literal(&expr) {
@@ -4286,6 +4287,7 @@ impl Session {
     }
 
     /// Evaluates a simple integer literal from a session parameter expression.
+    #[cfg(feature = "gql")]
     fn eval_integer_literal(expr: &grafeo_adapters::query::gql::ast::Expression) -> Option<i64> {
         use grafeo_adapters::query::gql::ast::{Expression, Literal};
         match expr {
