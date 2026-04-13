@@ -3774,14 +3774,29 @@ impl Session {
         if self.gc_interval > 0 {
             let count = self.commit_counter.fetch_add(1, Ordering::Relaxed) + 1;
             if count.is_multiple_of(self.gc_interval) {
+                #[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
+                let gc_start = std::time::Instant::now();
+
                 let min_epoch = self.transaction_manager.min_active_epoch();
                 for graph_name in &touched {
                     let store = self.resolve_store(graph_name);
                     store.gc_versions(min_epoch);
                 }
                 self.transaction_manager.gc();
+
                 #[cfg(feature = "metrics")]
-                crate::metrics::record_metric!(self.metrics, gc_runs, inc);
+                {
+                    crate::metrics::record_metric!(self.metrics, gc_runs, inc);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        let gc_duration_ms = gc_start.elapsed().as_secs_f64() * 1000.0;
+                        crate::metrics::record_metric!(
+                            self.metrics,
+                            gc_duration,
+                            observe gc_duration_ms
+                        );
+                    }
+                }
             }
         }
 

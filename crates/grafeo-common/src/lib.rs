@@ -43,3 +43,7 @@ pub use mvcc::{ColdVersionRef, HotVersionRef, OptionalEpochId, VersionIndex, Ver
 pub mod temporal;
 #[cfg(feature = "temporal")]
 pub use temporal::VersionLog;
+
+// Encryption at rest (feature-gated)
+#[cfg(feature = "encryption")]
+pub mod encryption;

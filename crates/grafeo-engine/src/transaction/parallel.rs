@@ -66,6 +66,11 @@ const MIN_BATCH_SIZE_FOR_PARALLEL: usize = 4;
 /// Maximum conflict rate before falling back to sequential execution.
 const MAX_CONFLICT_RATE_FOR_PARALLEL: f64 = 0.3;
 
+/// If the largest conflict cluster contains more than this fraction of all conflicting
+/// transactions, skip cluster-based re-execution (all conflicts are interconnected,
+/// partitioning adds overhead with no benefit).
+const CLUSTER_SKIP_THRESHOLD: f64 = 0.8;
+
 /// Status of an operation execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -182,6 +187,10 @@ pub struct BatchResult {
     pub reexecution_count: usize,
     /// Whether parallel execution was used (vs fallback to sequential).
     pub parallel_executed: bool,
+    /// Number of conflict clusters found during re-execution (0 if no conflicts).
+    pub conflict_cluster_count: usize,
+    /// Size of the largest conflict cluster (0 if no conflicts).
+    pub largest_cluster_size: usize,
 }
 
 impl BatchResult {
@@ -227,6 +236,132 @@ impl WriteTracker {
             return Some(writer);
         }
         None
+    }
+}
+
+/// Union-find structure for partitioning conflicting transactions into independent clusters.
+///
+/// After round 1 of Block-STM execution, transactions that share entities in their
+/// read/write sets are unioned together. Connected components form conflict clusters
+/// that can be re-executed independently in parallel.
+struct ConflictPartitioner {
+    parent: Vec<usize>,
+    rank: Vec<usize>,
+}
+
+impl ConflictPartitioner {
+    /// Creates a new partitioner for `n` transactions.
+    fn new(n: usize) -> Self {
+        Self {
+            parent: (0..n).collect(),
+            rank: vec![0; n],
+        }
+    }
+
+    /// Finds the root of `x` with path compression.
+    fn find(&mut self, x: usize) -> usize {
+        if self.parent[x] != x {
+            self.parent[x] = self.find(self.parent[x]);
+        }
+        self.parent[x]
+    }
+
+    /// Unions two sets by rank.
+    fn union(&mut self, a: usize, b: usize) {
+        let ra = self.find(a);
+        let rb = self.find(b);
+        if ra == rb {
+            return;
+        }
+        match self.rank[ra].cmp(&self.rank[rb]) {
+            std::cmp::Ordering::Less => self.parent[ra] = rb,
+            std::cmp::Ordering::Greater => self.parent[rb] = ra,
+            std::cmp::Ordering::Equal => {
+                self.parent[rb] = ra;
+                self.rank[ra] += 1;
+            }
+        }
+    }
+
+    /// Partitions conflicting transactions into independent clusters based on entity overlap.
+    ///
+    /// Two transactions are in the same cluster if they share any entity in their combined
+    /// read/write sets where at least one is a write. Returns clusters as vectors of
+    /// transaction indices, sorted by dependency order within each cluster.
+    ///
+    /// Also returns the size of the largest cluster for threshold checks.
+    fn partition(
+        read_sets: &[HashSet<(EntityId, EpochId)>],
+        write_sets: &[HashSet<EntityId>],
+        invalid_indices: &[usize],
+    ) -> (Vec<Vec<usize>>, usize) {
+        if invalid_indices.is_empty() {
+            return (Vec::new(), 0);
+        }
+
+        // Map invalid indices to a compact 0..N range for the union-find
+        let index_to_compact: FxHashMap<usize, usize> = invalid_indices
+            .iter()
+            .enumerate()
+            .map(|(compact, &orig)| (orig, compact))
+            .collect();
+
+        let n = invalid_indices.len();
+        let mut uf = ConflictPartitioner::new(n);
+
+        // Build entity -> list of compact indices that touch it (via write)
+        let mut entity_writers: FxHashMap<EntityId, Vec<usize>> = FxHashMap::default();
+
+        for &orig_idx in invalid_indices {
+            let compact = index_to_compact[&orig_idx];
+            for entity in &write_sets[orig_idx] {
+                entity_writers.entry(*entity).or_default().push(compact);
+            }
+        }
+
+        // Union transactions that share a written entity with any reader/writer
+        for &orig_idx in invalid_indices {
+            let compact = index_to_compact[&orig_idx];
+
+            // Check reads: if this transaction reads an entity that another wrote
+            for (entity, _epoch) in &read_sets[orig_idx] {
+                if let Some(writers) = entity_writers.get(entity) {
+                    for &writer_compact in writers {
+                        if writer_compact != compact {
+                            uf.union(compact, writer_compact);
+                        }
+                    }
+                }
+            }
+
+            // Check writes: if this transaction writes an entity that another also writes
+            for entity in &write_sets[orig_idx] {
+                if let Some(writers) = entity_writers.get(entity) {
+                    for &writer_compact in writers {
+                        if writer_compact != compact {
+                            uf.union(compact, writer_compact);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Extract clusters (group by root)
+        let mut cluster_map: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
+        for (compact, &orig_idx) in invalid_indices.iter().enumerate() {
+            let root = uf.find(compact);
+            cluster_map.entry(root).or_default().push(orig_idx);
+        }
+
+        let mut clusters: Vec<Vec<usize>> = cluster_map.into_values().collect();
+
+        // Sort each cluster by batch index (dependency order)
+        for cluster in &mut clusters {
+            cluster.sort_unstable();
+        }
+
+        let largest = clusters.iter().map(Vec::len).max().unwrap_or(0);
+        (clusters, largest)
     }
 }
 
@@ -289,6 +424,8 @@ impl ParallelExecutor {
                 failure_count: 0,
                 reexecution_count: 0,
                 parallel_executed: false,
+                conflict_cluster_count: 0,
+                largest_cluster_size: 0,
             };
         }
 
@@ -348,19 +485,33 @@ impl ParallelExecutor {
             return self.execute_sequential(batch, execute_fn);
         }
 
-        // Phase 3: Re-execution of conflicting transactions
+        // Phase 3: Cluster-based re-execution of conflicting transactions
+        //
+        // Partition conflicting transactions into independent clusters using union-find
+        // on entity overlap. Clusters with no shared entities can be re-executed fully
+        // in parallel. Within each cluster, transactions run in dependency order.
         let total_reexecutions = AtomicUsize::new(0);
 
-        for round in 0..MAX_REEXECUTION_ROUNDS {
-            if invalid_indices.is_empty() {
-                break;
-            }
+        // Collect read/write sets for partitioning
+        let all_read_sets: Vec<HashSet<(EntityId, EpochId)>> =
+            results.iter().map(|r| r.lock().read_set.clone()).collect();
+        let all_write_sets: Vec<HashSet<EntityId>> =
+            results.iter().map(|r| r.lock().write_set.clone()).collect();
 
-            // Re-execute invalid transactions
-            let still_invalid: Vec<usize> = self.pool.install(|| {
-                invalid_indices
-                    .par_iter()
-                    .filter_map(|&idx| {
+        let (clusters, largest_cluster) =
+            ConflictPartitioner::partition(&all_read_sets, &all_write_sets, &invalid_indices);
+
+        // If the largest cluster dominates, skip partitioning and fall back to round-based
+        let use_clusters = !clusters.is_empty()
+            && (largest_cluster as f64 / invalid_indices.len().max(1) as f64)
+                <= CLUSTER_SKIP_THRESHOLD;
+
+        if use_clusters {
+            // Execute clusters in parallel, transactions within each cluster sequentially
+            // in dependency order. This typically resolves all conflicts in a single pass.
+            self.pool.install(|| {
+                clusters.par_iter().for_each(|cluster| {
+                    for &idx in cluster {
                         let mut result = results[idx].lock();
 
                         // Clear previous state
@@ -368,38 +519,67 @@ impl ParallelExecutor {
                         result.write_set.clear();
                         result.dependencies.clear();
 
-                        // Re-execute
+                        // Re-execute in dependency order within the cluster
                         execute_fn(idx, &batch.operations[idx], &mut result);
                         result.mark_reexecuted();
                         total_reexecutions.fetch_add(1, Ordering::Relaxed);
 
-                        // Collect entities for re-validation
-                        let read_entities: Vec<EntityId> =
-                            result.read_set.iter().map(|(entity, _)| *entity).collect();
-
-                        // Re-validate
-                        for entity in read_entities {
-                            if let Some(writer) = write_tracker.was_written_by_earlier(&entity, idx)
-                            {
-                                result.mark_needs_revalidation();
-                                result.dependencies.push(writer);
-                                return Some(idx);
-                            }
+                        // Update write tracker with new writes
+                        for entity in &result.write_set {
+                            write_tracker.record_write(*entity, idx);
                         }
 
                         result.status = ExecutionStatus::Success;
-                        None
-                    })
-                    .collect()
+                    }
+                });
             });
+        } else {
+            // Fallback: round-based re-execution (original algorithm)
+            for round in 0..MAX_REEXECUTION_ROUNDS {
+                if invalid_indices.is_empty() {
+                    break;
+                }
 
-            invalid_indices = still_invalid;
+                let still_invalid: Vec<usize> = self.pool.install(|| {
+                    invalid_indices
+                        .par_iter()
+                        .filter_map(|&idx| {
+                            let mut result = results[idx].lock();
 
-            if round == MAX_REEXECUTION_ROUNDS - 1 && !invalid_indices.is_empty() {
-                // Max rounds reached, mark remaining as failed
-                for idx in &invalid_indices {
-                    let mut result = results[*idx].lock();
-                    result.mark_failed("Max re-execution rounds reached".to_string());
+                            result.read_set.clear();
+                            result.write_set.clear();
+                            result.dependencies.clear();
+
+                            execute_fn(idx, &batch.operations[idx], &mut result);
+                            result.mark_reexecuted();
+                            total_reexecutions.fetch_add(1, Ordering::Relaxed);
+
+                            let read_entities: Vec<EntityId> =
+                                result.read_set.iter().map(|(entity, _)| *entity).collect();
+
+                            for entity in read_entities {
+                                if let Some(writer) =
+                                    write_tracker.was_written_by_earlier(&entity, idx)
+                                {
+                                    result.mark_needs_revalidation();
+                                    result.dependencies.push(writer);
+                                    return Some(idx);
+                                }
+                            }
+
+                            result.status = ExecutionStatus::Success;
+                            None
+                        })
+                        .collect()
+                });
+
+                invalid_indices = still_invalid;
+
+                if round == MAX_REEXECUTION_ROUNDS - 1 && !invalid_indices.is_empty() {
+                    for idx in &invalid_indices {
+                        let mut result = results[*idx].lock();
+                        result.mark_failed("Max re-execution rounds reached".to_string());
+                    }
                 }
             }
         }
@@ -421,6 +601,8 @@ impl ParallelExecutor {
             success_count,
             reexecution_count: total_reexecutions.load(Ordering::Relaxed),
             parallel_executed: true,
+            conflict_cluster_count: clusters.len(),
+            largest_cluster_size: largest_cluster,
             results: final_results,
         }
     }
@@ -448,6 +630,8 @@ impl ParallelExecutor {
             success_count,
             reexecution_count: 0,
             parallel_executed: false,
+            conflict_cluster_count: 0,
+            largest_cluster_size: 0,
             results,
         }
     }
@@ -668,5 +852,213 @@ mod tests {
         result.mark_reexecuted();
         assert_eq!(result.status, ExecutionStatus::Reexecuted);
         assert_eq!(result.reexecution_count, 1);
+    }
+
+    // ---- Conflict Partitioner Tests ----
+
+    #[test]
+    fn test_partitioner_empty() {
+        let (clusters, largest) = ConflictPartitioner::partition(&[], &[], &[]);
+        assert!(clusters.is_empty());
+        assert_eq!(largest, 0);
+    }
+
+    #[test]
+    fn test_partitioner_disjoint_clusters() {
+        // 4 transactions: {0,1} share entity A, {2,3} share entity B
+        let entity_a = EntityId::Node(NodeId::new(100));
+        let entity_b = EntityId::Node(NodeId::new(200));
+
+        let read_sets = vec![
+            HashSet::from([(entity_a, EpochId::new(0))]),
+            HashSet::new(),
+            HashSet::from([(entity_b, EpochId::new(0))]),
+            HashSet::new(),
+        ];
+        let write_sets = vec![
+            HashSet::from([entity_a]),
+            HashSet::from([entity_a]),
+            HashSet::from([entity_b]),
+            HashSet::from([entity_b]),
+        ];
+
+        let invalid = vec![0, 1, 2, 3];
+        let (clusters, largest) = ConflictPartitioner::partition(&read_sets, &write_sets, &invalid);
+
+        assert_eq!(clusters.len(), 2, "should produce 2 disjoint clusters");
+        assert_eq!(largest, 2, "each cluster has 2 transactions");
+
+        // Verify all transactions are covered
+        let all: HashSet<usize> = clusters.iter().flat_map(|c| c.iter().copied()).collect();
+        assert_eq!(all, HashSet::from([0, 1, 2, 3]));
+    }
+
+    #[test]
+    fn test_partitioner_single_cluster() {
+        // All 3 transactions share entity A: one big cluster
+        let entity_a = EntityId::Node(NodeId::new(42));
+
+        let read_sets = vec![
+            HashSet::from([(entity_a, EpochId::new(0))]),
+            HashSet::from([(entity_a, EpochId::new(0))]),
+            HashSet::from([(entity_a, EpochId::new(0))]),
+        ];
+        let write_sets = vec![
+            HashSet::from([entity_a]),
+            HashSet::from([entity_a]),
+            HashSet::from([entity_a]),
+        ];
+
+        let invalid = vec![0, 1, 2];
+        let (clusters, largest) = ConflictPartitioner::partition(&read_sets, &write_sets, &invalid);
+
+        assert_eq!(clusters.len(), 1, "all share the same entity");
+        assert_eq!(largest, 3);
+        assert_eq!(clusters[0], vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn test_partitioner_chain_merges() {
+        // Tx 0 writes A, Tx 1 writes A and B, Tx 2 writes B
+        // Chain: 0 <-> 1 <-> 2 (all in one cluster via B bridging)
+        let entity_a = EntityId::Node(NodeId::new(10));
+        let entity_b = EntityId::Node(NodeId::new(20));
+
+        let read_sets = vec![HashSet::new(), HashSet::new(), HashSet::new()];
+        let write_sets = vec![
+            HashSet::from([entity_a]),
+            HashSet::from([entity_a, entity_b]),
+            HashSet::from([entity_b]),
+        ];
+
+        let invalid = vec![0, 1, 2];
+        let (clusters, largest) = ConflictPartitioner::partition(&read_sets, &write_sets, &invalid);
+
+        assert_eq!(clusters.len(), 1, "chain should merge into one cluster");
+        assert_eq!(largest, 3);
+    }
+
+    #[test]
+    fn test_partitioner_read_write_conflict() {
+        // Tx 0 writes A, Tx 1 reads A (no write): should be in the same cluster
+        let entity_a = EntityId::Node(NodeId::new(50));
+
+        let read_sets = vec![HashSet::new(), HashSet::from([(entity_a, EpochId::new(0))])];
+        let write_sets = vec![HashSet::from([entity_a]), HashSet::new()];
+
+        let invalid = vec![0, 1];
+        let (clusters, largest) = ConflictPartitioner::partition(&read_sets, &write_sets, &invalid);
+
+        assert_eq!(clusters.len(), 1, "read-write overlap merges clusters");
+        assert_eq!(largest, 2);
+    }
+
+    #[test]
+    fn test_partitioner_subset_of_transactions() {
+        // Only indices 2 and 5 are invalid out of 6 total transactions.
+        // They share no entities: should produce 2 clusters.
+        let entity_a = EntityId::Node(NodeId::new(1));
+        let entity_b = EntityId::Node(NodeId::new(2));
+
+        let read_sets = vec![
+            HashSet::new(),
+            HashSet::new(),
+            HashSet::from([(entity_a, EpochId::new(0))]),
+            HashSet::new(),
+            HashSet::new(),
+            HashSet::from([(entity_b, EpochId::new(0))]),
+        ];
+        let write_sets = vec![
+            HashSet::new(),
+            HashSet::new(),
+            HashSet::from([entity_a]),
+            HashSet::new(),
+            HashSet::new(),
+            HashSet::from([entity_b]),
+        ];
+
+        let invalid = vec![2, 5];
+        let (clusters, _) = ConflictPartitioner::partition(&read_sets, &write_sets, &invalid);
+
+        assert_eq!(
+            clusters.len(),
+            2,
+            "non-overlapping invalid txns form separate clusters"
+        );
+    }
+
+    #[test]
+    fn test_cluster_based_reexecution() {
+        // Two groups of conflicting operations that don't overlap.
+        // Group A (idx 0,1): read/write entity 100
+        // Group B (idx 2,3): read/write entity 200
+        // Group C (idx 4-7): independent, no conflicts
+        let executor = ParallelExecutor::new(4);
+        let batch = BatchRequest::new(vec![
+            "g1_op1", "g1_op2", "g2_op1", "g2_op2", "ind1", "ind2", "ind3", "ind4",
+        ]);
+
+        let entity_a = EntityId::Node(NodeId::new(100));
+        let entity_b = EntityId::Node(NodeId::new(200));
+
+        let result = executor.execute_batch(batch, |idx, _, result| {
+            match idx {
+                0 | 1 => {
+                    result.record_read(entity_a, EpochId::new(0));
+                    result.record_write(entity_a);
+                }
+                2 | 3 => {
+                    result.record_read(entity_b, EpochId::new(0));
+                    result.record_write(entity_b);
+                }
+                _ => {
+                    // Independent: unique entity per transaction
+                    result.record_write(EntityId::Node(NodeId::new(idx as u64 + 1000)));
+                }
+            }
+        });
+
+        assert!(result.all_succeeded());
+        assert_eq!(result.results.len(), 8);
+        assert!(result.parallel_executed);
+        // Conflict clusters should be detected (2 clusters for the conflicting pairs)
+        // Independent ops (4-7) don't conflict, so not in any cluster
+    }
+
+    #[test]
+    fn test_cluster_metrics_reported() {
+        let executor = ParallelExecutor::new(4);
+        let batch = BatchRequest::new(vec!["a", "b", "c", "d", "e", "f", "g", "h"]);
+
+        // No conflicts: cluster count should be 0
+        let result = executor.execute_batch(batch, |idx, _, result| {
+            result.record_write(EntityId::Node(NodeId::new(idx as u64)));
+        });
+
+        assert_eq!(result.conflict_cluster_count, 0);
+        assert_eq!(result.largest_cluster_size, 0);
+        assert_eq!(result.reexecution_count, 0);
+    }
+
+    #[test]
+    fn test_union_find_correctness() {
+        let mut uf = ConflictPartitioner::new(6);
+
+        // Union 0-1, 2-3, 4-5
+        uf.union(0, 1);
+        uf.union(2, 3);
+        uf.union(4, 5);
+
+        assert_eq!(uf.find(0), uf.find(1));
+        assert_eq!(uf.find(2), uf.find(3));
+        assert_eq!(uf.find(4), uf.find(5));
+        assert_ne!(uf.find(0), uf.find(2));
+        assert_ne!(uf.find(0), uf.find(4));
+
+        // Now merge first two groups
+        uf.union(1, 3);
+        assert_eq!(uf.find(0), uf.find(2));
+        assert_eq!(uf.find(0), uf.find(3));
+        assert_ne!(uf.find(0), uf.find(4));
     }
 }
