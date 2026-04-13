@@ -351,10 +351,10 @@ mod bulk_export {
     use super::{ArrowExportError, build_array, infer_column_type, record_batch_to_ipc_stream};
 
     /// Structural column names for nodes (property keys matching these are skipped).
-    const RESERVED_NODE_COLS: &[&str] = &["id", "labels"];
+    const RESERVED_NODE_COLS: &[&str] = &["_id", "_labels"];
 
     /// Structural column names for edges (property keys matching these are skipped).
-    const RESERVED_EDGE_COLS: &[&str] = &["id", "source", "target", "type"];
+    const RESERVED_EDGE_COLS: &[&str] = &["_id", "_source", "_target", "_type"];
 
     /// Discovers property keys in first-seen order, skipping reserved column names.
     fn discover_property_keys<'a>(
@@ -375,9 +375,10 @@ mod bulk_export {
 
     /// Converts a slice of [`Node`]s to an Arrow [`RecordBatch`].
     ///
-    /// Schema: `id` (UInt64), `labels` (List\<Utf8\>), plus one nullable column per
-    /// unique property key. Property types are inferred from values; mixed-type
-    /// columns fall back to Utf8.
+    /// Schema: `_id` (UInt64), `_labels` (List\<Utf8\>), plus one nullable column per
+    /// unique property key. Structural columns are underscore-prefixed to avoid
+    /// collision with user property names. Property types are inferred from
+    /// values; mixed-type columns fall back to Utf8.
     ///
     /// # Errors
     ///
@@ -406,9 +407,9 @@ mod bulk_export {
         }
 
         let mut fields: Vec<Field> = vec![
-            Field::new("id", DataType::UInt64, false),
+            Field::new("_id", DataType::UInt64, false),
             Field::new(
-                "labels",
+                "_labels",
                 DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
                 false,
             ),
@@ -436,8 +437,9 @@ mod bulk_export {
 
     /// Converts a slice of [`Edge`]s to an Arrow [`RecordBatch`].
     ///
-    /// Schema: `id` (UInt64), `type` (Utf8), `source` (UInt64), `target` (UInt64),
-    /// plus one nullable column per unique property key.
+    /// Schema: `_id` (UInt64), `_type` (Utf8), `_source` (UInt64), `_target` (UInt64),
+    /// plus one nullable column per unique property key. Structural columns are
+    /// underscore-prefixed to avoid collision with user property names.
     ///
     /// # Errors
     ///
@@ -467,10 +469,10 @@ mod bulk_export {
         }
 
         let mut fields: Vec<Field> = vec![
-            Field::new("id", DataType::UInt64, false),
-            Field::new("type", DataType::Utf8, false),
-            Field::new("source", DataType::UInt64, false),
-            Field::new("target", DataType::UInt64, false),
+            Field::new("_id", DataType::UInt64, false),
+            Field::new("_type", DataType::Utf8, false),
+            Field::new("_source", DataType::UInt64, false),
+            Field::new("_target", DataType::UInt64, false),
         ];
         let mut arrays: Vec<ArrayRef> = vec![
             Arc::new(id_builder.finish()),
@@ -879,8 +881,8 @@ mod tests {
             assert_eq!(batch.num_rows(), 2);
             // id, labels, name, age
             assert_eq!(batch.num_columns(), 4);
-            assert_eq!(batch.schema().field(0).name(), "id");
-            assert_eq!(batch.schema().field(1).name(), "labels");
+            assert_eq!(batch.schema().field(0).name(), "_id");
+            assert_eq!(batch.schema().field(1).name(), "_labels");
             assert_eq!(batch.schema().field(2).name(), "name");
             assert_eq!(batch.schema().field(3).name(), "age");
         }
@@ -889,14 +891,43 @@ mod tests {
         fn test_nodes_reserved_column_skipped() {
             let mut node = make_node(1, &["Test"]);
             node.properties
-                .insert(PropertyKey::new("id"), Value::Int64(999)); // should be skipped
+                .insert(PropertyKey::new("_id"), Value::Int64(999)); // should be skipped
             node.properties
                 .insert(PropertyKey::new("score"), Value::Float64(0.95));
 
             let batch = crate::database::arrow::nodes_to_record_batch(&[node]).unwrap();
-            // id (structural), labels (structural), score (property)
+            // _id (structural), _labels (structural), score (property)
             assert_eq!(batch.num_columns(), 3);
             assert_eq!(batch.schema().field(2).name(), "score");
+        }
+
+        /// Regression: properties named "id" or "labels" must NOT be dropped.
+        /// Old code reserved these bare names, causing silent data loss.
+        #[test]
+        fn test_nodes_property_named_id_preserved() {
+            let mut node = make_node(1, &["Method"]);
+            node.properties
+                .insert(PropertyKey::new("id"), Value::String("custom-uuid".into()));
+            node.properties
+                .insert(PropertyKey::new("labels"), Value::String("meta".into()));
+
+            let batch = crate::database::arrow::nodes_to_record_batch(&[node]).unwrap();
+            // _id, _labels, id (property), labels (property)
+            assert_eq!(batch.num_columns(), 4);
+            let names: Vec<_> = batch
+                .schema()
+                .fields()
+                .iter()
+                .map(|f| f.name().clone())
+                .collect();
+            assert!(
+                names.contains(&"id".to_string()),
+                "property 'id' must be preserved"
+            );
+            assert!(
+                names.contains(&"labels".to_string()),
+                "property 'labels' must be preserved"
+            );
         }
 
         #[test]
@@ -919,7 +950,7 @@ mod tests {
         fn test_edges_empty() {
             let batch = crate::database::arrow::edges_to_record_batch(&[]).unwrap();
             assert_eq!(batch.num_rows(), 0);
-            assert_eq!(batch.num_columns(), 4); // id, type, source, target
+            assert_eq!(batch.num_columns(), 4); // _id, _type, _source, _target
         }
 
         #[test]
@@ -930,13 +961,67 @@ mod tests {
 
             let batch = crate::database::arrow::edges_to_record_batch(&[edge]).unwrap();
             assert_eq!(batch.num_rows(), 1);
-            // id, type, source, target, since
+            // _id, _type, _source, _target, since
             assert_eq!(batch.num_columns(), 5);
-            assert_eq!(batch.schema().field(0).name(), "id");
-            assert_eq!(batch.schema().field(1).name(), "type");
-            assert_eq!(batch.schema().field(2).name(), "source");
-            assert_eq!(batch.schema().field(3).name(), "target");
+            assert_eq!(batch.schema().field(0).name(), "_id");
+            assert_eq!(batch.schema().field(1).name(), "_type");
+            assert_eq!(batch.schema().field(2).name(), "_source");
+            assert_eq!(batch.schema().field(3).name(), "_target");
             assert_eq!(batch.schema().field(4).name(), "since");
+        }
+
+        /// Regression: properties named "source" or "target" must NOT be dropped.
+        /// Old code reserved these bare names, causing silent data loss.
+        #[test]
+        fn test_edges_property_named_source_preserved() {
+            let mut edge = make_edge(1, 10, 20, "CALLS");
+            edge.properties
+                .insert(PropertyKey::new("source"), Value::String("jdt".into()));
+            edge.properties
+                .insert(PropertyKey::new("confidence"), Value::Float64(0.9));
+
+            let batch = crate::database::arrow::edges_to_record_batch(&[edge]).unwrap();
+            // _id, _type, _source, _target, source (property), confidence
+            assert_eq!(batch.num_columns(), 6);
+            let names: Vec<_> = batch
+                .schema()
+                .fields()
+                .iter()
+                .map(|f| f.name().clone())
+                .collect();
+            assert!(
+                names.contains(&"source".to_string()),
+                "property 'source' must be preserved"
+            );
+            assert!(names.contains(&"confidence".to_string()));
+        }
+
+        /// Regression: boolean properties must appear in Arrow export.
+        #[test]
+        fn test_nodes_boolean_properties_preserved() {
+            let mut node = make_node(1, &["Method"]);
+            node.properties
+                .insert(PropertyKey::new("name"), Value::String("foo".into()));
+            node.properties
+                .insert(PropertyKey::new("is_exported"), Value::Bool(true));
+            node.properties
+                .insert(PropertyKey::new("is_test"), Value::Bool(false));
+
+            let batch = crate::database::arrow::nodes_to_record_batch(&[node]).unwrap();
+            let names: Vec<_> = batch
+                .schema()
+                .fields()
+                .iter()
+                .map(|f| f.name().clone())
+                .collect();
+            assert!(
+                names.contains(&"is_exported".to_string()),
+                "bool property 'is_exported' must be present"
+            );
+            assert!(
+                names.contains(&"is_test".to_string()),
+                "bool property 'is_test' must be present"
+            );
         }
 
         #[test]

@@ -565,7 +565,7 @@ fn test_cypher_error_shows_position() {
 }
 
 #[test]
-#[cfg(feature = "sparql")]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 fn test_sparql_error_shows_position() {
     let db = GrafeoDB::new_in_memory();
     let session = db.session();
@@ -717,7 +717,7 @@ fn test_gql_error_includes_caret_marker() {
 }
 
 #[test]
-#[cfg(feature = "sparql")]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 fn test_sparql_error_includes_position() {
     let db = GrafeoDB::new_in_memory();
     let session = db.session();

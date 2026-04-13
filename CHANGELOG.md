@@ -6,6 +6,8 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 
 Hardening, ISO compliance, and vector search improvements driven by persona-based exploratory testing. Parser security limits prevent stack overflow attacks, all six query languages gain EXPLAIN support, Unicode identifiers bring GQL closer to ISO 39075, and quantized vector indexes cut memory usage up to 4x for large embedding workloads.
 
+**Breaking:** `QueryBuilder.param()` now raises `ValueError` on unsupported types instead of silently dropping them: code that relied on silent fallthrough will see exceptions and should fix the type conversion. Parser error messages now include a language prefix (e.g., `[GQL] Unexpected token`): code that pattern-matches on error strings may need updating. SPARQL `SERVICE` clauses now return an explicit error instead of silently executing the inner pattern against the local store: queries that appeared to work but returned incorrect results will now fail with a clear message. SPARQL property path `+`/`*` expansion depth raised from 10 to 50: queries on deep hierarchies will return more complete results, which may increase result set sizes and execution time.
+
 ### Added
 
 - **Quantized vector indexes**: `create_vector_index()` accepts `quantization` parameter (`"scalar"`, `"binary"`, `"product"`) for 4x memory reduction on large vector datasets. `VectorIndexKind` enum unifies plain and quantized indexes throughout the engine. All bindings (Python, Node.js, WASM, C) updated.
@@ -33,6 +35,7 @@ Hardening, ISO compliance, and vector search improvements driven by persona-base
 - **RDF blank node collisions across imports**: Turtle parser now prefixes blank node IDs per-import (`_:imp{N}_b0`), preventing cross-file collisions.
 - **Incremental backup always failed after full backup** (#267): the backup cursor stored the active WAL file's sequence without rotating, so post-backup writes stayed invisible to incremental. Both `backup_full` and `backup_incremental` now rotate the WAL after completing, ensuring new writes land in a file the next incremental will pick up.
 - **Edge variables in multi-hop queries returned as raw IDs** (#268): `plan_expand_chain` and `plan_factorized_aggregate` did not register edge columns in the planner's tracking set, causing RETURN to emit `NodeResolve` instead of `EdgeResolve`. Edge variables now resolve to full maps with `_id`, `_type`, `_source`, `_target`, and properties.
+- **Arrow/DataFrame export dropped user properties named `source`/`target`/`id`/`type`** (#272): structural columns in `edges_to_arrow()`, `edges_df()`, `nodes_to_arrow()`, and `nodes_df()` collided with user property names, silently dropping them. Structural columns are now underscore-prefixed (`_id`, `_type`, `_source`, `_target`, `_labels`) to match the engine's `edge_to_map()`/`node_to_map()` convention. **Breaking:** code referencing `df["source"]` must change to `df["_source"]`.
 - **Weighted hybrid search inverted vector ranking**: `hybrid_search()` with `fusion="weighted"` applied min-max normalization to raw vector distances, causing the farthest node to score highest. Vector distances are now negated before fusion so that closer vectors rank higher.
 
 ### Documentation

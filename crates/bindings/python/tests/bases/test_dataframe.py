@@ -121,7 +121,7 @@ class TestNodesDf:
 
         assert isinstance(df, pd.DataFrame)
         assert "id" in df.columns
-        assert "labels" in df.columns
+        assert "_labels" in df.columns
         assert "name" in df.columns
         assert len(df) == 4  # 3 persons + 1 company
 
@@ -138,12 +138,12 @@ class TestNodesDf:
         """Nodes without a property should have None in that column."""
         df = populated_db.nodes_df()
         # Company node shouldn't have 'age'
-        company_rows = df[df["labels"].apply(lambda labels: "Company" in labels)]
+        company_rows = df[df["_labels"].apply(lambda labels: "Company" in labels)]
         assert company_rows["age"].isna().all()
 
     def test_labels_are_lists(self, populated_db):
         df = populated_db.nodes_df()
-        for labels in df["labels"]:
+        for labels in df["_labels"]:
             assert isinstance(labels, list)
 
     def test_empty_graph(self):
@@ -151,7 +151,7 @@ class TestNodesDf:
         df = db.nodes_df()
         assert isinstance(df, pd.DataFrame)
         assert len(df) == 0
-        assert list(df.columns) == ["id", "labels"]
+        assert list(df.columns) == ["_id", "_labels"]
 
 
 # --- db.edges_df() ---
@@ -163,15 +163,15 @@ class TestEdgesDf:
         df = populated_db.edges_df()
 
         assert isinstance(df, pd.DataFrame)
-        assert "id" in df.columns
-        assert "source" in df.columns
-        assert "target" in df.columns
-        assert "type" in df.columns
+        assert "_id" in df.columns
+        assert "_source" in df.columns
+        assert "_target" in df.columns
+        assert "_type" in df.columns
         assert len(df) == 2  # KNOWS + WORKS_AT
 
     def test_edge_types(self, populated_db):
         df = populated_db.edges_df()
-        types = set(df["type"])
+        types = set(df["_type"])
         assert types == {"KNOWS", "WORKS_AT"}
 
     def test_property_columns(self, populated_db):
@@ -182,7 +182,7 @@ class TestEdgesDf:
     def test_missing_properties_are_none(self, populated_db):
         df = populated_db.edges_df()
         # KNOWS edge has 'since' but not 'role', WORKS_AT has 'role' but not 'since'
-        knows_rows = df[df["type"] == "KNOWS"]
+        knows_rows = df[df["_type"] == "KNOWS"]
         assert knows_rows["role"].isna().all()
 
     def test_empty_graph(self):
@@ -190,7 +190,7 @@ class TestEdgesDf:
         df = db.edges_df()
         assert isinstance(df, pd.DataFrame)
         assert len(df) == 0
-        assert list(df.columns) == ["id", "source", "target", "type"]
+        assert list(df.columns) == ["_id", "_type", "_source", "_target"]
 
 
 # --- Error handling ---

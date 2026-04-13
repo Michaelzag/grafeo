@@ -239,7 +239,7 @@ fn get_projection_by_name() {
 
 // ── SPARQL permission checks ────────────────────────────────────
 
-#[cfg(feature = "sparql")]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 #[test]
 fn sparql_select_with_readonly_succeeds() {
     let db = GrafeoDB::new_in_memory();
@@ -259,7 +259,7 @@ fn sparql_select_with_readonly_succeeds() {
     );
 }
 
-#[cfg(feature = "sparql")]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 #[test]
 fn sparql_insert_with_readonly_fails() {
     let db = GrafeoDB::new_in_memory();
@@ -278,7 +278,7 @@ fn sparql_insert_with_readonly_fails() {
 
 // ── SPARQL permission checks on RDF-model database ─────────────
 
-#[cfg(feature = "sparql")]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 #[test]
 fn sparql_select_on_rdf_database_with_readonly_succeeds() {
     use grafeo_engine::config::{Config, GraphModel};
@@ -302,7 +302,7 @@ fn sparql_select_on_rdf_database_with_readonly_succeeds() {
     );
 }
 
-#[cfg(feature = "sparql")]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 #[test]
 fn sparql_insert_on_rdf_database_with_readonly_fails() {
     use grafeo_engine::config::{Config, GraphModel};
