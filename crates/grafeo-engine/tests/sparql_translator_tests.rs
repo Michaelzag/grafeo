@@ -1,6 +1,6 @@
 //! Integration tests for SPARQL translator.
 
-#[cfg(feature = "sparql")]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 mod tests {
     use grafeo_engine::query::translators::sparql::translate;
 

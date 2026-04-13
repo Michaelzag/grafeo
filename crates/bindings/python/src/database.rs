@@ -2509,7 +2509,7 @@ impl PyGrafeoDB {
         // Collect all nodes and discover property keys.
         // Skip properties whose names collide with structural columns
         // to prevent silent overwrites (GrafeoDB/grafeo#254).
-        const RESERVED_NODE_COLS: &[&str] = &["id", "labels"];
+        const RESERVED_NODE_COLS: &[&str] = &["_id", "_labels"];
         let nodes: Vec<_> = store.all_nodes().collect();
         let mut prop_keys: Vec<String> = Vec::new();
         let mut prop_key_set = std::collections::HashSet::new();
@@ -2549,8 +2549,8 @@ impl PyGrafeoDB {
         }
 
         let data = pyo3::types::PyDict::new(py);
-        data.set_item("id", ids)?;
-        data.set_item("labels", labels)?;
+        data.set_item("_id", ids)?;
+        data.set_item("_labels", labels)?;
         for (key, col) in prop_keys.iter().zip(prop_columns.iter()) {
             data.set_item(key, col)?;
         }
@@ -2598,7 +2598,7 @@ impl PyGrafeoDB {
     /// Example:
     /// ```python
     /// df = db.edges_to_polars()
-    /// print(df.filter(pl.col("type") == "KNOWS"))
+    /// print(df.filter(pl.col("_type") == "KNOWS"))
     /// ```
     #[cfg(feature = "arrow-export")]
     #[pyo3(signature = ())]
@@ -2629,7 +2629,7 @@ impl PyGrafeoDB {
 
     /// Export all edges as a pandas DataFrame.
     ///
-    /// Columns: `id` (int), `source` (int), `target` (int), `type` (str),
+    /// Columns: `_id` (int), `_source` (int), `_target` (int), `_type` (str),
     /// plus one column per unique property key. Missing properties are `None`.
     ///
     /// Requires pandas (`uv add pandas`).
@@ -2637,7 +2637,7 @@ impl PyGrafeoDB {
     /// Example:
     /// ```python
     /// df = db.edges_df()
-    /// print(df[df["type"] == "KNOWS"])
+    /// print(df[df["_type"] == "KNOWS"])
     /// ```
     #[pyo3(signature = ())]
     fn edges_df(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
@@ -2660,7 +2660,7 @@ impl PyGrafeoDB {
         // Collect all edges and discover property keys.
         // Skip properties whose names collide with structural columns
         // to prevent silent overwrites (GrafeoDB/grafeo#254).
-        const RESERVED_EDGE_COLS: &[&str] = &["id", "source", "target", "type"];
+        const RESERVED_EDGE_COLS: &[&str] = &["_id", "_source", "_target", "_type"];
         let edges: Vec<_> = store.all_edges().collect();
         let mut prop_keys: Vec<String> = Vec::new();
         let mut prop_key_set = std::collections::HashSet::new();
@@ -2701,10 +2701,10 @@ impl PyGrafeoDB {
         }
 
         let data = pyo3::types::PyDict::new(py);
-        data.set_item("id", ids)?;
-        data.set_item("source", sources)?;
-        data.set_item("target", targets)?;
-        data.set_item("type", types)?;
+        data.set_item("_id", ids)?;
+        data.set_item("_source", sources)?;
+        data.set_item("_target", targets)?;
+        data.set_item("_type", types)?;
         for (key, col) in prop_keys.iter().zip(prop_columns.iter()) {
             data.set_item(key, col)?;
         }

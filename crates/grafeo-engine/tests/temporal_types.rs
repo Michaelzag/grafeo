@@ -329,7 +329,7 @@ fn gql_date_json_param_roundtrip() {
 // ============================================================================
 
 #[test]
-#[cfg(feature = "sparql")]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 fn sparql_xsd_date_literal() {
     let db = GrafeoDB::new_in_memory();
     let result = db
@@ -345,7 +345,7 @@ fn sparql_xsd_date_literal() {
 }
 
 #[test]
-#[cfg(feature = "sparql")]
+#[cfg(all(feature = "sparql", feature = "triple-store"))]
 fn sparql_xsd_duration_literal() {
     let db = GrafeoDB::new_in_memory();
     let result = db
