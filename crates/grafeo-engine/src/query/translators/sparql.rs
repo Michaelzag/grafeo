@@ -29,16 +29,18 @@ pub fn translate(query: &str) -> Result<LogicalPlan> {
     // EXPLAIN: show physical plan without executing.
     // EXPLAIN ANALYZE: execute with profiling, show actual vs estimated stats.
     let trimmed = query.trim_start();
-    let (explain, profile, actual_query) = if trimmed.len() >= 7
-        && trimmed[..7].eq_ignore_ascii_case("EXPLAIN")
+    let (explain, profile, actual_query) = if trimmed
+        .get(..7)
+        .is_some_and(|s| s.eq_ignore_ascii_case("EXPLAIN"))
         && trimmed
             .as_bytes()
             .get(7)
             .is_some_and(u8::is_ascii_whitespace)
     {
         let rest = trimmed[7..].trim_start();
-        if rest.len() >= 7
-            && rest[..7].eq_ignore_ascii_case("ANALYZE")
+        if rest
+            .get(..7)
+            .is_some_and(|s| s.eq_ignore_ascii_case("ANALYZE"))
             && rest.as_bytes().get(7).is_some_and(u8::is_ascii_whitespace)
         {
             // EXPLAIN ANALYZE: execute with profiling

@@ -163,8 +163,14 @@ impl super::GrafeoDB {
             return if let Some(d) = dimensions {
                 #[cfg(feature = "vector-index")]
                 {
-                    let index =
-                        Self::build_vector_index(d, metric, m, ef_construction, quantization_type);
+                    let index = Self::build_vector_index(
+                        d,
+                        metric,
+                        m,
+                        ef_construction,
+                        quantization_type,
+                        0,
+                    );
                     self.lpg_store()
                         .add_vector_index(label, property, Arc::new(index));
                 }
@@ -187,8 +193,14 @@ impl super::GrafeoDB {
         {
             use grafeo_core::index::vector::VectorIndexKind;
 
-            let index =
-                Self::build_vector_index(dims, metric, m, ef_construction, quantization_type);
+            let index = Self::build_vector_index(
+                dims,
+                metric,
+                m,
+                ef_construction,
+                quantization_type,
+                vectors.len(),
+            );
 
             match &index {
                 VectorIndexKind::Hnsw(_) => {
@@ -247,6 +259,7 @@ impl super::GrafeoDB {
         m: Option<usize>,
         ef_construction: Option<usize>,
         quantization: grafeo_core::index::vector::QuantizationType,
+        capacity: usize,
     ) -> grafeo_core::index::vector::VectorIndexKind {
         use grafeo_core::index::vector::{
             HnswConfig, HnswIndex, QuantizationType, QuantizedHnswIndex, VectorIndexKind,
@@ -261,7 +274,9 @@ impl super::GrafeoDB {
         }
 
         match quantization {
-            QuantizationType::None => VectorIndexKind::Hnsw(HnswIndex::with_capacity(config, 0)),
+            QuantizationType::None => {
+                VectorIndexKind::Hnsw(HnswIndex::with_capacity(config, capacity))
+            }
             _ => VectorIndexKind::Quantized(QuantizedHnswIndex::new(config, quantization)),
         }
     }

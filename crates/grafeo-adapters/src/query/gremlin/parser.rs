@@ -1029,6 +1029,8 @@ impl<'a> Parser<'a> {
     /// Parse a bare traversal starting with V() or E() (without 'g.' prefix).
     /// Used inside from()/to() arguments, e.g. `from(V().has('name', 'Gus'))`.
     fn parse_bare_traversal(&mut self) -> Result<Vec<Step>> {
+        self.enter_nesting()?;
+
         // Parse source (V, E, etc.) and convert to a step
         let source = self.parse_source()?;
 
@@ -1059,12 +1061,15 @@ impl<'a> Parser<'a> {
             steps.push(step);
         }
 
+        self.exit_nesting();
         Ok(steps)
     }
 
     /// Parse a sub-traversal (e.g., g.V().has('name', 'Gus'))
     /// Returns the steps as a Vec<Step>
     fn parse_sub_traversal(&mut self) -> Result<Vec<Step>> {
+        self.enter_nesting()?;
+
         // Consume 'g'
         self.expect(TokenKind::G)?;
         self.expect(TokenKind::Dot)?;
@@ -1099,6 +1104,7 @@ impl<'a> Parser<'a> {
             steps.push(step);
         }
 
+        self.exit_nesting();
         Ok(steps)
     }
 

@@ -617,8 +617,9 @@ impl QuantizedHnswIndex {
 
     /// Searches with an allowlist filter.
     ///
-    /// Only nodes in the `allowlist` can appear in results. The search ef
-    /// is auto-scaled based on allowlist selectivity.
+    /// Only nodes in the `allowlist` can appear in results. The candidate
+    /// count `k` is auto-scaled to `max(k, allowlist.len())` so the
+    /// underlying search retrieves enough candidates before filtering.
     #[must_use]
     pub fn search_with_filter(
         &self,

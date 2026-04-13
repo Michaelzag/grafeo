@@ -24,16 +24,18 @@ use grafeo_common::utils::error::{Error, QueryError, QueryErrorKind, Result};
 /// Returns an error if the query cannot be parsed or translated.
 pub fn translate(query: &str) -> Result<LogicalPlan> {
     let trimmed = query.trim_start();
-    let (explain, profile, actual_query) = if trimmed.len() >= 7
-        && trimmed[..7].eq_ignore_ascii_case("EXPLAIN")
+    let (explain, profile, actual_query) = if trimmed
+        .get(..7)
+        .is_some_and(|s| s.eq_ignore_ascii_case("EXPLAIN"))
         && trimmed
             .as_bytes()
             .get(7)
             .is_some_and(u8::is_ascii_whitespace)
     {
         let rest = trimmed[7..].trim_start();
-        if rest.len() >= 7
-            && rest[..7].eq_ignore_ascii_case("ANALYZE")
+        if rest
+            .get(..7)
+            .is_some_and(|s| s.eq_ignore_ascii_case("ANALYZE"))
             && rest.as_bytes().get(7).is_some_and(u8::is_ascii_whitespace)
         {
             (false, true, rest[7..].trim_start())
