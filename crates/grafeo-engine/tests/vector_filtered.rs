@@ -49,7 +49,7 @@ fn setup_db() -> GrafeoDB {
     // Create property index for fast lookups
     db.create_property_index("user_id");
 
-    db.create_vector_index("Doc", "emb", Some(3), Some("cosine"), None, None)
+    db.create_vector_index("Doc", "emb", Some(3), Some("cosine"), None, None, None)
         .expect("create index");
 
     let _ = (n1, n2, n3, n4, n5, n6);
@@ -222,7 +222,7 @@ fn test_filtered_search_non_indexed_property() {
 #[test]
 fn test_create_vector_index_no_dims_no_data_errors() {
     let db = GrafeoDB::new_in_memory();
-    let result = db.create_vector_index("Doc", "emb", None, None, None, None);
+    let result = db.create_vector_index("Doc", "emb", None, None, None, None, None);
     assert!(result.is_err(), "should error without dimensions or data");
 }
 
@@ -230,7 +230,7 @@ fn test_create_vector_index_no_dims_no_data_errors() {
 #[test]
 fn test_create_vector_index_with_dims_no_data_succeeds() {
     let db = GrafeoDB::new_in_memory();
-    db.create_vector_index("Doc", "emb", Some(4), Some("cosine"), None, None)
+    db.create_vector_index("Doc", "emb", Some(4), Some("cosine"), None, None, None)
         .expect("should create empty index with explicit dimensions");
 
     // Insert a node with vector after index creation, auto-insert should work
@@ -250,8 +250,16 @@ fn test_grafeo_memory_pattern() {
     let db = GrafeoDB::new_in_memory();
 
     // Create vector index first (grafeo-memory calls _ensure_indexes early)
-    db.create_vector_index("Memory", "embedding", Some(4), Some("cosine"), None, None)
-        .expect("create index");
+    db.create_vector_index(
+        "Memory",
+        "embedding",
+        Some(4),
+        Some("cosine"),
+        None,
+        None,
+        None,
+    )
+    .expect("create index");
 
     // Create nodes with properties at creation time (grafeo-memory pattern)
     for i in 0..10 {
@@ -316,7 +324,7 @@ fn test_grafeo_memory_pattern() {
 fn setup_operator_db() -> GrafeoDB {
     use grafeo_common::types::PropertyKey;
     let db = GrafeoDB::new_in_memory();
-    db.create_vector_index("Item", "emb", Some(3), Some("cosine"), None, None)
+    db.create_vector_index("Item", "emb", Some(3), Some("cosine"), None, None, None)
         .expect("create index");
 
     for i in 0..10 {
@@ -598,7 +606,7 @@ fn test_filter_ne_excludes_nodes_missing_property() {
     let n1 = db.create_node(&["Item"]);
     db.set_node_property(n1, "emb", vec3(1.0, 0.0, 0.0));
     db.set_node_property(n1, "color", Value::String("red".into()));
-    db.create_vector_index("Item", "emb", Some(3), None, None, None)
+    db.create_vector_index("Item", "emb", Some(3), None, None, None, None)
         .unwrap();
 
     let n2 = db.create_node(&["Item"]);

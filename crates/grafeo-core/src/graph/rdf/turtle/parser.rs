@@ -8,6 +8,12 @@ use crate::graph::rdf::sink::{TripleSink, VecSink};
 use crate::graph::rdf::term::{Literal, Term};
 use crate::graph::rdf::triple::Triple;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Global counter for generating unique per-parser import prefixes.
+/// Each `TurtleParser` instance gets a unique prefix so that blank node IDs
+/// from different imports never collide.
+static IMPORT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 const RDF_FIRST: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#first";
@@ -52,6 +58,9 @@ pub struct TurtleParser {
     base: Option<String>,
     /// Counter for generating anonymous blank node IDs.
     blank_counter: usize,
+    /// Unique prefix for this parser instance, used to scope blank node IDs
+    /// so that `_:b0` in one import does not collide with `_:b0` in another.
+    import_prefix: String,
     /// Current position in the input.
     pos: usize,
     /// Input bytes.
@@ -64,12 +73,17 @@ pub struct TurtleParser {
 
 impl TurtleParser {
     /// Creates a new parser.
+    ///
+    /// Each parser instance gets a unique import prefix so that blank node IDs
+    /// (e.g. `_:b0`) from different imports never collide.
     #[must_use]
     pub fn new() -> Self {
+        let counter = IMPORT_COUNTER.fetch_add(1, Ordering::Relaxed);
         Self {
             prefixes: HashMap::new(),
             base: None,
             blank_counter: 0,
+            import_prefix: format!("imp{counter}_"),
             pos: 0,
             input: Vec::new(),
             line: 1,
@@ -383,7 +397,7 @@ impl TurtleParser {
         if id.is_empty() {
             return Err(self.error("empty blank node identifier"));
         }
-        Ok(Term::blank(id))
+        Ok(Term::blank(format!("{}{}", self.import_prefix, id)))
     }
 
     fn read_blank_node_property_list(
@@ -679,7 +693,7 @@ impl TurtleParser {
 
     fn fresh_blank_id(&mut self) -> String {
         self.blank_counter += 1;
-        format!("_g{}", self.blank_counter)
+        format!("{}_g{}", self.import_prefix, self.blank_counter)
     }
 
     fn resolve_iri(&self, iri: String) -> String {
@@ -881,7 +895,10 @@ mod tests {
         "#;
         let triples = TurtleParser::new().parse(input).unwrap();
         assert_eq!(triples.len(), 1);
-        assert_eq!(triples[0].subject(), &Term::blank("b0"));
+        assert!(triples[0].subject().is_blank_node());
+        // The blank node ID is prefixed with the import prefix but ends with the original ID.
+        let bn_id = triples[0].subject().as_blank_node().unwrap().id();
+        assert!(bn_id.ends_with("b0"), "expected suffix 'b0', got: {bn_id}");
     }
 
     #[test]
@@ -1161,5 +1178,85 @@ mod tests {
         // Re-parse the output.
         let reparsed = TurtleParser::new().parse(&output).unwrap();
         assert_eq!(reparsed.len(), 4);
+    }
+
+    #[test]
+    fn test_blank_node_prefix_isolation_across_imports() {
+        // Two separate parsers parsing the same blank node `_:b0` must produce
+        // different blank node IDs so imports do not collide.
+        let input = r#"
+            _:b0 <http://xmlns.com/foaf/0.1/name> "Alix" .
+        "#;
+        let triples_a = TurtleParser::new().parse(input).unwrap();
+        let triples_b = TurtleParser::new().parse(input).unwrap();
+
+        let id_a = triples_a[0]
+            .subject()
+            .as_blank_node()
+            .unwrap()
+            .id()
+            .to_string();
+        let id_b = triples_b[0]
+            .subject()
+            .as_blank_node()
+            .unwrap()
+            .id()
+            .to_string();
+        assert_ne!(
+            id_a, id_b,
+            "blank node IDs from different parsers must differ"
+        );
+        // Both should still end with the original local name.
+        assert!(id_a.ends_with("b0"));
+        assert!(id_b.ends_with("b0"));
+    }
+
+    #[test]
+    fn test_blank_node_prefix_preserves_internal_links() {
+        // Blank nodes within a single import must still reference each other correctly.
+        let input = r#"
+            @prefix foaf: <http://xmlns.com/foaf/0.1/> .
+            _:alix foaf:name "Alix" ;
+                   foaf:knows _:gus .
+            _:gus foaf:name "Gus" .
+        "#;
+        let triples = TurtleParser::new().parse(input).unwrap();
+        assert_eq!(triples.len(), 3);
+
+        // The object of "knows" should be the same blank node as the subject of "Gus".
+        let knows_object = triples[1].object();
+        let gus_subject = triples[2].subject();
+        assert_eq!(
+            knows_object, gus_subject,
+            "internal blank node references must match"
+        );
+    }
+
+    #[test]
+    fn test_anonymous_blank_node_prefix_isolation() {
+        // Anonymous blank nodes from `[]` syntax should also get prefixed.
+        let input = r#"
+            @prefix foaf: <http://xmlns.com/foaf/0.1/> .
+            [ foaf:name "Alix" ] foaf:knows <http://example.org/gus> .
+        "#;
+        let triples_a = TurtleParser::new().parse(input).unwrap();
+        let triples_b = TurtleParser::new().parse(input).unwrap();
+
+        let subj_a = triples_a[0]
+            .subject()
+            .as_blank_node()
+            .unwrap()
+            .id()
+            .to_string();
+        let subj_b = triples_b[0]
+            .subject()
+            .as_blank_node()
+            .unwrap()
+            .id()
+            .to_string();
+        assert_ne!(
+            subj_a, subj_b,
+            "anonymous blank nodes from different parsers must differ"
+        );
     }
 }

@@ -2049,7 +2049,7 @@ impl Session {
     ) -> Result<()> {
         use grafeo_common::types::{PropertyKey, Value};
         use grafeo_common::utils::error::Error;
-        use grafeo_core::index::vector::{DistanceMetric, HnswConfig, HnswIndex};
+        use grafeo_core::index::vector::{DistanceMetric, HnswConfig, HnswIndex, VectorIndexKind};
 
         let metric = match metric {
             Some(m) => DistanceMetric::from_str(m).ok_or_else(|| {
@@ -2094,7 +2094,7 @@ impl Session {
             index.insert(*node_id, vec, &accessor);
         }
 
-        store.add_vector_index(label, property, Arc::new(index));
+        store.add_vector_index(label, property, Arc::new(VectorIndexKind::Hnsw(index)));
         Ok(())
     }
 

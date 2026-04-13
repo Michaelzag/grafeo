@@ -260,6 +260,9 @@ nav:
       - user-guide/vector-search/index.md
       - Getting Started: user-guide/vector-search/basics.md
       - HNSW Index: user-guide/vector-search/hnsw-index.md
+      - Text Search: user-guide/vector-search/text-search.md
+      - Hybrid Search: user-guide/vector-search/hybrid-search.md
+      - MMR Search: user-guide/vector-search/mmr-search.md
       - Quantization: user-guide/vector-search/quantization.md
       - Python API: user-guide/vector-search/python-api.md
     - Python API:

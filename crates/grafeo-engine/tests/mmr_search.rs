@@ -30,7 +30,7 @@ fn setup_db() -> GrafeoDB {
     let n5 = db.create_node(&["Doc"]);
     db.set_node_property(n5, "emb", vec3(0.9, 0.1, 0.0)); // similar to n1
 
-    db.create_vector_index("Doc", "emb", Some(3), Some("cosine"), None, None)
+    db.create_vector_index("Doc", "emb", Some(3), Some("cosine"), None, None, None)
         .expect("create index");
 
     db
@@ -173,5 +173,32 @@ fn test_mmr_returns_distances() {
     // All distances should be non-negative
     for (_id, dist) in &results {
         assert!(*dist >= 0.0, "distances should be non-negative");
+    }
+}
+
+#[test]
+fn test_mmr_distances_match_vector_search() {
+    let db = setup_db();
+    let query = &[1.0_f32, 0.0, 0.0];
+
+    // Get distances from both methods with lambda=1.0 (pure relevance)
+    let mmr_results = db
+        .mmr_search("Doc", "emb", query, 5, Some(20), Some(1.0), None, None)
+        .expect("mmr search");
+    let knn_results = db
+        .vector_search("Doc", "emb", query, 5, None, None)
+        .expect("vector search");
+
+    // For each node that appears in both result sets, distances should match
+    for (mmr_id, mmr_dist) in &mmr_results {
+        if let Some((_, knn_dist)) = knn_results.iter().find(|(id, _)| id == mmr_id) {
+            assert!(
+                (mmr_dist - knn_dist).abs() < 1e-5,
+                "mmr_search distance for node {} should match vector_search: mmr={}, knn={}",
+                mmr_id.as_u64(),
+                mmr_dist,
+                knn_dist,
+            );
+        }
     }
 }

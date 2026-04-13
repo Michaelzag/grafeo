@@ -40,5 +40,5 @@ pub use vector::{
     euclidean_distance_squared, l2_norm, manhattan_distance, normalize,
 };
 #[cfg(feature = "vector-index")]
-pub use vector::{HnswConfig, HnswIndex};
+pub use vector::{HnswConfig, HnswIndex, VectorIndexKind};
 pub use zone_map::{BloomFilter, ZoneMapBuilder, ZoneMapEntry, ZoneMapIndex};

@@ -23,7 +23,7 @@ fn test_incremental_insert_via_set_property() {
     let n2 = db.create_node(&["Doc"]);
     db.set_node_property(n2, "emb", vec3(0.0, 1.0, 0.0));
 
-    db.create_vector_index("Doc", "emb", Some(3), Some("cosine"), None, None)
+    db.create_vector_index("Doc", "emb", Some(3), Some("cosine"), None, None, None)
         .expect("create index");
 
     // Add a new node AFTER index creation
@@ -49,7 +49,7 @@ fn test_incremental_batch_create_after_index() {
     let n1 = db.create_node(&["Doc"]);
     db.set_node_property(n1, "emb", vec3(1.0, 0.0, 0.0));
 
-    db.create_vector_index("Doc", "emb", Some(3), Some("euclidean"), None, None)
+    db.create_vector_index("Doc", "emb", Some(3), Some("euclidean"), None, None, None)
         .expect("create index");
 
     // Batch-create nodes AFTER index
@@ -77,7 +77,7 @@ fn test_delete_removes_from_index() {
     let n3 = db.create_node(&["Doc"]);
     db.set_node_property(n3, "emb", vec3(0.0, 0.0, 1.0));
 
-    db.create_vector_index("Doc", "emb", Some(3), Some("euclidean"), None, None)
+    db.create_vector_index("Doc", "emb", Some(3), Some("euclidean"), None, None, None)
         .expect("create index");
 
     // Delete n2
@@ -104,7 +104,7 @@ fn test_label_after_vector_triggers_index() {
     let n1 = db.create_node(&["Doc"]);
     db.set_node_property(n1, "emb", vec3(1.0, 0.0, 0.0));
 
-    db.create_vector_index("Doc", "emb", Some(3), Some("cosine"), None, None)
+    db.create_vector_index("Doc", "emb", Some(3), Some("cosine"), None, None, None)
         .expect("create index");
 
     // Create a node WITHOUT the "Doc" label, set vector, THEN add label
@@ -132,7 +132,7 @@ fn test_drop_vector_index() {
     let n1 = db.create_node(&["Doc"]);
     db.set_node_property(n1, "emb", vec3(1.0, 0.0, 0.0));
 
-    db.create_vector_index("Doc", "emb", Some(3), Some("cosine"), None, None)
+    db.create_vector_index("Doc", "emb", Some(3), Some("cosine"), None, None, None)
         .expect("create index");
 
     // Search works
@@ -159,7 +159,7 @@ fn test_rebuild_vector_index() {
     let n1 = db.create_node(&["Doc"]);
     db.set_node_property(n1, "emb", vec3(1.0, 0.0, 0.0));
 
-    db.create_vector_index("Doc", "emb", Some(3), Some("cosine"), None, None)
+    db.create_vector_index("Doc", "emb", Some(3), Some("cosine"), None, None, None)
         .expect("create index");
 
     // Add more nodes

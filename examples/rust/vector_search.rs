@@ -42,7 +42,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //   - metric: "cosine", "euclidean", or "dot_product"
     //   - m: max connections per layer (None = default 16)
     //   - ef_construction: build-time search width (None = default 200)
-    db.create_vector_index("Document", "embedding", Some(4), Some("cosine"), None, None)?;
+    db.create_vector_index(
+        "Document",
+        "embedding",
+        Some(4),
+        Some("cosine"),
+        None,
+        None,
+        None,
+    )?;
     println!("Built HNSW index (cosine similarity, 4 dimensions)");
 
     // ── Search for similar documents ──────────────────────────────

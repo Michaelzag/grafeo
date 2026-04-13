@@ -2,6 +2,47 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
+## [0.5.38] - 2026-04-13
+
+Hardening, ISO compliance, and vector search improvements driven by persona-based exploratory testing. Parser security limits prevent stack overflow attacks, all six query languages gain EXPLAIN support, Unicode identifiers bring GQL closer to ISO 39075, and quantized vector indexes cut memory usage up to 4x for large embedding workloads.
+
+### Added
+
+- **Quantized vector indexes**: `create_vector_index()` accepts `quantization` parameter (`"scalar"`, `"binary"`, `"product"`) for 4x memory reduction on large vector datasets. `VectorIndexKind` enum unifies plain and quantized indexes throughout the engine. All bindings (Python, Node.js, WASM, C) updated.
+- **EXPLAIN/PROFILE for all 6 query languages**: Gremlin, GraphQL, and SQL/PGQ now support `EXPLAIN` and `EXPLAIN ANALYZE` prefix, matching existing GQL, Cypher, and SPARQL support. Python `explain()`, `explain_cypher()`, `explain_sql()`, `explain_gremlin()` convenience methods added.
+- **Unicode identifiers**: GQL, Cypher, and SQL/PGQ parsers now accept Unicode letters in identifiers (e.g., `CREATE (:人物 {名前: 'Alix'})`), per ISO GQL 39075. Gremlin and GraphQL already supported this.
+- **Unicode string escapes**: `\uXXXX` (4-digit BMP) and `\UXXXXXXXX` (8-digit full range) escape sequences in string literals across all query languages.
+- **CONSTRUCT output serialization**: Python `QueryResult.to_ntriples()` and `to_turtle()` methods for SPARQL CONSTRUCT results.
+- **NetworkX ID round-tripping**: `from_networkx()` preserves original node IDs via `_networkx_id` property, `to_networkx()` restores them. Returns a node mapping dict.
+- **GQL `!=` operator**: accepted as alias for `<>` (not-equal comparison).
+
+### Changed
+
+- **Parser error messages now identify the language**: all 6 parsers prefix errors with `[GQL]`, `[Cypher]`, `[SPARQL]`, `[Gremlin]`, `[GraphQL]`, `[SQL/PGQ]`.
+- **SPARQL property path depth raised to 50**: `+`/`*` paths now expand to 50 hops (up from 10), covering most real-world taxonomies and org charts.
+- **`QueryBuilder.param()` raises `ValueError`**: previously silently dropped unsupported types, now raises with a descriptive message.
+- **`execute_async()` documentation**: docstring now explains that it uses `spawn_blocking` (releases GIL, uses thread pool, not truly non-blocking I/O).
+
+### Fixed
+
+- **Parser recursion depth limits**: all 6 parsers now enforce a 128-level nesting limit, preventing stack overflow on deeply nested malicious input (DoS vector).
+- **SPARQL SERVICE clause returned wrong results silently**: now returns an explicit error instead of executing the inner pattern locally.
+- **GQL integer overflow produced confusing errors**: overflow on integer literals now reports the value and valid i64 range.
+- **NetworkX `in_degree()` was O(V*E)**: replaced full-graph scan with direct adjacency index lookup.
+- **`AsyncQueryResult` missing `nodes()`/`edges()`**: entity extraction now runs post-`spawn_blocking`, matching sync `QueryResult`.
+- **RDF blank node collisions across imports**: Turtle parser now prefixes blank node IDs per-import (`_:imp{N}_b0`), preventing cross-file collisions.
+- **Incremental backup always failed after full backup** (#267): the backup cursor stored the active WAL file's sequence without rotating, so post-backup writes stayed invisible to incremental. Both `backup_full` and `backup_incremental` now rotate the WAL after completing, ensuring new writes land in a file the next incremental will pick up.
+- **Edge variables in multi-hop queries returned as raw IDs** (#268): `plan_expand_chain` and `plan_factorized_aggregate` did not register edge columns in the planner's tracking set, causing RETURN to emit `NodeResolve` instead of `EdgeResolve`. Edge variables now resolve to full maps with `_id`, `_type`, `_source`, `_target`, and properties.
+- **Weighted hybrid search inverted vector ranking**: `hybrid_search()` with `fusion="weighted"` applied min-max normalization to raw vector distances, causing the farthest node to score highest. Vector distances are now negated before fusion so that closer vectors rank higher.
+
+### Documentation
+
+- **Search score conventions**: new table in the Vector Search guide clarifying return value semantics across all search methods (`vector_search` returns distances, lower = better; `hybrid_search` returns fusion scores, higher = better; `mmr_search` returns distances in MMR selection order; `text_search` returns BM25 scores, higher = better).
+- **Text Search guide**: new dedicated page covering BM25 index creation, searching, auto-sync behavior, and when to rebuild.
+- **Hybrid Search guide**: new dedicated page covering RRF vs weighted fusion, prerequisites, graceful degradation, and the common pitfall of treating fusion scores as distances.
+- **MMR Search guide**: new dedicated page covering Maximal Marginal Relevance parameters, lambda tuning, and when to use MMR vs vector search.
+- **Index auto-sync clarified**: `rebuild_vector_index()` and `rebuild_text_index()` docs now explain that indexes auto-sync on `set_node_property()` and batch operations; explicit rebuild is rarely needed. Updated across Rust doc comments, Python/Node.js binding docstrings, and API reference pages.
+
 ## [0.5.37] - 2026-04-12
 
 RDF Semantic Web overhaul with improved SPARQL support, RDF performance improvements and SHACL validation.

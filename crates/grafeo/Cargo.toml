@@ -47,6 +47,7 @@ triple-store = ["grafeo-engine/triple-store"]  # RDF triple store
 regex = ["grafeo-engine/regex"]  # Full regex (default for non-WASM)
 regex-lite = ["grafeo-engine/regex-lite"]  # Lightweight regex (for WASM)
 shacl = ["grafeo-engine/shacl"]  # SHACL shapes constraint language (W3C validation)
+ring-index = ["grafeo-engine/ring-index", "triple-store"]  # Ring Index for compact RDF (3x memory reduction)
 metrics = ["grafeo-engine/metrics"]  # Lock-free query, transaction, and session metrics
 tracing = ["grafeo-engine/tracing"]  # Observability spans and events
 arrow-export = ["grafeo-engine/arrow-export"]  # Arrow IPC zero-copy export

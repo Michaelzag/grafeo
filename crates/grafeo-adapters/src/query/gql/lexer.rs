@@ -412,7 +412,12 @@ impl<'a> Lexer<'a> {
             }
             '!' => {
                 self.advance();
-                TokenKind::Exclamation
+                if self.current_char() == '=' {
+                    self.advance();
+                    TokenKind::Ne
+                } else {
+                    TokenKind::Exclamation
+                }
             }
             '~' => {
                 self.advance();
@@ -426,7 +431,7 @@ impl<'a> Lexer<'a> {
             '`' => self.scan_quoted_identifier(),
             '$' => self.scan_parameter(),
             _ if ch.is_ascii_digit() => self.scan_number(),
-            _ if ch.is_ascii_alphabetic() || ch == '_' => self.scan_identifier(),
+            _ if ch.is_alphabetic() || ch == '_' => self.scan_identifier(),
             _ => {
                 self.advance();
                 TokenKind::Error
@@ -639,14 +644,14 @@ impl<'a> Lexer<'a> {
         }
 
         let ch = self.current_char();
-        if !ch.is_ascii_alphabetic() && ch != '_' {
+        if !ch.is_alphabetic() && ch != '_' {
             return TokenKind::Error;
         }
 
         // Scan the rest of the identifier
         while self.position < self.input.len() {
             let ch = self.current_char();
-            if ch.is_ascii_alphanumeric() || ch == '_' {
+            if ch.is_alphanumeric() || ch == '_' {
                 self.advance();
             } else {
                 break;
@@ -660,7 +665,7 @@ impl<'a> Lexer<'a> {
         let start = self.position;
         while self.position < self.input.len() {
             let ch = self.current_char();
-            if ch.is_ascii_alphanumeric() || ch == '_' {
+            if ch.is_alphanumeric() || ch == '_' {
                 self.advance();
             } else {
                 break;

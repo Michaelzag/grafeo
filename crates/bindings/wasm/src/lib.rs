@@ -399,6 +399,7 @@ impl Database {
                 opts.metric.as_deref(),
                 opts.m,
                 opts.ef_construction,
+                opts.quantization.as_deref(),
             )
             .map_err(|e| JsError::new(&e.to_string()))
     }
@@ -1179,6 +1180,7 @@ struct VectorIndexOptions {
     metric: Option<String>,
     m: Option<usize>,
     ef_construction: Option<usize>,
+    quantization: Option<String>,
 }
 
 /// Options for `vectorSearch()`.
@@ -1424,8 +1426,16 @@ mod tests {
 
             let db = GrafeoDB::new_in_memory();
             // Create index first, then insert nodes with Value::Vector
-            db.create_vector_index("Doc", "embedding", Some(3), Some("cosine"), None, None)
-                .unwrap();
+            db.create_vector_index(
+                "Doc",
+                "embedding",
+                Some(3),
+                Some("cosine"),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
 
             let vecs: &[&[f32]] = &[&[1.0, 0.0, 0.0], &[0.0, 1.0, 0.0], &[0.0, 0.0, 1.0]];
             for (i, v) in vecs.iter().enumerate() {
@@ -1451,8 +1461,16 @@ mod tests {
             use grafeo_common::types::{PropertyKey, Value};
 
             let db = GrafeoDB::new_in_memory();
-            db.create_vector_index("Doc", "embedding", Some(3), Some("cosine"), None, None)
-                .unwrap();
+            db.create_vector_index(
+                "Doc",
+                "embedding",
+                Some(3),
+                Some("cosine"),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
 
             for i in 0..5 {
                 let x = if i < 3 { 1.0f32 } else { 0.0 };

@@ -1,6 +1,7 @@
 //! Query results and builders for the Python API.
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
 
 use pyo3::prelude::*;
 
@@ -281,6 +282,84 @@ impl PyQueryResult {
         Ok(table.unbind())
     }
 
+    /// Serialize CONSTRUCT-style results as N-Triples text.
+    ///
+    /// The result must have columns `["subject", "predicate", "object"]` (the
+    /// standard shape returned by SPARQL CONSTRUCT queries). Each row is
+    /// formatted as `<subject> <predicate> <object> .\n`.
+    ///
+    /// Returns a Python string. Raises `ValueError` if the columns do not
+    /// match the expected triple pattern.
+    ///
+    /// Example:
+    /// ```python
+    /// result = db.execute_sparql("CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }")
+    /// print(result.to_ntriples())
+    /// ```
+    fn to_ntriples(&self) -> PyResult<String> {
+        self.validate_triple_columns()?;
+        let (si, pi, oi) = self.triple_column_indices();
+        let mut output = String::new();
+        for row in &self.rows {
+            let subj = Self::value_to_ntriples_term(&row[si]);
+            let pred = Self::value_to_ntriples_term(&row[pi]);
+            let obj = Self::value_to_ntriples_term(&row[oi]);
+            let _ = writeln!(output, "{subj} {pred} {obj} .");
+        }
+        Ok(output)
+    }
+
+    /// Serialize CONSTRUCT-style results as Turtle text.
+    ///
+    /// Groups triples by subject and uses `;` to separate predicate-object
+    /// pairs sharing the same subject. This is a convenience formatter, not a
+    /// full Turtle serializer (no prefix declarations are emitted).
+    ///
+    /// Returns a Python string. Raises `ValueError` if the columns do not
+    /// match the expected triple pattern.
+    ///
+    /// Example:
+    /// ```python
+    /// result = db.execute_sparql("CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }")
+    /// print(result.to_turtle())
+    /// ```
+    fn to_turtle(&self) -> PyResult<String> {
+        self.validate_triple_columns()?;
+        let (si, pi, oi) = self.triple_column_indices();
+
+        // Group by subject, preserving insertion order via Vec of (subject, predicates).
+        let mut subjects: Vec<(String, Vec<(String, String)>)> = Vec::new();
+        let mut subject_index: HashMap<String, usize> = HashMap::new();
+
+        for row in &self.rows {
+            let subj = Self::value_to_ntriples_term(&row[si]);
+            let pred = Self::value_to_ntriples_term(&row[pi]);
+            let obj = Self::value_to_ntriples_term(&row[oi]);
+
+            if let Some(&idx) = subject_index.get(&subj) {
+                subjects[idx].1.push((pred, obj));
+            } else {
+                let idx = subjects.len();
+                subject_index.insert(subj.clone(), idx);
+                subjects.push((subj, vec![(pred, obj)]));
+            }
+        }
+
+        let mut output = String::new();
+        for (subj, pairs) in &subjects {
+            output.push_str(subj);
+            for (i, (pred, obj)) in pairs.iter().enumerate() {
+                if i == 0 {
+                    let _ = write!(output, " {pred} {obj}");
+                } else {
+                    let _ = write!(output, " ;\n    {pred} {obj}");
+                }
+            }
+            output.push_str(" .\n\n");
+        }
+        Ok(output)
+    }
+
     fn __repr__(&self) -> String {
         let time_str = self
             .execution_time_ms
@@ -372,6 +451,83 @@ impl PyQueryResult {
             rows_scanned: None,
         }
     }
+
+    /// Validates that this result has triple-shaped columns (subject, predicate, object).
+    fn validate_triple_columns(&self) -> PyResult<()> {
+        let normalized: Vec<String> = self.columns.iter().map(|c| c.to_lowercase()).collect();
+        let has_s = normalized.iter().any(|c| c == "subject" || c == "s");
+        let has_p = normalized.iter().any(|c| c == "predicate" || c == "p");
+        let has_o = normalized.iter().any(|c| c == "object" || c == "o");
+
+        if has_s && has_p && has_o {
+            Ok(())
+        } else {
+            Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "to_ntriples()/to_turtle() requires columns named \
+                 [subject, predicate, object] (or [s, p, o]). \
+                 Got: {:?}",
+                self.columns
+            )))
+        }
+    }
+
+    /// Returns the column indices for (subject, predicate, object).
+    /// Must be called after `validate_triple_columns`.
+    fn triple_column_indices(&self) -> (usize, usize, usize) {
+        let normalized: Vec<String> = self.columns.iter().map(|c| c.to_lowercase()).collect();
+        let si = normalized
+            .iter()
+            .position(|c| c == "subject" || c == "s")
+            .unwrap_or(0);
+        let pi = normalized
+            .iter()
+            .position(|c| c == "predicate" || c == "p")
+            .unwrap_or(1);
+        let oi = normalized
+            .iter()
+            .position(|c| c == "object" || c == "o")
+            .unwrap_or(2);
+        (si, pi, oi)
+    }
+
+    /// Formats a `Value` as an N-Triples term.
+    ///
+    /// IRIs are wrapped in angle brackets, strings become quoted literals,
+    /// and blank nodes are prefixed with `_:`.
+    fn value_to_ntriples_term(val: &Value) -> String {
+        match val {
+            Value::String(s) => {
+                let s_str: &str = s.as_ref();
+                if s_str.starts_with("http://")
+                    || s_str.starts_with("https://")
+                    || s_str.starts_with("urn:")
+                {
+                    // Looks like an IRI
+                    format!("<{s_str}>")
+                } else if s_str.starts_with("_:") {
+                    // Blank node
+                    s_str.to_string()
+                } else {
+                    // Plain literal: escape special characters
+                    let escaped = s_str
+                        .replace('\\', "\\\\")
+                        .replace('"', "\\\"")
+                        .replace('\n', "\\n")
+                        .replace('\r', "\\r")
+                        .replace('\t', "\\t");
+                    format!("\"{escaped}\"")
+                }
+            }
+            Value::Int64(n) => format!("\"{n}\"^^<http://www.w3.org/2001/XMLSchema#integer>"),
+            Value::Float64(f) => format!("\"{f}\"^^<http://www.w3.org/2001/XMLSchema#double>"),
+            Value::Bool(b) => format!("\"{b}\"^^<http://www.w3.org/2001/XMLSchema#boolean>"),
+            Value::Null => "\"\"".to_string(),
+            other => {
+                // Fallback: quote the display representation.
+                format!("\"{}\"", other)
+            }
+        }
+    }
 }
 
 /// Builds parameterized queries with a fluent API.
@@ -403,10 +559,19 @@ impl PyQueryBuilder {
     }
 
     /// Set a parameter.
-    fn param(&mut self, name: String, value: &Bound<'_, PyAny>) {
-        if let Ok(v) = PyValue::from_py(value) {
-            self.params.insert(name, v);
-        }
+    ///
+    /// # Errors
+    ///
+    /// Raises `ValueError` if the value cannot be converted to a Grafeo type.
+    fn param(&mut self, name: String, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        let v = PyValue::from_py(value).map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "Cannot convert parameter '{}' to a Grafeo value: {}",
+                name, e
+            ))
+        })?;
+        self.params.insert(name, v);
+        Ok(())
     }
 
     /// Get the query string.

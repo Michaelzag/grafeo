@@ -340,11 +340,20 @@ pub(super) fn do_backup_full(
     manifest.segments.push(segment.clone());
     write_manifest(backup_dir, &manifest)?;
 
-    // Update backup cursor in the WAL directory
+    // Update backup cursor in the WAL directory.
+    // Rotate the WAL so that post-backup writes land in a new file with a
+    // strictly greater sequence number. Without this, writes that append to
+    // the still-active log file are invisible to incremental backup, which
+    // skips files with seq <= cursor.log_sequence. (GrafeoDB/grafeo#267)
     if let Some(wal) = wal {
+        // Record the sequence of the file that was active during this backup,
+        // then rotate so post-backup writes land in a new file with seq > this.
+        let backed_up_sequence = wal.current_sequence();
+        wal.rotate()
+            .map_err(|e| Error::Internal(format!("failed to rotate WAL after full backup: {e}")))?;
         let cursor = BackupCursor {
             backed_up_epoch: current_epoch,
-            log_sequence: wal.current_sequence(),
+            log_sequence: backed_up_sequence,
             timestamp_ms: now_ms(),
         };
         write_backup_cursor(wal.dir(), &cursor)?;
@@ -459,10 +468,19 @@ pub(super) fn do_backup_incremental(
     manifest.segments.push(segment.clone());
     write_manifest(backup_dir, &manifest)?;
 
+    // Rotate the WAL so subsequent incremental backups see a clean boundary.
+    // Same rationale as in do_backup_full (GrafeoDB/grafeo#267).
+    let backed_up_sequence = wal.current_sequence();
+    wal.rotate().map_err(|e| {
+        Error::Internal(format!(
+            "failed to rotate WAL after incremental backup: {e}"
+        ))
+    })?;
+
     // Update backup cursor
     let new_cursor = BackupCursor {
         backed_up_epoch: current_epoch,
-        log_sequence: wal.current_sequence(),
+        log_sequence: backed_up_sequence,
         timestamp_ms: now_ms(),
     };
     write_backup_cursor(wal.dir(), &new_cursor)?;

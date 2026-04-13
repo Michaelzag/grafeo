@@ -10,7 +10,7 @@ use parking_lot::RwLock;
 use std::sync::Arc;
 
 #[cfg(feature = "vector-index")]
-use crate::index::vector::HnswIndex;
+use crate::index::vector::VectorIndexKind;
 
 impl LpgStore {
     /// Creates an index on a node property for O(1) lookups by value.
@@ -135,7 +135,7 @@ impl LpgStore {
 
     /// Stores a vector index for a label+property pair.
     #[cfg(feature = "vector-index")]
-    pub fn add_vector_index(&self, label: &str, property: &str, index: Arc<HnswIndex>) {
+    pub fn add_vector_index(&self, label: &str, property: &str, index: Arc<VectorIndexKind>) {
         let key = format!("{label}:{property}");
         self.vector_indexes.write().insert(key, index);
     }
@@ -143,7 +143,7 @@ impl LpgStore {
     /// Retrieves the vector index for a label+property pair.
     #[cfg(feature = "vector-index")]
     #[must_use]
-    pub fn get_vector_index(&self, label: &str, property: &str) -> Option<Arc<HnswIndex>> {
+    pub fn get_vector_index(&self, label: &str, property: &str) -> Option<Arc<VectorIndexKind>> {
         let key = format!("{label}:{property}");
         self.vector_indexes.read().get(&key).cloned()
     }
@@ -162,7 +162,7 @@ impl LpgStore {
     /// Keys are in `"label:property"` format.
     #[cfg(feature = "vector-index")]
     #[must_use]
-    pub fn vector_index_entries(&self) -> Vec<(String, Arc<HnswIndex>)> {
+    pub fn vector_index_entries(&self) -> Vec<(String, Arc<VectorIndexKind>)> {
         self.vector_indexes
             .read()
             .iter()
@@ -173,7 +173,7 @@ impl LpgStore {
     /// Looks up a vector index by its `"label:property"` key.
     #[cfg(feature = "vector-index")]
     #[must_use]
-    pub fn get_vector_index_by_key(&self, key: &str) -> Option<Arc<HnswIndex>> {
+    pub fn get_vector_index_by_key(&self, key: &str) -> Option<Arc<VectorIndexKind>> {
         self.vector_indexes.read().get(key).cloned()
     }
 

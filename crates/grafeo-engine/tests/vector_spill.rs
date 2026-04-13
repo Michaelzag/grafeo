@@ -46,7 +46,7 @@ fn force_disk_spills_and_search_works() {
     }
 
     // Create vector index
-    db.create_vector_index("Item", "embedding", Some(dim), None, None, None)
+    db.create_vector_index("Item", "embedding", Some(dim), None, None, None, None)
         .unwrap();
 
     // Trigger spill (ForceDisk was triggered at startup but we inserted after)
@@ -122,7 +122,7 @@ fn checkpoint_after_spill_preserves_non_vector_data() {
             "embedding",
             Value::Vector(vec![1.0, 2.0, 3.0, 4.0].into()),
         );
-        db.create_vector_index("Item", "embedding", Some(4), None, None, None)
+        db.create_vector_index("Item", "embedding", Some(4), None, None, None, None)
             .unwrap();
 
         // Spill, then close (which checkpoints)

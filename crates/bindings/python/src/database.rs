@@ -23,8 +23,9 @@ use crate::types::PyValue;
 
 /// Holds results from async query execution.
 ///
-/// Works like [`PyQueryResult`] but without node/edge extraction (async context
-/// limitations). Iterate directly or call [`rows()`](Self::rows) to get all data.
+/// Works like [`PyQueryResult`], including [`nodes()`](Self::nodes) and
+/// [`edges()`](Self::edges) extraction. Iterate directly or call
+/// [`rows()`](Self::rows) to get all data.
 #[pyclass(name = "AsyncQueryResult")]
 pub struct AsyncQueryResult {
     #[pyo3(get)]
@@ -32,10 +33,22 @@ pub struct AsyncQueryResult {
     rows: Vec<Vec<Value>>,
     #[allow(dead_code)] // Stored for future typed access; currently only raw rows exposed
     column_types: Vec<LogicalType>,
+    nodes: Vec<PyNode>,
+    edges: Vec<PyEdge>,
 }
 
 #[pymethods]
 impl AsyncQueryResult {
+    /// Get all nodes from the result.
+    fn nodes(&self) -> Vec<PyNode> {
+        self.nodes.clone()
+    }
+
+    /// Get all edges from the result.
+    fn edges(&self) -> Vec<PyEdge> {
+        self.edges.clone()
+    }
+
     /// Get all rows as a list of lists.
     fn rows(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let list = pyo3::types::PyList::empty(py);
@@ -407,7 +420,11 @@ impl PyGrafeoDB {
 
     /// Execute a GQL query asynchronously.
     ///
-    /// This method returns a Python awaitable that can be used with asyncio.
+    /// Returns a Python awaitable that can be used with ``asyncio``.
+    /// Internally uses ``spawn_blocking`` to release the GIL while the query
+    /// runs on a thread pool, so other Python coroutines can make progress.
+    /// The underlying database I/O is synchronous: this does not use truly
+    /// non-blocking I/O, but it avoids holding the GIL during execution.
     ///
     /// Example:
     /// ```python
@@ -456,15 +473,21 @@ impl PyGrafeoDB {
             .map_err(|e| PyGrafeoError::Database(e.to_string()))?
             .map_err(PyGrafeoError::from)?;
 
-            // Create PyQueryResult from the result
-            // Note: We can't call extract_entities here because we don't have
-            // Python references in the async context. We return raw data.
+            // Extract entities before consuming the result rows.
+            // Entity extraction only inspects Value::Map markers, no Python needed.
+            let (nodes, edges) = grafeo_bindings_common::entity::extract_and_map(
+                &result,
+                |n| PyNode::new(n.id, n.labels, n.properties),
+                |e| PyEdge::new(e.id, e.edge_type, e.source_id, e.target_id, e.properties),
+            );
             let columns = std::mem::take(&mut result.columns);
             let column_types = std::mem::take(&mut result.column_types);
             Ok(AsyncQueryResult {
                 columns,
                 rows: result.into_rows(),
                 column_types,
+                nodes,
+                edges,
             })
         })
     }
@@ -521,6 +544,57 @@ impl PyGrafeoDB {
         params: Option<&Bound<'_, pyo3::types::PyDict>>,
     ) -> PyResult<PyQueryResult> {
         self.execute_language_impl("sparql", &format!("EXPLAIN {query}"), params)
+    }
+
+    /// Return the physical execution plan for a GQL query without executing it.
+    ///
+    /// Equivalent to ``db.execute("EXPLAIN " + query)``.
+    #[pyo3(signature = (query, params=None))]
+    fn explain(
+        &self,
+        query: &str,
+        params: Option<&Bound<'_, pyo3::types::PyDict>>,
+    ) -> PyResult<PyQueryResult> {
+        self.execute_language_impl("gql", &format!("EXPLAIN {query}"), params)
+    }
+
+    /// Return the physical execution plan for a Cypher query without executing it.
+    ///
+    /// Equivalent to ``db.execute_cypher("EXPLAIN " + query)``.
+    #[cfg(feature = "cypher")]
+    #[pyo3(signature = (query, params=None))]
+    fn explain_cypher(
+        &self,
+        query: &str,
+        params: Option<&Bound<'_, pyo3::types::PyDict>>,
+    ) -> PyResult<PyQueryResult> {
+        self.execute_language_impl("cypher", &format!("EXPLAIN {query}"), params)
+    }
+
+    /// Return the physical execution plan for a SQL/PGQ query without executing it.
+    ///
+    /// Equivalent to ``db.execute_sql("EXPLAIN " + query)``.
+    #[cfg(feature = "sql-pgq")]
+    #[pyo3(signature = (query, params=None))]
+    fn explain_sql(
+        &self,
+        query: &str,
+        params: Option<&Bound<'_, pyo3::types::PyDict>>,
+    ) -> PyResult<PyQueryResult> {
+        self.execute_language_impl("sql-pgq", &format!("EXPLAIN {query}"), params)
+    }
+
+    /// Return the physical execution plan for a Gremlin query without executing it.
+    ///
+    /// Equivalent to ``db.execute_gremlin("EXPLAIN " + query)``.
+    #[cfg(feature = "gremlin")]
+    #[pyo3(signature = (query, params=None))]
+    fn explain_gremlin(
+        &self,
+        query: &str,
+        params: Option<&Bound<'_, pyo3::types::PyDict>>,
+    ) -> PyResult<PyQueryResult> {
+        self.execute_language_impl("gremlin", &format!("EXPLAIN {query}"), params)
     }
 
     /// Validate the default graph against SHACL shapes in a named graph.
@@ -1145,11 +1219,15 @@ impl PyGrafeoDB {
     ///     metric: Distance metric - "cosine" (default), "euclidean", "dot_product", "manhattan"
     ///     m: HNSW links per node (default: 16). Higher = better recall, more memory.
     ///     ef_construction: Construction beam width (default: 128). Higher = better quality, slower build.
+    ///     quantization: Quantization mode - None (default), "scalar", "binary", or "product".
+    ///         Quantized indexes use less memory at the cost of slightly lower recall.
     ///
     /// Example:
     ///     db.create_node(['Doc'], {'embedding': [1.0, 0.0, 0.0]})
     ///     db.create_vector_index("Doc", "embedding", metric="cosine", m=32, ef_construction=200)
-    #[pyo3(signature = (label, property, dimensions=None, metric=None, m=None, ef_construction=None))]
+    ///     db.create_vector_index("Doc", "embedding", quantization="scalar")
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (label, property, dimensions=None, metric=None, m=None, ef_construction=None, quantization=None))]
     fn create_vector_index(
         &self,
         label: &str,
@@ -1158,10 +1236,19 @@ impl PyGrafeoDB {
         metric: Option<&str>,
         m: Option<usize>,
         ef_construction: Option<usize>,
+        quantization: Option<&str>,
     ) -> PyResult<()> {
         let db = self.inner.read();
-        db.create_vector_index(label, property, dimensions, metric, m, ef_construction)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+        db.create_vector_index(
+            label,
+            property,
+            dimensions,
+            metric,
+            m,
+            ef_construction,
+            quantization,
+        )
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
 
     /// Drop a vector index for the given label and property.
@@ -1183,6 +1270,12 @@ impl PyGrafeoDB {
     ///
     /// Drops the existing index and recreates it from scratch, preserving
     /// the original configuration (dimensions, metric, M, ef_construction).
+    ///
+    /// Note: In most cases you do NOT need to call this. Vector indexes
+    /// auto-sync when you call set_node_property(), batch_create_nodes(),
+    /// or batch_create_nodes_with_props() with vector data. Use this only
+    /// after importing data through non-standard paths or to compact the
+    /// index after many deletions.
     ///
     /// Args:
     ///     label: Node label of the index
@@ -1211,7 +1304,10 @@ impl PyGrafeoDB {
     ///     ef: Search beam width (higher = better recall, slower). Uses index default if None.
     ///
     /// Returns:
-    ///     List of (node_id, distance) tuples, sorted by distance ascending.
+    ///     List of (node_id, distance) tuples, sorted by distance ascending
+    ///     (lower distance = more similar). The distance scale depends on
+    ///     the metric configured at index creation: cosine [0, 2],
+    ///     euclidean [0, inf), dot_product (negated), manhattan [0, inf).
     ///
     /// Example:
     ///     results = db.vector_search("Doc", "embedding", [1.0, 0.0, 0.0], k=10, ef=200)
@@ -1365,7 +1461,11 @@ impl PyGrafeoDB {
     ///     ef: Search beam width (higher = better recall, slower). Uses index default if None.
     ///
     /// Returns:
-    ///     List of (node_id, distance) tuples, ordered by MMR selection.
+    ///     List of (node_id, distance) tuples in MMR selection order.
+    ///     The distance values are identical to those returned by
+    ///     vector_search() for the same nodes (lower = more similar).
+    ///     The ordering reflects MMR's relevance-diversity balance,
+    ///     not distance sorting.
     ///
     /// Example:
     ///     results = db.mmr_search("Doc", "embedding", [1.0, 0.0, 0.0], k=4, lambda_mult=0.5)
@@ -1409,6 +1509,9 @@ impl PyGrafeoDB {
     /// Create a BM25 text index on a node property for full-text search.
     ///
     /// Indexes all existing nodes with the given label and text property.
+    /// The index is automatically kept in sync as nodes are created,
+    /// updated, or deleted. You do NOT need to call rebuild_text_index()
+    /// after normal write operations.
     ///
     /// Args:
     ///     label: Node label to index
@@ -1439,6 +1542,10 @@ impl PyGrafeoDB {
 
     /// Rebuild a text index by rescanning all matching nodes.
     ///
+    /// Note: Text indexes auto-sync on normal writes (set_node_property,
+    /// batch_create_nodes_with_props, delete_node). You only need this
+    /// after importing data through non-standard paths.
+    ///
     /// Args:
     ///     label: Node label of the index
     ///     property: Property name of the index
@@ -1452,7 +1559,9 @@ impl PyGrafeoDB {
     /// Search a text index using BM25 scoring.
     ///
     /// Returns up to k results as (node_id, score) tuples sorted by
-    /// descending relevance.
+    /// descending relevance (higher score = more relevant). BM25 scores
+    /// are unbounded positive floats; compare them only within a single
+    /// query's results.
     ///
     /// Args:
     ///     label: Node label that was indexed
@@ -1461,7 +1570,7 @@ impl PyGrafeoDB {
     ///     k: Number of results to return
     ///
     /// Returns:
-    ///     List of (node_id, score) tuples.
+    ///     List of (node_id, score) tuples sorted by score descending.
     ///
     /// Example:
     ///     results = db.text_search("Article", "title", "graph database", k=10)
@@ -1488,7 +1597,9 @@ impl PyGrafeoDB {
     /// Perform hybrid search combining text (BM25) and vector similarity.
     ///
     /// Runs both text and vector search, then fuses results using
-    /// Reciprocal Rank Fusion (RRF) by default.
+    /// Reciprocal Rank Fusion (RRF) by default. Requires both a text
+    /// index (create_text_index) and a vector index (create_vector_index).
+    /// If either index is missing, that source is silently omitted.
     ///
     /// Args:
     ///     label: Node label to search within
@@ -1501,7 +1612,10 @@ impl PyGrafeoDB {
     ///     weights: Weights for weighted fusion [text_weight, vector_weight]
     ///
     /// Returns:
-    ///     List of (node_id, score) tuples.
+    ///     List of (node_id, score) tuples sorted by fused score
+    ///     descending (higher = more relevant). These are fusion scores,
+    ///     NOT distances. Do not apply distance-based transformations
+    ///     (like dividing by score) to these values.
     ///
     /// Example:
     ///     results = db.hybrid_search("Article", "title", "embedding",

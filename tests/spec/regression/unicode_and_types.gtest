@@ -18,29 +18,29 @@ tests:
 
   - name: emoji_roundtrip
     setup:
-      - "INSERT (:Tag {symbol: '\U0001F389', name: 'party'})"
+      - "INSERT (:Tag {symbol: '🎉', name: 'party'})"
     query: MATCH (t:Tag) RETURN t.symbol, t.name
     expect:
       rows:
-        - ["\U0001F389", party]
+        - ["🎉", party]
 
   - name: cjk_roundtrip
     # Tokyo in kanji
     setup:
-      - "INSERT (:City {name: '\u6771\u4EAC'})"
+      - "INSERT (:City {name: '東京'})"
     query: MATCH (c:City) RETURN c.name
     expect:
       rows:
-        - ["\u6771\u4EAC"]
+        - ["東京"]
 
   - name: combining_diacritics_roundtrip
     # e + combining acute accent (two codepoints)
     setup:
-      - "INSERT (:Word {text: 'calf\u0065\u0301'})"
+      - "INSERT (:Word {text: 'café'})"
     query: MATCH (w:Word) RETURN w.text
     expect:
       rows:
-        - ["calf\u0065\u0301"]
+        - ["café"]
 
   # ---------------------------------------------------------------------------
   # Aggregation edge cases

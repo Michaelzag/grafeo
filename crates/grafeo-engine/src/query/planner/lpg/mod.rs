@@ -250,6 +250,21 @@ impl Planner {
         self
     }
 
+    /// Generates an edge column name from an expand's edge variable (or an
+    /// anonymous fallback) and registers it in `edge_columns` so downstream
+    /// RETURN emits `EdgeResolve` instead of `NodeResolve`.
+    ///
+    /// Returns the column name for the caller to push into its output columns.
+    pub(super) fn register_edge_column(&self, edge_variable: &Option<String>) -> String {
+        let name = edge_variable.clone().unwrap_or_else(|| {
+            let count = self.anon_edge_counter.get();
+            self.anon_edge_counter.set(count + 1);
+            format!("_anon_edge_{}", count)
+        });
+        self.edge_columns.borrow_mut().insert(name.clone());
+        name
+    }
+
     /// Counts consecutive single-hop expand operations.
     ///
     /// Returns the count and the deepest non-expand operator (the base of the chain).

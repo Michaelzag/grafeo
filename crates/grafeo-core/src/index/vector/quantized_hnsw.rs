@@ -614,6 +614,142 @@ impl QuantizedHnswIndex {
             queries.iter().map(|query| self.search(query, k)).collect()
         }
     }
+
+    /// Searches with an allowlist filter.
+    ///
+    /// Only nodes in the `allowlist` can appear in results. The candidate
+    /// count `k` is auto-scaled to `max(k, allowlist.len())` so the
+    /// underlying search retrieves enough candidates before filtering.
+    #[must_use]
+    pub fn search_with_filter(
+        &self,
+        query: &[f32],
+        k: usize,
+        allowlist: &std::collections::HashSet<NodeId>,
+    ) -> Vec<(NodeId, f32)> {
+        let results = self.search(query, k.max(allowlist.len()));
+        results
+            .into_iter()
+            .filter(|(id, _)| allowlist.contains(id))
+            .take(k)
+            .collect()
+    }
+
+    /// Searches with a custom ef and an allowlist filter.
+    #[must_use]
+    pub fn search_with_ef_and_filter(
+        &self,
+        query: &[f32],
+        k: usize,
+        ef: usize,
+        allowlist: &std::collections::HashSet<NodeId>,
+    ) -> Vec<(NodeId, f32)> {
+        let results = self.search_with_ef(query, k.max(allowlist.len()), ef);
+        results
+            .into_iter()
+            .filter(|(id, _)| allowlist.contains(id))
+            .take(k)
+            .collect()
+    }
+
+    /// Batch search with custom ef for multiple queries.
+    #[must_use]
+    pub fn batch_search_with_ef(
+        &self,
+        queries: &[Vec<f32>],
+        k: usize,
+        ef: usize,
+    ) -> Vec<Vec<(NodeId, f32)>> {
+        #[cfg(feature = "parallel")]
+        {
+            use rayon::prelude::*;
+            queries
+                .par_iter()
+                .map(|query| self.search_with_ef(query, k, ef))
+                .collect()
+        }
+        #[cfg(not(feature = "parallel"))]
+        {
+            queries
+                .iter()
+                .map(|query| self.search_with_ef(query, k, ef))
+                .collect()
+        }
+    }
+
+    /// Batch search with an allowlist filter for multiple queries.
+    #[must_use]
+    pub fn batch_search_with_filter(
+        &self,
+        queries: &[Vec<f32>],
+        k: usize,
+        allowlist: &std::collections::HashSet<NodeId>,
+    ) -> Vec<Vec<(NodeId, f32)>> {
+        #[cfg(feature = "parallel")]
+        {
+            use rayon::prelude::*;
+            queries
+                .par_iter()
+                .map(|query| self.search_with_filter(query, k, allowlist))
+                .collect()
+        }
+        #[cfg(not(feature = "parallel"))]
+        {
+            queries
+                .iter()
+                .map(|query| self.search_with_filter(query, k, allowlist))
+                .collect()
+        }
+    }
+
+    /// Batch search with custom ef and an allowlist filter for multiple queries.
+    #[must_use]
+    pub fn batch_search_with_ef_and_filter(
+        &self,
+        queries: &[Vec<f32>],
+        k: usize,
+        ef: usize,
+        allowlist: &std::collections::HashSet<NodeId>,
+    ) -> Vec<Vec<(NodeId, f32)>> {
+        #[cfg(feature = "parallel")]
+        {
+            use rayon::prelude::*;
+            queries
+                .par_iter()
+                .map(|query| self.search_with_ef_and_filter(query, k, ef, allowlist))
+                .collect()
+        }
+        #[cfg(not(feature = "parallel"))]
+        {
+            queries
+                .iter()
+                .map(|query| self.search_with_ef_and_filter(query, k, ef, allowlist))
+                .collect()
+        }
+    }
+
+    /// Snapshot the underlying HNSW topology for serialization.
+    #[must_use]
+    pub fn snapshot_topology(&self) -> (Option<NodeId>, usize, Vec<(NodeId, Vec<Vec<NodeId>>)>) {
+        self.hnsw.snapshot_topology()
+    }
+
+    /// Restore topology from a snapshot. Replaces all current data.
+    pub fn restore_topology(
+        &self,
+        entry_point: Option<NodeId>,
+        max_level: usize,
+        node_data: Vec<(NodeId, Vec<Vec<NodeId>>)>,
+    ) {
+        self.hnsw
+            .restore_topology(entry_point, max_level, node_data);
+    }
+
+    /// Returns estimated heap memory in bytes.
+    #[must_use]
+    pub fn heap_memory_bytes(&self) -> usize {
+        self.hnsw.heap_memory_bytes() + self.memory_usage()
+    }
 }
 
 impl std::fmt::Debug for QuantizedHnswIndex {
@@ -833,5 +969,140 @@ mod tests {
         let results = index.search(&vectors[5], 3);
         assert_eq!(results.len(), 3);
         assert_eq!(results[0].0, NodeId::new(6));
+    }
+
+    #[test]
+    fn test_search_with_allowlist_filter() {
+        let config = HnswConfig::new(4, DistanceMetric::Euclidean);
+        let index = QuantizedHnswIndex::new(config, QuantizationType::Scalar);
+
+        let vectors = create_test_vectors(50, 4);
+        for (i, vec) in vectors.iter().enumerate() {
+            index.insert(NodeId::new(i as u64 + 1), vec);
+        }
+
+        let allowlist: std::collections::HashSet<NodeId> =
+            [1, 10, 25, 40].iter().map(|&i| NodeId::new(i)).collect();
+        let results = index.search_with_filter(&vectors[24], 3, &allowlist);
+        assert!(!results.is_empty());
+        assert!(results.len() <= 3);
+        for (id, _) in &results {
+            assert!(allowlist.contains(id), "result {id:?} not in allowlist");
+        }
+    }
+
+    #[test]
+    fn test_search_with_ef_and_allowlist_filter() {
+        let config = HnswConfig::new(4, DistanceMetric::Euclidean);
+        let index = QuantizedHnswIndex::new(config, QuantizationType::Binary);
+
+        let vectors = create_test_vectors(50, 4);
+        for (i, vec) in vectors.iter().enumerate() {
+            index.insert(NodeId::new(i as u64 + 1), vec);
+        }
+
+        let allowlist: std::collections::HashSet<NodeId> =
+            [5, 15, 30].iter().map(|&i| NodeId::new(i)).collect();
+        let results = index.search_with_ef_and_filter(&vectors[14], 2, 50, &allowlist);
+        assert!(!results.is_empty());
+        assert!(results.len() <= 2);
+        for (id, _) in &results {
+            assert!(allowlist.contains(id));
+        }
+    }
+
+    #[test]
+    fn test_batch_search_with_ef() {
+        let config = HnswConfig::new(4, DistanceMetric::Euclidean);
+        let index = QuantizedHnswIndex::new(config, QuantizationType::Scalar);
+
+        let vectors = create_test_vectors(50, 4);
+        for (i, vec) in vectors.iter().enumerate() {
+            index.insert(NodeId::new(i as u64 + 1), vec);
+        }
+
+        let queries = vec![vectors[10].clone(), vectors[30].clone()];
+        let results = index.batch_search_with_ef(&queries, 3, 50);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].len(), 3);
+        assert_eq!(results[1].len(), 3);
+    }
+
+    #[test]
+    fn test_batch_search_with_filter() {
+        let config = HnswConfig::new(4, DistanceMetric::Euclidean);
+        let index = QuantizedHnswIndex::new(config, QuantizationType::Binary);
+
+        let vectors = create_test_vectors(50, 4);
+        for (i, vec) in vectors.iter().enumerate() {
+            index.insert(NodeId::new(i as u64 + 1), vec);
+        }
+
+        let allowlist: std::collections::HashSet<NodeId> = (1..=25).map(NodeId::new).collect();
+        let queries = vec![vectors[5].clone(), vectors[20].clone()];
+        let results = index.batch_search_with_filter(&queries, 3, &allowlist);
+        assert_eq!(results.len(), 2);
+        for batch in &results {
+            for (id, _) in batch {
+                assert!(allowlist.contains(id));
+            }
+        }
+    }
+
+    #[test]
+    fn test_batch_search_with_ef_and_filter() {
+        let config = HnswConfig::new(4, DistanceMetric::Euclidean);
+        let index = QuantizedHnswIndex::new(config, QuantizationType::Scalar);
+
+        let vectors = create_test_vectors(50, 4);
+        for (i, vec) in vectors.iter().enumerate() {
+            index.insert(NodeId::new(i as u64 + 1), vec);
+        }
+
+        let allowlist: std::collections::HashSet<NodeId> = (10..=40).map(NodeId::new).collect();
+        let queries = vec![vectors[15].clone()];
+        let results = index.batch_search_with_ef_and_filter(&queries, 5, 100, &allowlist);
+        assert_eq!(results.len(), 1);
+        for (id, _) in &results[0] {
+            assert!(allowlist.contains(id));
+        }
+    }
+
+    #[test]
+    fn test_snapshot_and_restore_topology() {
+        let config = HnswConfig::new(4, DistanceMetric::Euclidean);
+        let index = QuantizedHnswIndex::new(config.clone(), QuantizationType::Scalar);
+
+        let vectors = create_test_vectors(20, 4);
+        for (i, vec) in vectors.iter().enumerate() {
+            index.insert(NodeId::new(i as u64 + 1), vec);
+        }
+
+        let before = index.search(&vectors[10], 5);
+
+        let (entry, max_level, nodes) = index.snapshot_topology();
+
+        let index2 = QuantizedHnswIndex::new(config, QuantizationType::Scalar);
+        // Re-insert vectors (topology restore only restores graph structure)
+        for (i, vec) in vectors.iter().enumerate() {
+            index2.insert(NodeId::new(i as u64 + 1), vec);
+        }
+        index2.restore_topology(entry, max_level, nodes);
+
+        let after = index2.search(&vectors[10], 5);
+        assert_eq!(before.len(), after.len());
+    }
+
+    #[test]
+    fn test_heap_memory_bytes() {
+        let config = HnswConfig::new(4, DistanceMetric::Euclidean);
+        let index = QuantizedHnswIndex::new(config, QuantizationType::Scalar);
+
+        let empty_mem = index.heap_memory_bytes();
+        index.insert(NodeId::new(1), &[0.1, 0.2, 0.3, 0.4]);
+        assert!(
+            index.heap_memory_bytes() > empty_mem,
+            "memory should grow after insert"
+        );
     }
 }

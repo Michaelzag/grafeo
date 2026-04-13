@@ -7,6 +7,10 @@ use super::ast::*;
 use super::lexer::{Lexer, Token, TokenKind};
 use grafeo_common::utils::error::{Error, QueryError, QueryErrorKind, Result};
 
+/// Maximum nesting depth for recursive parsing constructs (parenthesized
+/// expressions, EXISTS subqueries, function calls).
+const MAX_NESTING_DEPTH: u32 = 128;
+
 /// SPARQL Parser.
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
@@ -17,6 +21,8 @@ pub struct Parser<'a> {
     collection_counter: u32,
     /// Counter for generating unique anonymous blank node labels.
     anon_blank_counter: u32,
+    /// Current nesting depth for recursive parsing constructs.
+    nesting_depth: u32,
 }
 
 impl<'a> Parser<'a> {
@@ -30,6 +36,7 @@ impl<'a> Parser<'a> {
             source,
             collection_counter: 0,
             anon_blank_counter: 0,
+            nesting_depth: 0,
         }
     }
 
@@ -1452,7 +1459,10 @@ impl<'a> Parser<'a> {
     // ==================== Expressions ====================
 
     fn parse_expression(&mut self) -> Result<Expression> {
-        self.parse_conditional_or_expression()
+        self.enter_nesting()?;
+        let result = self.parse_conditional_or_expression();
+        self.exit_nesting();
+        result
     }
 
     fn parse_conditional_or_expression(&mut self) -> Result<Expression> {
@@ -2234,9 +2244,25 @@ impl<'a> Parser<'a> {
             .map_err(|_| self.error(&format!("invalid integer: {}", text)))
     }
 
+    /// Increments the nesting depth and returns an error if the limit is exceeded.
+    fn enter_nesting(&mut self) -> Result<()> {
+        self.nesting_depth += 1;
+        if self.nesting_depth > MAX_NESTING_DEPTH {
+            return Err(self.error(&format!(
+                "Maximum nesting depth of {MAX_NESTING_DEPTH} exceeded"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Decrements the nesting depth.
+    fn exit_nesting(&mut self) {
+        self.nesting_depth = self.nesting_depth.saturating_sub(1);
+    }
+
     fn error(&self, message: &str) -> Error {
         Error::Query(
-            QueryError::new(QueryErrorKind::Syntax, message)
+            QueryError::new(QueryErrorKind::Syntax, format!("[SPARQL] {message}"))
                 .with_span(self.current.span)
                 .with_source(self.source.to_string()),
         )
@@ -2620,5 +2646,48 @@ mod tests {
     fn test_parse_invalid_keyword_fails() {
         let result = parse("SELECTX ?x WHERE { ?x ?y ?z }");
         assert!(result.is_err(), "Invalid keyword should fail");
+    }
+
+    // ==================== Recursion depth limit tests ====================
+
+    #[test]
+    fn test_deeply_nested_filter_errors_not_stack_overflow() {
+        let deep = "(".repeat(300) + "?x" + &")".repeat(300);
+        let query = format!("SELECT ?x WHERE {{ ?x ?p ?y . FILTER({deep}) }}");
+        let mut parser = Parser::new(&query);
+        let result = parser.parse();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("nesting depth"),
+            "Expected nesting depth error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_moderate_filter_nesting_succeeds() {
+        let depth = 50;
+        let deep = "(".repeat(depth) + "?x" + &")".repeat(depth);
+        let query = format!("SELECT ?x WHERE {{ ?x ?p ?y . FILTER({deep}) }}");
+        let mut parser = Parser::new(&query);
+        let result = parser.parse();
+        assert!(
+            result.is_ok(),
+            "50 levels of FILTER nesting should succeed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_deeply_nested_boolean_expressions() {
+        // ((?x && ?y) && (?x && ?y)) && ...
+        let deep = "(".repeat(300) + "true" + &")".repeat(300);
+        let query = format!("SELECT ?x WHERE {{ ?x ?p ?y . FILTER({deep}) }}");
+        let mut parser = Parser::new(&query);
+        let result = parser.parse();
+        assert!(
+            result.is_err(),
+            "300 levels of boolean nesting should error, not stack overflow"
+        );
     }
 }

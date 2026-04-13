@@ -16,13 +16,42 @@ use grafeo_common::utils::error::{Error, QueryError, QueryErrorKind, Result};
 
 /// Translates a Gremlin query string to a logical plan.
 ///
+/// Supports an `EXPLAIN` or `EXPLAIN ANALYZE` prefix (case-insensitive,
+/// non-standard extension) to request plan-only or profiled execution.
+///
 /// # Errors
 ///
 /// Returns an error if the query cannot be parsed or translated.
 pub fn translate(query: &str) -> Result<LogicalPlan> {
-    let statement = gremlin::parse(query)?;
+    let trimmed = query.trim_start();
+    let (explain, profile, actual_query) = if trimmed
+        .get(..7)
+        .is_some_and(|s| s.eq_ignore_ascii_case("EXPLAIN"))
+        && trimmed
+            .as_bytes()
+            .get(7)
+            .is_some_and(u8::is_ascii_whitespace)
+    {
+        let rest = trimmed[7..].trim_start();
+        if rest
+            .get(..7)
+            .is_some_and(|s| s.eq_ignore_ascii_case("ANALYZE"))
+            && rest.as_bytes().get(7).is_some_and(u8::is_ascii_whitespace)
+        {
+            (false, true, rest[7..].trim_start())
+        } else {
+            (true, false, rest)
+        }
+    } else {
+        (false, false, query)
+    };
+
+    let statement = gremlin::parse(actual_query)?;
     let translator = GremlinTranslator::new();
-    translator.translate_statement(&statement)
+    let mut plan = translator.translate_statement(&statement)?;
+    plan.explain = explain;
+    plan.profile = profile;
+    Ok(plan)
 }
 
 /// Translator from Gremlin AST to LogicalPlan.
@@ -3742,5 +3771,34 @@ mod tests {
         let plan = super::translate("g.V().has('Person', 'name', 'Alix').repeat(both()).times(1)")
             .unwrap();
         assert!(!plan.root.has_mutations());
+    }
+
+    // === EXPLAIN/PROFILE tests ===
+
+    #[test]
+    fn test_explain_prefix_sets_explain_flag() {
+        let plan = super::translate("EXPLAIN g.V().hasLabel('Person')").unwrap();
+        assert!(plan.explain, "EXPLAIN prefix should set explain flag");
+        assert!(!plan.profile, "EXPLAIN should not set profile flag");
+    }
+
+    #[test]
+    fn test_explain_analyze_sets_profile_flag() {
+        let plan = super::translate("EXPLAIN ANALYZE g.V().hasLabel('Person')").unwrap();
+        assert!(!plan.explain, "EXPLAIN ANALYZE should not set explain flag");
+        assert!(plan.profile, "EXPLAIN ANALYZE should set profile flag");
+    }
+
+    #[test]
+    fn test_explain_case_insensitive() {
+        let plan = super::translate("explain g.V().hasLabel('Person')").unwrap();
+        assert!(plan.explain, "explain (lowercase) should set explain flag");
+    }
+
+    #[test]
+    fn test_no_explain_prefix_normal_query() {
+        let plan = super::translate("g.V().hasLabel('Person')").unwrap();
+        assert!(!plan.explain);
+        assert!(!plan.profile);
     }
 }

@@ -11,7 +11,7 @@ use grafeo_common::types::{LogicalType, NodeId, PropertyKey, Value};
 use std::sync::Arc;
 
 #[cfg(feature = "vector-index")]
-use crate::index::vector::HnswIndex;
+use crate::index::vector::VectorIndexKind;
 
 /// A scan operator that finds nodes by vector similarity.
 ///
@@ -55,7 +55,7 @@ pub struct VectorScanOperator {
     store: Arc<dyn GraphStore>,
     /// The HNSW index to search (None = brute-force).
     #[cfg(feature = "vector-index")]
-    index: Option<Arc<HnswIndex>>,
+    index: Option<Arc<VectorIndexKind>>,
     /// The query vector.
     query: Vec<f32>,
     /// Number of nearest neighbors to return.
@@ -97,7 +97,7 @@ impl VectorScanOperator {
     #[must_use]
     pub fn with_index(
         store: Arc<dyn GraphStore>,
-        index: Arc<HnswIndex>,
+        index: Arc<VectorIndexKind>,
         query: Vec<f32>,
         k: usize,
     ) -> Self {
@@ -594,7 +594,9 @@ mod tests {
     #[cfg(feature = "vector-index")]
     #[test]
     fn test_vector_scan_with_hnsw_index() {
-        use crate::index::vector::{HnswConfig, HnswIndex, PropertyVectorAccessor};
+        use crate::index::vector::{
+            HnswConfig, HnswIndex, PropertyVectorAccessor, VectorIndexKind,
+        };
 
         let store = Arc::new(LpgStore::new().unwrap());
 
@@ -613,12 +615,13 @@ mod tests {
 
         // Create HNSW index and insert using accessor
         let config = HnswConfig::new(3, DistanceMetric::Euclidean);
-        let index = Arc::new(HnswIndex::new(config));
+        let hnsw = HnswIndex::new(config);
         let accessor = PropertyVectorAccessor::new(&*store, "vec");
 
-        index.insert(n1, &v1, &accessor);
-        index.insert(n2, &v2, &accessor);
-        index.insert(n3, &v3, &accessor);
+        hnsw.insert(n1, &v1, &accessor);
+        hnsw.insert(n2, &v2, &accessor);
+        hnsw.insert(n3, &v3, &accessor);
+        let index = Arc::new(VectorIndexKind::Hnsw(hnsw));
 
         // Search using index
         let query = vec![0.1f32, 0.2, 0.35];

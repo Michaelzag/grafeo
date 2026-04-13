@@ -29,16 +29,18 @@ pub fn translate(query: &str) -> Result<LogicalPlan> {
     // EXPLAIN: show physical plan without executing.
     // EXPLAIN ANALYZE: execute with profiling, show actual vs estimated stats.
     let trimmed = query.trim_start();
-    let (explain, profile, actual_query) = if trimmed.len() >= 7
-        && trimmed[..7].eq_ignore_ascii_case("EXPLAIN")
+    let (explain, profile, actual_query) = if trimmed
+        .get(..7)
+        .is_some_and(|s| s.eq_ignore_ascii_case("EXPLAIN"))
         && trimmed
             .as_bytes()
             .get(7)
             .is_some_and(u8::is_ascii_whitespace)
     {
         let rest = trimmed[7..].trim_start();
-        if rest.len() >= 7
-            && rest[..7].eq_ignore_ascii_case("ANALYZE")
+        if rest
+            .get(..7)
+            .is_some_and(|s| s.eq_ignore_ascii_case("ANALYZE"))
             && rest.as_bytes().get(7).is_some_and(u8::is_ascii_whitespace)
         {
             // EXPLAIN ANALYZE: execute with profiling
@@ -873,14 +875,10 @@ impl SparqlTranslator {
                 Ok(plan.root)
             }
 
-            ast::GraphPattern::Service {
-                endpoint: _,
-                pattern,
-                silent: _,
-            } => {
-                // SERVICE queries remote endpoints - for now, translate the pattern
-                self.translate_graph_pattern(pattern)
-            }
+            ast::GraphPattern::Service { .. } => Err(Error::Query(QueryError::new(
+                QueryErrorKind::Semantic,
+                "SPARQL SERVICE (federated queries) is not yet supported",
+            ))),
 
             ast::GraphPattern::InlineData(data) => {
                 // VALUES clause: each row becomes a chain of BIND operators
@@ -1904,7 +1902,7 @@ impl SparqlTranslator {
         triple: &ast::TriplePattern,
         inner_path: &ast::PropertyPath,
     ) -> Result<LogicalOperator> {
-        const MAX_DEPTH: usize = 10;
+        const MAX_DEPTH: usize = 50;
 
         let subject = self.translate_triple_term(&triple.subject)?;
         let object = self.translate_triple_term(&triple.object)?;
@@ -1934,7 +1932,7 @@ impl SparqlTranslator {
         triple: &ast::TriplePattern,
         inner_path: &ast::PropertyPath,
     ) -> Result<LogicalOperator> {
-        const MAX_DEPTH: usize = 10;
+        const MAX_DEPTH: usize = 50;
 
         let subject = self.translate_triple_term(&triple.subject)?;
         let object = self.translate_triple_term(&triple.object)?;
@@ -3048,6 +3046,119 @@ mod tests {
         assert!(
             find_left_join(&plan.root),
             "OPTIONAL should produce a LeftJoin operator in the plan"
+        );
+    }
+
+    // === SERVICE clause tests (federated queries not supported) ===
+
+    #[test]
+    fn test_service_clause_returns_explicit_error() {
+        let result =
+            translate("SELECT ?x WHERE { SERVICE <http://example.org/sparql> { ?x ?p ?o } }");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("SERVICE"),
+            "Error should mention SERVICE, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_service_silent_clause_also_errors() {
+        let result = translate(
+            "SELECT ?x WHERE { SERVICE SILENT <http://example.org/sparql> { ?x ?p ?o } }",
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("SERVICE"),
+            "SILENT SERVICE should also error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_service_clause_with_local_patterns_still_errors() {
+        // Ensure SERVICE is not silently executed locally
+        let result =
+            translate("SELECT ?x ?y WHERE { ?x ?p ?y . SERVICE <http://remote/> { ?y ?q ?z } }");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_query_without_service_still_works() {
+        // Regression: ensure normal queries still translate fine
+        let result = translate("SELECT ?x ?y WHERE { ?x ?p ?y }");
+        assert!(result.is_ok());
+    }
+
+    // === SAMPLE aggregate tests (3G verification) ===
+
+    #[test]
+    fn test_sample_aggregate_translates() {
+        let result = translate(
+            "SELECT (SAMPLE(?name) AS ?sampleName) WHERE { ?x <http://example.org/name> ?name }",
+        );
+        assert!(
+            result.is_ok(),
+            "SAMPLE aggregate should translate: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_group_concat_with_separator_translates() {
+        let result = translate(
+            r#"SELECT (GROUP_CONCAT(?name; separator=", ") AS ?names) WHERE { ?x <http://example.org/name> ?name }"#,
+        );
+        assert!(
+            result.is_ok(),
+            "GROUP_CONCAT with separator should translate: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_group_concat_without_separator_translates() {
+        let result = translate(
+            "SELECT (GROUP_CONCAT(?name) AS ?names) WHERE { ?x <http://example.org/name> ?name }",
+        );
+        assert!(
+            result.is_ok(),
+            "GROUP_CONCAT without separator should translate: {:?}",
+            result.err()
+        );
+    }
+
+    // === Property path depth tests (3D verification) ===
+
+    #[test]
+    fn test_property_path_plus_translates_beyond_10() {
+        // With MAX_DEPTH=50, a + path should expand to more than 10 levels
+        let result = translate("SELECT ?x ?y WHERE { ?x <http://example.org/knows>+ ?y }");
+        assert!(
+            result.is_ok(),
+            "Property path + should translate: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_property_path_star_translates() {
+        let result = translate("SELECT ?x ?y WHERE { ?x <http://example.org/knows>* ?y }");
+        assert!(
+            result.is_ok(),
+            "Property path * should translate: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_property_path_optional_translates() {
+        let result = translate("SELECT ?x ?y WHERE { ?x <http://example.org/knows>? ?y }");
+        assert!(
+            result.is_ok(),
+            "Property path ? should translate: {:?}",
+            result.err()
         );
     }
 }

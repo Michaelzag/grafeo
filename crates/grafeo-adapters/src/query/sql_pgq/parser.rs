@@ -9,12 +9,18 @@ use super::lexer::{Lexer, Token, TokenKind};
 use crate::query::keywords::unescape_string;
 use grafeo_common::utils::error::{QueryError, QueryErrorKind, Result};
 
+/// Maximum nesting depth for recursive parsing constructs (parenthesized
+/// expressions, CASE, subqueries).
+const MAX_NESTING_DEPTH: u32 = 128;
+
 /// SQL/PGQ query parser.
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
     current: Token,
     previous: Token,
     source: &'a str,
+    /// Current nesting depth for recursive parsing constructs.
+    nesting_depth: u32,
 }
 
 impl<'a> Parser<'a> {
@@ -32,6 +38,7 @@ impl<'a> Parser<'a> {
             current,
             previous,
             source: query,
+            nesting_depth: 0,
         }
     }
 
@@ -744,7 +751,10 @@ impl<'a> Parser<'a> {
     // ==================== Expression Parsing ====================
 
     fn parse_expression(&mut self) -> Result<Expression> {
-        self.parse_or_expression()
+        self.enter_nesting()?;
+        let result = self.parse_or_expression();
+        self.exit_nesting();
+        result
     }
 
     fn parse_or_expression(&mut self) -> Result<Expression> {
@@ -998,9 +1008,11 @@ impl<'a> Parser<'a> {
                 }
             }
             TokenKind::LParen => {
+                self.enter_nesting()?;
                 self.advance();
                 let expr = self.parse_expression()?;
                 self.expect(TokenKind::RParen)?;
+                self.exit_nesting();
                 Ok(expr)
             }
             TokenKind::LBracket => {
@@ -1195,8 +1207,24 @@ impl<'a> Parser<'a> {
         )
     }
 
+    /// Increments the nesting depth and returns an error if the limit is exceeded.
+    fn enter_nesting(&mut self) -> Result<()> {
+        self.nesting_depth += 1;
+        if self.nesting_depth > MAX_NESTING_DEPTH {
+            return Err(self.error(&format!(
+                "Maximum nesting depth of {MAX_NESTING_DEPTH} exceeded"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Decrements the nesting depth.
+    fn exit_nesting(&mut self) {
+        self.nesting_depth = self.nesting_depth.saturating_sub(1);
+    }
+
     fn error(&self, message: &str) -> grafeo_common::utils::error::Error {
-        QueryError::new(QueryErrorKind::Syntax, message)
+        QueryError::new(QueryErrorKind::Syntax, format!("[SQL/PGQ] {message}"))
             .with_span(self.current.span)
             .with_source(self.source.to_string())
             .into()
@@ -2276,5 +2304,49 @@ mod tests {
             panic!("Expected Case expression, got {case_expr:?}");
         }
         assert_eq!(s.graph_table.columns.items[1].alias, "tier");
+    }
+
+    // ==================== Recursion depth limit tests ====================
+
+    #[test]
+    fn test_deeply_nested_parentheses_errors_not_stack_overflow() {
+        let deep = "(".repeat(300) + "1" + &")".repeat(300);
+        let query = format!("SELECT * FROM GRAPH_TABLE (MATCH (n) COLUMNS ({deep} AS val))");
+        let mut parser = Parser::new(&query);
+        let result = parser.parse();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("nesting depth"),
+            "Expected nesting depth error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_moderate_nesting_succeeds() {
+        let depth = 50;
+        let deep = "(".repeat(depth) + "1" + &")".repeat(depth);
+        let query = format!("SELECT * FROM GRAPH_TABLE (MATCH (n) COLUMNS ({deep} AS val))");
+        let mut parser = Parser::new(&query);
+        let result = parser.parse();
+        assert!(
+            result.is_ok(),
+            "50 levels of nesting should succeed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_deeply_nested_case_in_columns() {
+        let prefix = "CASE WHEN true THEN ".repeat(300);
+        let suffix = " END".repeat(300);
+        let query =
+            format!("SELECT * FROM GRAPH_TABLE (MATCH (n) COLUMNS ({prefix}1{suffix} AS val))");
+        let mut parser = Parser::new(&query);
+        let result = parser.parse();
+        assert!(
+            result.is_err(),
+            "300 levels of CASE should error, not stack overflow"
+        );
     }
 }

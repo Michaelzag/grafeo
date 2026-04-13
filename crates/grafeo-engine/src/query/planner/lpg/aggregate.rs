@@ -387,11 +387,7 @@ impl super::Planner {
                 edge_types: expand.edge_types.clone(),
             });
 
-            let edge_col_name = expand.edge_variable.clone().unwrap_or_else(|| {
-                let count = self.anon_edge_counter.get();
-                self.anon_edge_counter.set(count + 1);
-                format!("_anon_edge_{}", count)
-            });
+            let edge_col_name = self.register_edge_column(&expand.edge_variable);
             columns.push(edge_col_name);
             columns.push(expand.to_variable.clone());
 

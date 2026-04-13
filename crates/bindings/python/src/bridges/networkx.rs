@@ -105,25 +105,14 @@ impl PyNetworkXAdapter {
     fn in_degree(&self, node_id: u64) -> PyResult<usize> {
         let db = self.db.read();
         let store = db.store();
-        let nodes = store.node_ids();
-        let mut count = 0;
-        for other in nodes {
-            for (neighbor, _) in store.edges_from(other, Direction::Outgoing) {
-                if neighbor.0 == node_id {
-                    count += 1;
-                }
-            }
-        }
-        Ok(count)
+        Ok(store.in_degree(NodeId::new(node_id)))
     }
 
     /// Get out-degree of a node.
     fn out_degree(&self, node_id: u64) -> PyResult<usize> {
         let db = self.db.read();
         let store = db.store();
-        Ok(store
-            .edges_from(NodeId::new(node_id), Direction::Outgoing)
-            .count())
+        Ok(store.out_degree(NodeId::new(node_id)))
     }
 
     /// Get degree of a node (in + out for directed, total for undirected).
@@ -156,6 +145,10 @@ impl PyNetworkXAdapter {
 
     /// Convert to a NetworkX graph object.
     ///
+    /// If nodes have a `_networkx_id` property (set by `from_networkx()`), that
+    /// value is used as the NetworkX node identifier, preserving original IDs
+    /// through a round-trip. Otherwise the Grafeo `NodeId` is used.
+    ///
     /// Requires networkx to be installed.
     fn to_networkx(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let nx = py.import("networkx")?;
@@ -171,6 +164,9 @@ impl PyNetworkXAdapter {
         let store = db.store();
         let nodes = store.node_ids();
 
+        // Build a mapping from Grafeo NodeId -> NetworkX node identifier.
+        let mut id_map: HashMap<u64, Py<PyAny>> = HashMap::new();
+
         // Add nodes with properties
         for node_id in &nodes {
             if let Some(node) = store.get_node(*node_id) {
@@ -180,12 +176,20 @@ impl PyNetworkXAdapter {
                 let labels: Vec<String> = node.labels.iter().map(|s| s.to_string()).collect();
                 attrs.set_item("labels", labels)?;
 
-                // Add properties
+                // Determine the NetworkX node identifier: use _networkx_id if present.
+                let mut nx_id: Py<PyAny> = node_id.0.into_pyobject(py)?.into_any().unbind();
+
+                // Add properties (skip _networkx_id from exported attrs)
                 for (key, value) in &node.properties {
+                    if key.as_str() == "_networkx_id" {
+                        nx_id = crate::types::PyValue::to_py(value, py);
+                        continue;
+                    }
                     attrs.set_item(key.as_str(), crate::types::PyValue::to_py(value, py))?;
                 }
 
-                graph.call_method("add_node", (node_id.0,), Some(&attrs))?;
+                id_map.insert(node_id.0, nx_id.clone_ref(py));
+                graph.call_method("add_node", (nx_id,), Some(&attrs))?;
             }
         }
 
@@ -203,7 +207,16 @@ impl PyNetworkXAdapter {
                         attrs.set_item(key.as_str(), crate::types::PyValue::to_py(value, py))?;
                     }
 
-                    graph.call_method("add_edge", (node_id.0, neighbor.0), Some(&attrs))?;
+                    let src_nx = id_map.get(&node_id.0).map_or_else(
+                        || node_id.0.into_pyobject(py).unwrap().into_any().unbind(),
+                        |v| v.clone_ref(py),
+                    );
+                    let dst_nx = id_map.get(&neighbor.0).map_or_else(
+                        || neighbor.0.into_pyobject(py).unwrap().into_any().unbind(),
+                        |v| v.clone_ref(py),
+                    );
+
+                    graph.call_method("add_edge", (src_nx, dst_nx), Some(&attrs))?;
                 }
             }
         }
@@ -213,13 +226,18 @@ impl PyNetworkXAdapter {
 
     /// Create a Grafeo database from a NetworkX graph.
     ///
+    /// Each imported node stores its original NetworkX ID as the `_networkx_id`
+    /// property, so a subsequent `to_networkx()` call restores the original IDs.
+    ///
     /// Args:
     ///     G: NetworkX graph object
     ///
     /// Returns:
-    ///     New PyNetworkXAdapter wrapping the imported graph
+    ///     Tuple of (adapter, node_mapping) where node_mapping is a dict mapping
+    ///     Grafeo node IDs (int) to original NetworkX node identifiers.
     #[staticmethod]
-    fn from_networkx(g: &Bound<'_, PyAny>, _py: Python<'_>) -> PyResult<Self> {
+    fn from_networkx(g: &Bound<'_, PyAny>, py: Python<'_>) -> PyResult<(Self, Py<PyAny>)> {
+        use grafeo_common::types::Value;
         use grafeo_engine::config::Config;
 
         // Create new in-memory database
@@ -232,13 +250,24 @@ impl PyNetworkXAdapter {
 
         // Import nodes with data
         let nodes_data = g.call_method1("nodes", (true,))?; // nodes(data=True)
-        let mut node_map: HashMap<i64, NodeId> = HashMap::new();
+
+        // We use a Python-hashable key -> NodeId mapping internally, and also
+        // produce a Grafeo-ID -> original-NX-ID dict to return to the caller.
+        //
+        // `nx_key_to_grafeo` is keyed on a stringified representation because
+        // NetworkX node IDs can be int or str (or any hashable), and Rust
+        // HashMap needs a consistent key type.
+        let mut nx_key_to_grafeo: HashMap<String, NodeId> = HashMap::new();
+        let mapping_dict = PyDict::new(py);
 
         for item in nodes_data.try_iter()? {
             let item = item?;
             let tuple: &Bound<'_, PyTuple> = item.cast()?;
-            let py_id: i64 = tuple.get_item(0)?.extract()?;
+            let py_id_obj = tuple.get_item(0)?;
             let node_data = tuple.get_item(1)?;
+
+            // Build a stable string key for our internal HashMap.
+            let hash_key: String = py_id_obj.repr()?.extract()?;
 
             let db_guard = db.read();
 
@@ -253,7 +282,19 @@ impl PyNetworkXAdapter {
 
             let label_refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
             let grafeo_id = db_guard.create_node(&label_refs);
-            node_map.insert(py_id, grafeo_id);
+            nx_key_to_grafeo.insert(hash_key, grafeo_id);
+
+            // Store the original NetworkX node ID as a property for round-tripping.
+            if let Ok(nx_val) = crate::types::PyValue::from_py(&py_id_obj) {
+                db_guard.set_node_property(grafeo_id, "_networkx_id", nx_val);
+            } else {
+                // Fallback: store as string representation.
+                let repr: String = py_id_obj.repr()?.extract()?;
+                db_guard.set_node_property(grafeo_id, "_networkx_id", Value::String(repr.into()));
+            }
+
+            // Record in the return mapping: grafeo_id (int) -> original NX id
+            mapping_dict.set_item(grafeo_id.0, &py_id_obj)?;
 
             // Import all properties except "labels"
             if let Ok(dict) = node_data.cast::<pyo3::types::PyDict>() {
@@ -277,11 +318,17 @@ impl PyNetworkXAdapter {
         for item in edges_data.try_iter()? {
             let item = item?;
             let tuple: &Bound<'_, PyTuple> = item.cast()?;
-            let src: i64 = tuple.get_item(0)?.extract()?;
-            let dst: i64 = tuple.get_item(1)?.extract()?;
+            let src_obj = tuple.get_item(0)?;
+            let dst_obj = tuple.get_item(1)?;
             let edge_data = tuple.get_item(2)?;
 
-            if let (Some(&src_id), Some(&dst_id)) = (node_map.get(&src), node_map.get(&dst)) {
+            let src_key: String = src_obj.repr()?.extract()?;
+            let dst_key: String = dst_obj.repr()?.extract()?;
+
+            if let (Some(&src_id), Some(&dst_id)) = (
+                nx_key_to_grafeo.get(&src_key),
+                nx_key_to_grafeo.get(&dst_key),
+            ) {
                 let db_guard = db.read();
 
                 // Get edge type
@@ -311,10 +358,11 @@ impl PyNetworkXAdapter {
             }
         }
 
-        Ok(Self {
+        let adapter = Self {
             db,
             directed: is_directed,
-        })
+        };
+        Ok((adapter, mapping_dict.into_any().unbind()))
     }
 
     // ==========================================================================

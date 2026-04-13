@@ -118,8 +118,277 @@ pub use hnsw::HnswIndex;
 pub use quantized_hnsw::QuantizedHnswIndex;
 #[cfg(feature = "vector-index")]
 pub use section::VectorStoreSection;
+// VectorIndexKind is defined below in this file (not in a sub-module).
 
 use grafeo_common::types::NodeId;
+#[cfg(feature = "vector-index")]
+use std::collections::HashSet;
+
+// ── VectorIndexKind ────────────────────────────────────────────────
+
+/// Unified enum for vector indexes stored in the LPG store.
+///
+/// Wraps either a plain [`HnswIndex`] or a [`QuantizedHnswIndex`],
+/// allowing the store and engine to handle both through a single type.
+#[cfg(feature = "vector-index")]
+pub enum VectorIndexKind {
+    /// Standard full-precision HNSW index.
+    Hnsw(HnswIndex),
+    /// Quantized HNSW index (scalar, binary, or product quantization).
+    Quantized(QuantizedHnswIndex),
+}
+
+#[cfg(feature = "vector-index")]
+impl VectorIndexKind {
+    /// Returns the HNSW configuration.
+    #[must_use]
+    pub fn config(&self) -> &HnswConfig {
+        match self {
+            Self::Hnsw(idx) => idx.config(),
+            Self::Quantized(idx) => idx.config(),
+        }
+    }
+
+    /// Returns the number of vectors in the index.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Hnsw(idx) => idx.len(),
+            Self::Quantized(idx) => idx.len(),
+        }
+    }
+
+    /// Returns true if the index is empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::Hnsw(idx) => idx.is_empty(),
+            Self::Quantized(idx) => idx.is_empty(),
+        }
+    }
+
+    /// Returns true if the index contains the given ID.
+    #[must_use]
+    pub fn contains(&self, id: NodeId) -> bool {
+        match self {
+            Self::Hnsw(idx) => idx.contains(id),
+            Self::Quantized(idx) => idx.contains(id),
+        }
+    }
+
+    /// Removes a vector from the index.
+    pub fn remove(&self, id: NodeId) -> bool {
+        match self {
+            Self::Hnsw(idx) => idx.remove(id),
+            Self::Quantized(idx) => idx.remove(id),
+        }
+    }
+
+    /// Inserts a vector into the index.
+    ///
+    /// For `Hnsw`, the accessor is used for neighbor distance lookups.
+    /// For `Quantized`, the vector is stored internally and the accessor is unused.
+    pub fn insert(&self, id: NodeId, vector: &[f32], accessor: &impl VectorAccessor) {
+        match self {
+            Self::Hnsw(idx) => idx.insert(id, vector, accessor),
+            Self::Quantized(idx) => idx.insert(id, vector),
+        }
+    }
+
+    /// Searches for the k nearest neighbors.
+    #[must_use]
+    pub fn search(
+        &self,
+        query: &[f32],
+        k: usize,
+        accessor: &impl VectorAccessor,
+    ) -> Vec<(NodeId, f32)> {
+        match self {
+            Self::Hnsw(idx) => idx.search(query, k, accessor),
+            Self::Quantized(idx) => idx.search(query, k),
+        }
+    }
+
+    /// Searches with a custom ef (beam width) parameter.
+    #[must_use]
+    pub fn search_with_ef(
+        &self,
+        query: &[f32],
+        k: usize,
+        ef: usize,
+        accessor: &impl VectorAccessor,
+    ) -> Vec<(NodeId, f32)> {
+        match self {
+            Self::Hnsw(idx) => idx.search_with_ef(query, k, ef, accessor),
+            Self::Quantized(idx) => idx.search_with_ef(query, k, ef),
+        }
+    }
+
+    /// Searches with an allowlist filter.
+    #[must_use]
+    pub fn search_with_filter(
+        &self,
+        query: &[f32],
+        k: usize,
+        allowlist: &HashSet<NodeId>,
+        accessor: &impl VectorAccessor,
+    ) -> Vec<(NodeId, f32)> {
+        match self {
+            Self::Hnsw(idx) => idx.search_with_filter(query, k, allowlist, accessor),
+            Self::Quantized(idx) => idx.search_with_filter(query, k, allowlist),
+        }
+    }
+
+    /// Searches with a custom ef and an allowlist filter.
+    #[must_use]
+    pub fn search_with_ef_and_filter(
+        &self,
+        query: &[f32],
+        k: usize,
+        ef: usize,
+        allowlist: &HashSet<NodeId>,
+        accessor: &impl VectorAccessor,
+    ) -> Vec<(NodeId, f32)> {
+        match self {
+            Self::Hnsw(idx) => idx.search_with_ef_and_filter(query, k, ef, allowlist, accessor),
+            Self::Quantized(idx) => idx.search_with_ef_and_filter(query, k, ef, allowlist),
+        }
+    }
+
+    /// Batch search for multiple queries.
+    #[must_use]
+    pub fn batch_search(
+        &self,
+        queries: &[Vec<f32>],
+        k: usize,
+        accessor: &impl VectorAccessor,
+    ) -> Vec<Vec<(NodeId, f32)>> {
+        match self {
+            Self::Hnsw(idx) => idx.batch_search(queries, k, accessor),
+            Self::Quantized(idx) => idx.batch_search(queries, k),
+        }
+    }
+
+    /// Batch search with custom ef for multiple queries.
+    #[must_use]
+    pub fn batch_search_with_ef(
+        &self,
+        queries: &[Vec<f32>],
+        k: usize,
+        ef: usize,
+        accessor: &impl VectorAccessor,
+    ) -> Vec<Vec<(NodeId, f32)>> {
+        match self {
+            Self::Hnsw(idx) => idx.batch_search_with_ef(queries, k, ef, accessor),
+            Self::Quantized(idx) => idx.batch_search_with_ef(queries, k, ef),
+        }
+    }
+
+    /// Batch search with an allowlist filter for multiple queries.
+    #[must_use]
+    pub fn batch_search_with_filter(
+        &self,
+        queries: &[Vec<f32>],
+        k: usize,
+        allowlist: &HashSet<NodeId>,
+        accessor: &impl VectorAccessor,
+    ) -> Vec<Vec<(NodeId, f32)>> {
+        match self {
+            Self::Hnsw(idx) => idx.batch_search_with_filter(queries, k, allowlist, accessor),
+            Self::Quantized(idx) => idx.batch_search_with_filter(queries, k, allowlist),
+        }
+    }
+
+    /// Batch search with custom ef and an allowlist filter.
+    #[must_use]
+    pub fn batch_search_with_ef_and_filter(
+        &self,
+        queries: &[Vec<f32>],
+        k: usize,
+        ef: usize,
+        allowlist: &HashSet<NodeId>,
+        accessor: &impl VectorAccessor,
+    ) -> Vec<Vec<(NodeId, f32)>> {
+        match self {
+            Self::Hnsw(idx) => {
+                idx.batch_search_with_ef_and_filter(queries, k, ef, allowlist, accessor)
+            }
+            Self::Quantized(idx) => idx.batch_search_with_ef_and_filter(queries, k, ef, allowlist),
+        }
+    }
+
+    /// Snapshot the HNSW topology for serialization.
+    #[must_use]
+    pub fn snapshot_topology(&self) -> (Option<NodeId>, usize, Vec<(NodeId, Vec<Vec<NodeId>>)>) {
+        match self {
+            Self::Hnsw(idx) => idx.snapshot_topology(),
+            Self::Quantized(idx) => idx.snapshot_topology(),
+        }
+    }
+
+    /// Restore topology from a snapshot.
+    pub fn restore_topology(
+        &self,
+        entry_point: Option<NodeId>,
+        max_level: usize,
+        node_data: Vec<(NodeId, Vec<Vec<NodeId>>)>,
+    ) {
+        match self {
+            Self::Hnsw(idx) => idx.restore_topology(entry_point, max_level, node_data),
+            Self::Quantized(idx) => idx.restore_topology(entry_point, max_level, node_data),
+        }
+    }
+
+    /// Returns estimated heap memory in bytes.
+    #[must_use]
+    pub fn heap_memory_bytes(&self) -> usize {
+        match self {
+            Self::Hnsw(idx) => idx.heap_memory_bytes(),
+            Self::Quantized(idx) => idx.heap_memory_bytes(),
+        }
+    }
+
+    /// Returns the quantization type, if this is a quantized index.
+    #[must_use]
+    pub fn quantization_type(&self) -> Option<QuantizationType> {
+        match self {
+            Self::Hnsw(_) => None,
+            Self::Quantized(idx) => Some(idx.quantization_type()),
+        }
+    }
+
+    /// Returns a reference to the inner `HnswIndex`, if this is a plain HNSW variant.
+    #[must_use]
+    pub fn as_hnsw(&self) -> Option<&HnswIndex> {
+        match self {
+            Self::Hnsw(idx) => Some(idx),
+            Self::Quantized(_) => None,
+        }
+    }
+
+    /// Returns a reference to the inner `QuantizedHnswIndex`, if quantized.
+    #[must_use]
+    pub fn as_quantized(&self) -> Option<&QuantizedHnswIndex> {
+        match self {
+            Self::Hnsw(_) => None,
+            Self::Quantized(idx) => Some(idx),
+        }
+    }
+}
+
+#[cfg(feature = "vector-index")]
+impl From<HnswIndex> for VectorIndexKind {
+    fn from(idx: HnswIndex) -> Self {
+        Self::Hnsw(idx)
+    }
+}
+
+#[cfg(feature = "vector-index")]
+impl From<QuantizedHnswIndex> for VectorIndexKind {
+    fn from(idx: QuantizedHnswIndex) -> Self {
+        Self::Quantized(idx)
+    }
+}
 
 /// Configuration for vector search operations.
 #[derive(Debug, Clone)]
@@ -373,5 +642,177 @@ mod tests {
         assert!((results[0].1 - 0.0).abs() < 0.001);
         assert_eq!(results[1].0, NodeId::new(2));
         assert!((results[1].1 - 5.0).abs() < 0.001); // 3-4-5 triangle
+    }
+
+    // ── VectorIndexKind Quantized dispatch ────────────────────────────
+
+    #[cfg(feature = "vector-index")]
+    mod vector_index_kind_tests {
+        use super::super::*;
+        use std::collections::HashSet;
+
+        /// Minimal accessor that always returns None (quantized indexes
+        /// store vectors internally so the accessor is unused).
+        struct NoopAccessor;
+        impl VectorAccessor for NoopAccessor {
+            fn get_vector(&self, _id: NodeId) -> Option<std::sync::Arc<[f32]>> {
+                None
+            }
+        }
+
+        fn build_quantized_kind(n: usize) -> VectorIndexKind {
+            let config = HnswConfig::new(4, DistanceMetric::Euclidean);
+            let q = QuantizedHnswIndex::new(config, QuantizationType::Scalar);
+            for i in 0..n {
+                let vec: Vec<f32> = (0..4)
+                    .map(|j| ((i * 4 + j) as f32) / (n * 4) as f32)
+                    .collect();
+                q.insert(NodeId::new(i as u64 + 1), &vec);
+            }
+            VectorIndexKind::Quantized(q)
+        }
+
+        #[test]
+        fn quantized_kind_basic_ops() {
+            let kind = build_quantized_kind(20);
+            assert_eq!(kind.len(), 20);
+            assert!(!kind.is_empty());
+            assert!(kind.contains(NodeId::new(1)));
+            assert!(!kind.contains(NodeId::new(999)));
+        }
+
+        #[test]
+        fn quantized_kind_insert_and_search() {
+            let kind = build_quantized_kind(30);
+            let query = vec![0.5, 0.5, 0.0, 0.0];
+            let results = kind.search(&query, 3, &NoopAccessor);
+            assert_eq!(results.len(), 3);
+        }
+
+        #[test]
+        fn quantized_kind_search_with_ef() {
+            let kind = build_quantized_kind(30);
+            let query = vec![0.5, 0.5, 0.0, 0.0];
+            let results = kind.search_with_ef(&query, 3, 50, &NoopAccessor);
+            assert_eq!(results.len(), 3);
+        }
+
+        #[test]
+        fn quantized_kind_search_with_filter() {
+            let kind = build_quantized_kind(30);
+            let allowlist: HashSet<NodeId> = (1..=10).map(NodeId::new).collect();
+            let query = vec![0.1, 0.1, 0.0, 0.0];
+            let results = kind.search_with_filter(&query, 5, &allowlist, &NoopAccessor);
+            assert!(!results.is_empty());
+            for (id, _) in &results {
+                assert!(allowlist.contains(id));
+            }
+        }
+
+        #[test]
+        fn quantized_kind_search_with_ef_and_filter() {
+            let kind = build_quantized_kind(30);
+            let allowlist: HashSet<NodeId> = (5..=15).map(NodeId::new).collect();
+            let query = vec![0.3, 0.3, 0.0, 0.0];
+            let results = kind.search_with_ef_and_filter(&query, 3, 50, &allowlist, &NoopAccessor);
+            for (id, _) in &results {
+                assert!(allowlist.contains(id));
+            }
+        }
+
+        #[test]
+        fn quantized_kind_batch_search() {
+            let kind = build_quantized_kind(30);
+            let queries = vec![vec![0.1, 0.0, 0.0, 0.0], vec![0.9, 0.9, 0.0, 0.0]];
+            let results = kind.batch_search(&queries, 2, &NoopAccessor);
+            assert_eq!(results.len(), 2);
+        }
+
+        #[test]
+        fn quantized_kind_batch_search_with_ef() {
+            let kind = build_quantized_kind(30);
+            let queries = vec![vec![0.1, 0.0, 0.0, 0.0]];
+            let results = kind.batch_search_with_ef(&queries, 2, 50, &NoopAccessor);
+            assert_eq!(results.len(), 1);
+        }
+
+        #[test]
+        fn quantized_kind_batch_search_with_filter() {
+            let kind = build_quantized_kind(30);
+            let allowlist: HashSet<NodeId> = (1..=10).map(NodeId::new).collect();
+            let queries = vec![vec![0.1, 0.0, 0.0, 0.0]];
+            let results = kind.batch_search_with_filter(&queries, 5, &allowlist, &NoopAccessor);
+            assert_eq!(results.len(), 1);
+            for (id, _) in &results[0] {
+                assert!(allowlist.contains(id));
+            }
+        }
+
+        #[test]
+        fn quantized_kind_batch_search_with_ef_and_filter() {
+            let kind = build_quantized_kind(30);
+            let allowlist: HashSet<NodeId> = (1..=15).map(NodeId::new).collect();
+            let queries = vec![vec![0.2, 0.0, 0.0, 0.0]];
+            let results =
+                kind.batch_search_with_ef_and_filter(&queries, 3, 50, &allowlist, &NoopAccessor);
+            assert_eq!(results.len(), 1);
+            for (id, _) in &results[0] {
+                assert!(allowlist.contains(id));
+            }
+        }
+
+        #[test]
+        fn quantized_kind_remove() {
+            let kind = build_quantized_kind(5);
+            assert!(kind.remove(NodeId::new(1)));
+            assert_eq!(kind.len(), 4);
+            assert!(!kind.contains(NodeId::new(1)));
+        }
+
+        #[test]
+        fn quantized_kind_snapshot_restore() {
+            let kind = build_quantized_kind(10);
+            let (entry, level, nodes) = kind.snapshot_topology();
+
+            let config = HnswConfig::new(4, DistanceMetric::Euclidean);
+            let kind2 = VectorIndexKind::Quantized(QuantizedHnswIndex::new(
+                config,
+                QuantizationType::Scalar,
+            ));
+            for i in 0..10 {
+                let vec: Vec<f32> = (0..4).map(|j| ((i * 4 + j) as f32) / 40.0).collect();
+                kind2.insert(NodeId::new(i as u64 + 1), &vec, &NoopAccessor);
+            }
+            kind2.restore_topology(entry, level, nodes);
+            assert_eq!(kind2.len(), 10);
+        }
+
+        #[test]
+        fn quantized_kind_heap_memory() {
+            let kind = build_quantized_kind(10);
+            assert!(kind.heap_memory_bytes() > 0);
+        }
+
+        #[test]
+        fn quantized_kind_type_accessors() {
+            let kind = build_quantized_kind(1);
+            assert!(kind.as_quantized().is_some());
+            assert!(kind.as_hnsw().is_none());
+            assert_eq!(kind.quantization_type(), Some(QuantizationType::Scalar));
+        }
+
+        #[test]
+        fn from_trait_impls() {
+            let config = HnswConfig::new(4, DistanceMetric::Euclidean);
+
+            let hnsw = HnswIndex::new(config.clone());
+            let kind: VectorIndexKind = hnsw.into();
+            assert!(kind.as_hnsw().is_some());
+
+            let quantized = QuantizedHnswIndex::new(config, QuantizationType::Binary);
+            let kind2: VectorIndexKind = quantized.into();
+            assert!(kind2.as_quantized().is_some());
+            assert_eq!(kind2.quantization_type(), Some(QuantizationType::Binary));
+        }
     }
 }

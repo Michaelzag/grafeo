@@ -318,3 +318,92 @@ fn backup_full_twice_produces_two_segments() {
 
     db.close().expect("close");
 }
+
+/// Regression for GrafeoDB/grafeo#267: incremental backup must succeed
+/// after a full backup without requiring a manual WAL rotation.
+///
+/// Previously, `do_backup_full` stored the active log file's sequence in the
+/// cursor but did not rotate, so writes that landed in the same file were
+/// invisible to incremental (which skips `seq <= cursor.log_sequence`).
+#[test]
+fn incremental_backup_works_without_manual_rotation() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let db_path = dir.path().join("issue267.grafeo");
+    let backup_dir = dir.path().join("backups");
+
+    let db = GrafeoDB::open(&db_path).expect("open");
+    let session = db.session();
+
+    // Seed data and take a full backup
+    session
+        .execute("INSERT (:Person {name: 'Alix'})")
+        .expect("insert");
+    let full = db.backup_full(&backup_dir).expect("full backup");
+
+    // Insert more data WITHOUT manually rotating the WAL
+    session
+        .execute("INSERT (:Person {name: 'Gus'})")
+        .expect("insert");
+    session
+        .execute("INSERT (:Person {name: 'Vincent'})")
+        .expect("insert");
+
+    // Incremental must succeed (no manual wal.rotate() call)
+    let incr = db
+        .backup_incremental(&backup_dir)
+        .expect("incremental backup should work without manual WAL rotation");
+    assert!(incr.size_bytes > 0);
+    assert!(incr.start_epoch > full.end_epoch);
+
+    db.close().expect("close");
+}
+
+/// Regression for GrafeoDB/grafeo#267: two consecutive incremental backups
+/// with writes between them must both succeed.
+///
+/// This tests the same boundary condition in `do_backup_incremental` itself:
+/// the cursor it writes must not block the next incremental from seeing new
+/// WAL data.
+#[test]
+fn multiple_incremental_backups_in_sequence() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let db_path = dir.path().join("multi_incr.grafeo");
+    let backup_dir = dir.path().join("backups");
+
+    let db = GrafeoDB::open(&db_path).expect("open");
+    let session = db.session();
+
+    // Seed + full backup
+    session
+        .execute("INSERT (:Person {name: 'Alix'})")
+        .expect("insert");
+    db.backup_full(&backup_dir).expect("full backup");
+
+    // First incremental
+    session
+        .execute("INSERT (:Person {name: 'Gus'})")
+        .expect("insert");
+    let incr1 = db
+        .backup_incremental(&backup_dir)
+        .expect("first incremental");
+
+    // Second incremental (no manual rotation between them)
+    session
+        .execute("INSERT (:Person {name: 'Vincent'})")
+        .expect("insert");
+    let incr2 = db
+        .backup_incremental(&backup_dir)
+        .expect("second incremental should also succeed");
+    assert!(incr2.start_epoch > incr1.start_epoch);
+
+    let manifest = GrafeoDB::read_backup_manifest(&backup_dir)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        manifest.segments.len(),
+        3,
+        "should have 1 full + 2 incremental segments"
+    );
+
+    db.close().expect("close");
+}

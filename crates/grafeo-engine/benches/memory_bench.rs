@@ -196,8 +196,16 @@ fn bench_memory_vector_index(c: &mut Criterion) {
                     let query = format!("INSERT (:Item {{id: {}, embedding: [{vec_str}]}})", i);
                     session.execute(&query).unwrap();
                 }
-                db.create_vector_index("Item", "embedding", Some(128), Some("cosine"), None, None)
-                    .unwrap();
+                db.create_vector_index(
+                    "Item",
+                    "embedding",
+                    Some(128),
+                    Some("cosine"),
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
                 black_box(db.memory_usage().total_bytes);
             }
             start.elapsed()
@@ -214,8 +222,16 @@ fn bench_memory_vector_index(c: &mut Criterion) {
         let query = format!("INSERT (:Item {{id: {}, embedding: [{vec_str}]}})", i);
         session.execute(&query).unwrap();
     }
-    db.create_vector_index("Item", "embedding", Some(128), Some("cosine"), None, None)
-        .unwrap();
+    db.create_vector_index(
+        "Item",
+        "embedding",
+        Some(128),
+        Some("cosine"),
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     recorder_record("memory_vector_index_1k", db.memory_usage().total_bytes);
 }
 

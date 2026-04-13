@@ -24,7 +24,7 @@ use grafeo_common::types::{LogicalType, NodeId, PropertyKey, Value};
 use std::sync::Arc;
 
 #[cfg(feature = "vector-index")]
-use crate::index::vector::HnswIndex;
+use crate::index::vector::VectorIndexKind;
 
 /// Vector join operator for hybrid graph + vector queries.
 ///
@@ -49,7 +49,7 @@ pub struct VectorJoinOperator {
     store: Arc<dyn GraphStore>,
     /// The HNSW index for right side (None = brute-force).
     #[cfg(feature = "vector-index")]
-    index: Option<Arc<HnswIndex>>,
+    index: Option<Arc<VectorIndexKind>>,
     /// Property containing left-side vectors (for entity-to-entity similarity).
     /// If None, uses `query_vector` directly.
     left_property: Option<String>,
@@ -186,7 +186,7 @@ impl VectorJoinOperator {
     /// Sets an HNSW index for the right side.
     #[cfg(feature = "vector-index")]
     #[must_use]
-    pub fn with_index(mut self, index: Arc<HnswIndex>) -> Self {
+    pub fn with_index(mut self, index: Arc<VectorIndexKind>) -> Self {
         self.index = Some(index);
         self.uses_index = true;
         self

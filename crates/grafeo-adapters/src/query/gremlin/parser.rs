@@ -8,11 +8,17 @@ use super::lexer::{Lexer, Token, TokenKind};
 use grafeo_common::types::Value;
 use grafeo_common::utils::error::{Error, Result};
 
+/// Maximum nesting depth for recursive parsing constructs (nested traversals
+/// such as `.where()`, `.local()`, `.union()`, `.choose()`).
+const MAX_NESTING_DEPTH: u32 = 128;
+
 /// Gremlin parser.
 pub struct Parser<'a> {
     tokens: Vec<Token>,
     position: usize,
     source: &'a str,
+    /// Current nesting depth for recursive parsing constructs.
+    nesting_depth: u32,
 }
 
 impl<'a> Parser<'a> {
@@ -24,7 +30,24 @@ impl<'a> Parser<'a> {
             tokens,
             position: 0,
             source,
+            nesting_depth: 0,
         }
+    }
+
+    /// Increments the nesting depth and returns an error if the limit is exceeded.
+    fn enter_nesting(&mut self) -> Result<()> {
+        self.nesting_depth += 1;
+        if self.nesting_depth > MAX_NESTING_DEPTH {
+            return Err(self.error(&format!(
+                "Maximum nesting depth of {MAX_NESTING_DEPTH} exceeded"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Decrements the nesting depth.
+    fn exit_nesting(&mut self) {
+        self.nesting_depth = self.nesting_depth.saturating_sub(1);
     }
 
     /// Parses the query into a statement.
@@ -976,6 +999,7 @@ impl<'a> Parser<'a> {
     /// `and(has(...), has(...))`).  Steps are separated by dots: the caller is
     /// responsible for consuming the outer delimiters.
     fn parse_inner_steps(&mut self) -> Result<Vec<Step>> {
+        self.enter_nesting()?;
         let mut steps = Vec::new();
         // Parse first step
         let step = self.parse_step()?;
@@ -986,6 +1010,7 @@ impl<'a> Parser<'a> {
             let step = self.parse_step()?;
             steps.push(step);
         }
+        self.exit_nesting();
         Ok(steps)
     }
 
@@ -1004,6 +1029,8 @@ impl<'a> Parser<'a> {
     /// Parse a bare traversal starting with V() or E() (without 'g.' prefix).
     /// Used inside from()/to() arguments, e.g. `from(V().has('name', 'Gus'))`.
     fn parse_bare_traversal(&mut self) -> Result<Vec<Step>> {
+        self.enter_nesting()?;
+
         // Parse source (V, E, etc.) and convert to a step
         let source = self.parse_source()?;
 
@@ -1034,12 +1061,15 @@ impl<'a> Parser<'a> {
             steps.push(step);
         }
 
+        self.exit_nesting();
         Ok(steps)
     }
 
     /// Parse a sub-traversal (e.g., g.V().has('name', 'Gus'))
     /// Returns the steps as a Vec<Step>
     fn parse_sub_traversal(&mut self) -> Result<Vec<Step>> {
+        self.enter_nesting()?;
+
         // Consume 'g'
         self.expect(TokenKind::G)?;
         self.expect(TokenKind::Dot)?;
@@ -1074,6 +1104,7 @@ impl<'a> Parser<'a> {
             steps.push(step);
         }
 
+        self.exit_nesting();
         Ok(steps)
     }
 
@@ -1191,7 +1222,7 @@ impl<'a> Parser<'a> {
         Error::Query(
             grafeo_common::utils::error::QueryError::new(
                 grafeo_common::utils::error::QueryErrorKind::Syntax,
-                message,
+                format!("[Gremlin] {message}"),
             )
             .with_span(self.current_span())
             .with_source(self.source.to_string()),
@@ -1822,5 +1853,64 @@ mod tests {
         } else {
             panic!("Expected Union step");
         }
+    }
+
+    // ==================== Recursion depth limit tests ====================
+
+    #[test]
+    fn test_deeply_nested_steps_errors_not_stack_overflow() {
+        // Gremlin nesting happens via nested traversals in steps like not(), and(), or()
+        let prefix = "not(".repeat(300);
+        let suffix = ")".repeat(300);
+        let query = format!("g.V().{prefix}has('name', 'x'){suffix}");
+        let mut parser = Parser::new(&query);
+        let result = parser.parse();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("nesting depth"),
+            "Expected nesting depth error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_moderate_step_nesting_succeeds() {
+        // 10 levels of not() should succeed
+        let prefix = "not(".repeat(10);
+        let suffix = ")".repeat(10);
+        let query = format!("g.V().{prefix}has('name', 'x'){suffix}");
+        let mut parser = Parser::new(&query);
+        let result = parser.parse();
+        assert!(
+            result.is_ok(),
+            "10 levels of step nesting should succeed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_deeply_nested_and_steps() {
+        let prefix = "and(".repeat(300);
+        let suffix = ")".repeat(300);
+        let query = format!("g.V().{prefix}has('x', 1){suffix}");
+        let mut parser = Parser::new(&query);
+        let result = parser.parse();
+        assert!(
+            result.is_err(),
+            "300 levels of and() should error, not stack overflow"
+        );
+    }
+
+    #[test]
+    fn test_deeply_nested_or_steps() {
+        let prefix = "or(".repeat(300);
+        let suffix = ")".repeat(300);
+        let query = format!("g.V().{prefix}has('x', 1){suffix}");
+        let mut parser = Parser::new(&query);
+        let result = parser.parse();
+        assert!(
+            result.is_err(),
+            "300 levels of or() should error, not stack overflow"
+        );
     }
 }

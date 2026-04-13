@@ -93,11 +93,14 @@ impl super::GrafeoDB {
     /// * `metric` - Distance metric: `"cosine"` (default), `"euclidean"`, `"dot_product"`, `"manhattan"`
     /// * `m` - HNSW links per node (default: 16). Higher = better recall, more memory.
     /// * `ef_construction` - Construction beam width (default: 128). Higher = better index quality, slower build.
+    /// * `quantization` - Quantization mode: `None` (default), `"scalar"`, `"binary"`, or `"product"`.
+    ///   Quantized indexes use less memory at the cost of slightly lower recall.
     ///
     /// # Errors
     ///
     /// Returns an error if the metric is invalid, no vectors are found, or
     /// dimensions don't match.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_vector_index(
         &self,
         label: &str,
@@ -106,6 +109,7 @@ impl super::GrafeoDB {
         metric: Option<&str>,
         m: Option<usize>,
         ef_construction: Option<usize>,
+        quantization: Option<&str>,
     ) -> Result<()> {
         use grafeo_common::types::{PropertyKey, Value};
         use grafeo_core::index::vector::DistanceMetric;
@@ -119,6 +123,11 @@ impl super::GrafeoDB {
             })?,
             None => DistanceMetric::Cosine,
         };
+
+        #[cfg(feature = "vector-index")]
+        let quantization_type = Self::parse_quantization(quantization)?;
+        #[cfg(not(feature = "vector-index"))]
+        let _ = quantization;
 
         // Scan nodes to validate vectors exist and check dimensions
         let prop_key = PropertyKey::new(property);
@@ -154,17 +163,14 @@ impl super::GrafeoDB {
             return if let Some(d) = dimensions {
                 #[cfg(feature = "vector-index")]
                 {
-                    use grafeo_core::index::vector::{HnswConfig, HnswIndex};
-
-                    let mut config = HnswConfig::new(d, metric);
-                    if let Some(m_val) = m {
-                        config = config.with_m(m_val);
-                    }
-                    if let Some(ef_c) = ef_construction {
-                        config = config.with_ef_construction(ef_c);
-                    }
-
-                    let index = HnswIndex::new(config);
+                    let index = Self::build_vector_index(
+                        d,
+                        metric,
+                        m,
+                        ef_construction,
+                        quantization_type,
+                        0,
+                    );
                     self.lpg_store()
                         .add_vector_index(label, property, Arc::new(index));
                 }
@@ -182,26 +188,35 @@ impl super::GrafeoDB {
             };
         };
 
-        // Build and populate the HNSW index
+        // Build and populate the vector index
         #[cfg(feature = "vector-index")]
         {
-            use grafeo_core::index::vector::{HnswConfig, HnswIndex};
+            use grafeo_core::index::vector::VectorIndexKind;
 
-            let mut config = HnswConfig::new(dims, metric);
-            if let Some(m_val) = m {
-                config = config.with_m(m_val);
-            }
-            if let Some(ef_c) = ef_construction {
-                config = config.with_ef_construction(ef_c);
-            }
-
-            let index = HnswIndex::with_capacity(config, vectors.len());
-            let accessor = grafeo_core::index::vector::PropertyVectorAccessor::new(
-                &**self.lpg_store(),
-                property,
+            let index = Self::build_vector_index(
+                dims,
+                metric,
+                m,
+                ef_construction,
+                quantization_type,
+                vectors.len(),
             );
-            for (node_id, vec) in &vectors {
-                index.insert(*node_id, vec, &accessor);
+
+            match &index {
+                VectorIndexKind::Hnsw(_) => {
+                    let accessor = grafeo_core::index::vector::PropertyVectorAccessor::new(
+                        &**self.lpg_store(),
+                        property,
+                    );
+                    for (node_id, vec) in &vectors {
+                        index.insert(*node_id, vec, &accessor);
+                    }
+                }
+                VectorIndexKind::Quantized(q_idx) => {
+                    for (node_id, vec) in &vectors {
+                        q_idx.insert(*node_id, vec);
+                    }
+                }
             }
 
             self.lpg_store()
@@ -217,6 +232,53 @@ impl super::GrafeoDB {
         );
 
         Ok(())
+    }
+
+    /// Parses a quantization string into a [`QuantizationType`].
+    #[cfg(feature = "vector-index")]
+    fn parse_quantization(
+        quantization: Option<&str>,
+    ) -> Result<grafeo_core::index::vector::QuantizationType> {
+        use grafeo_core::index::vector::QuantizationType;
+        match quantization {
+            None | Some("none") => Ok(QuantizationType::None),
+            Some("scalar") => Ok(QuantizationType::Scalar),
+            Some("binary") => Ok(QuantizationType::Binary),
+            Some("product") => Ok(QuantizationType::Product { num_subvectors: 8 }),
+            Some(other) => Err(grafeo_common::utils::error::Error::Internal(format!(
+                "Unknown quantization type '{other}'. Use: scalar, binary, product"
+            ))),
+        }
+    }
+
+    /// Builds a [`VectorIndexKind`] from the given parameters.
+    #[cfg(feature = "vector-index")]
+    fn build_vector_index(
+        dims: usize,
+        metric: grafeo_core::index::vector::DistanceMetric,
+        m: Option<usize>,
+        ef_construction: Option<usize>,
+        quantization: grafeo_core::index::vector::QuantizationType,
+        capacity: usize,
+    ) -> grafeo_core::index::vector::VectorIndexKind {
+        use grafeo_core::index::vector::{
+            HnswConfig, HnswIndex, QuantizationType, QuantizedHnswIndex, VectorIndexKind,
+        };
+
+        let mut config = HnswConfig::new(dims, metric);
+        if let Some(m_val) = m {
+            config = config.with_m(m_val);
+        }
+        if let Some(ef_c) = ef_construction {
+            config = config.with_ef_construction(ef_c);
+        }
+
+        match quantization {
+            QuantizationType::None => {
+                VectorIndexKind::Hnsw(HnswIndex::with_capacity(config, capacity))
+            }
+            _ => VectorIndexKind::Quantized(QuantizedHnswIndex::new(config, quantization)),
+        }
     }
 
     /// Drops a vector index for the given label and property.
@@ -237,7 +299,19 @@ impl super::GrafeoDB {
 
     /// Drops and recreates a vector index, rescanning all matching nodes.
     ///
-    /// This is useful after bulk inserts or when the index may be out of sync.
+    /// In normal usage you do **not** need to call this. Vector indexes
+    /// auto-sync when nodes are created or updated via
+    /// [`set_node_property`](Self::set_node_property),
+    /// [`batch_create_nodes`](Self::batch_create_nodes), or
+    /// [`batch_create_nodes_with_props`](Self::batch_create_nodes_with_props).
+    ///
+    /// Use `rebuild_vector_index` only when:
+    /// - Data was loaded through non-standard paths (e.g., persistence
+    ///   restore or direct store manipulation) before the index existed.
+    /// - You want to compact the index after many deletions (HNSW does
+    ///   not reclaim deleted-node slots automatically).
+    /// - The index configuration needs to be refreshed after upgrading.
+    ///
     /// When the index still exists, the previous configuration (dimensions,
     /// metric, M, ef\_construction) is preserved. When it has already been
     /// dropped, dimensions are inferred from existing data and default
@@ -249,11 +323,22 @@ impl super::GrafeoDB {
     /// and no dimensions can be inferred).
     #[cfg(feature = "vector-index")]
     pub fn rebuild_vector_index(&self, label: &str, property: &str) -> Result<()> {
-        // Preserve config from existing index if available
-        let config = self
-            .lpg_store()
-            .get_vector_index(label, property)
-            .map(|idx| idx.config().clone());
+        // Preserve config and quantization type from existing index if available
+        let existing = self.lpg_store().get_vector_index(label, property);
+
+        let (config, quantization_name) = if let Some(ref idx) = existing {
+            let qt = match idx.quantization_type() {
+                Some(grafeo_core::index::vector::QuantizationType::Scalar) => Some("scalar"),
+                Some(grafeo_core::index::vector::QuantizationType::Binary) => Some("binary"),
+                Some(grafeo_core::index::vector::QuantizationType::Product { .. }) => {
+                    Some("product")
+                }
+                _ => None,
+            };
+            (Some(idx.config().clone()), qt)
+        } else {
+            (None, None)
+        };
 
         self.lpg_store().remove_vector_index(label, property);
 
@@ -265,10 +350,11 @@ impl super::GrafeoDB {
                 Some(config.metric.name()),
                 Some(config.m),
                 Some(config.ef_construction),
+                quantization_name,
             )
         } else {
             // Index was already dropped: infer dimensions from data
-            self.create_vector_index(label, property, None, None, None, None)
+            self.create_vector_index(label, property, None, None, None, None, None)
         }
     }
 
