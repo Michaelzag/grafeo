@@ -340,6 +340,10 @@ impl JsGrafeoDB {
     }
 
     /// Search for the k nearest neighbors of a query vector.
+    ///
+    /// Returns an array of [nodeId, distance] pairs sorted by distance
+    /// ascending (lower = more similar). The distance scale depends on
+    /// the metric configured at index creation.
     #[napi(js_name = "vectorSearch")]
     pub async fn vector_search(
         &self,
@@ -627,6 +631,11 @@ impl JsGrafeoDB {
 
     /// Rebuild a vector index by rescanning all matching nodes.
     /// Preserves the original index configuration.
+    ///
+    /// Note: Vector indexes auto-sync when you call setNodeProperty(),
+    /// batchCreateNodes(), or batchCreateNodesWithProps() with vector data.
+    /// You only need this after non-standard data imports or to compact
+    /// the index after many deletions.
     #[napi(js_name = "rebuildVectorIndex")]
     pub async fn rebuild_vector_index(&self, label: String, property: String) -> Result<()> {
         let db = self.inner.clone();
@@ -685,6 +694,11 @@ impl JsGrafeoDB {
     }
 
     /// Search for diverse nearest neighbors using Maximal Marginal Relevance (MMR).
+    ///
+    /// Returns an array of [nodeId, distance] pairs in MMR selection order.
+    /// The distance values match vectorSearch() for the same nodes
+    /// (lower = more similar). The ordering reflects relevance-diversity
+    /// balance, not distance sorting.
     #[napi(js_name = "mmrSearch")]
     #[allow(clippy::too_many_arguments)]
     pub async fn mmr_search(
@@ -731,6 +745,10 @@ impl JsGrafeoDB {
 #[napi]
 impl JsGrafeoDB {
     /// Create a BM25 text index on a node property for full-text search.
+    ///
+    /// The index is automatically kept in sync as nodes are created,
+    /// updated, or deleted. You do not need to call rebuildTextIndex()
+    /// after normal write operations.
     #[napi(js_name = "createTextIndex")]
     pub async fn create_text_index(&self, label: String, property: String) -> Result<()> {
         let db = self.inner.clone();
@@ -757,6 +775,9 @@ impl JsGrafeoDB {
     }
 
     /// Rebuild a text index by rescanning all matching nodes.
+    ///
+    /// Note: Text indexes auto-sync on normal writes. You only need this
+    /// after importing data through non-standard paths.
     #[napi(js_name = "rebuildTextIndex")]
     pub async fn rebuild_text_index(&self, label: String, property: String) -> Result<()> {
         let db = self.inner.clone();
@@ -772,7 +793,9 @@ impl JsGrafeoDB {
 
     /// Search a text index using BM25 scoring.
     ///
-    /// Returns an array of [nodeId, score] pairs sorted by descending relevance.
+    /// Returns an array of [nodeId, score] pairs sorted by descending
+    /// relevance (higher score = more relevant). BM25 scores are
+    /// unbounded positive floats.
     #[napi(js_name = "textSearch")]
     pub async fn text_search(
         &self,
@@ -804,7 +827,13 @@ impl JsGrafeoDB {
 impl JsGrafeoDB {
     /// Perform hybrid search combining text (BM25) and vector similarity.
     ///
-    /// Returns an array of [nodeId, score] pairs.
+    /// Requires both a text index (createTextIndex) and a vector index
+    /// (createVectorIndex). If either is missing, that source is silently
+    /// omitted from fusion.
+    ///
+    /// Returns an array of [nodeId, score] pairs sorted by fused score
+    /// descending (higher = more relevant). These are fusion scores,
+    /// NOT distances.
     #[napi(js_name = "hybridSearch")]
     #[allow(clippy::too_many_arguments)]
     pub async fn hybrid_search(

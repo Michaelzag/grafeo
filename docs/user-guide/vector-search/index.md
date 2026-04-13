@@ -29,13 +29,39 @@ Vector search finds nodes based on the semantic similarity of their embeddings r
 | **Quantization** | Scalar (4x), Binary (32x), Product (8-192x) compression |
 | **Filtered Search** | Property filters: equality, `$gt`, `$gte`, `$lt`, `$lte`, `$ne`, `$in`, `$nin`, `$contains` |
 | **MMR Search** | Maximal Marginal Relevance for diverse RAG retrieval |
-| **Incremental Indexing** | Indexes stay in sync automatically as nodes change |
+| **Incremental Indexing** | Indexes auto-sync on `set_node_property()` and batch operations; explicit rebuild is rarely needed |
 | **Batch Operations** | `batch_create_nodes()` and `batch_vector_search()` |
 | **Hybrid Queries** | Combine graph patterns with vector similarity |
 | **BM25 Text Search** | Full-text keyword search with inverted indexes |
 | **Hybrid Search** | Combined text + vector search with RRF or weighted fusion |
 | **Built-in Embeddings** | In-process ONNX embedding generation (opt-in `embed` feature) |
 | **SIMD Acceleration** | AVX2, SSE, NEON optimized distance computation |
+
+## Search Score Conventions
+
+Different search methods return different value types. Understanding these conventions
+is critical when post-processing results (e.g. applying temporal decay or thresholds).
+
+| Method | Returns | Sort Order | Interpretation |
+| ------ | ------- | ---------- | -------------- |
+| `vector_search()` | `(node_id, distance)` | Ascending (lowest first) | Lower = more similar |
+| `mmr_search()` | `(node_id, distance)` | MMR selection order | Same distances as `vector_search` |
+| `text_search()` | `(node_id, score)` | Descending (highest first) | Higher = more relevant (BM25) |
+| `hybrid_search()` | `(node_id, score)` | Descending (highest first) | Higher = more relevant (fusion) |
+
+!!! warning "Common pitfall: score vs distance"
+    `hybrid_search()` returns fusion scores (higher = better), while
+    `vector_search()` returns distances (lower = better). If you apply a
+    temporal decay factor, use **multiplication** for fusion scores and
+    **division** for distances:
+
+    ```python
+    # Correct for hybrid_search (score, higher = better):
+    decayed_score = score * decay_factor
+
+    # Correct for vector_search (distance, lower = better):
+    decayed_distance = distance / decay_factor
+    ```
 
 ## Quick Example
 

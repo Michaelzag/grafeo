@@ -267,7 +267,10 @@ async dropVectorIndex(label: string, property: string): Promise<boolean>
 
 ### rebuildVectorIndex()
 
-Rebuild a vector index by rescanning all matching nodes.
+Rebuild a vector index by rescanning all matching nodes. Preserves the original index configuration.
+
+!!! note "Auto-sync: rebuild is rarely needed"
+    Vector indexes auto-sync when you call `setNodeProperty()`, `batchCreateNodes()`, or `batchCreateNodesWithProps()` with vector data. You only need `rebuildVectorIndex()` after importing data through non-standard paths or to compact the index after many deletions.
 
 ```typescript
 async rebuildVectorIndex(label: string, property: string): Promise<void>
@@ -276,7 +279,7 @@ async rebuildVectorIndex(label: string, property: string): Promise<void>
 ### vectorSearch()
 
 Search for the k nearest neighbors of a query vector.
-Returns `[[nodeId, distance], ...]` sorted by distance.
+Returns `[[nodeId, distance], ...]` sorted by distance ascending (lower distance = more similar). The distance scale depends on the metric configured at index creation: cosine `[0, 2]`, euclidean `[0, inf)`, dot_product (negated), manhattan `[0, inf)`.
 
 ```typescript
 async vectorSearch(
@@ -330,7 +333,7 @@ async batchVectorSearch(
 
 ### mmrSearch()
 
-Search for diverse nearest neighbors using Maximal Marginal Relevance.
+Search for diverse nearest neighbors using Maximal Marginal Relevance. Returns `[[nodeId, distance], ...]` in MMR selection order. The `distance` values are identical to those returned by `vectorSearch()` for the same nodes (lower = more similar). The ordering reflects MMR's relevance-diversity balance, not pure distance sorting.
 
 ```typescript
 async mmrSearch(
@@ -349,7 +352,7 @@ async mmrSearch(
 
 ### createTextIndex()
 
-Create a BM25 text index on a node property for full-text search.
+Create a BM25 text index on a node property for full-text search. The index is automatically kept in sync as nodes are created, updated, or deleted. You do not need to call `rebuildTextIndex()` after normal write operations.
 
 ```typescript
 async createTextIndex(label: string, property: string): Promise<void>
@@ -365,7 +368,7 @@ async dropTextIndex(label: string, property: string): Promise<boolean>
 
 ### rebuildTextIndex()
 
-Rebuild a text index by rescanning all matching nodes.
+Rebuild a text index by rescanning all matching nodes. Text indexes auto-sync on normal writes; you only need this after importing data through non-standard paths.
 
 ```typescript
 async rebuildTextIndex(label: string, property: string): Promise<void>
@@ -373,7 +376,7 @@ async rebuildTextIndex(label: string, property: string): Promise<void>
 
 ### textSearch()
 
-Search a text index using BM25 scoring. Returns `[[nodeId, score], ...]`.
+Search a text index using BM25 scoring. Returns `[[nodeId, score], ...]` sorted by descending relevance (higher score = more relevant). BM25 scores are unbounded positive floats.
 
 ```typescript
 async textSearch(
@@ -386,7 +389,14 @@ async textSearch(
 
 ### hybridSearch()
 
-Combine text (BM25) and vector similarity search. Returns `[[nodeId, score], ...]`.
+Combine text (BM25) and vector similarity search. For best results, create both a text index (`createTextIndex()`) and a vector index (`createVectorIndex()`). If either index is missing, that source is silently omitted from fusion.
+
+Returns `[[nodeId, score], ...]` sorted by fused score **descending** (higher = more relevant). These are fusion scores, **not** distances.
+
+!!! warning "Score convention differs from vectorSearch"
+    `hybridSearch()` returns fusion scores where higher = better.
+    `vectorSearch()` returns distances where lower = better.
+    For temporal decay, **multiply** fusion scores but **divide** distances.
 
 ```typescript
 async hybridSearch(

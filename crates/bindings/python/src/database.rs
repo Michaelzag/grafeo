@@ -1184,6 +1184,12 @@ impl PyGrafeoDB {
     /// Drops the existing index and recreates it from scratch, preserving
     /// the original configuration (dimensions, metric, M, ef_construction).
     ///
+    /// Note: In most cases you do NOT need to call this. Vector indexes
+    /// auto-sync when you call set_node_property(), batch_create_nodes(),
+    /// or batch_create_nodes_with_props() with vector data. Use this only
+    /// after importing data through non-standard paths or to compact the
+    /// index after many deletions.
+    ///
     /// Args:
     ///     label: Node label of the index
     ///     property: Property name of the index
@@ -1211,7 +1217,10 @@ impl PyGrafeoDB {
     ///     ef: Search beam width (higher = better recall, slower). Uses index default if None.
     ///
     /// Returns:
-    ///     List of (node_id, distance) tuples, sorted by distance ascending.
+    ///     List of (node_id, distance) tuples, sorted by distance ascending
+    ///     (lower distance = more similar). The distance scale depends on
+    ///     the metric configured at index creation: cosine [0, 2],
+    ///     euclidean [0, inf), dot_product (negated), manhattan [0, inf).
     ///
     /// Example:
     ///     results = db.vector_search("Doc", "embedding", [1.0, 0.0, 0.0], k=10, ef=200)
@@ -1365,7 +1374,11 @@ impl PyGrafeoDB {
     ///     ef: Search beam width (higher = better recall, slower). Uses index default if None.
     ///
     /// Returns:
-    ///     List of (node_id, distance) tuples, ordered by MMR selection.
+    ///     List of (node_id, distance) tuples in MMR selection order.
+    ///     The distance values are identical to those returned by
+    ///     vector_search() for the same nodes (lower = more similar).
+    ///     The ordering reflects MMR's relevance-diversity balance,
+    ///     not distance sorting.
     ///
     /// Example:
     ///     results = db.mmr_search("Doc", "embedding", [1.0, 0.0, 0.0], k=4, lambda_mult=0.5)
@@ -1409,6 +1422,9 @@ impl PyGrafeoDB {
     /// Create a BM25 text index on a node property for full-text search.
     ///
     /// Indexes all existing nodes with the given label and text property.
+    /// The index is automatically kept in sync as nodes are created,
+    /// updated, or deleted. You do NOT need to call rebuild_text_index()
+    /// after normal write operations.
     ///
     /// Args:
     ///     label: Node label to index
@@ -1439,6 +1455,10 @@ impl PyGrafeoDB {
 
     /// Rebuild a text index by rescanning all matching nodes.
     ///
+    /// Note: Text indexes auto-sync on normal writes (set_node_property,
+    /// batch_create_nodes_with_props, delete_node). You only need this
+    /// after importing data through non-standard paths.
+    ///
     /// Args:
     ///     label: Node label of the index
     ///     property: Property name of the index
@@ -1452,7 +1472,9 @@ impl PyGrafeoDB {
     /// Search a text index using BM25 scoring.
     ///
     /// Returns up to k results as (node_id, score) tuples sorted by
-    /// descending relevance.
+    /// descending relevance (higher score = more relevant). BM25 scores
+    /// are unbounded positive floats; compare them only within a single
+    /// query's results.
     ///
     /// Args:
     ///     label: Node label that was indexed
@@ -1461,7 +1483,7 @@ impl PyGrafeoDB {
     ///     k: Number of results to return
     ///
     /// Returns:
-    ///     List of (node_id, score) tuples.
+    ///     List of (node_id, score) tuples sorted by score descending.
     ///
     /// Example:
     ///     results = db.text_search("Article", "title", "graph database", k=10)
@@ -1488,7 +1510,9 @@ impl PyGrafeoDB {
     /// Perform hybrid search combining text (BM25) and vector similarity.
     ///
     /// Runs both text and vector search, then fuses results using
-    /// Reciprocal Rank Fusion (RRF) by default.
+    /// Reciprocal Rank Fusion (RRF) by default. Requires both a text
+    /// index (create_text_index) and a vector index (create_vector_index).
+    /// If either index is missing, that source is silently omitted.
     ///
     /// Args:
     ///     label: Node label to search within
@@ -1501,7 +1525,10 @@ impl PyGrafeoDB {
     ///     weights: Weights for weighted fusion [text_weight, vector_weight]
     ///
     /// Returns:
-    ///     List of (node_id, score) tuples.
+    ///     List of (node_id, score) tuples sorted by fused score
+    ///     descending (higher = more relevant). These are fusion scores,
+    ///     NOT distances. Do not apply distance-based transformations
+    ///     (like dividing by score) to these values.
     ///
     /// Example:
     ///     results = db.hybrid_search("Article", "title", "embedding",

@@ -127,7 +127,11 @@ impl super::GrafeoDB {
     ///
     /// # Returns
     ///
-    /// Vector of `(NodeId, distance)` pairs sorted by distance ascending.
+    /// Vector of `(NodeId, distance)` pairs sorted by distance ascending
+    /// (lower distance = more similar). The distance scale depends on the
+    /// metric configured at index creation: cosine \[0, 2\], euclidean
+    /// \[0, inf), dot product (negated, so lower = higher similarity),
+    /// manhattan \[0, inf).
     ///
     /// # Errors
     ///
@@ -308,7 +312,9 @@ impl super::GrafeoDB {
     /// Searches a text index using BM25 scoring.
     ///
     /// Returns up to `k` results as `(NodeId, score)` pairs sorted by
-    /// descending relevance score.
+    /// descending relevance score (higher = more relevant). BM25 scores
+    /// are unbounded positive floats whose magnitude depends on corpus
+    /// statistics, so compare them only within a single query's results.
     ///
     /// # Errors
     ///
@@ -336,7 +342,9 @@ impl super::GrafeoDB {
     /// Performs hybrid search combining text (BM25) and vector similarity.
     ///
     /// Runs both text search and vector search, then fuses results using
-    /// the specified method (default: Reciprocal Rank Fusion).
+    /// the specified method (default: Reciprocal Rank Fusion). If either
+    /// index is missing, that source is silently omitted from fusion.
+    /// Returns empty results only when both indexes are absent.
     ///
     /// # Arguments
     ///
@@ -347,6 +355,20 @@ impl super::GrafeoDB {
     /// * `query_vector` - Vector query for similarity search (optional)
     /// * `k` - Number of results to return
     /// * `fusion` - Score fusion method (default: RRF with k=60)
+    ///
+    /// # Returns
+    ///
+    /// `(NodeId, score)` pairs sorted by fused score **descending**
+    /// (higher = more relevant). These are fusion scores, **not**
+    /// distances. With RRF, scores are `sum(1 / (k + rank))` across
+    /// sources. With weighted fusion, scores are min-max normalized
+    /// and combined with explicit weights.
+    ///
+    /// **Important:** Do not treat these scores the same as
+    /// [`vector_search`](Self::vector_search) distances. For temporal
+    /// decay or boosting, multiply fusion scores (higher = better)
+    /// rather than dividing (which is appropriate for distances where
+    /// lower = better).
     ///
     /// # Errors
     ///
@@ -383,10 +405,15 @@ impl super::GrafeoDB {
             let accessor = self.make_vector_accessor(label, vector_property);
             let vector_results = vector_index.search(query_vec, k * 2, &accessor);
             if !vector_results.is_empty() {
+                // Negate distances so that "closer = higher score", matching
+                // the text source convention (higher = better). This is
+                // essential for weighted fusion where min-max normalization
+                // would otherwise invert the vector ranking. RRF is
+                // unaffected because it uses rank positions, not values.
                 sources.push(
                     vector_results
                         .into_iter()
-                        .map(|(id, dist)| (id, f64::from(dist)))
+                        .map(|(id, dist)| (id, -f64::from(dist)))
                         .collect(),
                 );
             }

@@ -2162,3 +2162,128 @@ fn test_with_aggregate_having_filter() {
     assert_eq!(result.rows()[0][1], Value::String("Gus".into()));
     assert_eq!(result.rows()[0][2], Value::Int64(2));
 }
+
+// ============================================================================
+// Edge variable resolution (GrafeoDB/grafeo#268)
+// ============================================================================
+
+/// Regression: RETURN-ing an edge variable must produce a map with _id, _type,
+/// _source, _target (and any user properties), not a bare Int64.
+#[test]
+fn edge_variable_returns_map_not_int() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+    session
+        .execute("INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})")
+        .unwrap();
+
+    let result = session
+        .execute("MATCH (a)-[r]->(b) RETURN a, r, b")
+        .unwrap();
+    let rows = result.rows();
+    assert_eq!(rows.len(), 1);
+
+    eprintln!("a = {:?}", rows[0][0]);
+    eprintln!("r = {:?}", rows[0][1]);
+    eprintln!("b = {:?}", rows[0][2]);
+
+    // 'r' must be a Map, not Int64
+    assert!(
+        matches!(&rows[0][1], Value::Map(_)),
+        "edge variable 'r' should be a Map, got: {:?}",
+        rows[0][1]
+    );
+
+    // Verify the map has the expected metadata keys
+    if let Value::Map(map) = &rows[0][1] {
+        let key = |s: &str| grafeo_common::types::PropertyKey::new(s);
+        assert!(map.contains_key(&key("_id")), "edge map missing _id");
+        assert!(map.contains_key(&key("_type")), "edge map missing _type");
+        assert!(
+            map.contains_key(&key("_source")),
+            "edge map missing _source"
+        );
+        assert!(
+            map.contains_key(&key("_target")),
+            "edge map missing _target"
+        );
+        assert_eq!(map[&key("_type")], Value::String("KNOWS".into()));
+    }
+}
+
+/// Same as above but with LIMIT (the exact query from the issue report).
+#[test]
+fn edge_variable_returns_map_with_limit() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+    session
+        .execute("INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})")
+        .unwrap();
+
+    let result = session
+        .execute("MATCH (a)-[r]->(b) RETURN a, r, b LIMIT 1")
+        .unwrap();
+    let rows = result.rows();
+    assert_eq!(rows.len(), 1);
+
+    eprintln!("r (with LIMIT) = {:?}", rows[0][1]);
+    assert!(
+        matches!(&rows[0][1], Value::Map(_)),
+        "edge 'r' with LIMIT should be a Map, got: {:?}",
+        rows[0][1]
+    );
+}
+
+/// Edge variable via Cypher parser (the issue reports both GQL and Cypher).
+#[cfg(feature = "cypher")]
+#[test]
+fn edge_variable_returns_map_cypher() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+    session
+        .execute("INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})")
+        .unwrap();
+
+    let result = session
+        .execute_language("MATCH (a)-[r]->(b) RETURN a, r, b LIMIT 1", "cypher", None)
+        .unwrap();
+    let rows = result.rows();
+    assert_eq!(rows.len(), 1);
+
+    eprintln!("r (cypher) = {:?}", rows[0][1]);
+    assert!(
+        matches!(&rows[0][1], Value::Map(_)),
+        "edge 'r' via Cypher should be a Map, got: {:?}",
+        rows[0][1]
+    );
+}
+
+/// Multi-hop pattern: the factorized expand chain path.
+#[test]
+fn edge_variable_multi_hop_returns_map() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+    session
+        .execute("INSERT (:Person {name: 'Alix'})-[:KNOWS]->(:Person {name: 'Gus'})-[:KNOWS]->(:Person {name: 'Vincent'})")
+        .unwrap();
+
+    let result = session
+        .execute("MATCH (a)-[r1]->(b)-[r2]->(c) RETURN a, r1, b, r2, c")
+        .unwrap();
+    let rows = result.rows();
+    assert_eq!(rows.len(), 1);
+
+    eprintln!("r1 (multi-hop) = {:?}", rows[0][1]);
+    eprintln!("r2 (multi-hop) = {:?}", rows[0][3]);
+
+    assert!(
+        matches!(&rows[0][1], Value::Map(_)),
+        "edge 'r1' in multi-hop should be a Map, got: {:?}",
+        rows[0][1]
+    );
+    assert!(
+        matches!(&rows[0][3], Value::Map(_)),
+        "edge 'r2' in multi-hop should be a Map, got: {:?}",
+        rows[0][3]
+    );
+}

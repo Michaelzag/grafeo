@@ -2,6 +2,22 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
+## [0.5.38] - 2026-04-13
+
+### Fixed
+
+- **Incremental backup always failed after full backup** (#267): the backup cursor stored the active WAL file's sequence without rotating, so post-backup writes stayed invisible to incremental. Both `backup_full` and `backup_incremental` now rotate the WAL after completing, ensuring new writes land in a file the next incremental will pick up.
+- **Edge variables in multi-hop queries returned as raw IDs** (#268): `plan_expand_chain` and `plan_factorized_aggregate` did not register edge columns in the planner's tracking set, causing RETURN to emit `NodeResolve` instead of `EdgeResolve`. Edge variables now resolve to full maps with `_id`, `_type`, `_source`, `_target`, and properties.
+- **Weighted hybrid search inverted vector ranking**: `hybrid_search()` with `fusion="weighted"` applied min-max normalization to raw vector distances, causing the farthest node to score highest. Vector distances are now negated before fusion so that closer vectors rank higher.
+
+### Documentation
+
+- **Search score conventions**: new table in the Vector Search guide clarifying return value semantics across all search methods (`vector_search` returns distances, lower = better; `hybrid_search` returns fusion scores, higher = better; `mmr_search` returns distances in MMR selection order; `text_search` returns BM25 scores, higher = better).
+- **Text Search guide**: new dedicated page covering BM25 index creation, searching, auto-sync behavior, and when to rebuild.
+- **Hybrid Search guide**: new dedicated page covering RRF vs weighted fusion, prerequisites, graceful degradation, and the common pitfall of treating fusion scores as distances.
+- **MMR Search guide**: new dedicated page covering Maximal Marginal Relevance parameters, lambda tuning, and when to use MMR vs vector search.
+- **Index auto-sync clarified**: `rebuild_vector_index()` and `rebuild_text_index()` docs now explain that indexes auto-sync on `set_node_property()` and batch operations; explicit rebuild is rarely needed. Updated across Rust doc comments, Python/Node.js binding docstrings, and API reference pages.
+
 ## [0.5.37] - 2026-04-12
 
 RDF Semantic Web overhaul with improved SPARQL support, RDF performance improvements and SHACL validation.

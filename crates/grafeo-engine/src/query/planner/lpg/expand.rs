@@ -99,13 +99,8 @@ impl super::Planner {
         // Preserve all input columns and add edge + target to match ExpandOperator output
         let mut columns = input_columns;
 
-        // Generate edge column name - use provided name or generate anonymous name
-        let edge_col_name = expand.edge_variable.clone().unwrap_or_else(|| {
-            let count = self.anon_edge_counter.get();
-            self.anon_edge_counter.set(count + 1);
-            format!("_anon_edge_{}", count)
-        });
-        self.edge_columns.borrow_mut().insert(edge_col_name.clone());
+        // Generate edge column name and register for EdgeResolve in RETURN
+        let edge_col_name = self.register_edge_column(&expand.edge_variable);
         if is_variable_length {
             self.group_list_variables
                 .borrow_mut()
@@ -198,11 +193,7 @@ impl super::Planner {
             });
 
             // Add edge and target columns
-            let edge_col_name = expand.edge_variable.clone().unwrap_or_else(|| {
-                let count = self.anon_edge_counter.get();
-                self.anon_edge_counter.set(count + 1);
-                format!("_anon_edge_{}", count)
-            });
+            let edge_col_name = self.register_edge_column(&expand.edge_variable);
             columns.push(edge_col_name);
             columns.push(expand.to_variable.clone());
 

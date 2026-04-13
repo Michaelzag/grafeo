@@ -563,7 +563,7 @@ def vector_search(
 ) -> List[Tuple[int, float]]
 ```
 
-Returns a list of `(node_id, distance)` tuples sorted by distance ascending.
+Returns a list of `(node_id, distance)` tuples sorted by distance ascending (lower distance = more similar). The distance scale depends on the metric configured at index creation: cosine `[0, 2]`, euclidean `[0, inf)`, dot_product (negated, so lower = higher similarity), manhattan `[0, inf)`.
 
 ```python
 results = db.vector_search("Doc", "embedding", [1.0, 0.0, 0.0], k=10, ef=200)
@@ -592,6 +592,8 @@ def mmr_search(
 ) -> List[Tuple[int, float]]
 ```
 
+Returns a list of `(node_id, distance)` tuples in MMR selection order. The `distance` values are identical to those returned by `vector_search()` for the same nodes (lower = more similar). The list ordering reflects MMR's relevance-diversity balance, not pure distance sorting.
+
 ```python
 results = db.mmr_search("Doc", "embedding", [1.0, 0.0, 0.0], k=4, lambda_mult=0.5)
 for node_id, distance in results:
@@ -606,7 +608,7 @@ BM25 full-text search. Requires the `text-index` feature and a text index create
 def text_search(self, label: str, property: str, query: str, k: int) -> List[Tuple[int, float]]
 ```
 
-Returns a list of `(node_id, score)` tuples sorted by descending relevance.
+Returns a list of `(node_id, score)` tuples sorted by descending relevance (higher score = more relevant). BM25 scores are unbounded positive floats; compare them only within a single query's results.
 
 ```python
 db.create_text_index("Article", "title")
@@ -617,7 +619,7 @@ for node_id, score in results:
 
 ### hybrid_search()
 
-Combined text and vector search using Reciprocal Rank Fusion (RRF) or weighted fusion. Requires the `hybrid-search` feature and both a text index and a vector index.
+Combined text and vector search using Reciprocal Rank Fusion (RRF) or weighted fusion. Requires the `hybrid-search` feature. For best results, create both a text index (`create_text_index()`) and a vector index (`create_vector_index()`). If either index is missing, that source is silently omitted from fusion.
 
 ```python
 def hybrid_search(
@@ -634,7 +636,12 @@ def hybrid_search(
 ) -> List[Tuple[int, float]]
 ```
 
-Returns a list of `(node_id, score)` tuples.
+Returns a list of `(node_id, score)` tuples sorted by fused score **descending** (higher = more relevant). These are fusion scores, **not** distances. With RRF (default), scores are `sum(1/(k+rank))` across sources. With weighted fusion, scores are normalized to `[0, 1]` and combined with explicit weights.
+
+!!! warning "Score convention differs from vector_search"
+    `hybrid_search()` returns fusion scores where higher = better.
+    `vector_search()` returns distances where lower = better.
+    For temporal decay, **multiply** fusion scores but **divide** distances.
 
 ```python
 results = db.hybrid_search(
@@ -711,7 +718,10 @@ def drop_vector_index(self, label: str, property: str) -> bool
 
 ### rebuild_vector_index()
 
-Rebuild a vector index from scratch, preserving its configuration.
+Rebuild a vector index from scratch, preserving its configuration (dimensions, metric, M, ef_construction).
+
+!!! note "Auto-sync: rebuild is rarely needed"
+    Vector indexes auto-sync when you call `set_node_property()`, `batch_create_nodes()`, or `batch_create_nodes_with_props()` with vector data. You only need `rebuild_vector_index()` after importing data through non-standard paths or to compact the index after many deletions.
 
 ```python
 def rebuild_vector_index(self, label: str, property: str) -> None
@@ -723,7 +733,7 @@ Requires the `text-index` feature.
 
 ### create_text_index()
 
-Create a BM25 text index on a node property.
+Create a BM25 text index on a node property. The index is automatically kept in sync as nodes are created, updated, or deleted. You do not need to call `rebuild_text_index()` after normal write operations.
 
 ```python
 def create_text_index(self, label: str, property: str) -> None
@@ -739,7 +749,7 @@ def drop_text_index(self, label: str, property: str) -> bool
 
 ### rebuild_text_index()
 
-Rebuild a text index from scratch.
+Rebuild a text index from scratch. Text indexes auto-sync on normal writes; you only need this after importing data through non-standard paths.
 
 ```python
 def rebuild_text_index(self, label: str, property: str) -> None

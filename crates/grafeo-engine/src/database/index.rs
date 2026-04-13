@@ -237,7 +237,19 @@ impl super::GrafeoDB {
 
     /// Drops and recreates a vector index, rescanning all matching nodes.
     ///
-    /// This is useful after bulk inserts or when the index may be out of sync.
+    /// In normal usage you do **not** need to call this. Vector indexes
+    /// auto-sync when nodes are created or updated via
+    /// [`set_node_property`](Self::set_node_property),
+    /// [`batch_create_nodes`](Self::batch_create_nodes), or
+    /// [`batch_create_nodes_with_props`](Self::batch_create_nodes_with_props).
+    ///
+    /// Use `rebuild_vector_index` only when:
+    /// - Data was loaded through non-standard paths (e.g., persistence
+    ///   restore or direct store manipulation) before the index existed.
+    /// - You want to compact the index after many deletions (HNSW does
+    ///   not reclaim deleted-node slots automatically).
+    /// - The index configuration needs to be refreshed after upgrading.
+    ///
     /// When the index still exists, the previous configuration (dimensions,
     /// metric, M, ef\_construction) is preserved. When it has already been
     /// dropped, dimensions are inferred from existing data and default

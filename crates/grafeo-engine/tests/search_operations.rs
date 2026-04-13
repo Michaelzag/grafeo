@@ -172,6 +172,68 @@ mod vector {
             .expect("search after recreate");
         assert_eq!(r2.len(), 2);
     }
+
+    #[test]
+    fn test_vector_index_auto_inserts_on_set_property() {
+        let db = GrafeoDB::new_in_memory();
+
+        // Create index FIRST, on empty data
+        db.create_vector_index("Doc", "emb", Some(3), Some("cosine"), None, None)
+            .expect("create empty index");
+
+        // Add nodes AFTER index exists (no rebuild)
+        let n1 = db.create_node(&["Doc"]);
+        db.set_node_property(n1, "emb", vec3(1.0, 0.0, 0.0));
+
+        let n2 = db.create_node(&["Doc"]);
+        db.set_node_property(n2, "emb", vec3(0.0, 1.0, 0.0));
+
+        // Search should find both nodes WITHOUT calling rebuild_vector_index
+        let results = db
+            .vector_search("Doc", "emb", &[1.0, 0.0, 0.0], 5, None, None)
+            .expect("search without rebuild");
+
+        assert_eq!(
+            results.len(),
+            2,
+            "auto-inserted nodes should be searchable without rebuild"
+        );
+
+        // The closest node to [1,0,0] should be n1
+        assert_eq!(results[0].0, n1, "n1 should be the closest match");
+    }
+
+    #[test]
+    fn test_rebuild_vector_index_preserves_results() {
+        let db = setup_vector_db();
+        let query = &[1.0_f32, 0.0, 0.0];
+
+        // Search before rebuild
+        let before = db
+            .vector_search("Doc", "emb", query, 4, None, None)
+            .expect("search before rebuild");
+
+        // Rebuild
+        db.rebuild_vector_index("Doc", "emb").expect("rebuild");
+
+        // Search after rebuild
+        let after = db
+            .vector_search("Doc", "emb", query, 4, None, None)
+            .expect("search after rebuild");
+
+        // Same nodes, same distances (within floating point tolerance)
+        assert_eq!(before.len(), after.len(), "same result count after rebuild");
+
+        for (b, a) in before.iter().zip(after.iter()) {
+            assert_eq!(b.0, a.0, "same node IDs after rebuild");
+            assert!(
+                (b.1 - a.1).abs() < 1e-5,
+                "same distances after rebuild: {} vs {}",
+                b.1,
+                a.1,
+            );
+        }
+    }
 }
 
 // ============================================================================
@@ -403,6 +465,181 @@ mod hybrid {
         // Even with no text matches, vector search may return results
         // Just verify it doesn't error
         let _ = results;
+    }
+
+    #[test]
+    fn test_hybrid_search_scores_descending() {
+        let db = setup_hybrid_db();
+
+        let results = db
+            .hybrid_search(
+                "Doc",
+                "content",
+                "emb",
+                "Rust graph",
+                Some(&[1.0, 0.0, 0.0]),
+                4,
+                None,
+            )
+            .expect("hybrid search");
+
+        assert!(
+            results.len() >= 2,
+            "need at least 2 results to verify order"
+        );
+
+        // Verify scores are in descending order (higher = better)
+        for window in results.windows(2) {
+            assert!(
+                window[0].1 >= window[1].1,
+                "hybrid_search scores should be descending (higher = better): {} >= {}",
+                window[0].1,
+                window[1].1,
+            );
+        }
+
+        // Verify all scores are positive
+        for (_, score) in &results {
+            assert!(
+                *score > 0.0,
+                "hybrid_search fusion scores should be positive"
+            );
+        }
+    }
+
+    #[test]
+    fn test_hybrid_search_without_text_index() {
+        let db = GrafeoDB::new_in_memory();
+
+        let n1 = db.create_node(&["Doc"]);
+        db.set_node_property(n1, "content", Value::String("Rust graph database".into()));
+        db.set_node_property(n1, "emb", vec3(1.0, 0.0, 0.0));
+
+        let n2 = db.create_node(&["Doc"]);
+        db.set_node_property(n2, "content", Value::String("Python ML".into()));
+        db.set_node_property(n2, "emb", vec3(0.0, 1.0, 0.0));
+
+        // Create ONLY vector index, no text index
+        db.create_vector_index("Doc", "emb", Some(3), Some("cosine"), None, None)
+            .expect("create vector index");
+
+        // hybrid_search should work, using only vector source
+        let results = db
+            .hybrid_search(
+                "Doc",
+                "content",
+                "emb",
+                "Rust",
+                Some(&[1.0, 0.0, 0.0]),
+                4,
+                None,
+            )
+            .expect("hybrid without text index should not error");
+
+        assert!(
+            !results.is_empty(),
+            "should return results from vector source only"
+        );
+    }
+
+    #[test]
+    fn test_hybrid_search_without_vector_index() {
+        let db = GrafeoDB::new_in_memory();
+
+        let n1 = db.create_node(&["Doc"]);
+        db.set_node_property(n1, "content", Value::String("Rust graph database".into()));
+        db.set_node_property(n1, "emb", vec3(1.0, 0.0, 0.0));
+
+        // Create ONLY text index, no vector index
+        db.create_text_index("Doc", "content")
+            .expect("create text index");
+
+        // hybrid_search with a vector query should still work, using only text source
+        let results = db
+            .hybrid_search(
+                "Doc",
+                "content",
+                "emb",
+                "Rust",
+                Some(&[1.0, 0.0, 0.0]),
+                4,
+                None,
+            )
+            .expect("hybrid without vector index should not error");
+
+        assert!(
+            !results.is_empty(),
+            "should return results from text source only"
+        );
+    }
+
+    #[test]
+    fn test_hybrid_search_without_any_index() {
+        let db = GrafeoDB::new_in_memory();
+
+        let n1 = db.create_node(&["Doc"]);
+        db.set_node_property(n1, "content", Value::String("Rust graph database".into()));
+        db.set_node_property(n1, "emb", vec3(1.0, 0.0, 0.0));
+
+        // No indexes at all
+        let results = db
+            .hybrid_search(
+                "Doc",
+                "content",
+                "emb",
+                "Rust",
+                Some(&[1.0, 0.0, 0.0]),
+                4,
+                None,
+            )
+            .expect("hybrid without any index should not error");
+
+        assert!(
+            results.is_empty(),
+            "should return empty when no indexes exist"
+        );
+    }
+
+    #[test]
+    fn test_hybrid_weighted_fusion_vector_ranking() {
+        let db = setup_hybrid_db();
+
+        // Use weighted fusion: the node closest in vector space to query [1,0,0]
+        // AND matching text "Rust" should rank higher than a node that is
+        // far in vector space even if it matches text.
+        let fusion = grafeo_core::index::text::FusionMethod::Weighted {
+            weights: vec![0.3, 0.7], // heavily weight vector similarity
+        };
+        let results = db
+            .hybrid_search(
+                "Doc",
+                "content",
+                "emb",
+                "Rust",
+                Some(&[1.0, 0.0, 0.0]),
+                4,
+                Some(fusion),
+            )
+            .expect("weighted hybrid search");
+
+        assert!(results.len() >= 2, "need at least 2 results");
+
+        // With 0.7 vector weight and query [1,0,0], the node with emb [1,0,0]
+        // (n1: "Rust graph database engine") should rank above the node with
+        // emb [0.9,0.1,0] (n3: "Rust systems programming language").
+        // Both match "Rust" in text, but n1 is closer in vector space.
+        let top_node = results[0].0;
+        let top_props = db.get_node(top_node).expect("top node exists");
+        let content = top_props
+            .properties
+            .get(&grafeo_common::types::PropertyKey::new("content"))
+            .expect("has content");
+        if let Value::String(s) = content {
+            assert!(
+                s.contains("Rust graph database"),
+                "with 70% vector weight, closest vector should rank first, got: {s}"
+            );
+        }
     }
 }
 
