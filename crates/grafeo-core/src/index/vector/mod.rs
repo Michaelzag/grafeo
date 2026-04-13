@@ -643,4 +643,176 @@ mod tests {
         assert_eq!(results[1].0, NodeId::new(2));
         assert!((results[1].1 - 5.0).abs() < 0.001); // 3-4-5 triangle
     }
+
+    // ── VectorIndexKind Quantized dispatch ────────────────────────────
+
+    #[cfg(feature = "vector-index")]
+    mod vector_index_kind_tests {
+        use super::super::*;
+        use std::collections::HashSet;
+
+        /// Minimal accessor that always returns None (quantized indexes
+        /// store vectors internally so the accessor is unused).
+        struct NoopAccessor;
+        impl VectorAccessor for NoopAccessor {
+            fn get_vector(&self, _id: NodeId) -> Option<std::sync::Arc<[f32]>> {
+                None
+            }
+        }
+
+        fn build_quantized_kind(n: usize) -> VectorIndexKind {
+            let config = HnswConfig::new(4, DistanceMetric::Euclidean);
+            let q = QuantizedHnswIndex::new(config, QuantizationType::Scalar);
+            for i in 0..n {
+                let vec: Vec<f32> = (0..4)
+                    .map(|j| ((i * 4 + j) as f32) / (n * 4) as f32)
+                    .collect();
+                q.insert(NodeId::new(i as u64 + 1), &vec);
+            }
+            VectorIndexKind::Quantized(q)
+        }
+
+        #[test]
+        fn quantized_kind_basic_ops() {
+            let kind = build_quantized_kind(20);
+            assert_eq!(kind.len(), 20);
+            assert!(!kind.is_empty());
+            assert!(kind.contains(NodeId::new(1)));
+            assert!(!kind.contains(NodeId::new(999)));
+        }
+
+        #[test]
+        fn quantized_kind_insert_and_search() {
+            let kind = build_quantized_kind(30);
+            let query = vec![0.5, 0.5, 0.0, 0.0];
+            let results = kind.search(&query, 3, &NoopAccessor);
+            assert_eq!(results.len(), 3);
+        }
+
+        #[test]
+        fn quantized_kind_search_with_ef() {
+            let kind = build_quantized_kind(30);
+            let query = vec![0.5, 0.5, 0.0, 0.0];
+            let results = kind.search_with_ef(&query, 3, 50, &NoopAccessor);
+            assert_eq!(results.len(), 3);
+        }
+
+        #[test]
+        fn quantized_kind_search_with_filter() {
+            let kind = build_quantized_kind(30);
+            let allowlist: HashSet<NodeId> = (1..=10).map(NodeId::new).collect();
+            let query = vec![0.1, 0.1, 0.0, 0.0];
+            let results = kind.search_with_filter(&query, 5, &allowlist, &NoopAccessor);
+            assert!(!results.is_empty());
+            for (id, _) in &results {
+                assert!(allowlist.contains(id));
+            }
+        }
+
+        #[test]
+        fn quantized_kind_search_with_ef_and_filter() {
+            let kind = build_quantized_kind(30);
+            let allowlist: HashSet<NodeId> = (5..=15).map(NodeId::new).collect();
+            let query = vec![0.3, 0.3, 0.0, 0.0];
+            let results = kind.search_with_ef_and_filter(&query, 3, 50, &allowlist, &NoopAccessor);
+            for (id, _) in &results {
+                assert!(allowlist.contains(id));
+            }
+        }
+
+        #[test]
+        fn quantized_kind_batch_search() {
+            let kind = build_quantized_kind(30);
+            let queries = vec![vec![0.1, 0.0, 0.0, 0.0], vec![0.9, 0.9, 0.0, 0.0]];
+            let results = kind.batch_search(&queries, 2, &NoopAccessor);
+            assert_eq!(results.len(), 2);
+        }
+
+        #[test]
+        fn quantized_kind_batch_search_with_ef() {
+            let kind = build_quantized_kind(30);
+            let queries = vec![vec![0.1, 0.0, 0.0, 0.0]];
+            let results = kind.batch_search_with_ef(&queries, 2, 50, &NoopAccessor);
+            assert_eq!(results.len(), 1);
+        }
+
+        #[test]
+        fn quantized_kind_batch_search_with_filter() {
+            let kind = build_quantized_kind(30);
+            let allowlist: HashSet<NodeId> = (1..=10).map(NodeId::new).collect();
+            let queries = vec![vec![0.1, 0.0, 0.0, 0.0]];
+            let results = kind.batch_search_with_filter(&queries, 5, &allowlist, &NoopAccessor);
+            assert_eq!(results.len(), 1);
+            for (id, _) in &results[0] {
+                assert!(allowlist.contains(id));
+            }
+        }
+
+        #[test]
+        fn quantized_kind_batch_search_with_ef_and_filter() {
+            let kind = build_quantized_kind(30);
+            let allowlist: HashSet<NodeId> = (1..=15).map(NodeId::new).collect();
+            let queries = vec![vec![0.2, 0.0, 0.0, 0.0]];
+            let results =
+                kind.batch_search_with_ef_and_filter(&queries, 3, 50, &allowlist, &NoopAccessor);
+            assert_eq!(results.len(), 1);
+            for (id, _) in &results[0] {
+                assert!(allowlist.contains(id));
+            }
+        }
+
+        #[test]
+        fn quantized_kind_remove() {
+            let kind = build_quantized_kind(5);
+            assert!(kind.remove(NodeId::new(1)));
+            assert_eq!(kind.len(), 4);
+            assert!(!kind.contains(NodeId::new(1)));
+        }
+
+        #[test]
+        fn quantized_kind_snapshot_restore() {
+            let kind = build_quantized_kind(10);
+            let (entry, level, nodes) = kind.snapshot_topology();
+
+            let config = HnswConfig::new(4, DistanceMetric::Euclidean);
+            let kind2 = VectorIndexKind::Quantized(QuantizedHnswIndex::new(
+                config,
+                QuantizationType::Scalar,
+            ));
+            for i in 0..10 {
+                let vec: Vec<f32> = (0..4).map(|j| ((i * 4 + j) as f32) / 40.0).collect();
+                kind2.insert(NodeId::new(i as u64 + 1), &vec, &NoopAccessor);
+            }
+            kind2.restore_topology(entry, level, nodes);
+            assert_eq!(kind2.len(), 10);
+        }
+
+        #[test]
+        fn quantized_kind_heap_memory() {
+            let kind = build_quantized_kind(10);
+            assert!(kind.heap_memory_bytes() > 0);
+        }
+
+        #[test]
+        fn quantized_kind_type_accessors() {
+            let kind = build_quantized_kind(1);
+            assert!(kind.as_quantized().is_some());
+            assert!(kind.as_hnsw().is_none());
+            assert_eq!(kind.quantization_type(), Some(QuantizationType::Scalar));
+        }
+
+        #[test]
+        fn from_trait_impls() {
+            let config = HnswConfig::new(4, DistanceMetric::Euclidean);
+
+            let hnsw = HnswIndex::new(config.clone());
+            let kind: VectorIndexKind = hnsw.into();
+            assert!(kind.as_hnsw().is_some());
+
+            let quantized = QuantizedHnswIndex::new(config, QuantizationType::Binary);
+            let kind2: VectorIndexKind = quantized.into();
+            assert!(kind2.as_quantized().is_some());
+            assert_eq!(kind2.quantization_type(), Some(QuantizationType::Binary));
+        }
+    }
 }

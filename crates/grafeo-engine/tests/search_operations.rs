@@ -241,6 +241,145 @@ mod vector {
             );
         }
     }
+
+    // ── Quantized vector index tests ─────────────────────────────────
+
+    #[test]
+    fn test_scalar_quantized_vector_index() {
+        let db = GrafeoDB::new_in_memory();
+        let n1 = db.create_node(&["Doc"]);
+        db.set_node_property(n1, "emb", vec3(1.0, 0.0, 0.0));
+        let n2 = db.create_node(&["Doc"]);
+        db.set_node_property(n2, "emb", vec3(0.0, 1.0, 0.0));
+        let n3 = db.create_node(&["Doc"]);
+        db.set_node_property(n3, "emb", vec3(0.0, 0.0, 1.0));
+
+        db.create_vector_index(
+            "Doc",
+            "emb",
+            Some(3),
+            Some("cosine"),
+            None,
+            None,
+            Some("scalar"),
+        )
+        .expect("create scalar quantized index");
+
+        let results = db
+            .vector_search("Doc", "emb", &[1.0, 0.0, 0.0], 2, None, None)
+            .expect("search scalar quantized");
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].0, n1);
+    }
+
+    #[test]
+    fn test_binary_quantized_vector_index() {
+        let db = GrafeoDB::new_in_memory();
+        let n1 = db.create_node(&["Doc"]);
+        db.set_node_property(n1, "emb", vec3(1.0, 0.0, 0.0));
+        let n2 = db.create_node(&["Doc"]);
+        db.set_node_property(n2, "emb", vec3(0.0, 1.0, 0.0));
+
+        db.create_vector_index(
+            "Doc",
+            "emb",
+            Some(3),
+            Some("euclidean"),
+            None,
+            None,
+            Some("binary"),
+        )
+        .expect("create binary quantized index");
+
+        let results = db
+            .vector_search("Doc", "emb", &[0.9, 0.1, 0.0], 2, None, None)
+            .expect("search binary quantized");
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_product_quantized_vector_index() {
+        // Product quantization needs dims divisible by num_subvectors (default 8),
+        // so use 8-dim vectors.
+        let db = GrafeoDB::new_in_memory();
+        for i in 0..10 {
+            let n = db.create_node(&["Doc"]);
+            let vec: Vec<f32> = (0..8).map(|j| ((i * 8 + j) as f32) / 80.0).collect();
+            db.set_node_property(n, "emb", Value::Vector(vec.into()));
+        }
+
+        db.create_vector_index(
+            "Doc",
+            "emb",
+            Some(8),
+            Some("euclidean"),
+            None,
+            None,
+            Some("product"),
+        )
+        .expect("create product quantized index");
+
+        let results = db
+            .vector_search("Doc", "emb", &[0.5; 8], 3, None, None)
+            .expect("search product quantized");
+        assert_eq!(results.len(), 3);
+    }
+
+    #[test]
+    fn test_empty_quantized_index_auto_inserts() {
+        let db = GrafeoDB::new_in_memory();
+
+        // Create quantized index on empty data with explicit dimensions
+        db.create_vector_index(
+            "Doc",
+            "emb",
+            Some(3),
+            Some("cosine"),
+            None,
+            None,
+            Some("scalar"),
+        )
+        .expect("create empty scalar index");
+
+        // Add nodes after index creation
+        let n1 = db.create_node(&["Doc"]);
+        db.set_node_property(n1, "emb", vec3(1.0, 0.0, 0.0));
+        let n2 = db.create_node(&["Doc"]);
+        db.set_node_property(n2, "emb", vec3(0.0, 1.0, 0.0));
+
+        let results = db
+            .vector_search("Doc", "emb", &[1.0, 0.0, 0.0], 2, None, None)
+            .expect("search after late insert into quantized index");
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_rebuild_preserves_quantization_type() {
+        let db = GrafeoDB::new_in_memory();
+        let n1 = db.create_node(&["Doc"]);
+        db.set_node_property(n1, "emb", vec3(1.0, 0.0, 0.0));
+        let n2 = db.create_node(&["Doc"]);
+        db.set_node_property(n2, "emb", vec3(0.0, 1.0, 0.0));
+
+        db.create_vector_index(
+            "Doc",
+            "emb",
+            Some(3),
+            Some("cosine"),
+            None,
+            None,
+            Some("binary"),
+        )
+        .expect("create binary index");
+
+        db.rebuild_vector_index("Doc", "emb").expect("rebuild");
+
+        // Search should still work after rebuild
+        let results = db
+            .vector_search("Doc", "emb", &[1.0, 0.0, 0.0], 2, None, None)
+            .expect("search after rebuild of quantized index");
+        assert_eq!(results.len(), 2);
+    }
 }
 
 // ============================================================================
