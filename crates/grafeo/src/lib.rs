@@ -71,11 +71,21 @@ pub use grafeo_engine::{
     StatementKind, VERSION,
 };
 
-// Re-export the auth module for qualified access (e.g. grafeo::auth::Identity)
+// Re-export submodules for qualified access (e.g. grafeo::auth::Identity)
+pub use grafeo_engine::admin;
 pub use grafeo_engine::auth;
+#[cfg(feature = "cdc")]
+pub use grafeo_engine::cdc;
+pub use grafeo_engine::database;
+pub use grafeo_engine::memory_usage;
+pub use grafeo_engine::session;
 
 // Re-export query results
 pub use grafeo_engine::database::QueryResult;
+
+// Re-export MemoryUsage, ProjectionSpec at top level for convenience
+pub use grafeo_engine::MemoryUsage;
+pub use grafeo_engine::ProjectionSpec;
 
 // Re-export core types - you'll need these for working with IDs and values
 pub use grafeo_common::types::{EdgeId, NodeId, Value};
