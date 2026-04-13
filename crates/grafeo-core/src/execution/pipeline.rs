@@ -204,6 +204,14 @@ impl Pipeline {
 
     /// Execute the pipeline.
     ///
+    /// # Deadline behavior
+    ///
+    /// The deadline is checked **between** chunk iterations, not during source reads.
+    /// A slow source read (e.g., a complex scan or join) can exceed the deadline
+    /// before cancellation is evaluated. This matches the pull-based executor's
+    /// behavior and is an accepted trade-off: cooperative cancellation between
+    /// chunks avoids the complexity of interrupt-based cancellation within operators.
+    ///
     /// # Errors
     ///
     /// Returns `Err` if any source, operator, or sink fails during execution,

@@ -448,12 +448,13 @@ impl GrafeoFileManager {
 
         for (section_type, data) in sections {
             // Encrypt section data if encryption is enabled.
-            // The nonce uses the section type + checkpoint iteration for uniqueness.
+            // Nonce uses the page-aligned write offset, which is unique per section
+            // within a checkpoint (even if duplicate section types were passed).
             // AAD binds the ciphertext to the section type, preventing relocation.
             #[cfg(feature = "encryption")]
             let (write_data, checksum, length) = if let Some(ref enc) = self.section_encryptor {
-                let iteration = active_header.iteration + 1;
-                let nonce = grafeo_common::encryption::build_nonce(*section_type as u32, iteration);
+                let nonce =
+                    grafeo_common::encryption::build_nonce(*section_type as u32, current_offset);
                 let aad = format!("grafeo-section:{}", *section_type as u32);
                 let encrypted = enc
                     .encrypt(data, &nonce, aad.as_bytes())

@@ -236,8 +236,12 @@ impl WalManager {
             #[cfg(feature = "encryption")]
             let (frame_data, record_size) = if let Some(ref enc) = self.encryptor {
                 let file_seq = self.current_sequence.load(Ordering::Relaxed);
-                let record_counter = self.total_record_count.load(Ordering::Relaxed);
-                let nonce = grafeo_common::encryption::build_nonce(file_seq as u32, record_counter);
+                // Use the file byte offset as the nonce counter, not the ephemeral
+                // record count. The byte offset survives restarts (file is append-only)
+                // and is unique per record within a file. Combined with the file sequence,
+                // this guarantees nonce uniqueness even after crash + restart.
+                let byte_offset = log_file.size;
+                let nonce = grafeo_common::encryption::build_nonce(file_seq as u32, byte_offset);
                 let aad = b"grafeo-wal";
                 let encrypted = enc
                     .encrypt(data, &nonce, aad)

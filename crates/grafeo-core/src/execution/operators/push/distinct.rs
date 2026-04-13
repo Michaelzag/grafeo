@@ -41,23 +41,61 @@ impl RowKey {
 
 fn hash_value(value: &Value) -> u64 {
     use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
+    use std::hash::Hasher;
 
     let mut hasher = DefaultHasher::new();
-    // Discriminant tag to distinguish types
-    std::mem::discriminant(value).hash(&mut hasher);
+    hash_value_into(value, &mut hasher);
+    hasher.finish()
+}
+
+/// Recursively hashes a Value into a Hasher without relying on Debug output.
+///
+/// Each variant is prefixed with a discriminant tag to prevent cross-type collisions.
+fn hash_value_into(value: &Value, hasher: &mut impl std::hash::Hasher) {
+    use std::hash::Hash;
+
+    std::mem::discriminant(value).hash(hasher);
     match value {
         Value::Null => {}
-        Value::Bool(b) => b.hash(&mut hasher),
-        Value::Int64(i) => i.hash(&mut hasher),
-        Value::Float64(f) => f.to_bits().hash(&mut hasher),
-        Value::String(s) => s.hash(&mut hasher),
-        Value::Bytes(b) => b.hash(&mut hasher),
-        // Complex types: use debug representation as stable hash input.
-        // This matches the pull-based DistinctOperator's approach.
-        _ => format!("{value:?}").hash(&mut hasher),
+        Value::Bool(b) => b.hash(hasher),
+        Value::Int64(i) => i.hash(hasher),
+        Value::Float64(f) => f.to_bits().hash(hasher),
+        Value::String(s) => s.hash(hasher),
+        Value::Bytes(b) => b.hash(hasher),
+        Value::List(items) => {
+            items.len().hash(hasher);
+            for item in items.iter() {
+                hash_value_into(item, hasher);
+            }
+        }
+        Value::Map(map) => {
+            map.len().hash(hasher);
+            // BTreeMap iterates in key order: deterministic
+            for (k, v) in map.iter() {
+                k.as_str().hash(hasher);
+                hash_value_into(v, hasher);
+            }
+        }
+        Value::Vector(vec) => {
+            vec.len().hash(hasher);
+            for f in vec.iter() {
+                f.to_bits().hash(hasher);
+            }
+        }
+        Value::Path { nodes, edges } => {
+            nodes.len().hash(hasher);
+            for n in nodes.iter() {
+                hash_value_into(n, hasher);
+            }
+            edges.len().hash(hasher);
+            for e in edges.iter() {
+                hash_value_into(e, hasher);
+            }
+        }
+        // Temporal and other scalar types: use their Display representation
+        // which is stable and semantically meaningful (ISO 8601 for dates, etc.)
+        _ => format!("{value}").hash(hasher),
     }
-    hasher.finish()
 }
 
 /// Push-based distinct operator.
