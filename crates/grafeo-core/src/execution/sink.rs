@@ -64,6 +64,10 @@ impl Sink for CollectorSink {
     fn name(&self) -> &'static str {
         "CollectorSink"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any> {
+        self
+    }
 }
 
 /// Materializing sink that buffers all data in memory.
@@ -134,6 +138,10 @@ impl Sink for MaterializingSink {
 
     fn name(&self) -> &'static str {
         "MaterializingSink"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any> {
+        self
     }
 }
 
@@ -215,6 +223,10 @@ impl Sink for LimitingSink {
     fn name(&self) -> &'static str {
         "LimitingSink"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any> {
+        self
+    }
 }
 
 /// Counting sink that just counts rows without storing data.
@@ -255,6 +267,10 @@ impl Sink for CountingSink {
     fn name(&self) -> &'static str {
         "CountingSink"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any> {
+        self
+    }
 }
 
 /// Null sink that discards all data.
@@ -286,6 +302,10 @@ impl Sink for NullSink {
 
     fn name(&self) -> &'static str {
         "NullSink"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any> {
+        self
     }
 }
 

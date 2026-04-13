@@ -258,6 +258,10 @@ impl Operator for FactorizedExpandOperator {
     fn name(&self) -> &'static str {
         "FactorizedExpand"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 impl FactorizedOperator for FactorizedExpandOperator {
@@ -566,6 +570,10 @@ impl Operator for SingleChunkOperator {
     fn name(&self) -> &'static str {
         "SingleChunk"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// Configuration for a single expand step in a lazy chain.
@@ -730,6 +738,10 @@ impl Operator for LazyFactorizedChainOperator {
 
     fn name(&self) -> &'static str {
         "LazyFactorizedChain"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }
 

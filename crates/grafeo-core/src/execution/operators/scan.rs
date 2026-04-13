@@ -149,6 +149,10 @@ impl Operator for ScanOperator {
     fn name(&self) -> &'static str {
         "Scan"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(all(test, feature = "lpg"))]

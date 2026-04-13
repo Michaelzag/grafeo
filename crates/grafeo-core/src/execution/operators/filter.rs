@@ -3625,6 +3625,11 @@ impl FilterOperator {
     pub fn new(child: Box<dyn Operator>, predicate: Box<dyn Predicate>) -> Self {
         Self { child, predicate }
     }
+
+    /// Decomposes this operator into its child and predicate for push-based conversion.
+    pub fn into_parts(self) -> (Box<dyn Operator>, Box<dyn Predicate>) {
+        (self.child, self.predicate)
+    }
 }
 
 impl Operator for FilterOperator {
@@ -3675,6 +3680,10 @@ impl Operator for FilterOperator {
 
     fn name(&self) -> &'static str {
         "Filter"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }
 
@@ -3727,6 +3736,10 @@ mod tests {
 
         fn name(&self) -> &'static str {
             "MockScan"
+        }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
         }
     }
 

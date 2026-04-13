@@ -1,0 +1,266 @@
+//! Converts pull-based operator trees into push-based pipelines.
+//!
+//! The converter walks the operator tree top-down, decomposing operators that
+//! have push equivalents. Source operators (scan, expand, join) stay pull-based
+//! and get wrapped in [`OperatorSource`].
+//!
+//! This enables the documented push-based execution model without modifying
+//! the planner, which continues to emit pull-based operator trees.
+
+use super::chunk::DataChunk;
+use super::operators::push::FilterPredicate;
+use super::operators::{
+    AggregatePushOperator, DistinctPushOperator, FilterPushOperator, LimitPushOperator,
+    SortPushOperator,
+};
+use super::operators::{
+    DistinctOperator, FilterOperator, HashAggregateOperator, LimitOperator, Operator, Predicate,
+    SortOperator,
+};
+use super::pipeline::PushOperator;
+
+// -------------------------------------------------------------------------
+// Type adapters (bridge pull types to push types)
+// -------------------------------------------------------------------------
+
+/// Adapts a pull-based [`Predicate`] to the push [`FilterPredicate`] trait.
+pub struct PredicateAdapter(pub Box<dyn Predicate>);
+
+impl FilterPredicate for PredicateAdapter {
+    fn evaluate(&self, chunk: &DataChunk, row: usize) -> bool {
+        self.0.evaluate(chunk, row)
+    }
+}
+
+// NOTE: ProjectExprAdapter and is_simple_project are intentionally omitted.
+// ProjectOperator carries store references, transaction context, and session
+// context that cannot be transferred to push operators. Project stays pull-based.
+// When a dedicated PushProjectOperator with store access is added, revisit this.
+
+/// Converts a pull-based sort key to the push-based equivalent.
+///
+/// Both types have identical fields but are separate types in separate modules.
+fn convert_sort_key(pull: &super::operators::SortKey) -> super::operators::push::SortKey {
+    use super::operators::{NullOrder, SortDirection};
+    super::operators::push::SortKey {
+        column: pull.column,
+        direction: match pull.direction {
+            SortDirection::Ascending => super::operators::push::SortDirection::Ascending,
+            SortDirection::Descending => super::operators::push::SortDirection::Descending,
+        },
+        null_order: match pull.null_order {
+            NullOrder::NullsFirst => super::operators::push::NullOrder::First,
+            NullOrder::NullsLast => super::operators::push::NullOrder::Last,
+        },
+    }
+}
+
+// -------------------------------------------------------------------------
+// Pipeline converter
+// -------------------------------------------------------------------------
+
+/// Converts a pull-based operator tree into a source operator and a chain of push operators.
+///
+/// Walks the tree from the root, decomposing operators that have push equivalents
+/// (Filter, Project, Sort, Aggregate, Limit, Distinct). Stops at source operators
+/// (scan, expand, join, etc.) which stay pull-based.
+///
+/// Returns `(source, push_ops)` where:
+/// - `source` is the deepest non-convertible operator (pull-based)
+/// - `push_ops` is the chain of push operators in pipeline order (source-first)
+///
+/// If the root operator has no push equivalent (e.g., a bare scan), returns
+/// an empty `push_ops` vec.
+pub fn convert_to_pipeline(
+    root: Box<dyn Operator>,
+) -> (Box<dyn Operator>, Vec<Box<dyn PushOperator>>) {
+    let mut push_ops: Vec<Box<dyn PushOperator>> = Vec::new();
+    let source = decompose_recursive(root, &mut push_ops);
+    // Push ops are collected root-first (outermost first), reverse for pipeline order
+    push_ops.reverse();
+    (source, push_ops)
+}
+
+/// Recursively decomposes operators, collecting push equivalents.
+///
+/// Uses `name()` to identify the operator type, then `into_any()` + downcast
+/// to decompose it into child + push operator.
+fn decompose_recursive(
+    op: Box<dyn Operator>,
+    push_ops: &mut Vec<Box<dyn PushOperator>>,
+) -> Box<dyn Operator> {
+    match op.name() {
+        "Filter" => {
+            let any = op.into_any();
+            let filter = any
+                .downcast::<FilterOperator>()
+                .expect("name() returned 'Filter' but downcast failed");
+            let (child, predicate) = filter.into_parts();
+            push_ops.push(Box::new(FilterPushOperator::new(Box::new(
+                PredicateAdapter(predicate),
+            ))));
+            decompose_recursive(child, push_ops)
+        }
+        // Project is NOT decomposed because it often holds store references,
+        // transaction context, and session context that cannot be transferred
+        // to push operators. Treat as a source operator boundary.
+        //
+        // TODO: when a dedicated PushProjectOperator with store access exists,
+        // revisit this decision.
+        "Sort" => {
+            let any = op.into_any();
+            let sort = any
+                .downcast::<SortOperator>()
+                .expect("name() returned 'Sort' but downcast failed");
+            let (child, sort_keys) = sort.into_parts();
+            let push_keys: Vec<_> = sort_keys.iter().map(convert_sort_key).collect();
+            push_ops.push(Box::new(SortPushOperator::new(push_keys)));
+            decompose_recursive(child, push_ops)
+        }
+        "HashAggregate" => {
+            let any = op.into_any();
+            let agg = any
+                .downcast::<HashAggregateOperator>()
+                .expect("name() returned 'HashAggregate' but downcast failed");
+            let (child, group_columns, aggregates) = agg.into_parts();
+            push_ops.push(Box::new(AggregatePushOperator::new(
+                group_columns,
+                aggregates,
+            )));
+            decompose_recursive(child, push_ops)
+        }
+        "Limit" => {
+            let any = op.into_any();
+            let limit = any
+                .downcast::<LimitOperator>()
+                .expect("name() returned 'Limit' but downcast failed");
+            let (child, count) = limit.into_parts();
+            push_ops.push(Box::new(LimitPushOperator::new(count)));
+            decompose_recursive(child, push_ops)
+        }
+        "Distinct" => {
+            let any = op.into_any();
+            let distinct = any
+                .downcast::<DistinctOperator>()
+                .expect("name() returned 'Distinct' but downcast failed");
+            let (child, columns) = distinct.into_parts();
+            let push_distinct = if let Some(cols) = columns {
+                DistinctPushOperator::on_columns(cols)
+            } else {
+                DistinctPushOperator::new()
+            };
+            push_ops.push(Box::new(push_distinct));
+            decompose_recursive(child, push_ops)
+        }
+        // Not convertible: this is a source operator (scan, expand, join, etc.)
+        _ => op,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::execution::operators::{OperatorResult, SortKey};
+    use grafeo_common::types::LogicalType;
+
+    /// A trivial predicate that always returns true (for testing decomposition only).
+    struct AlwaysTruePredicate;
+
+    impl Predicate for AlwaysTruePredicate {
+        fn evaluate(&self, _chunk: &DataChunk, _row: usize) -> bool {
+            true
+        }
+    }
+
+    /// A minimal test operator that produces one chunk.
+    struct TestScanOperator {
+        emitted: bool,
+    }
+
+    impl TestScanOperator {
+        fn new() -> Self {
+            Self { emitted: false }
+        }
+    }
+
+    impl Operator for TestScanOperator {
+        fn next(&mut self) -> OperatorResult {
+            if self.emitted {
+                return Ok(None);
+            }
+            self.emitted = true;
+            let mut col = crate::execution::vector::ValueVector::with_type(LogicalType::Int64);
+            col.push_int64(1);
+            col.push_int64(2);
+            col.push_int64(3);
+            Ok(Some(DataChunk::new(vec![col])))
+        }
+
+        fn reset(&mut self) {
+            self.emitted = false;
+        }
+
+        fn name(&self) -> &'static str {
+            "TestScan"
+        }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
+        }
+    }
+
+    #[test]
+    fn convert_bare_scan_produces_empty_pipeline() {
+        let scan: Box<dyn Operator> = Box::new(TestScanOperator::new());
+        let (source, push_ops) = convert_to_pipeline(scan);
+        assert!(push_ops.is_empty());
+        assert_eq!(source.name(), "TestScan");
+    }
+
+    #[test]
+    fn convert_filter_scan_produces_one_push_op() {
+        let scan: Box<dyn Operator> = Box::new(TestScanOperator::new());
+        let predicate: Box<dyn Predicate> = Box::new(AlwaysTruePredicate);
+        let filter: Box<dyn Operator> = Box::new(FilterOperator::new(scan, predicate));
+
+        let (source, push_ops) = convert_to_pipeline(filter);
+        assert_eq!(source.name(), "TestScan");
+        assert_eq!(push_ops.len(), 1);
+        assert_eq!(push_ops.len(), 1);
+        // Push operators have their own naming convention
+        assert!(
+            push_ops[0].name().contains("Filter"),
+            "expected filter push op, got {}",
+            push_ops[0].name()
+        );
+    }
+
+    #[test]
+    fn convert_limit_filter_scan_produces_two_push_ops() {
+        let scan: Box<dyn Operator> = Box::new(TestScanOperator::new());
+        let predicate: Box<dyn Predicate> = Box::new(AlwaysTruePredicate);
+        let filter: Box<dyn Operator> = Box::new(FilterOperator::new(scan, predicate));
+        let limit: Box<dyn Operator> =
+            Box::new(LimitOperator::new(filter, 10, vec![LogicalType::Int64]));
+
+        let (source, push_ops) = convert_to_pipeline(limit);
+        assert_eq!(source.name(), "TestScan");
+        assert_eq!(push_ops.len(), 2);
+        // Pipeline order: filter first, then limit
+        assert!(push_ops[0].name().contains("Filter"));
+        assert!(push_ops[1].name().contains("Limit"));
+    }
+
+    #[test]
+    fn convert_sort_scan_produces_one_push_op() {
+        let scan: Box<dyn Operator> = Box::new(TestScanOperator::new());
+        let keys = vec![SortKey::ascending(0)];
+        let sort: Box<dyn Operator> =
+            Box::new(SortOperator::new(scan, keys, vec![LogicalType::Int64]));
+
+        let (source, push_ops) = convert_to_pipeline(sort);
+        assert_eq!(source.name(), "TestScan");
+        assert_eq!(push_ops.len(), 1);
+        assert!(push_ops[0].name().contains("Sort"));
+    }
+}

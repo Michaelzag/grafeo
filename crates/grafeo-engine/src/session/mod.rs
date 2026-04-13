@@ -2652,12 +2652,22 @@ impl Session {
                 transaction_id,
                 read_only,
             );
-            let mut physical_plan = planner.plan(&optimized_plan)?;
+            let physical_plan = planner.plan(&optimized_plan)?;
 
-            // Execute the plan
+            // Execute the plan via push-based pipeline when possible
             let executor = Executor::with_columns(physical_plan.columns.clone())
                 .with_deadline(self.query_deadline());
-            let mut result = executor.execute(physical_plan.operator.as_mut())?;
+            let (mut source, push_ops) =
+                grafeo_core::execution::pipeline_convert::convert_to_pipeline(
+                    physical_plan.into_operator(),
+                );
+            let mut result = if push_ops.is_empty() {
+                // Pure source query: use traditional pull-based execution
+                executor.execute(source.as_mut())?
+            } else {
+                // Pipeline execution: push data from source through operators
+                executor.execute_pipeline(source, push_ops)?
+            };
 
             // Add execution metrics
             let rows_scanned = result.rows.len() as u64;

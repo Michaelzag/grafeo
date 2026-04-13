@@ -75,6 +75,10 @@ impl Operator for ProfiledOperator {
     fn name(&self) -> &'static str {
         self.inner.name()
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 // ProfiledOperator is Send + Sync because:
@@ -129,6 +133,10 @@ mod tests {
 
         fn name(&self) -> &'static str {
             "MockOperator"
+        }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
         }
     }
 

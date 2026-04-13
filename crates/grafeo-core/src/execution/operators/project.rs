@@ -135,6 +135,11 @@ impl ProjectOperator {
         self
     }
 
+    /// Decomposes this operator into its child and projections for push-based conversion.
+    pub fn into_parts(self) -> (Box<dyn Operator>, Vec<ProjectExpr>, Vec<LogicalType>) {
+        (self.child, self.projections, self.output_types)
+    }
+
     /// Creates a project operator that selects specific columns.
     pub fn select_columns(
         child: Box<dyn Operator>,
@@ -411,6 +416,10 @@ impl Operator for ProjectOperator {
     fn name(&self) -> &'static str {
         "Project"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// Converts a [`Node`] to a `Value::Map` with metadata and properties.
@@ -492,6 +501,10 @@ mod tests {
 
         fn name(&self) -> &'static str {
             "MockScan"
+        }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
         }
     }
 

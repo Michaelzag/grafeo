@@ -148,6 +148,10 @@ impl Operator for ExceptOperator {
     fn name(&self) -> &'static str {
         "Except"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// INTERSECT operator: rows common to both inputs.
@@ -239,6 +243,10 @@ impl Operator for IntersectOperator {
     fn name(&self) -> &'static str {
         "Intersect"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// OTHERWISE operator: use left result if non-empty, otherwise use right.
@@ -317,5 +325,9 @@ impl Operator for OtherwiseOperator {
 
     fn name(&self) -> &'static str {
         "Otherwise"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }

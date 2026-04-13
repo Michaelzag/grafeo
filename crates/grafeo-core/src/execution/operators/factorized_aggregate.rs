@@ -335,6 +335,10 @@ impl Operator for FactorizedAggregateOperator {
     fn name(&self) -> &'static str {
         "FactorizedAggregate"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// Trait for operators that can provide factorized output.

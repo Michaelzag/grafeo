@@ -648,6 +648,10 @@ impl Operator for VariableLengthExpandOperator {
     fn name(&self) -> &'static str {
         "VariableLengthExpand"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(all(test, feature = "lpg"))]

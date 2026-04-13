@@ -164,6 +164,10 @@ impl Operator for ProcedureCallOperator {
     fn name(&self) -> &'static str {
         "ProcedureCall"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// Maps a `Value` to its `LogicalType`.

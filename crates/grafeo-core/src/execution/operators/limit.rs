@@ -34,6 +34,11 @@ impl LimitOperator {
             returned: 0,
         }
     }
+
+    /// Decomposes this operator for push-based conversion.
+    pub fn into_parts(self) -> (Box<dyn Operator>, usize) {
+        (self.child, self.limit)
+    }
 }
 
 impl Operator for LimitOperator {
@@ -96,6 +101,10 @@ impl Operator for LimitOperator {
 
     fn name(&self) -> &'static str {
         "Limit"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }
 
@@ -178,6 +187,10 @@ impl Operator for SkipOperator {
 
     fn name(&self) -> &'static str {
         "Skip"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }
 
@@ -289,6 +302,10 @@ impl Operator for LimitSkipOperator {
     fn name(&self) -> &'static str {
         "LimitSkip"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(test)]
@@ -328,6 +345,10 @@ mod tests {
 
         fn name(&self) -> &'static str {
             "Mock"
+        }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
         }
     }
 

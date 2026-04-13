@@ -207,6 +207,10 @@ impl Operator for UnwindOperator {
     fn name(&self) -> &'static str {
         "Unwind"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(test)]
@@ -237,6 +241,10 @@ mod tests {
 
         fn name(&self) -> &'static str {
             "MockOperator"
+        }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
         }
     }
 

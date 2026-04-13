@@ -458,6 +458,10 @@ impl Operator for VectorJoinOperator {
             "VectorJoin(BruteForce)"
         }
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(all(test, feature = "lpg"))]

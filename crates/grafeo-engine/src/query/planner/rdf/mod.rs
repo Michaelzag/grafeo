@@ -1699,6 +1699,10 @@ impl Operator for RdfInsertTripleOperator {
     fn name(&self) -> &'static str {
         "RdfInsertTriple"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 // ============================================================================
@@ -1875,6 +1879,10 @@ impl Operator for RdfInsertPatternOperator {
     fn name(&self) -> &'static str {
         "RdfInsertPattern"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 // ============================================================================
@@ -1974,6 +1982,10 @@ impl Operator for RdfDeleteTripleOperator {
 
     fn name(&self) -> &'static str {
         "RdfDeleteTriple"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }
 
@@ -2151,6 +2163,10 @@ impl Operator for RdfDeletePatternOperator {
     fn name(&self) -> &'static str {
         "RdfDeletePattern"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 // ============================================================================
@@ -2217,6 +2233,10 @@ impl Operator for RdfClearGraphOperator {
     fn name(&self) -> &'static str {
         "RdfClearGraph"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 // ============================================================================
@@ -2282,6 +2302,10 @@ impl Operator for RdfCreateGraphOperator {
 
     fn name(&self) -> &'static str {
         "RdfCreateGraph"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }
 
@@ -2350,6 +2374,10 @@ impl Operator for RdfDropGraphOperator {
     fn name(&self) -> &'static str {
         "RdfDropGraph"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 // ============================================================================
@@ -2411,6 +2439,10 @@ impl Operator for RdfCopyGraphOperator {
     fn name(&self) -> &'static str {
         "RdfCopyGraph"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// Operator that moves all triples from one graph to another.
@@ -2468,6 +2500,10 @@ impl Operator for RdfMoveGraphOperator {
     fn name(&self) -> &'static str {
         "RdfMoveGraph"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// Operator that adds (merges) all triples from one graph into another.
@@ -2524,6 +2560,10 @@ impl Operator for RdfAddGraphOperator {
 
     fn name(&self) -> &'static str {
         "RdfAddGraph"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }
 
@@ -2759,6 +2799,10 @@ impl Operator for RdfModifyOperator {
     fn name(&self) -> &'static str {
         "RdfModify"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 // ============================================================================
@@ -2803,6 +2847,10 @@ impl Operator for RdfUnionOperator {
 
     fn name(&self) -> &'static str {
         "RdfUnion"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }
 
@@ -2897,6 +2945,10 @@ impl Operator for RdfBindOperator {
 
     fn name(&self) -> &'static str {
         "RdfBind"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }
 
@@ -3001,6 +3053,10 @@ impl Operator for RdfProjectOperator {
 
     fn name(&self) -> &'static str {
         "RdfProject"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }
 
@@ -3130,6 +3186,10 @@ impl Operator for RdfLeapfrogOperator {
     fn name(&self) -> &'static str {
         "RdfLeapfrog"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// CONSTRUCT operator: instantiates triple templates from variable bindings.
@@ -3244,6 +3304,10 @@ impl Operator for ConstructOperator {
     fn name(&self) -> &'static str {
         "Construct"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// Operator that produces a single pre-computed `DataChunk` and then stops.
@@ -3272,6 +3336,10 @@ impl Operator for ConstantOperator {
 
     fn name(&self) -> &'static str {
         "Constant"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }
 
@@ -3370,6 +3438,10 @@ impl Operator for DictResolveOperator {
 
     fn name(&self) -> &'static str {
         "DictResolve"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }
 
@@ -3701,6 +3773,10 @@ impl Operator for RdfTripleScanOperator {
 
     fn name(&self) -> &'static str {
         "RdfTripleScan"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }
 

@@ -295,6 +295,12 @@ pub trait Operator: Send + Sync {
 
     /// Returns a name for debugging/explain output.
     fn name(&self) -> &'static str;
+
+    /// Converts this boxed operator into `Box<dyn Any>` for type-based dispatch.
+    ///
+    /// Used by the pipeline converter to decompose pull-based operator trees
+    /// into push-based pipelines via downcasting to concrete types.
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send>;
 }
 
 #[cfg(test)]

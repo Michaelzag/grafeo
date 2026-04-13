@@ -56,6 +56,10 @@ impl Operator for SingleRowOperator {
     fn name(&self) -> &'static str {
         "SingleRow"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// An operator that produces no rows.
@@ -85,6 +89,10 @@ impl Operator for EmptyOperator {
 
     fn name(&self) -> &'static str {
         "Empty"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }
 
@@ -161,6 +169,10 @@ impl Operator for NodeListOperator {
 
     fn name(&self) -> &'static str {
         "NodeList"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }
 

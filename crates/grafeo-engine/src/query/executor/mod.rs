@@ -109,6 +109,58 @@ impl Executor {
         Ok(result)
     }
 
+    /// Executes a push-based pipeline.
+    ///
+    /// The source operator is wrapped in [`OperatorSource`], push operators form
+    /// the pipeline body, and a [`ChunkCollector`] gathers results.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal sink downcast fails (should never happen since we
+    /// create the `ChunkCollector` ourselves).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if pipeline execution fails or the query timeout is exceeded.
+    pub fn execute_pipeline(
+        &self,
+        source: Box<dyn Operator>,
+        push_ops: Vec<Box<dyn grafeo_core::execution::pipeline::PushOperator>>,
+    ) -> Result<QueryResult> {
+        use grafeo_core::execution::{ChunkCollector, OperatorSource, Pipeline};
+
+        let _span = grafeo_debug_span!("grafeo::query::execute_pipeline");
+
+        let source = Box::new(OperatorSource::new(source));
+        let collector = ChunkCollector::new();
+
+        // Build and execute the pipeline
+        let mut pipeline = Pipeline::new(source, push_ops, Box::new(collector));
+        pipeline.execute().map_err(convert_operator_error)?;
+
+        // Extract the sink (ChunkCollector) and get the chunks
+        // Safety: we know the sink is a ChunkCollector because we just created it
+        let sink_box = pipeline.into_sink();
+        let any_sink: Box<dyn std::any::Any> = sink_box.into_any();
+        let collector = any_sink
+            .downcast::<ChunkCollector>()
+            .expect("sink should be ChunkCollector");
+        let chunks = collector.into_chunks();
+
+        let mut result = QueryResult::with_types(self.columns.clone(), self.column_types.clone());
+        let mut types_captured = !result.column_types.iter().all(|t| *t == LogicalType::Any);
+
+        for chunk in &chunks {
+            if !types_captured && chunk.column_count() > 0 {
+                self.capture_column_types(chunk, &mut result);
+                types_captured = true;
+            }
+            self.collect_chunk(chunk, &mut result)?;
+        }
+
+        Ok(result)
+    }
+
     /// Executes and returns at most `limit` rows.
     ///
     /// # Errors
@@ -384,6 +436,10 @@ mod tests {
         fn name(&self) -> &'static str {
             "MockInt"
         }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
+        }
     }
 
     /// Empty mock operator for testing empty results.
@@ -398,6 +454,10 @@ mod tests {
 
         fn name(&self) -> &'static str {
             "Empty"
+        }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
         }
     }
 

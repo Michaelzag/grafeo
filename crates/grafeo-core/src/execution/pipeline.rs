@@ -82,6 +82,9 @@ pub trait Sink: Send + Sync {
 
     /// Name of this sink for debugging.
     fn name(&self) -> &'static str;
+
+    /// Converts this boxed sink into `Box<dyn Any>` for type-based dispatch.
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any>;
 }
 
 /// Push-based operator trait.
@@ -152,6 +155,15 @@ impl Pipeline {
     pub fn with_operator(mut self, op: Box<dyn PushOperator>) -> Self {
         self.operators.push(op);
         self
+    }
+
+    /// Consumes the pipeline and returns the sink.
+    ///
+    /// Call this after [`execute()`](Self::execute) to retrieve collected results
+    /// from the sink. Useful for extracting chunks from a [`CollectorSink`](super::sink::CollectorSink)
+    /// or [`ChunkCollector`].
+    pub fn into_sink(self) -> Box<dyn Sink> {
+        self.sink
     }
 
     /// Execute the pipeline.
@@ -350,6 +362,10 @@ impl Sink for ChunkCollector {
     fn name(&self) -> &'static str {
         "ChunkCollector"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any> {
+        self
+    }
 }
 
 #[cfg(test)]
@@ -424,6 +440,10 @@ mod tests {
 
         fn name(&self) -> &'static str {
             "TestSink"
+        }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any> {
+            self
         }
     }
 

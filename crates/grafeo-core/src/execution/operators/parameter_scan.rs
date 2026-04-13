@@ -113,6 +113,10 @@ impl Operator for ParameterScanOperator {
     fn name(&self) -> &'static str {
         "ParameterScan"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(test)]

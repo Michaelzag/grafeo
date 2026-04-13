@@ -77,6 +77,11 @@ impl DistinctOperator {
         }
     }
 
+    /// Decomposes this operator for push-based conversion.
+    pub fn into_parts(self) -> (Box<dyn Operator>, Option<Vec<usize>>) {
+        (self.child, self.distinct_columns)
+    }
+
     /// Creates a distinct operator that considers only specified columns.
     pub fn on_columns(
         child: Box<dyn Operator>,
@@ -143,6 +148,10 @@ impl Operator for DistinctOperator {
     fn name(&self) -> &'static str {
         "Distinct"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(test)]
@@ -181,6 +190,10 @@ mod tests {
 
         fn name(&self) -> &'static str {
             "Mock"
+        }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
         }
     }
 

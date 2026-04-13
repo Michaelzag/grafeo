@@ -32,6 +32,7 @@ pub mod operators;
 #[cfg(feature = "parallel")]
 pub mod parallel;
 pub mod pipeline;
+pub mod pipeline_convert;
 pub mod profile;
 pub mod selection;
 pub mod sink;

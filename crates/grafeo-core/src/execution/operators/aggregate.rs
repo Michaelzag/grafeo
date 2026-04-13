@@ -781,6 +781,11 @@ impl HashAggregateOperator {
         }
     }
 
+    /// Decomposes this operator for push-based conversion.
+    pub fn into_parts(self) -> (Box<dyn Operator>, Vec<usize>, Vec<AggregateExpr>) {
+        (self.child, self.group_columns, self.aggregates)
+    }
+
     /// Performs the aggregation.
     fn aggregate(&mut self) -> Result<(), OperatorError> {
         while let Some(chunk) = self.child.next()? {
@@ -939,6 +944,10 @@ impl Operator for HashAggregateOperator {
     fn name(&self) -> &'static str {
         "HashAggregate"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// Simple (non-grouping) aggregate operator for global aggregations.
@@ -1077,6 +1086,10 @@ impl Operator for SimpleAggregateOperator {
     fn name(&self) -> &'static str {
         "SimpleAggregate"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(test)]
@@ -1115,6 +1128,10 @@ mod tests {
 
         fn name(&self) -> &'static str {
             "Mock"
+        }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
         }
     }
 

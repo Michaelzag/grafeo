@@ -624,6 +624,10 @@ impl Operator for HashJoinOperator {
     fn name(&self) -> &'static str {
         "HashJoin"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// Nested loop join operator.
@@ -960,6 +964,10 @@ impl Operator for NestedLoopJoinOperator {
     fn name(&self) -> &'static str {
         "NestedLoopJoin"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(test)]
@@ -999,6 +1007,10 @@ mod tests {
 
         fn name(&self) -> &'static str {
             "Mock"
+        }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
         }
     }
 

@@ -414,6 +414,10 @@ impl Operator for ShortestPathOperator {
     fn name(&self) -> &'static str {
         "ShortestPath"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(all(test, feature = "lpg"))]
@@ -461,6 +465,10 @@ mod tests {
 
         fn name(&self) -> &'static str {
             "MockPair"
+        }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
         }
     }
 

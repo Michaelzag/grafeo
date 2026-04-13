@@ -116,6 +116,11 @@ impl SortOperator {
         }
     }
 
+    /// Decomposes this operator into its child and sort keys for push-based conversion.
+    pub fn into_parts(self) -> (Box<dyn Operator>, Vec<SortKey>) {
+        (self.child, self.sort_keys)
+    }
+
     /// Materializes and sorts the input.
     fn sort(&mut self) -> Result<(), OperatorError> {
         // Materialize all input
@@ -236,6 +241,10 @@ impl Operator for SortOperator {
     fn name(&self) -> &'static str {
         "Sort"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(test)]
@@ -274,6 +283,10 @@ mod tests {
 
         fn name(&self) -> &'static str {
             "Mock"
+        }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
         }
     }
 

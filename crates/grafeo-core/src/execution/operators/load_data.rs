@@ -303,6 +303,10 @@ impl Operator for LoadDataOperator {
             LoadDataFormat::Parquet => "LoadParquet",
         }
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 // ============================================================================

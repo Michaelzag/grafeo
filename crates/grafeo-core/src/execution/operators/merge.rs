@@ -313,6 +313,10 @@ impl Operator for MergeOperator {
     fn name(&self) -> &'static str {
         "Merge"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// Configuration for a relationship merge operation.
@@ -570,6 +574,10 @@ impl Operator for MergeRelationshipOperator {
 
     fn name(&self) -> &'static str {
         "MergeRelationship"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }
 

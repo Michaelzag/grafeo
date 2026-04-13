@@ -426,6 +426,10 @@ impl Operator for CreateNodeOperator {
     fn name(&self) -> &'static str {
         "CreateNode"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// Operator that creates new edges.
@@ -674,6 +678,10 @@ impl Operator for CreateEdgeOperator {
     fn name(&self) -> &'static str {
         "CreateEdge"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// Operator that deletes nodes.
@@ -829,6 +837,10 @@ impl Operator for DeleteNodeOperator {
     fn name(&self) -> &'static str {
         "DeleteNode"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// Operator that deletes edges.
@@ -950,6 +962,10 @@ impl Operator for DeleteEdgeOperator {
 
     fn name(&self) -> &'static str {
         "DeleteEdge"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }
 
@@ -1090,6 +1106,10 @@ impl Operator for AddLabelOperator {
     fn name(&self) -> &'static str {
         "AddLabel"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// Operator that removes labels from nodes.
@@ -1228,6 +1248,10 @@ impl Operator for RemoveLabelOperator {
 
     fn name(&self) -> &'static str {
         "RemoveLabel"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }
 
@@ -1582,6 +1606,10 @@ impl Operator for SetPropertyOperator {
     fn name(&self) -> &'static str {
         "SetProperty"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(all(test, feature = "lpg"))]
@@ -1615,6 +1643,10 @@ mod tests {
         fn name(&self) -> &'static str {
             "MockInput"
         }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
+        }
     }
 
     struct EmptyInput;
@@ -1625,6 +1657,10 @@ mod tests {
         fn reset(&mut self) {}
         fn name(&self) -> &'static str {
             "EmptyInput"
+        }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
         }
     }
 

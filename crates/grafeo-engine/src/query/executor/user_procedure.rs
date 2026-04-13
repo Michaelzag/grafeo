@@ -228,6 +228,10 @@ impl Operator for UserProcedureOperator {
     fn name(&self) -> &'static str {
         "UserProcedure"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// Converts a Value to a GQL literal string for parameter substitution.
