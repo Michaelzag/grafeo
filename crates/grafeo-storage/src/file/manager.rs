@@ -37,6 +37,9 @@ pub struct GrafeoFileManager {
     active_slot: Mutex<u8>,
     /// Whether this manager was opened in read-only mode.
     read_only: bool,
+    /// Encryptor for section data (None = unencrypted).
+    #[cfg(feature = "encryption")]
+    section_encryptor: Option<grafeo_common::encryption::PageEncryptor>,
 }
 
 impl GrafeoFileManager {
@@ -105,6 +108,8 @@ impl GrafeoFileManager {
             active_header: Mutex::new(DbHeader::EMPTY),
             active_slot: Mutex::new(0),
             read_only: false,
+            #[cfg(feature = "encryption")]
+            section_encryptor: None,
         })
     }
 
@@ -143,6 +148,8 @@ impl GrafeoFileManager {
             active_header: Mutex::new(active_header),
             active_slot: Mutex::new(active_slot),
             read_only: false,
+            #[cfg(feature = "encryption")]
+            section_encryptor: None,
         })
     }
 
@@ -187,7 +194,19 @@ impl GrafeoFileManager {
             active_header: Mutex::new(active_header),
             active_slot: Mutex::new(active_slot),
             read_only: true,
+            #[cfg(feature = "encryption")]
+            section_encryptor: None,
         })
+    }
+
+    /// Sets the encryptor for section-level encryption.
+    ///
+    /// When set, all section data is encrypted on write and decrypted on read.
+    /// The GCM authentication tag provides integrity verification, replacing
+    /// the CRC-32 checksum for encrypted sections.
+    #[cfg(feature = "encryption")]
+    pub fn set_section_encryptor(&mut self, encryptor: grafeo_common::encryption::PageEncryptor) {
+        self.section_encryptor = Some(encryptor);
     }
 
     /// Returns `true` if this manager was opened in read-only mode.
@@ -428,22 +447,45 @@ impl GrafeoFileManager {
         let mut current_offset = SECTION_DATA_OFFSET;
 
         for (section_type, data) in sections {
-            let checksum = crc32fast::hash(data);
+            // Encrypt section data if encryption is enabled.
+            // The nonce uses the section type + checkpoint iteration for uniqueness.
+            // AAD binds the ciphertext to the section type, preventing relocation.
+            #[cfg(feature = "encryption")]
+            let (write_data, checksum, length) = if let Some(ref enc) = self.section_encryptor {
+                let iteration = active_header.iteration + 1;
+                let nonce = grafeo_common::encryption::build_nonce(*section_type as u32, iteration);
+                let aad = format!("grafeo-section:{}", *section_type as u32);
+                let encrypted = enc
+                    .encrypt(data, &nonce, aad.as_bytes())
+                    .map_err(|e| Error::Internal(format!("section encryption failed: {e}")))?;
+                let crc = crc32fast::hash(&encrypted);
+                let len = encrypted.len() as u64;
+                (encrypted, crc, len)
+            } else {
+                let crc = crc32fast::hash(data);
+                (data.to_vec(), crc, data.len() as u64)
+            };
+
+            #[cfg(not(feature = "encryption"))]
+            let (write_data, checksum, length) = {
+                let crc = crc32fast::hash(data);
+                (data, crc, data.len() as u64)
+            };
 
             file.seek(SeekFrom::Start(current_offset))?;
-            file.write_all(data)?;
+            file.write_all(&write_data)?;
 
             dir.upsert(SectionDirectoryEntry {
                 section_type: *section_type,
                 version: 1,
                 flags: section_type.default_flags(),
                 offset: current_offset,
-                length: data.len() as u64,
+                length,
                 checksum,
             })?;
 
             // Align next section to page boundary
-            let section_end = current_offset + data.len() as u64;
+            let section_end = current_offset + length;
             current_offset = (section_end + page_size - 1) / page_size * page_size;
         }
 
@@ -557,12 +599,25 @@ impl GrafeoFileManager {
         let mut data = vec![0u8; entry.length as usize];
         std::io::Read::read_exact(&mut *file, &mut data)?;
 
+        // Verify CRC on the raw bytes (encrypted or plaintext)
         let actual_crc = crc32fast::hash(&data);
         if actual_crc != entry.checksum {
             return Err(Error::Internal(format!(
                 "section {:?} CRC mismatch: expected {:#010X}, got {actual_crc:#010X}",
                 entry.section_type, entry.checksum
             )));
+        }
+
+        // Decrypt if encryption is enabled
+        #[cfg(feature = "encryption")]
+        if let Some(ref enc) = self.section_encryptor {
+            let aad = format!("grafeo-section:{}", entry.section_type as u32);
+            return enc.decrypt(&data, aad.as_bytes()).map_err(|_| {
+                Error::Internal(format!(
+                    "section {:?} decryption failed: wrong key or corrupted data",
+                    entry.section_type
+                ))
+            });
         }
 
         Ok(data)

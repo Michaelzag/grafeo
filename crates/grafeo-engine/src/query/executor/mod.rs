@@ -16,7 +16,8 @@ use grafeo_common::types::{LogicalType, Value};
 use grafeo_common::utils::error::{Error, QueryError, Result};
 use grafeo_core::execution::operators::{Operator, OperatorError};
 use grafeo_core::execution::{
-    AdaptiveContext, AdaptiveSummary, CardinalityTrackingWrapper, DataChunk, SharedAdaptiveContext,
+    AdaptiveContext, AdaptiveSummary, CardinalityTrackingWrapper, DataChunk, Pipeline,
+    SharedAdaptiveContext,
 };
 
 /// Executes a physical operator tree and collects results.
@@ -127,15 +128,16 @@ impl Executor {
         source: Box<dyn Operator>,
         push_ops: Vec<Box<dyn grafeo_core::execution::pipeline::PushOperator>>,
     ) -> Result<QueryResult> {
-        use grafeo_core::execution::{ChunkCollector, OperatorSource, Pipeline};
+        use grafeo_core::execution::{ChunkCollector, OperatorSource};
 
         let _span = grafeo_debug_span!("grafeo::query::execute_pipeline");
 
         let source = Box::new(OperatorSource::new(source));
         let collector = ChunkCollector::new();
 
-        // Build and execute the pipeline
+        // Build and execute the pipeline with deadline enforcement
         let mut pipeline = Pipeline::new(source, push_ops, Box::new(collector));
+        pipeline.set_deadline(self.deadline);
         pipeline.execute().map_err(convert_operator_error)?;
 
         // Extract the sink (ChunkCollector) and get the chunks
@@ -519,5 +521,65 @@ mod tests {
 
         let result = executor.execute(&mut op).unwrap();
         assert_eq!(result.row_count(), 3);
+    }
+
+    #[test]
+    fn test_execute_pipeline_timeout_expired() {
+        use std::time::{Duration, Instant};
+
+        use grafeo_core::execution::pipeline::{Sink as PipelineSink, Source as PipelineSource};
+
+        struct PipelineTestSource {
+            remaining: usize,
+        }
+
+        impl PipelineSource for PipelineTestSource {
+            fn next_chunk(
+                &mut self,
+                _chunk_size: usize,
+            ) -> std::result::Result<Option<DataChunk>, OperatorError> {
+                if self.remaining == 0 {
+                    return Ok(None);
+                }
+                self.remaining -= 1;
+                Ok(Some(DataChunk::empty()))
+            }
+            fn reset(&mut self) {}
+            fn name(&self) -> &'static str {
+                "PipelineTestSource"
+            }
+        }
+
+        struct PipelineTestSink;
+
+        impl PipelineSink for PipelineTestSink {
+            fn consume(&mut self, _chunk: DataChunk) -> std::result::Result<bool, OperatorError> {
+                Ok(true)
+            }
+            fn finalize(&mut self) -> std::result::Result<(), OperatorError> {
+                Ok(())
+            }
+            fn name(&self) -> &'static str {
+                "PipelineTestSink"
+            }
+            fn into_any(self: Box<Self>) -> Box<dyn std::any::Any> {
+                self
+            }
+        }
+
+        let expired = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
+        let mut pipeline = Pipeline::simple(
+            Box::new(PipelineTestSource { remaining: 10 }),
+            Box::new(PipelineTestSink),
+        )
+        .with_deadline(Some(expired));
+
+        let result = pipeline.execute().map_err(convert_operator_error);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("Query exceeded timeout"),
+            "Expected timeout error, got: {err}"
+        );
     }
 }

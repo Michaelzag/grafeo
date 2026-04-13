@@ -1432,6 +1432,7 @@ dependencies = [
  "hkdf",
  "indexmap",
  "parking_lot",
+ "rand 0.10.1",
  "serde",
  "sha2",
  "smallvec",

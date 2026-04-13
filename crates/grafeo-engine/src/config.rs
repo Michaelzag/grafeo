@@ -4,6 +4,31 @@ use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
 
+/// Encryption-at-rest configuration.
+///
+/// Provides the key chain that derives per-component data encryption keys (DEKs)
+/// from a master encryption key (ME) via HKDF-SHA256. Each storage component
+/// (WAL, sections, vector pages) gets its own DEK.
+///
+/// Wrapped in `Arc` internally so `Config` can remain `Clone` without
+/// duplicating key material.
+#[cfg(feature = "encryption")]
+#[derive(Clone)]
+pub struct EncryptionConfig {
+    /// The key chain that derives per-component encryption keys.
+    /// Shared via Arc so Config can be cloned.
+    pub key_chain: std::sync::Arc<grafeo_common::encryption::KeyChain>,
+}
+
+#[cfg(feature = "encryption")]
+impl fmt::Debug for EncryptionConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EncryptionConfig")
+            .field("key_chain", &"[redacted]")
+            .finish()
+    }
+}
+
 /// The graph data model for a database.
 ///
 /// Each database uses exactly one model, chosen at creation time and immutable
@@ -270,6 +295,16 @@ pub struct Config {
     /// `.grafeo` container and truncates the WAL. `None` means checkpoints
     /// only happen on explicit `wal_checkpoint()` or database close.
     pub checkpoint_interval: Option<Duration>,
+
+    /// Encryption configuration.
+    ///
+    /// When set, all data written to disk (WAL records, sections, snapshots) is
+    /// encrypted with AES-256-GCM. The key chain derives per-component keys from
+    /// a master encryption key via HKDF-SHA256.
+    ///
+    /// Requires the `encryption` feature flag. Without it, this field is ignored.
+    #[cfg(feature = "encryption")]
+    pub encryption: Option<EncryptionConfig>,
 }
 
 /// Configuration for adaptive query execution.
@@ -364,6 +399,8 @@ impl Default for Config {
             cdc_retention: crate::cdc::CdcRetentionConfig::default(),
             section_configs: hashbrown::HashMap::new(),
             checkpoint_interval: None,
+            #[cfg(feature = "encryption")]
+            encryption: None,
         }
     }
 }

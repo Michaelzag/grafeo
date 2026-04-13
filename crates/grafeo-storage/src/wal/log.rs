@@ -235,8 +235,9 @@ impl WalManager {
             // Plaintext frame:  [len:4][data][crc32:4]
             #[cfg(feature = "encryption")]
             let (frame_data, record_size) = if let Some(ref enc) = self.encryptor {
-                let seq = self.current_sequence.load(Ordering::Relaxed);
-                let nonce = grafeo_common::encryption::build_nonce(0, seq);
+                let file_seq = self.current_sequence.load(Ordering::Relaxed);
+                let record_counter = self.total_record_count.load(Ordering::Relaxed);
+                let nonce = grafeo_common::encryption::build_nonce(file_seq as u32, record_counter);
                 let aad = b"grafeo-wal";
                 let encrypted = enc
                     .encrypt(data, &nonce, aad)

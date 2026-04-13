@@ -44,13 +44,18 @@ fn hash_value(value: &Value) -> u64 {
     use std::hash::{Hash, Hasher};
 
     let mut hasher = DefaultHasher::new();
+    // Discriminant tag to distinguish types
+    std::mem::discriminant(value).hash(&mut hasher);
     match value {
-        Value::Null => 0u8.hash(&mut hasher),
+        Value::Null => {}
         Value::Bool(b) => b.hash(&mut hasher),
         Value::Int64(i) => i.hash(&mut hasher),
         Value::Float64(f) => f.to_bits().hash(&mut hasher),
         Value::String(s) => s.hash(&mut hasher),
-        _ => 0u8.hash(&mut hasher),
+        Value::Bytes(b) => b.hash(&mut hasher),
+        // Complex types: use debug representation as stable hash input.
+        // This matches the pull-based DistinctOperator's approach.
+        _ => format!("{value:?}").hash(&mut hasher),
     }
     hasher.finish()
 }

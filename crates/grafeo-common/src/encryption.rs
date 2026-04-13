@@ -18,6 +18,7 @@
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Nonce};
 use hkdf::Hkdf;
+use rand::RngExt;
 use sha2::Sha256;
 use zeroize::Zeroizing;
 
@@ -235,10 +236,11 @@ impl PasswordKeyProvider {
 
 impl KeyProvider for PasswordKeyProvider {
     fn provide_root_key(&self) -> Result<Zeroizing<[u8; KEY_SIZE]>> {
-        // When used as a KeyProvider trait object, the salt must be stored alongside
-        // the wrapped ME. This method uses a zero salt as a placeholder: callers
-        // should use `derive_with_salt` directly with the stored salt.
-        self.derive_with_salt(&[0u8; 16])
+        Err(Error::InvalidValue(
+            "password-based key derivation requires a stored salt; \
+             use derive_with_salt() instead"
+                .to_string(),
+        ))
     }
 }
 
@@ -276,9 +278,10 @@ impl KeyProvider for RawKeyProvider {
 /// Returns an error if encryption fails.
 pub fn wrap_me(root_key: &[u8; KEY_SIZE], me: &[u8; KEY_SIZE]) -> Result<Vec<u8>> {
     let encryptor = PageEncryptor::new(root_key);
-    // Use a fixed nonce for ME wrapping (the ME is only wrapped once per key rotation).
-    // The AAD includes a domain separator to prevent cross-purpose key reuse.
-    let nonce = [0u8; NONCE_SIZE];
+    // Generate a random nonce so every wrap produces unique ciphertext,
+    // even if the same root key and ME are used more than once.
+    let mut nonce = [0u8; NONCE_SIZE];
+    rand::rng().fill(&mut nonce);
     encryptor.encrypt(me, &nonce, b"grafeo-me-wrap")
 }
 
@@ -449,6 +452,27 @@ mod tests {
     }
 
     #[test]
+    fn me_wrap_uses_random_nonce() {
+        let root_key = test_key();
+        let me = [42u8; KEY_SIZE];
+
+        let wrapped1 = wrap_me(&root_key, &me).unwrap();
+        let wrapped2 = wrap_me(&root_key, &me).unwrap();
+
+        // Random nonces mean the wrapped output differs each time
+        assert_ne!(
+            wrapped1, wrapped2,
+            "wrap_me must produce different ciphertext on each call"
+        );
+
+        // Both must still unwrap to the same ME
+        let unwrapped1 = unwrap_me(&root_key, &wrapped1).unwrap();
+        let unwrapped2 = unwrap_me(&root_key, &wrapped2).unwrap();
+        assert_eq!(*unwrapped1, me);
+        assert_eq!(*unwrapped2, me);
+    }
+
+    #[test]
     fn me_unwrap_wrong_key_fails() {
         let root_key = test_key();
         let me = [42u8; KEY_SIZE];
@@ -480,6 +504,21 @@ mod tests {
         let different_salt = [2u8; 16];
         let key3 = provider.derive_with_salt(&different_salt).unwrap();
         assert_ne!(*key1, *key3, "different salts must produce different keys");
+    }
+
+    #[test]
+    fn password_provider_provide_root_key_returns_error() {
+        let provider = PasswordKeyProvider::new(b"test-password");
+        let result = provider.provide_root_key();
+        assert!(
+            result.is_err(),
+            "provide_root_key must fail for password providers"
+        );
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("salt"),
+            "error should mention salt requirement, got: {err_msg}"
+        );
     }
 
     #[test]

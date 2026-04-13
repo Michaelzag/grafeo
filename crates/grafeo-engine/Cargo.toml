@@ -85,6 +85,7 @@ algos = ["grafeo-adapters/algos"]  # Graph algorithm plugin (SSSP, PageRank, etc
 wal = ["grafeo-storage/wal"]  # Write-ahead log storage
 async-storage = ["grafeo-storage/async-storage", "dep:tokio"]  # Async WAL and storage backend
 grafeo-file = ["grafeo-storage/grafeo-file"]  # Single-file .grafeo format
+encryption = ["grafeo-common/encryption", "grafeo-storage/encryption"]  # AES-256-GCM encryption at rest
 spill = ["grafeo-core/spill"]  # Disk spilling for out-of-core execution
 mmap = ["grafeo-core/mmap"]  # File-backed vector storage
 temporal = ["grafeo-core/temporal"]  # Append-only versioned properties

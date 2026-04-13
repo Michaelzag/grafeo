@@ -4,6 +4,8 @@
 //! forward through operators via `push()` calls, enabling better parallelism
 //! and cache utilization compared to pull-based execution.
 
+use std::time::Instant;
+
 use super::chunk::DataChunk;
 use super::operators::OperatorError;
 
@@ -120,11 +122,13 @@ pub trait PushOperator: Send + Sync {
     fn name(&self) -> &'static str;
 }
 
-/// Execution pipeline connecting source → operators → sink.
+/// Execution pipeline connecting source, operators, and sink.
 pub struct Pipeline {
     source: Box<dyn Source>,
     operators: Vec<Box<dyn PushOperator>>,
     sink: Box<dyn Sink>,
+    /// Optional wall-clock deadline after which execution is aborted.
+    deadline: Option<Instant>,
 }
 
 impl Pipeline {
@@ -138,6 +142,7 @@ impl Pipeline {
             source,
             operators,
             sink,
+            deadline: None,
         }
     }
 
@@ -147,6 +152,7 @@ impl Pipeline {
             source,
             operators: Vec::new(),
             sink,
+            deadline: None,
         }
     }
 
@@ -155,6 +161,36 @@ impl Pipeline {
     pub fn with_operator(mut self, op: Box<dyn PushOperator>) -> Self {
         self.operators.push(op);
         self
+    }
+
+    /// Sets a wall-clock deadline for pipeline execution.
+    ///
+    /// When set, the pipeline checks between chunks whether the deadline has
+    /// been exceeded and aborts with a timeout error if so.
+    #[must_use]
+    pub fn with_deadline(mut self, deadline: Option<Instant>) -> Self {
+        self.deadline = deadline;
+        self
+    }
+
+    /// Sets the deadline on an already-constructed pipeline.
+    pub fn set_deadline(&mut self, deadline: Option<Instant>) {
+        self.deadline = deadline;
+    }
+
+    /// Checks whether the deadline has been exceeded.
+    ///
+    /// On WASM targets this is a no-op because `Instant` is not available.
+    fn check_deadline(&self) -> Result<(), OperatorError> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(deadline) = self.deadline
+            && Instant::now() >= deadline
+        {
+            return Err(OperatorError::Execution(
+                "Query exceeded timeout".to_string(),
+            ));
+        }
+        Ok(())
     }
 
     /// Consumes the pipeline and returns the sink.
@@ -170,12 +206,15 @@ impl Pipeline {
     ///
     /// # Errors
     ///
-    /// Returns `Err` if any source, operator, or sink fails during execution.
+    /// Returns `Err` if any source, operator, or sink fails during execution,
+    /// or if the configured deadline is exceeded between chunks.
     pub fn execute(&mut self) -> Result<(), OperatorError> {
         let chunk_size = self.compute_chunk_size();
 
         // Process all chunks from source
         while let Some(chunk) = self.source.next_chunk(chunk_size)? {
+            self.check_deadline()?;
+
             if !self.push_through(chunk)? {
                 // Early termination requested
                 break;
@@ -502,6 +541,58 @@ mod tests {
 
         let merged = collector.into_single_chunk();
         assert_eq!(merged.len(), 2);
+    }
+
+    #[test]
+    fn test_pipeline_deadline_expired() {
+        use std::time::{Duration, Instant};
+
+        let source = Box::new(TestSource::new(10, 5));
+        let sink = Box::new(TestSink::new());
+
+        // Set a deadline that has already passed
+        let expired = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
+        let mut pipeline = Pipeline::simple(source, sink).with_deadline(Some(expired));
+
+        let result = pipeline.execute();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("Query exceeded timeout"),
+            "Expected timeout error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_pipeline_no_deadline() {
+        let source = Box::new(TestSource::new(3, 5));
+        let sink = Box::new(TestSink::new());
+
+        // No deadline should execute normally
+        let mut pipeline = Pipeline::simple(source, sink).with_deadline(None);
+        pipeline.execute().unwrap();
+    }
+
+    #[test]
+    fn test_pipeline_set_deadline() {
+        use std::time::{Duration, Instant};
+
+        let source = Box::new(TestSource::new(10, 5));
+        let sink = Box::new(TestSink::new());
+
+        let mut pipeline = Pipeline::simple(source, sink);
+
+        // Set deadline after construction
+        let expired = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
+        pipeline.set_deadline(Some(expired));
+
+        let result = pipeline.execute();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("Query exceeded timeout"),
+            "Expected timeout error, got: {err}"
+        );
     }
 
     #[test]

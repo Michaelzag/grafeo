@@ -62,7 +62,7 @@ fn convert_sort_key(pull: &super::operators::SortKey) -> super::operators::push:
 /// Converts a pull-based operator tree into a source operator and a chain of push operators.
 ///
 /// Walks the tree from the root, decomposing operators that have push equivalents
-/// (Filter, Project, Sort, Aggregate, Limit, Distinct). Stops at source operators
+/// (Filter, Sort, Aggregate, Limit, Distinct). Stops at source operators
 /// (scan, expand, join, etc.) which stay pull-based.
 ///
 /// Returns `(source, push_ops)` where:
