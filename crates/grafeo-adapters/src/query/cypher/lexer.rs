@@ -316,7 +316,7 @@ impl<'a> Lexer<'a> {
             '\'' | '"' => self.scan_string(ch),
             '`' => self.scan_quoted_identifier(),
             _ if ch.is_ascii_digit() => self.scan_number(),
-            _ if ch.is_ascii_alphabetic() || ch == '_' => self.scan_identifier(),
+            _ if ch.is_alphabetic() || ch == '_' => self.scan_identifier(),
             _ => TokenKind::Error,
         };
 
@@ -473,7 +473,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn scan_identifier(&mut self) -> TokenKind {
-        while self.current_char().is_ascii_alphanumeric() || self.current_char() == '_' {
+        while self.current_char().is_alphanumeric() || self.current_char() == '_' {
             self.advance();
         }
 

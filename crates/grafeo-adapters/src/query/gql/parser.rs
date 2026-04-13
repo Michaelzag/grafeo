@@ -10460,4 +10460,78 @@ mod tests {
             "GQL parser errors should be prefixed with [GQL], got: {err}"
         );
     }
+
+    // ==================== Unicode identifier tests ====================
+
+    #[test]
+    fn test_unicode_label_cjk() {
+        let mut parser = Parser::new("INSERT (:人物 {名前: 'Alix'})");
+        let result = parser.parse();
+        assert!(
+            result.is_ok(),
+            "CJK label and property should parse: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_unicode_label_accented() {
+        let mut parser = Parser::new("MATCH (n:Universit\u{00E9}) RETURN n");
+        let result = parser.parse();
+        assert!(
+            result.is_ok(),
+            "Accented label should parse: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_unicode_label_cyrillic() {
+        let mut parser = Parser::new(
+            "MATCH (n:\u{041F}\u{0435}\u{0440}\u{0441}\u{043E}\u{043D}\u{0430}) RETURN n",
+        );
+        let result = parser.parse();
+        assert!(
+            result.is_ok(),
+            "Cyrillic label should parse: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_unicode_label_arabic() {
+        let mut parser = Parser::new("MATCH (n:\u{0634}\u{062E}\u{0635}) RETURN n");
+        let result = parser.parse();
+        assert!(
+            result.is_ok(),
+            "Arabic label should parse: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_unicode_variable_name() {
+        let mut parser = Parser::new("MATCH (\u{540D}\u{524D}:Person) RETURN \u{540D}\u{524D}");
+        let result = parser.parse();
+        assert!(
+            result.is_ok(),
+            "Unicode variable name should parse: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_ascii_identifiers_still_work() {
+        // Regression: ensure basic ASCII identifiers are unaffected
+        let mut parser = Parser::new("MATCH (n:Person) WHERE n.age > 19 RETURN n.name");
+        let result = parser.parse();
+        assert!(result.is_ok(), "ASCII identifiers should still work");
+    }
+
+    #[test]
+    fn test_unicode_string_with_escape() {
+        let mut parser = Parser::new("RETURN '\\u0041'");
+        let result = parser.parse();
+        assert!(result.is_ok(), "String with \\u escape should parse");
+    }
 }

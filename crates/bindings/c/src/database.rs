@@ -1334,7 +1334,7 @@ pub extern "C" fn grafeo_create_vector_index(
     match db
         .inner
         .read()
-        .create_vector_index(label_str, prop_str, dims, metric_str, m_val, ef_val)
+        .create_vector_index(label_str, prop_str, dims, metric_str, m_val, ef_val, None)
     {
         Ok(()) => GrafeoStatus::Ok,
         Err(e) => set_error(&e),

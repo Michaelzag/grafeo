@@ -244,6 +244,10 @@ impl CommonKeyword {
 }
 
 /// Unescapes backslash-escaped characters in a string literal.
+///
+/// Supports standard escapes (`\n`, `\r`, `\t`, `\\`, `\'`, `\"`) as well as
+/// Unicode escapes: `\uXXXX` (4-hex-digit BMP) and `\UXXXXXXXX` (8-hex-digit
+/// full Unicode range).
 #[must_use]
 pub fn unescape_string(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
@@ -257,6 +261,42 @@ pub fn unescape_string(s: &str) -> String {
                 Some('\\') => result.push('\\'),
                 Some('\'') => result.push('\''),
                 Some('"') => result.push('"'),
+                Some('u') => {
+                    // \uXXXX: 4-hex-digit Unicode escape (BMP)
+                    let hex: String = chars.by_ref().take(4).collect();
+                    if hex.len() == 4 {
+                        if let Some(cp) =
+                            u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32)
+                        {
+                            result.push(cp);
+                        } else {
+                            // Invalid codepoint (e.g. surrogate): preserve literal
+                            result.push_str("\\u");
+                            result.push_str(&hex);
+                        }
+                    } else {
+                        // Not enough hex digits: preserve literal
+                        result.push_str("\\u");
+                        result.push_str(&hex);
+                    }
+                }
+                Some('U') => {
+                    // \UXXXXXXXX: 8-hex-digit Unicode escape (full range)
+                    let hex: String = chars.by_ref().take(8).collect();
+                    if hex.len() == 8 {
+                        if let Some(cp) =
+                            u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32)
+                        {
+                            result.push(cp);
+                        } else {
+                            result.push_str("\\U");
+                            result.push_str(&hex);
+                        }
+                    } else {
+                        result.push_str("\\U");
+                        result.push_str(&hex);
+                    }
+                }
                 Some(other) => {
                     result.push('\\');
                     result.push(other);
@@ -362,5 +402,72 @@ mod tests {
                 "Expected '{kw}' to be recognized as a common keyword"
             );
         }
+    }
+
+    // ==================== Unicode escape sequence tests ====================
+
+    #[test]
+    fn test_unescape_basic_escapes_unchanged() {
+        assert_eq!(unescape_string(r"\n"), "\n");
+        assert_eq!(unescape_string(r"\r"), "\r");
+        assert_eq!(unescape_string(r"\t"), "\t");
+        assert_eq!(unescape_string(r"\\"), "\\");
+        assert_eq!(unescape_string(r"\'"), "'");
+        assert_eq!(unescape_string(r#"\""#), "\"");
+    }
+
+    #[test]
+    fn test_unescape_unicode_bmp_4digit() {
+        // \u0041 = 'A'
+        assert_eq!(unescape_string(r"\u0041"), "A");
+        // \u00E9 = 'e' (e with acute)
+        assert_eq!(unescape_string(r"\u00E9"), "\u{00E9}");
+        // \u4EBA = Chinese character for 'person'
+        assert_eq!(unescape_string(r"\u4EBA"), "\u{4EBA}");
+        // \u0000 = null character
+        assert_eq!(unescape_string(r"\u0000"), "\0");
+    }
+
+    #[test]
+    fn test_unescape_unicode_full_8digit() {
+        // \U0001F600 = grinning face emoji
+        assert_eq!(unescape_string(r"\U0001F600"), "\u{1F600}");
+        // \U00000041 = 'A' (padded)
+        assert_eq!(unescape_string(r"\U00000041"), "A");
+    }
+
+    #[test]
+    fn test_unescape_unicode_invalid_surrogate_preserved() {
+        // \uD800 is a surrogate, not a valid scalar value
+        let result = unescape_string(r"\uD800");
+        assert_eq!(
+            result, r"\uD800",
+            "Surrogates should be preserved as literal"
+        );
+    }
+
+    #[test]
+    fn test_unescape_unicode_invalid_too_large_preserved() {
+        // \U00110000 exceeds Unicode max (0x10FFFF)
+        let result = unescape_string(r"\U00110000");
+        assert_eq!(result, r"\U00110000", "Out-of-range should be preserved");
+    }
+
+    #[test]
+    fn test_unescape_unicode_incomplete_hex_preserved() {
+        // Only 2 hex digits instead of 4
+        let result = unescape_string(r"\u00");
+        assert_eq!(result, r"\u00", "Incomplete hex should be preserved");
+    }
+
+    #[test]
+    fn test_unescape_unicode_mixed_with_text() {
+        assert_eq!(unescape_string(r"Hello \u0041\u0042\u0043"), "Hello ABC");
+    }
+
+    #[test]
+    fn test_unescape_unicode_case_insensitive_hex() {
+        assert_eq!(unescape_string(r"\u00e9"), "\u{00E9}");
+        assert_eq!(unescape_string(r"\u00E9"), "\u{00E9}");
     }
 }

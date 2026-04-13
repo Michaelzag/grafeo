@@ -16,7 +16,7 @@ use grafeo_common::storage::section::{Section, SectionType};
 use grafeo_common::types::NodeId;
 use grafeo_common::utils::error::{Error, Result};
 
-use super::{DistanceMetric, HnswIndex};
+use super::{DistanceMetric, VectorIndexKind};
 
 /// Current vector store section format version.
 const VECTOR_SECTION_VERSION: u8 = 1;
@@ -49,17 +49,17 @@ struct IndexSnapshot {
 
 /// Vector Store section for the `.grafeo` container.
 ///
-/// Wraps a collection of `(key, Arc<HnswIndex>)` pairs and serializes
+/// Wraps a collection of `(key, Arc<VectorIndexKind>)` pairs and serializes
 /// their HNSW topologies for persistence.
 pub struct VectorStoreSection {
     /// Vector indexes: (key, index) pairs from LpgStore::vector_index_entries()
-    indexes: Vec<(String, Arc<HnswIndex>)>,
+    indexes: Vec<(String, Arc<VectorIndexKind>)>,
     dirty: AtomicBool,
 }
 
 impl VectorStoreSection {
     /// Create a new Vector Store section from the current indexes.
-    pub fn new(indexes: Vec<(String, Arc<HnswIndex>)>) -> Self {
+    pub fn new(indexes: Vec<(String, Arc<VectorIndexKind>)>) -> Self {
         Self {
             indexes,
             dirty: AtomicBool::new(false),
@@ -148,11 +148,11 @@ impl Section for VectorStoreSection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::index::vector::HnswConfig;
+    use crate::index::vector::{HnswConfig, HnswIndex};
 
-    fn make_test_index() -> (String, Arc<HnswIndex>) {
+    fn make_test_index() -> (String, Arc<VectorIndexKind>) {
         let config = HnswConfig::new(4, DistanceMetric::Cosine);
-        let index = Arc::new(HnswIndex::new(config));
+        let index = Arc::new(VectorIndexKind::Hnsw(HnswIndex::new(config)));
 
         // Manually set up a small topology via snapshot/restore
         let nodes = vec![
@@ -175,7 +175,7 @@ mod tests {
 
         // Create a fresh index with same config to restore into
         let config = index.config().clone();
-        let fresh_index = Arc::new(HnswIndex::new(config));
+        let fresh_index = Arc::new(VectorIndexKind::Hnsw(HnswIndex::new(config)));
         let mut section2 = VectorStoreSection::new(vec![(key, fresh_index.clone())]);
         section2
             .deserialize(&bytes)

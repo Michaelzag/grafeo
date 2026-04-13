@@ -1900,7 +1900,7 @@ impl SparqlTranslator {
         triple: &ast::TriplePattern,
         inner_path: &ast::PropertyPath,
     ) -> Result<LogicalOperator> {
-        const MAX_DEPTH: usize = 10;
+        const MAX_DEPTH: usize = 50;
 
         let subject = self.translate_triple_term(&triple.subject)?;
         let object = self.translate_triple_term(&triple.object)?;
@@ -1930,7 +1930,7 @@ impl SparqlTranslator {
         triple: &ast::TriplePattern,
         inner_path: &ast::PropertyPath,
     ) -> Result<LogicalOperator> {
-        const MAX_DEPTH: usize = 10;
+        const MAX_DEPTH: usize = 50;
 
         let subject = self.translate_triple_term(&triple.subject)?;
         let object = self.translate_triple_term(&triple.object)?;
@@ -3087,5 +3087,76 @@ mod tests {
         // Regression: ensure normal queries still translate fine
         let result = translate("SELECT ?x ?y WHERE { ?x ?p ?y }");
         assert!(result.is_ok());
+    }
+
+    // === SAMPLE aggregate tests (3G verification) ===
+
+    #[test]
+    fn test_sample_aggregate_translates() {
+        let result = translate(
+            "SELECT (SAMPLE(?name) AS ?sampleName) WHERE { ?x <http://example.org/name> ?name }",
+        );
+        assert!(
+            result.is_ok(),
+            "SAMPLE aggregate should translate: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_group_concat_with_separator_translates() {
+        let result = translate(
+            r#"SELECT (GROUP_CONCAT(?name; separator=", ") AS ?names) WHERE { ?x <http://example.org/name> ?name }"#,
+        );
+        assert!(
+            result.is_ok(),
+            "GROUP_CONCAT with separator should translate: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_group_concat_without_separator_translates() {
+        let result = translate(
+            "SELECT (GROUP_CONCAT(?name) AS ?names) WHERE { ?x <http://example.org/name> ?name }",
+        );
+        assert!(
+            result.is_ok(),
+            "GROUP_CONCAT without separator should translate: {:?}",
+            result.err()
+        );
+    }
+
+    // === Property path depth tests (3D verification) ===
+
+    #[test]
+    fn test_property_path_plus_translates_beyond_10() {
+        // With MAX_DEPTH=50, a + path should expand to more than 10 levels
+        let result = translate("SELECT ?x ?y WHERE { ?x <http://example.org/knows>+ ?y }");
+        assert!(
+            result.is_ok(),
+            "Property path + should translate: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_property_path_star_translates() {
+        let result = translate("SELECT ?x ?y WHERE { ?x <http://example.org/knows>* ?y }");
+        assert!(
+            result.is_ok(),
+            "Property path * should translate: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_property_path_optional_translates() {
+        let result = translate("SELECT ?x ?y WHERE { ?x <http://example.org/knows>? ?y }");
+        assert!(
+            result.is_ok(),
+            "Property path ? should translate: {:?}",
+            result.err()
+        );
     }
 }

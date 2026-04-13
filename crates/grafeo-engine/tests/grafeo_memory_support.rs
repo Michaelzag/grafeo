@@ -129,7 +129,7 @@ mod batch_create_with_props {
         let db = db();
 
         // Create a vector index first
-        db.create_vector_index("Doc", "emb", Some(3), None, None, None)
+        db.create_vector_index("Doc", "emb", Some(3), None, None, None, None)
             .unwrap();
 
         let mut props_list = Vec::new();
@@ -180,7 +180,7 @@ mod filter_optimization {
         let db = db();
 
         // Create index first
-        db.create_vector_index("Memory", "embedding", Some(3), None, None, None)
+        db.create_vector_index("Memory", "embedding", Some(3), None, None, None, None)
             .unwrap();
 
         // Create nodes via batch (auto-inserts into vector index)
@@ -220,7 +220,7 @@ mod filter_optimization {
     fn combined_equality_and_operator_filter() {
         let db = db();
 
-        db.create_vector_index("Memory", "embedding", Some(2), None, None, None)
+        db.create_vector_index("Memory", "embedding", Some(2), None, None, None, None)
             .unwrap();
 
         let mut p1 = HashMap::new();
@@ -269,7 +269,7 @@ mod filter_optimization {
     fn operator_filter_lt_works() {
         let db = db();
 
-        db.create_vector_index("Memory", "embedding", Some(2), None, None, None)
+        db.create_vector_index("Memory", "embedding", Some(2), None, None, None, None)
             .unwrap();
 
         db.batch_create_nodes_with_props(

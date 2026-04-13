@@ -99,8 +99,16 @@ fn test_incremental_growth_with_persistence() {
         inserted += batch_size as u64;
 
         // Create vector index after first batch
-        db.create_vector_index("Memory", "embedding", Some(384), Some("cosine"), None, None)
-            .expect("create vector index");
+        db.create_vector_index(
+            "Memory",
+            "embedding",
+            Some(384),
+            Some("cosine"),
+            None,
+            None,
+            None,
+        )
+        .expect("create vector index");
 
         // Verify search works
         let results = db
@@ -117,8 +125,16 @@ fn test_incremental_growth_with_persistence() {
 
         // Index metadata is persisted in snapshot v4 (single-file format),
         // but WAL-based persistence requires manual recreation after reopen.
-        db.create_vector_index("Memory", "embedding", Some(384), Some("cosine"), None, None)
-            .expect("recreate vector index after reopen");
+        db.create_vector_index(
+            "Memory",
+            "embedding",
+            Some(384),
+            Some("cosine"),
+            None,
+            None,
+            None,
+        )
+        .expect("recreate vector index after reopen");
 
         let batch_end = (inserted + reopen_every as u64).min(total_nodes as u64);
         for i in inserted..batch_end {
@@ -181,8 +197,16 @@ fn bench_hnsw_at_20k() {
             Value::Vector(random_384d_vector(i).into()),
         );
     }
-    db.create_vector_index("Memory", "embedding", Some(384), Some("cosine"), None, None)
-        .expect("create index");
+    db.create_vector_index(
+        "Memory",
+        "embedding",
+        Some(384),
+        Some("cosine"),
+        None,
+        None,
+        None,
+    )
+    .expect("create index");
 
     // Insert remaining incrementally
     for i in 100..total as u64 {
@@ -243,8 +267,16 @@ fn test_hnsw_recall_at_2k() {
         all_vectors.push(vec);
     }
 
-    db.create_vector_index("Memory", "embedding", Some(384), Some("cosine"), None, None)
-        .expect("create index");
+    db.create_vector_index(
+        "Memory",
+        "embedding",
+        Some(384),
+        Some("cosine"),
+        None,
+        None,
+        None,
+    )
+    .expect("create index");
 
     // Measure recall@10 for 20 queries
     let k = 10;
@@ -309,8 +341,16 @@ fn test_concurrent_vector_search_during_writes() {
             Value::Vector(random_384d_vector(i).into()),
         );
     }
-    db.create_vector_index("Memory", "embedding", Some(384), Some("cosine"), None, None)
-        .expect("create index");
+    db.create_vector_index(
+        "Memory",
+        "embedding",
+        Some(384),
+        Some("cosine"),
+        None,
+        None,
+        None,
+    )
+    .expect("create index");
 
     let num_readers = 4;
     let queries_per_reader = 50;
@@ -658,8 +698,16 @@ fn bench_vector_index_rebuild_5k() {
         }
 
         // Create index before close (so it gets persisted in snapshot v4)
-        db.create_vector_index("Memory", "embedding", Some(384), Some("cosine"), None, None)
-            .expect("create index");
+        db.create_vector_index(
+            "Memory",
+            "embedding",
+            Some(384),
+            Some("cosine"),
+            None,
+            None,
+            None,
+        )
+        .expect("create index");
 
         // Verify search works before close
         let results = db
@@ -687,8 +735,16 @@ fn bench_vector_index_rebuild_5k() {
     // The single-file format (snapshot v4) persists index metadata and
     // rebuilds the index from data on load. Measure if search works immediately.
     let rebuild_start = Instant::now();
-    db.create_vector_index("Memory", "embedding", Some(384), Some("cosine"), None, None)
-        .expect("recreate vector index after reopen");
+    db.create_vector_index(
+        "Memory",
+        "embedding",
+        Some(384),
+        Some("cosine"),
+        None,
+        None,
+        None,
+    )
+    .expect("recreate vector index after reopen");
     let rebuild_time = rebuild_start.elapsed();
 
     // Verify search works after rebuild
@@ -749,8 +805,16 @@ fn test_byov_384_cosine() {
         );
     }
 
-    db.create_vector_index("Memory", "embedding", Some(384), Some("cosine"), None, None)
-        .expect("create index");
+    db.create_vector_index(
+        "Memory",
+        "embedding",
+        Some(384),
+        Some("cosine"),
+        None,
+        None,
+        None,
+    )
+    .expect("create index");
 
     // Search with the same vector as node 0: should return node 0 as closest
     let query = random_384d_vector(0);
@@ -792,8 +856,16 @@ fn test_byov_all_metrics() {
             );
         }
 
-        db.create_vector_index("Memory", "embedding", Some(384), Some(metric), None, None)
-            .unwrap_or_else(|e| panic!("create index with {metric}: {e}"));
+        db.create_vector_index(
+            "Memory",
+            "embedding",
+            Some(384),
+            Some(metric),
+            None,
+            None,
+            None,
+        )
+        .unwrap_or_else(|e| panic!("create index with {metric}: {e}"));
 
         let results = db
             .vector_search("Memory", "embedding", &random_384d_vector(0), 5, None, None)
@@ -822,8 +894,16 @@ fn test_byov_incremental_after_index() {
         "embedding",
         Value::Vector(random_384d_vector(9999).into()),
     );
-    db.create_vector_index("Memory", "embedding", Some(384), Some("cosine"), None, None)
-        .expect("create index");
+    db.create_vector_index(
+        "Memory",
+        "embedding",
+        Some(384),
+        Some("cosine"),
+        None,
+        None,
+        None,
+    )
+    .expect("create index");
 
     // Insert 100 nodes incrementally
     for i in 0..100u64 {
@@ -1005,8 +1085,16 @@ fn test_batch_create_nodes_384() {
     let ids = db.batch_create_nodes("Memory", "embedding", vectors);
     assert_eq!(ids.len(), 200, "should create 200 nodes");
 
-    db.create_vector_index("Memory", "embedding", Some(384), Some("cosine"), None, None)
-        .expect("create index");
+    db.create_vector_index(
+        "Memory",
+        "embedding",
+        Some(384),
+        Some("cosine"),
+        None,
+        None,
+        None,
+    )
+    .expect("create index");
 
     let results = db
         .vector_search(

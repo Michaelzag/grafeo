@@ -30,7 +30,7 @@ fn setup_db() -> GrafeoDB {
     let n5 = db.create_node(&["Doc"]);
     db.set_node_property(n5, "emb", vec3(0.9, 0.1, 0.0)); // similar to n1
 
-    db.create_vector_index("Doc", "emb", Some(3), Some("cosine"), None, None)
+    db.create_vector_index("Doc", "emb", Some(3), Some("cosine"), None, None, None)
         .expect("create index");
 
     db

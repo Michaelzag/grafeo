@@ -43,7 +43,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 
 #[cfg(feature = "vector-index")]
-use crate::index::vector::HnswIndex;
+use crate::index::vector::VectorIndexKind;
 
 #[cfg(feature = "tiered-storage")]
 use crate::codec::EpochStore;
@@ -413,7 +413,7 @@ pub struct LpgStore {
     /// Created via [`GrafeoDB::create_vector_index`](grafeo_engine::GrafeoDB::create_vector_index).
     /// Lock order: 7 (same level as property_indexes, disjoint keys)
     #[cfg(feature = "vector-index")]
-    pub(super) vector_indexes: RwLock<FxHashMap<String, Arc<HnswIndex>>>,
+    pub(super) vector_indexes: RwLock<FxHashMap<String, Arc<VectorIndexKind>>>,
 
     /// Text indexes: "label:property" -> inverted index with BM25 scoring.
     ///

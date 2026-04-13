@@ -446,6 +446,7 @@ fn restore_indexes_from_snapshot(db: &super::GrafeoDB, indexes: &SnapshotIndexes
             Some(vi.metric.name()),
             Some(vi.m),
             Some(vi.ef_construction),
+            None,
         ) {
             grafeo_warn!(
                 "Failed to restore vector index :{label}({property}): {err}",
@@ -1558,8 +1559,16 @@ mod tests {
             Value::Vector(Arc::from([0.0_f32, 1.0, 0.0])),
         );
 
-        db.create_vector_index("Doc", "embedding", None, Some("cosine"), Some(4), Some(32))
-            .unwrap();
+        db.create_vector_index(
+            "Doc",
+            "embedding",
+            None,
+            Some("cosine"),
+            Some(4),
+            Some(32),
+            None,
+        )
+        .unwrap();
 
         let snapshot = db.export_snapshot().unwrap();
         let db2 = GrafeoDB::import_snapshot(&snapshot).unwrap();

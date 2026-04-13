@@ -312,6 +312,7 @@ impl JsGrafeoDB {
 
     /// Create a vector similarity index on a node property.
     #[napi(js_name = "createVectorIndex")]
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_vector_index(
         &self,
         label: String,
@@ -320,6 +321,7 @@ impl JsGrafeoDB {
         metric: Option<String>,
         m: Option<u32>,
         ef_construction: Option<u32>,
+        quantization: Option<String>,
     ) -> Result<()> {
         let db = self.inner.clone();
         tokio::task::spawn_blocking(move || {
@@ -331,6 +333,7 @@ impl JsGrafeoDB {
                 metric.as_deref(),
                 m.map(|v| v as usize),
                 ef_construction.map(|v| v as usize),
+                quantization.as_deref(),
             )
             .map_err(NodeGrafeoError::from)
             .map_err(napi::Error::from)

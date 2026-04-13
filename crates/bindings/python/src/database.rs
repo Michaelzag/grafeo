@@ -1219,11 +1219,15 @@ impl PyGrafeoDB {
     ///     metric: Distance metric - "cosine" (default), "euclidean", "dot_product", "manhattan"
     ///     m: HNSW links per node (default: 16). Higher = better recall, more memory.
     ///     ef_construction: Construction beam width (default: 128). Higher = better quality, slower build.
+    ///     quantization: Quantization mode - None (default), "scalar", "binary", or "product".
+    ///         Quantized indexes use less memory at the cost of slightly lower recall.
     ///
     /// Example:
     ///     db.create_node(['Doc'], {'embedding': [1.0, 0.0, 0.0]})
     ///     db.create_vector_index("Doc", "embedding", metric="cosine", m=32, ef_construction=200)
-    #[pyo3(signature = (label, property, dimensions=None, metric=None, m=None, ef_construction=None))]
+    ///     db.create_vector_index("Doc", "embedding", quantization="scalar")
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (label, property, dimensions=None, metric=None, m=None, ef_construction=None, quantization=None))]
     fn create_vector_index(
         &self,
         label: &str,
@@ -1232,10 +1236,19 @@ impl PyGrafeoDB {
         metric: Option<&str>,
         m: Option<usize>,
         ef_construction: Option<usize>,
+        quantization: Option<&str>,
     ) -> PyResult<()> {
         let db = self.inner.read();
-        db.create_vector_index(label, property, dimensions, metric, m, ef_construction)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+        db.create_vector_index(
+            label,
+            property,
+            dimensions,
+            metric,
+            m,
+            ef_construction,
+            quantization,
+        )
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
 
     /// Drop a vector index for the given label and property.

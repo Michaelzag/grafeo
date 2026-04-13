@@ -118,8 +118,277 @@ pub use hnsw::HnswIndex;
 pub use quantized_hnsw::QuantizedHnswIndex;
 #[cfg(feature = "vector-index")]
 pub use section::VectorStoreSection;
+// VectorIndexKind is defined below in this file (not in a sub-module).
 
 use grafeo_common::types::NodeId;
+#[cfg(feature = "vector-index")]
+use std::collections::HashSet;
+
+// ── VectorIndexKind ────────────────────────────────────────────────
+
+/// Unified enum for vector indexes stored in the LPG store.
+///
+/// Wraps either a plain [`HnswIndex`] or a [`QuantizedHnswIndex`],
+/// allowing the store and engine to handle both through a single type.
+#[cfg(feature = "vector-index")]
+pub enum VectorIndexKind {
+    /// Standard full-precision HNSW index.
+    Hnsw(HnswIndex),
+    /// Quantized HNSW index (scalar, binary, or product quantization).
+    Quantized(QuantizedHnswIndex),
+}
+
+#[cfg(feature = "vector-index")]
+impl VectorIndexKind {
+    /// Returns the HNSW configuration.
+    #[must_use]
+    pub fn config(&self) -> &HnswConfig {
+        match self {
+            Self::Hnsw(idx) => idx.config(),
+            Self::Quantized(idx) => idx.config(),
+        }
+    }
+
+    /// Returns the number of vectors in the index.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Hnsw(idx) => idx.len(),
+            Self::Quantized(idx) => idx.len(),
+        }
+    }
+
+    /// Returns true if the index is empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::Hnsw(idx) => idx.is_empty(),
+            Self::Quantized(idx) => idx.is_empty(),
+        }
+    }
+
+    /// Returns true if the index contains the given ID.
+    #[must_use]
+    pub fn contains(&self, id: NodeId) -> bool {
+        match self {
+            Self::Hnsw(idx) => idx.contains(id),
+            Self::Quantized(idx) => idx.contains(id),
+        }
+    }
+
+    /// Removes a vector from the index.
+    pub fn remove(&self, id: NodeId) -> bool {
+        match self {
+            Self::Hnsw(idx) => idx.remove(id),
+            Self::Quantized(idx) => idx.remove(id),
+        }
+    }
+
+    /// Inserts a vector into the index.
+    ///
+    /// For `Hnsw`, the accessor is used for neighbor distance lookups.
+    /// For `Quantized`, the vector is stored internally and the accessor is unused.
+    pub fn insert(&self, id: NodeId, vector: &[f32], accessor: &impl VectorAccessor) {
+        match self {
+            Self::Hnsw(idx) => idx.insert(id, vector, accessor),
+            Self::Quantized(idx) => idx.insert(id, vector),
+        }
+    }
+
+    /// Searches for the k nearest neighbors.
+    #[must_use]
+    pub fn search(
+        &self,
+        query: &[f32],
+        k: usize,
+        accessor: &impl VectorAccessor,
+    ) -> Vec<(NodeId, f32)> {
+        match self {
+            Self::Hnsw(idx) => idx.search(query, k, accessor),
+            Self::Quantized(idx) => idx.search(query, k),
+        }
+    }
+
+    /// Searches with a custom ef (beam width) parameter.
+    #[must_use]
+    pub fn search_with_ef(
+        &self,
+        query: &[f32],
+        k: usize,
+        ef: usize,
+        accessor: &impl VectorAccessor,
+    ) -> Vec<(NodeId, f32)> {
+        match self {
+            Self::Hnsw(idx) => idx.search_with_ef(query, k, ef, accessor),
+            Self::Quantized(idx) => idx.search_with_ef(query, k, ef),
+        }
+    }
+
+    /// Searches with an allowlist filter.
+    #[must_use]
+    pub fn search_with_filter(
+        &self,
+        query: &[f32],
+        k: usize,
+        allowlist: &HashSet<NodeId>,
+        accessor: &impl VectorAccessor,
+    ) -> Vec<(NodeId, f32)> {
+        match self {
+            Self::Hnsw(idx) => idx.search_with_filter(query, k, allowlist, accessor),
+            Self::Quantized(idx) => idx.search_with_filter(query, k, allowlist),
+        }
+    }
+
+    /// Searches with a custom ef and an allowlist filter.
+    #[must_use]
+    pub fn search_with_ef_and_filter(
+        &self,
+        query: &[f32],
+        k: usize,
+        ef: usize,
+        allowlist: &HashSet<NodeId>,
+        accessor: &impl VectorAccessor,
+    ) -> Vec<(NodeId, f32)> {
+        match self {
+            Self::Hnsw(idx) => idx.search_with_ef_and_filter(query, k, ef, allowlist, accessor),
+            Self::Quantized(idx) => idx.search_with_ef_and_filter(query, k, ef, allowlist),
+        }
+    }
+
+    /// Batch search for multiple queries.
+    #[must_use]
+    pub fn batch_search(
+        &self,
+        queries: &[Vec<f32>],
+        k: usize,
+        accessor: &impl VectorAccessor,
+    ) -> Vec<Vec<(NodeId, f32)>> {
+        match self {
+            Self::Hnsw(idx) => idx.batch_search(queries, k, accessor),
+            Self::Quantized(idx) => idx.batch_search(queries, k),
+        }
+    }
+
+    /// Batch search with custom ef for multiple queries.
+    #[must_use]
+    pub fn batch_search_with_ef(
+        &self,
+        queries: &[Vec<f32>],
+        k: usize,
+        ef: usize,
+        accessor: &impl VectorAccessor,
+    ) -> Vec<Vec<(NodeId, f32)>> {
+        match self {
+            Self::Hnsw(idx) => idx.batch_search_with_ef(queries, k, ef, accessor),
+            Self::Quantized(idx) => idx.batch_search_with_ef(queries, k, ef),
+        }
+    }
+
+    /// Batch search with an allowlist filter for multiple queries.
+    #[must_use]
+    pub fn batch_search_with_filter(
+        &self,
+        queries: &[Vec<f32>],
+        k: usize,
+        allowlist: &HashSet<NodeId>,
+        accessor: &impl VectorAccessor,
+    ) -> Vec<Vec<(NodeId, f32)>> {
+        match self {
+            Self::Hnsw(idx) => idx.batch_search_with_filter(queries, k, allowlist, accessor),
+            Self::Quantized(idx) => idx.batch_search_with_filter(queries, k, allowlist),
+        }
+    }
+
+    /// Batch search with custom ef and an allowlist filter.
+    #[must_use]
+    pub fn batch_search_with_ef_and_filter(
+        &self,
+        queries: &[Vec<f32>],
+        k: usize,
+        ef: usize,
+        allowlist: &HashSet<NodeId>,
+        accessor: &impl VectorAccessor,
+    ) -> Vec<Vec<(NodeId, f32)>> {
+        match self {
+            Self::Hnsw(idx) => {
+                idx.batch_search_with_ef_and_filter(queries, k, ef, allowlist, accessor)
+            }
+            Self::Quantized(idx) => idx.batch_search_with_ef_and_filter(queries, k, ef, allowlist),
+        }
+    }
+
+    /// Snapshot the HNSW topology for serialization.
+    #[must_use]
+    pub fn snapshot_topology(&self) -> (Option<NodeId>, usize, Vec<(NodeId, Vec<Vec<NodeId>>)>) {
+        match self {
+            Self::Hnsw(idx) => idx.snapshot_topology(),
+            Self::Quantized(idx) => idx.snapshot_topology(),
+        }
+    }
+
+    /// Restore topology from a snapshot.
+    pub fn restore_topology(
+        &self,
+        entry_point: Option<NodeId>,
+        max_level: usize,
+        node_data: Vec<(NodeId, Vec<Vec<NodeId>>)>,
+    ) {
+        match self {
+            Self::Hnsw(idx) => idx.restore_topology(entry_point, max_level, node_data),
+            Self::Quantized(idx) => idx.restore_topology(entry_point, max_level, node_data),
+        }
+    }
+
+    /// Returns estimated heap memory in bytes.
+    #[must_use]
+    pub fn heap_memory_bytes(&self) -> usize {
+        match self {
+            Self::Hnsw(idx) => idx.heap_memory_bytes(),
+            Self::Quantized(idx) => idx.heap_memory_bytes(),
+        }
+    }
+
+    /// Returns the quantization type, if this is a quantized index.
+    #[must_use]
+    pub fn quantization_type(&self) -> Option<QuantizationType> {
+        match self {
+            Self::Hnsw(_) => None,
+            Self::Quantized(idx) => Some(idx.quantization_type()),
+        }
+    }
+
+    /// Returns a reference to the inner `HnswIndex`, if this is a plain HNSW variant.
+    #[must_use]
+    pub fn as_hnsw(&self) -> Option<&HnswIndex> {
+        match self {
+            Self::Hnsw(idx) => Some(idx),
+            Self::Quantized(_) => None,
+        }
+    }
+
+    /// Returns a reference to the inner `QuantizedHnswIndex`, if quantized.
+    #[must_use]
+    pub fn as_quantized(&self) -> Option<&QuantizedHnswIndex> {
+        match self {
+            Self::Hnsw(_) => None,
+            Self::Quantized(idx) => Some(idx),
+        }
+    }
+}
+
+#[cfg(feature = "vector-index")]
+impl From<HnswIndex> for VectorIndexKind {
+    fn from(idx: HnswIndex) -> Self {
+        Self::Hnsw(idx)
+    }
+}
+
+#[cfg(feature = "vector-index")]
+impl From<QuantizedHnswIndex> for VectorIndexKind {
+    fn from(idx: QuantizedHnswIndex) -> Self {
+        Self::Quantized(idx)
+    }
+}
 
 /// Configuration for vector search operations.
 #[derive(Debug, Clone)]

@@ -614,6 +614,141 @@ impl QuantizedHnswIndex {
             queries.iter().map(|query| self.search(query, k)).collect()
         }
     }
+
+    /// Searches with an allowlist filter.
+    ///
+    /// Only nodes in the `allowlist` can appear in results. The search ef
+    /// is auto-scaled based on allowlist selectivity.
+    #[must_use]
+    pub fn search_with_filter(
+        &self,
+        query: &[f32],
+        k: usize,
+        allowlist: &std::collections::HashSet<NodeId>,
+    ) -> Vec<(NodeId, f32)> {
+        let results = self.search(query, k.max(allowlist.len()));
+        results
+            .into_iter()
+            .filter(|(id, _)| allowlist.contains(id))
+            .take(k)
+            .collect()
+    }
+
+    /// Searches with a custom ef and an allowlist filter.
+    #[must_use]
+    pub fn search_with_ef_and_filter(
+        &self,
+        query: &[f32],
+        k: usize,
+        ef: usize,
+        allowlist: &std::collections::HashSet<NodeId>,
+    ) -> Vec<(NodeId, f32)> {
+        let results = self.search_with_ef(query, k.max(allowlist.len()), ef);
+        results
+            .into_iter()
+            .filter(|(id, _)| allowlist.contains(id))
+            .take(k)
+            .collect()
+    }
+
+    /// Batch search with custom ef for multiple queries.
+    #[must_use]
+    pub fn batch_search_with_ef(
+        &self,
+        queries: &[Vec<f32>],
+        k: usize,
+        ef: usize,
+    ) -> Vec<Vec<(NodeId, f32)>> {
+        #[cfg(feature = "parallel")]
+        {
+            use rayon::prelude::*;
+            queries
+                .par_iter()
+                .map(|query| self.search_with_ef(query, k, ef))
+                .collect()
+        }
+        #[cfg(not(feature = "parallel"))]
+        {
+            queries
+                .iter()
+                .map(|query| self.search_with_ef(query, k, ef))
+                .collect()
+        }
+    }
+
+    /// Batch search with an allowlist filter for multiple queries.
+    #[must_use]
+    pub fn batch_search_with_filter(
+        &self,
+        queries: &[Vec<f32>],
+        k: usize,
+        allowlist: &std::collections::HashSet<NodeId>,
+    ) -> Vec<Vec<(NodeId, f32)>> {
+        #[cfg(feature = "parallel")]
+        {
+            use rayon::prelude::*;
+            queries
+                .par_iter()
+                .map(|query| self.search_with_filter(query, k, allowlist))
+                .collect()
+        }
+        #[cfg(not(feature = "parallel"))]
+        {
+            queries
+                .iter()
+                .map(|query| self.search_with_filter(query, k, allowlist))
+                .collect()
+        }
+    }
+
+    /// Batch search with custom ef and an allowlist filter for multiple queries.
+    #[must_use]
+    pub fn batch_search_with_ef_and_filter(
+        &self,
+        queries: &[Vec<f32>],
+        k: usize,
+        ef: usize,
+        allowlist: &std::collections::HashSet<NodeId>,
+    ) -> Vec<Vec<(NodeId, f32)>> {
+        #[cfg(feature = "parallel")]
+        {
+            use rayon::prelude::*;
+            queries
+                .par_iter()
+                .map(|query| self.search_with_ef_and_filter(query, k, ef, allowlist))
+                .collect()
+        }
+        #[cfg(not(feature = "parallel"))]
+        {
+            queries
+                .iter()
+                .map(|query| self.search_with_ef_and_filter(query, k, ef, allowlist))
+                .collect()
+        }
+    }
+
+    /// Snapshot the underlying HNSW topology for serialization.
+    #[must_use]
+    pub fn snapshot_topology(&self) -> (Option<NodeId>, usize, Vec<(NodeId, Vec<Vec<NodeId>>)>) {
+        self.hnsw.snapshot_topology()
+    }
+
+    /// Restore topology from a snapshot. Replaces all current data.
+    pub fn restore_topology(
+        &self,
+        entry_point: Option<NodeId>,
+        max_level: usize,
+        node_data: Vec<(NodeId, Vec<Vec<NodeId>>)>,
+    ) {
+        self.hnsw
+            .restore_topology(entry_point, max_level, node_data);
+    }
+
+    /// Returns estimated heap memory in bytes.
+    #[must_use]
+    pub fn heap_memory_bytes(&self) -> usize {
+        self.hnsw.heap_memory_bytes() + self.memory_usage()
+    }
 }
 
 impl std::fmt::Debug for QuantizedHnswIndex {

@@ -278,7 +278,9 @@ impl super::GrafeoDB {
 
         // Collect matching vector indexes BEFORE deletion removes labels
         #[cfg(feature = "vector-index")]
-        let indexes_to_clean: Vec<std::sync::Arc<grafeo_core::index::vector::HnswIndex>> = self
+        let indexes_to_clean: Vec<
+            std::sync::Arc<grafeo_core::index::vector::VectorIndexKind>,
+        > = self
             .lpg_store()
             .get_node(id)
             .map(|node| {
