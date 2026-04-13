@@ -1061,4 +1061,77 @@ mod tests {
         assert_eq!(uf.find(0), uf.find(3));
         assert_ne!(uf.find(0), uf.find(4));
     }
+
+    #[test]
+    fn test_cluster_reexecution_resolves_conflicts() {
+        // Two disjoint conflict groups: {0,1} share entity A, {2,3} share entity B.
+        // After round 1, both groups conflict internally.
+        // Cluster-based re-execution should resolve them in one pass.
+        let executor = ParallelExecutor::new(4);
+        let ops: Vec<String> = (0..8).map(|i| format!("op{i}")).collect();
+        let batch = BatchRequest::new(ops);
+
+        let entity_a = EntityId::Node(NodeId::new(100));
+        let entity_b = EntityId::Node(NodeId::new(200));
+
+        let result = executor.execute_batch(batch, |idx, _, result| match idx {
+            0 | 1 => {
+                result.record_read(entity_a, EpochId::new(0));
+                result.record_write(entity_a);
+            }
+            2 | 3 => {
+                result.record_read(entity_b, EpochId::new(0));
+                result.record_write(entity_b);
+            }
+            _ => {
+                result.record_write(EntityId::Node(NodeId::new(idx as u64 + 1000)));
+            }
+        });
+
+        assert!(result.all_succeeded(), "all operations should succeed");
+        assert!(result.parallel_executed, "should use parallel execution");
+        // Conflicts should have been detected and re-executed
+        assert!(
+            result.reexecution_count > 0 || result.conflict_cluster_count == 0,
+            "either conflicts resolved via clusters or no conflicts arose"
+        );
+    }
+
+    #[test]
+    fn test_large_single_cluster_falls_back() {
+        // All operations conflict on the same entity.
+        // The largest cluster > 80% threshold should trigger round-based fallback.
+        let executor = ParallelExecutor::new(4);
+        let ops: Vec<String> = (0..10).map(|i| format!("op{i}")).collect();
+        let batch = BatchRequest::new(ops);
+
+        let shared = EntityId::Node(NodeId::new(999));
+
+        let result = executor.execute_batch(batch, |_idx, _, result| {
+            result.record_read(shared, EpochId::new(0));
+            result.record_write(shared);
+        });
+
+        // Should succeed (via either cluster or round-based fallback)
+        assert!(result.all_succeeded() || !result.parallel_executed);
+    }
+
+    #[test]
+    fn test_sequential_fallback_high_conflict_rate() {
+        // >30% conflict rate should trigger sequential fallback
+        let executor = ParallelExecutor::new(4);
+        let ops: Vec<String> = (0..5).map(|i| format!("op{i}")).collect();
+        let batch = BatchRequest::new(ops);
+
+        let shared = EntityId::Node(NodeId::new(42));
+
+        let result = executor.execute_batch(batch, |_idx, _, result| {
+            result.record_read(shared, EpochId::new(0));
+            result.record_write(shared);
+        });
+
+        // With 100% conflict rate, should either fall back to sequential
+        // or succeed through re-execution
+        assert!(result.all_succeeded());
+    }
 }

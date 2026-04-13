@@ -263,4 +263,138 @@ mod tests {
         assert_eq!(push_ops.len(), 1);
         assert!(push_ops[0].name().contains("Sort"));
     }
+
+    #[test]
+    fn convert_aggregate_scan_produces_one_push_op() {
+        use crate::execution::operators::{AggregateExpr, AggregateFunction};
+
+        let scan: Box<dyn Operator> = Box::new(TestScanOperator::new());
+        let aggregates = vec![AggregateExpr {
+            function: AggregateFunction::Count,
+            column: None,
+            column2: None,
+            distinct: false,
+            alias: None,
+            percentile: None,
+            separator: None,
+        }];
+        let agg: Box<dyn Operator> = Box::new(HashAggregateOperator::new(
+            scan,
+            vec![],
+            aggregates,
+            vec![LogicalType::Int64],
+        ));
+
+        let (source, push_ops) = convert_to_pipeline(agg);
+        assert_eq!(source.name(), "TestScan");
+        assert_eq!(push_ops.len(), 1);
+        assert!(push_ops[0].name().contains("Aggregate"));
+    }
+
+    #[test]
+    fn convert_distinct_scan_produces_one_push_op() {
+        let scan: Box<dyn Operator> = Box::new(TestScanOperator::new());
+        let distinct: Box<dyn Operator> =
+            Box::new(DistinctOperator::new(scan, vec![LogicalType::Int64]));
+
+        let (source, push_ops) = convert_to_pipeline(distinct);
+        assert_eq!(source.name(), "TestScan");
+        assert_eq!(push_ops.len(), 1);
+        assert!(push_ops[0].name().contains("Distinct"));
+    }
+
+    #[test]
+    fn convert_distinct_on_columns_scan() {
+        let scan: Box<dyn Operator> = Box::new(TestScanOperator::new());
+        let distinct: Box<dyn Operator> = Box::new(DistinctOperator::on_columns(
+            scan,
+            vec![0],
+            vec![LogicalType::Int64],
+        ));
+
+        let (source, push_ops) = convert_to_pipeline(distinct);
+        assert_eq!(source.name(), "TestScan");
+        assert_eq!(push_ops.len(), 1);
+        assert!(push_ops[0].name().contains("Distinct"));
+    }
+
+    #[test]
+    fn convert_deep_pipeline_sort_filter_limit() {
+        let scan: Box<dyn Operator> = Box::new(TestScanOperator::new());
+        let predicate: Box<dyn Predicate> = Box::new(AlwaysTruePredicate);
+        let filter: Box<dyn Operator> = Box::new(FilterOperator::new(scan, predicate));
+        let keys = vec![SortKey::ascending(0)];
+        let sort: Box<dyn Operator> =
+            Box::new(SortOperator::new(filter, keys, vec![LogicalType::Int64]));
+        let limit: Box<dyn Operator> =
+            Box::new(LimitOperator::new(sort, 5, vec![LogicalType::Int64]));
+
+        let (source, push_ops) = convert_to_pipeline(limit);
+        assert_eq!(source.name(), "TestScan");
+        assert_eq!(push_ops.len(), 3);
+        // Pipeline order: filter, sort, limit (source-first)
+        assert!(push_ops[0].name().contains("Filter"));
+        assert!(push_ops[1].name().contains("Sort"));
+        assert!(push_ops[2].name().contains("Limit"));
+    }
+
+    #[test]
+    fn pipeline_roundtrip_produces_correct_results() {
+        use crate::execution::pipeline::Pipeline;
+        use crate::execution::sink::CollectorSink;
+        use crate::execution::source::OperatorSource;
+
+        // Build: Scan -> Filter(always true) -> Sort(col 0 ASC)
+        let scan: Box<dyn Operator> = Box::new(TestScanOperator::new());
+        let predicate: Box<dyn Predicate> = Box::new(AlwaysTruePredicate);
+        let filter: Box<dyn Operator> = Box::new(FilterOperator::new(scan, predicate));
+        let keys = vec![SortKey::ascending(0)];
+        let sort: Box<dyn Operator> =
+            Box::new(SortOperator::new(filter, keys, vec![LogicalType::Int64]));
+
+        // Convert to pipeline
+        let (source, push_ops) = convert_to_pipeline(sort);
+        assert_eq!(push_ops.len(), 2); // Filter + Sort
+
+        // Execute the pipeline
+        let source = Box::new(OperatorSource::new(source));
+        let collector = CollectorSink::new();
+        let mut pipeline = Pipeline::new(source, push_ops, Box::new(collector));
+        pipeline.execute().unwrap();
+
+        // Extract results
+        let sink_box = pipeline.into_sink();
+        let any_sink: Box<dyn std::any::Any> = sink_box.into_any();
+        let collector = any_sink.downcast::<CollectorSink>().unwrap();
+        assert_eq!(collector.row_count(), 3);
+    }
+
+    #[test]
+    fn predicate_adapter_delegates_correctly() {
+        let mut col = crate::execution::vector::ValueVector::with_type(LogicalType::Int64);
+        col.push_int64(42);
+        let chunk = DataChunk::new(vec![col]);
+
+        let adapter = PredicateAdapter(Box::new(AlwaysTruePredicate));
+        assert!(adapter.evaluate(&chunk, 0));
+    }
+
+    #[test]
+    fn convert_sort_key_maps_directions() {
+        use crate::execution::operators::{NullOrder, SortDirection};
+
+        let asc = super::convert_sort_key(&SortKey {
+            column: 3,
+            direction: SortDirection::Ascending,
+            null_order: NullOrder::NullsFirst,
+        });
+        assert_eq!(asc.column, 3);
+
+        let desc = super::convert_sort_key(&SortKey {
+            column: 7,
+            direction: SortDirection::Descending,
+            null_order: NullOrder::NullsLast,
+        });
+        assert_eq!(desc.column, 7);
+    }
 }

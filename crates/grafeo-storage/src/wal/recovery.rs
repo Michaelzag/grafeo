@@ -1180,4 +1180,82 @@ mod crash_tests {
             "Aborted + crashed records should both be discarded"
         );
     }
+
+    #[cfg(feature = "encryption")]
+    #[test]
+    fn test_encrypted_wal_roundtrip() {
+        use grafeo_common::encryption::{KEY_SIZE, KeyChain};
+
+        let dir = tempdir().unwrap();
+        let key = [42u8; KEY_SIZE];
+        let chain = KeyChain::new(key);
+
+        // Write encrypted records
+        {
+            let mut wal = WalManager::open(dir.path()).unwrap();
+            wal.set_encryptor(chain.encryptor_for("grafeo-wal", &0u64.to_be_bytes()));
+
+            wal.log(&WalRecord::CreateNode {
+                id: NodeId::new(1),
+                labels: vec!["Person".to_string()],
+            })
+            .unwrap();
+
+            wal.log(&WalRecord::TransactionCommit {
+                transaction_id: TransactionId::new(1),
+            })
+            .unwrap();
+
+            wal.sync().unwrap();
+        }
+
+        // Recover with same key
+        let mut recovery = WalRecovery::new(dir.path());
+        recovery.set_encryptor(chain.encryptor_for("grafeo-wal", &0u64.to_be_bytes()));
+        let records = recovery.recover().unwrap();
+        assert_eq!(records.len(), 2, "should recover both encrypted records");
+    }
+
+    #[cfg(feature = "encryption")]
+    #[test]
+    fn test_encrypted_wal_wrong_key_fails() {
+        use grafeo_common::encryption::{KEY_SIZE, KeyChain};
+
+        let dir = tempdir().unwrap();
+        let key = [42u8; KEY_SIZE];
+        let chain = KeyChain::new(key);
+
+        // Write with key A
+        {
+            let mut wal = WalManager::open(dir.path()).unwrap();
+            wal.set_encryptor(chain.encryptor_for("grafeo-wal", &0u64.to_be_bytes()));
+
+            wal.log(&WalRecord::CreateNode {
+                id: NodeId::new(1),
+                labels: vec!["Test".to_string()],
+            })
+            .unwrap();
+
+            wal.log(&WalRecord::TransactionCommit {
+                transaction_id: TransactionId::new(1),
+            })
+            .unwrap();
+
+            wal.sync().unwrap();
+        }
+
+        // Try recovery with wrong key B: decryption fails, treated as corruption,
+        // best-effort recovery returns no usable records
+        let wrong_key = [99u8; KEY_SIZE];
+        let wrong_chain = KeyChain::new(wrong_key);
+        let mut recovery = WalRecovery::new(dir.path());
+        recovery.set_encryptor(wrong_chain.encryptor_for("grafeo-wal", &0u64.to_be_bytes()));
+
+        let records = recovery.recover().unwrap_or_default();
+        assert!(
+            records.is_empty(),
+            "wrong key should produce no recoverable records, got {}",
+            records.len()
+        );
+    }
 }
