@@ -15,6 +15,9 @@ const CHECKPOINT_METADATA_FILE: &str = "checkpoint.meta";
 pub struct WalRecovery {
     /// Directory containing WAL files.
     dir: std::path::PathBuf,
+    /// Encryptor for decrypting WAL records (None = unencrypted).
+    #[cfg(feature = "encryption")]
+    encryptor: Option<grafeo_common::encryption::PageEncryptor>,
 }
 
 impl WalRecovery {
@@ -22,7 +25,15 @@ impl WalRecovery {
     pub fn new(dir: impl AsRef<Path>) -> Self {
         Self {
             dir: dir.as_ref().to_path_buf(),
+            #[cfg(feature = "encryption")]
+            encryptor: None,
         }
+    }
+
+    /// Sets the encryptor for decrypting WAL records during recovery.
+    #[cfg(feature = "encryption")]
+    pub fn set_encryptor(&mut self, encryptor: grafeo_common::encryption::PageEncryptor) {
+        self.encryptor = Some(encryptor);
     }
 
     /// Creates a recovery handler from a WAL manager.
@@ -30,6 +41,8 @@ impl WalRecovery {
     pub fn from_wal(wal: &WalManager) -> Self {
         Self {
             dir: wal.dir().to_path_buf(),
+            #[cfg(feature = "encryption")]
+            encryptor: None,
         }
     }
 
@@ -259,21 +272,51 @@ impl WalRecovery {
         }
         let len = u32::from_le_bytes(len_buf) as usize;
 
-        // Read data
-        let mut data = vec![0u8; len];
-        reader.read_exact(&mut data)?;
+        // Read payload (either encrypted or plaintext+checksum)
+        #[cfg(feature = "encryption")]
+        let data = if let Some(ref enc) = self.encryptor {
+            // Encrypted frame: payload is nonce(12) || ciphertext || tag(16)
+            let mut encrypted = vec![0u8; len];
+            reader.read_exact(&mut encrypted)?;
+            let aad = b"grafeo-wal";
+            enc.decrypt(&encrypted, aad).map_err(|_| {
+                Error::Storage(StorageError::Corruption(
+                    "WAL decryption failed: wrong key or corrupted record".to_string(),
+                ))
+            })?
+        } else {
+            // Plaintext frame: data + crc32
+            let mut data = vec![0u8; len];
+            reader.read_exact(&mut data)?;
 
-        // Read and verify checksum
-        let mut checksum_buf = [0u8; 4];
-        reader.read_exact(&mut checksum_buf)?;
-        let stored_checksum = u32::from_le_bytes(checksum_buf);
-        let computed_checksum = crc32fast::hash(&data);
+            let mut checksum_buf = [0u8; 4];
+            reader.read_exact(&mut checksum_buf)?;
+            let stored_checksum = u32::from_le_bytes(checksum_buf);
+            let computed_checksum = crc32fast::hash(&data);
+            if stored_checksum != computed_checksum {
+                return Err(Error::Storage(StorageError::Corruption(
+                    "WAL checksum mismatch".to_string(),
+                )));
+            }
+            data
+        };
 
-        if stored_checksum != computed_checksum {
-            return Err(Error::Storage(StorageError::Corruption(
-                "WAL checksum mismatch".to_string(),
-            )));
-        }
+        #[cfg(not(feature = "encryption"))]
+        let data = {
+            let mut data = vec![0u8; len];
+            reader.read_exact(&mut data)?;
+
+            let mut checksum_buf = [0u8; 4];
+            reader.read_exact(&mut checksum_buf)?;
+            let stored_checksum = u32::from_le_bytes(checksum_buf);
+            let computed_checksum = crc32fast::hash(&data);
+            if stored_checksum != computed_checksum {
+                return Err(Error::Storage(StorageError::Corruption(
+                    "WAL checksum mismatch".to_string(),
+                )));
+            }
+            data
+        };
 
         // Deserialize
         let (record, _): (R, _) =

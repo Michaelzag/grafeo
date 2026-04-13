@@ -111,8 +111,8 @@ impl Executor {
 
     /// Executes a push-based pipeline.
     ///
-    /// The source operator is wrapped in [`OperatorSource`], push operators form
-    /// the pipeline body, and a [`ChunkCollector`] gathers results.
+    /// The source operator is wrapped in `OperatorSource`, push operators form
+    /// the pipeline body, and a `ChunkCollector` gathers results.
     ///
     /// # Panics
     ///

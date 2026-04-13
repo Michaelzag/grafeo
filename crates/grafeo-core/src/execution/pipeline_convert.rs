@@ -2,7 +2,7 @@
 //!
 //! The converter walks the operator tree top-down, decomposing operators that
 //! have push equivalents. Source operators (scan, expand, join) stay pull-based
-//! and get wrapped in [`OperatorSource`].
+//! and get wrapped in [`OperatorSource`](super::source::OperatorSource).
 //!
 //! This enables the documented push-based execution model without modifying
 //! the planner, which continues to emit pull-based operator trees.

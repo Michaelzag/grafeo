@@ -52,6 +52,11 @@ pub struct PageEncryptor {
 
 impl PageEncryptor {
     /// Creates a new encryptor from a 32-byte key.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the key length is not 32 bytes (cannot happen when called
+    /// with `&[u8; KEY_SIZE]`).
     #[must_use]
     pub fn new(key: &[u8; KEY_SIZE]) -> Self {
         Self {
@@ -147,6 +152,11 @@ impl KeyChain {
     /// The `context` identifies the storage component (e.g., `"grafeo-wal"`,
     /// `"grafeo-pages"`). The `id` is component-specific (e.g., WAL generation,
     /// file ID, snapshot ID).
+    ///
+    /// # Panics
+    ///
+    /// Panics if HKDF expansion fails for a 32-byte output (cannot happen with
+    /// SHA-256, which supports up to 255 * 32 = 8160 bytes).
     #[must_use]
     pub fn derive_dek(&self, context: &str, id: &[u8]) -> Zeroizing<[u8; KEY_SIZE]> {
         let hk = Hkdf::<Sha256>::new(None, &*self.me);
