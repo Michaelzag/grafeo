@@ -21,13 +21,40 @@ use grafeo_common::utils::error::{Error, QueryError, QueryErrorKind, Result};
 
 /// Translates a SQL/PGQ query string to a logical plan.
 ///
+/// Supports an `EXPLAIN` or `EXPLAIN ANALYZE` prefix (case-insensitive)
+/// to request plan-only or profiled execution.
+///
 /// # Errors
 ///
 /// Returns an error if parsing fails or the AST contains unsupported constructs.
 pub fn translate(query: &str) -> Result<LogicalPlan> {
-    let statement = sql_pgq::parse(query)?;
+    let trimmed = query.trim_start();
+    let (explain, profile, actual_query) = if trimmed.len() >= 7
+        && trimmed[..7].eq_ignore_ascii_case("EXPLAIN")
+        && trimmed
+            .as_bytes()
+            .get(7)
+            .is_some_and(u8::is_ascii_whitespace)
+    {
+        let rest = trimmed[7..].trim_start();
+        if rest.len() >= 7
+            && rest[..7].eq_ignore_ascii_case("ANALYZE")
+            && rest.as_bytes().get(7).is_some_and(u8::is_ascii_whitespace)
+        {
+            (false, true, rest[7..].trim_start())
+        } else {
+            (true, false, rest)
+        }
+    } else {
+        (false, false, query)
+    };
+
+    let statement = sql_pgq::parse(actual_query)?;
     let translator = SqlPgqTranslator::new();
-    translator.translate_statement(&statement)
+    let mut plan = translator.translate_statement(&statement)?;
+    plan.explain = explain;
+    plan.profile = profile;
+    Ok(plan)
 }
 
 /// SQL/PGQ AST to logical plan translator.
@@ -1776,5 +1803,37 @@ mod tests {
         assert_eq!(yields.len(), 2, "Should have 2 yield items");
         assert_eq!(yields[0].field_name, "name");
         assert_eq!(yields[1].field_name, "value");
+    }
+
+    // === EXPLAIN/PROFILE tests ===
+
+    #[test]
+    fn test_explain_prefix_sets_explain_flag() {
+        let plan = super::translate(
+            "EXPLAIN SELECT * FROM GRAPH_TABLE (MATCH (n:Person) COLUMNS (n.name AS name))",
+        )
+        .unwrap();
+        assert!(plan.explain, "EXPLAIN prefix should set explain flag");
+        assert!(!plan.profile, "EXPLAIN should not set profile flag");
+    }
+
+    #[test]
+    fn test_explain_analyze_sets_profile_flag() {
+        let plan = super::translate(
+            "EXPLAIN ANALYZE SELECT * FROM GRAPH_TABLE (MATCH (n:Person) COLUMNS (n.name AS name))",
+        )
+        .unwrap();
+        assert!(!plan.explain, "EXPLAIN ANALYZE should not set explain flag");
+        assert!(plan.profile, "EXPLAIN ANALYZE should set profile flag");
+    }
+
+    #[test]
+    fn test_no_explain_prefix_normal_query() {
+        let plan = super::translate(
+            "SELECT * FROM GRAPH_TABLE (MATCH (n:Person) COLUMNS (n.name AS name))",
+        )
+        .unwrap();
+        assert!(!plan.explain);
+        assert!(!plan.profile);
     }
 }

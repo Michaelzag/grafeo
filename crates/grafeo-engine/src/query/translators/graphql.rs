@@ -25,13 +25,40 @@ use std::collections::HashMap;
 
 /// Translates a GraphQL query string to a logical plan.
 ///
+/// Supports an `EXPLAIN` or `EXPLAIN ANALYZE` prefix (case-insensitive,
+/// non-standard extension) to request plan-only or profiled execution.
+///
 /// # Errors
 ///
 /// Returns an error if the query cannot be parsed or translated.
 pub fn translate(query: &str) -> Result<LogicalPlan> {
-    let doc = graphql::parse(query)?;
+    let trimmed = query.trim_start();
+    let (explain, profile, actual_query) = if trimmed.len() >= 7
+        && trimmed[..7].eq_ignore_ascii_case("EXPLAIN")
+        && trimmed
+            .as_bytes()
+            .get(7)
+            .is_some_and(u8::is_ascii_whitespace)
+    {
+        let rest = trimmed[7..].trim_start();
+        if rest.len() >= 7
+            && rest[..7].eq_ignore_ascii_case("ANALYZE")
+            && rest.as_bytes().get(7).is_some_and(u8::is_ascii_whitespace)
+        {
+            (false, true, rest[7..].trim_start())
+        } else {
+            (true, false, rest)
+        }
+    } else {
+        (false, false, query)
+    };
+
+    let doc = graphql::parse(actual_query)?;
     let translator = GraphQLTranslator::new();
-    translator.translate_document(&doc)
+    let mut plan = translator.translate_document(&doc)?;
+    plan.explain = explain;
+    plan.profile = profile;
+    Ok(plan)
 }
 
 /// Mutation type for GraphQL mutations.
@@ -1797,5 +1824,28 @@ mod tests {
             find_in_filter(&plan.root),
             "Expected Filter with In operator for inline fragment type condition"
         );
+    }
+
+    // === EXPLAIN/PROFILE tests ===
+
+    #[test]
+    fn test_explain_prefix_sets_explain_flag() {
+        let plan = super::translate("EXPLAIN { person { name } }").unwrap();
+        assert!(plan.explain, "EXPLAIN prefix should set explain flag");
+        assert!(!plan.profile, "EXPLAIN should not set profile flag");
+    }
+
+    #[test]
+    fn test_explain_analyze_sets_profile_flag() {
+        let plan = super::translate("EXPLAIN ANALYZE { person { name } }").unwrap();
+        assert!(!plan.explain, "EXPLAIN ANALYZE should not set explain flag");
+        assert!(plan.profile, "EXPLAIN ANALYZE should set profile flag");
+    }
+
+    #[test]
+    fn test_no_explain_prefix_normal_query() {
+        let plan = super::translate("{ person { name } }").unwrap();
+        assert!(!plan.explain);
+        assert!(!plan.profile);
     }
 }

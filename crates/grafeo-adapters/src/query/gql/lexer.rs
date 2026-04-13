@@ -412,7 +412,12 @@ impl<'a> Lexer<'a> {
             }
             '!' => {
                 self.advance();
-                TokenKind::Exclamation
+                if self.current_char() == '=' {
+                    self.advance();
+                    TokenKind::Ne
+                } else {
+                    TokenKind::Exclamation
+                }
             }
             '~' => {
                 self.advance();

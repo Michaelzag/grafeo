@@ -8,12 +8,18 @@ use super::lexer::{Lexer, Token, TokenKind};
 use crate::query::keywords::unescape_string;
 use grafeo_common::utils::error::{QueryError, QueryErrorKind, Result};
 
+/// Maximum nesting depth for recursive parsing constructs (parenthesized
+/// expressions, CASE, EXISTS subqueries, list literals, function calls).
+const MAX_NESTING_DEPTH: u32 = 128;
+
 /// Cypher query parser.
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
     current: Token,
     previous: Token,
     source: &'a str,
+    /// Current nesting depth for recursive parsing constructs.
+    nesting_depth: u32,
 }
 
 impl<'a> Parser<'a> {
@@ -31,7 +37,24 @@ impl<'a> Parser<'a> {
             current,
             previous,
             source: query,
+            nesting_depth: 0,
         }
+    }
+
+    /// Increments the nesting depth and returns an error if the limit is exceeded.
+    fn enter_nesting(&mut self) -> Result<()> {
+        self.nesting_depth += 1;
+        if self.nesting_depth > MAX_NESTING_DEPTH {
+            return Err(self.error(&format!(
+                "Maximum nesting depth of {MAX_NESTING_DEPTH} exceeded"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Decrements the nesting depth.
+    fn exit_nesting(&mut self) {
+        self.nesting_depth = self.nesting_depth.saturating_sub(1);
     }
 
     /// Parses the query into a statement.
@@ -1537,17 +1560,21 @@ impl<'a> Parser<'a> {
 
                 // EXISTS { MATCH ... WHERE ... } subquery form
                 if lower == "exists" && self.current.kind == TokenKind::LBrace {
+                    self.enter_nesting()?;
                     self.advance(); // consume {
                     let inner_query = self.parse_exists_inner_query()?;
                     self.expect(TokenKind::RBrace)?;
+                    self.exit_nesting();
                     return Ok(Expression::Exists(Box::new(inner_query)));
                 }
 
                 // COUNT { MATCH ... WHERE ... } subquery form
                 if lower == "count" && self.current.kind == TokenKind::LBrace {
+                    self.enter_nesting()?;
                     self.advance(); // consume {
                     let inner_query = self.parse_exists_inner_query()?;
                     self.expect(TokenKind::RBrace)?;
+                    self.exit_nesting();
                     return Ok(Expression::CountSubquery(Box::new(inner_query)));
                 }
 
@@ -1671,12 +1698,15 @@ impl<'a> Parser<'a> {
                 }
             }
             TokenKind::LParen => {
+                self.enter_nesting()?;
                 self.advance();
                 let expr = self.parse_expression()?;
                 self.expect(TokenKind::RParen)?;
+                self.exit_nesting();
                 Ok(expr)
             }
             TokenKind::LBracket => {
+                self.enter_nesting()?;
                 self.advance();
 
                 // Detect pattern comprehension: [(pattern) WHERE pred | expr]
@@ -1699,6 +1729,7 @@ impl<'a> Parser<'a> {
                             self.advance();
                             let projection = self.parse_expression()?;
                             self.expect(TokenKind::RBracket)?;
+                            self.exit_nesting();
                             return Ok(Expression::PatternComprehension {
                                 pattern: Box::new(pattern),
                                 where_clause,
@@ -1732,6 +1763,7 @@ impl<'a> Parser<'a> {
                     };
 
                     self.expect(TokenKind::RBracket)?;
+                    self.exit_nesting();
                     return Ok(Expression::ListComprehension {
                         variable,
                         list: Box::new(list),
@@ -1750,6 +1782,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 self.expect(TokenKind::RBracket)?;
+                self.exit_nesting();
                 Ok(Expression::List(items))
             }
             TokenKind::LBrace => {
@@ -1828,6 +1861,8 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_case_expression(&mut self) -> Result<Expression> {
+        self.enter_nesting()?;
+
         let input = if self.current.kind != TokenKind::When {
             Some(Box::new(self.parse_expression()?))
         } else {
@@ -1851,6 +1886,7 @@ impl<'a> Parser<'a> {
         };
 
         self.expect(TokenKind::End)?;
+        self.exit_nesting();
 
         Ok(Expression::Case {
             input,
@@ -2492,7 +2528,7 @@ impl<'a> Parser<'a> {
     }
 
     fn error(&self, message: &str) -> grafeo_common::utils::error::Error {
-        QueryError::new(QueryErrorKind::Syntax, message)
+        QueryError::new(QueryErrorKind::Syntax, format!("[Cypher] {message}"))
             .with_span(self.current.span)
             .with_source(self.source.to_string())
             .into()
@@ -3999,5 +4035,65 @@ mod tests {
     fn test_parse_alter_current_graph_type_with_semicolon() {
         let stmt = parse_ok("SHOW CURRENT GRAPH TYPE;");
         assert!(matches!(stmt, Statement::ShowCurrentGraphType));
+    }
+
+    // ==================== Recursion depth limit tests ====================
+
+    #[test]
+    fn test_deeply_nested_parentheses_errors_not_stack_overflow() {
+        let deep = "(".repeat(300) + "1" + &")".repeat(300);
+        let query = format!("MATCH (n) RETURN {deep}");
+        let mut parser = Parser::new(&query);
+        let result = parser.parse();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("nesting depth"),
+            "Expected nesting depth error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_moderate_nesting_succeeds() {
+        let depth = 50;
+        let deep = "(".repeat(depth) + "1" + &")".repeat(depth);
+        let query = format!("RETURN {deep}");
+        let mut parser = Parser::new(&query);
+        let result = parser.parse();
+        assert!(result.is_ok(), "50 levels of nesting should succeed");
+    }
+
+    #[test]
+    fn test_nested_case_expression_depth_limit() {
+        let prefix = "CASE WHEN true THEN ".repeat(300);
+        let suffix = " END".repeat(300);
+        let query = format!("RETURN {prefix}1{suffix}");
+        let mut parser = Parser::new(&query);
+        let result = parser.parse();
+        assert!(
+            result.is_err(),
+            "Deeply nested CASE should error, not stack overflow"
+        );
+    }
+
+    #[test]
+    fn test_nested_list_comprehension_depth_limit() {
+        let deep = "[x IN ".repeat(300) + "[1]" + &" | x]".repeat(300);
+        let query = format!("RETURN {deep}");
+        let mut parser = Parser::new(&query);
+        // Should error or parse, but never stack overflow
+        let _ = parser.parse();
+    }
+
+    #[test]
+    fn test_cypher_error_includes_language_prefix() {
+        let mut parser = Parser::new("INVALID SYNTAX");
+        let result = parser.parse();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("[Cypher]"),
+            "Cypher errors should be prefixed with [Cypher], got: {err}"
+        );
     }
 }

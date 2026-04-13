@@ -105,25 +105,14 @@ impl PyNetworkXAdapter {
     fn in_degree(&self, node_id: u64) -> PyResult<usize> {
         let db = self.db.read();
         let store = db.store();
-        let nodes = store.node_ids();
-        let mut count = 0;
-        for other in nodes {
-            for (neighbor, _) in store.edges_from(other, Direction::Outgoing) {
-                if neighbor.0 == node_id {
-                    count += 1;
-                }
-            }
-        }
-        Ok(count)
+        Ok(store.in_degree(NodeId::new(node_id)))
     }
 
     /// Get out-degree of a node.
     fn out_degree(&self, node_id: u64) -> PyResult<usize> {
         let db = self.db.read();
         let store = db.store();
-        Ok(store
-            .edges_from(NodeId::new(node_id), Direction::Outgoing)
-            .count())
+        Ok(store.out_degree(NodeId::new(node_id)))
     }
 
     /// Get degree of a node (in + out for directed, total for undirected).

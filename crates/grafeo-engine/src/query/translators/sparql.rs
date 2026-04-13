@@ -873,14 +873,10 @@ impl SparqlTranslator {
                 Ok(plan.root)
             }
 
-            ast::GraphPattern::Service {
-                endpoint: _,
-                pattern,
-                silent: _,
-            } => {
-                // SERVICE queries remote endpoints - for now, translate the pattern
-                self.translate_graph_pattern(pattern)
-            }
+            ast::GraphPattern::Service { .. } => Err(Error::Query(QueryError::new(
+                QueryErrorKind::Semantic,
+                "SPARQL SERVICE (federated queries) is not yet supported",
+            ))),
 
             ast::GraphPattern::InlineData(data) => {
                 // VALUES clause: each row becomes a chain of BIND operators
@@ -3049,5 +3045,47 @@ mod tests {
             find_left_join(&plan.root),
             "OPTIONAL should produce a LeftJoin operator in the plan"
         );
+    }
+
+    // === SERVICE clause tests (federated queries not supported) ===
+
+    #[test]
+    fn test_service_clause_returns_explicit_error() {
+        let result =
+            translate("SELECT ?x WHERE { SERVICE <http://example.org/sparql> { ?x ?p ?o } }");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("SERVICE"),
+            "Error should mention SERVICE, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_service_silent_clause_also_errors() {
+        let result = translate(
+            "SELECT ?x WHERE { SERVICE SILENT <http://example.org/sparql> { ?x ?p ?o } }",
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("SERVICE"),
+            "SILENT SERVICE should also error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_service_clause_with_local_patterns_still_errors() {
+        // Ensure SERVICE is not silently executed locally
+        let result =
+            translate("SELECT ?x ?y WHERE { ?x ?p ?y . SERVICE <http://remote/> { ?y ?q ?z } }");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_query_without_service_still_works() {
+        // Regression: ensure normal queries still translate fine
+        let result = translate("SELECT ?x ?y WHERE { ?x ?p ?y }");
+        assert!(result.is_ok());
     }
 }

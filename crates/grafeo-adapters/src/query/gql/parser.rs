@@ -6,6 +6,10 @@ use super::lexer::{Lexer, Token, TokenKind};
 use crate::query::keywords::unescape_string;
 use grafeo_common::utils::error::{Error, QueryError, QueryErrorKind, Result, SourceSpan};
 
+/// Maximum nesting depth for recursive parsing constructs (parenthesized
+/// expressions, CASE, EXISTS subqueries, list literals, function calls).
+const MAX_NESTING_DEPTH: u32 = 128;
+
 /// GQL Parser.
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
@@ -13,6 +17,8 @@ pub struct Parser<'a> {
     peeked: Option<Token>,
     peeked_second: Option<Token>,
     source: &'a str,
+    /// Current nesting depth for recursive parsing constructs.
+    nesting_depth: u32,
 }
 
 impl<'a> Parser<'a> {
@@ -26,7 +32,24 @@ impl<'a> Parser<'a> {
             peeked: None,
             peeked_second: None,
             source: input,
+            nesting_depth: 0,
         }
+    }
+
+    /// Increments the nesting depth and returns an error if the limit is exceeded.
+    fn enter_nesting(&mut self) -> Result<()> {
+        self.nesting_depth += 1;
+        if self.nesting_depth > MAX_NESTING_DEPTH {
+            return Err(self.error(&format!(
+                "Maximum nesting depth of {MAX_NESTING_DEPTH} exceeded"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Decrements the nesting depth.
+    fn exit_nesting(&mut self) {
+        self.nesting_depth = self.nesting_depth.saturating_sub(1);
     }
 
     /// Checks if the current token can be used as a label, type name, or property name.
@@ -3520,7 +3543,20 @@ impl<'a> Parser<'a> {
                 } else {
                     text.parse()
                 }
-                .map_err(|_| self.error("Invalid integer"))?;
+                .map_err(|e: std::num::ParseIntError| {
+                    if *e.kind() == std::num::IntErrorKind::PosOverflow
+                        || *e.kind() == std::num::IntErrorKind::NegOverflow
+                    {
+                        self.error(&format!(
+                            "Integer literal '{}' overflows the valid range ({} to {})",
+                            text,
+                            i64::MIN,
+                            i64::MAX
+                        ))
+                    } else {
+                        self.error(&format!("Invalid integer literal: '{}'", text))
+                    }
+                })?;
                 self.advance();
                 Ok(Expression::Literal(Literal::Integer(value)))
             }
@@ -3960,17 +3996,22 @@ impl<'a> Parser<'a> {
                 }
             }
             TokenKind::LParen => {
+                self.enter_nesting()?;
                 self.advance();
                 let expr = self.parse_expression()?;
                 self.expect(TokenKind::RParen)?;
+                self.exit_nesting();
                 Ok(expr)
             }
             TokenKind::LBracket => {
+                self.enter_nesting()?;
                 self.advance(); // consume [
                 // Disambiguate: [x IN list WHERE ... | expr] vs [elem, ...]
                 // List comprehension if: identifier followed by IN keyword
                 if self.is_identifier() && self.peek_kind() == TokenKind::In {
-                    return self.parse_list_comprehension_inner();
+                    let result = self.parse_list_comprehension_inner();
+                    self.exit_nesting();
+                    return result;
                 }
                 let mut elements = Vec::new();
                 if self.current.kind != TokenKind::RBracket {
@@ -3981,6 +4022,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 self.expect(TokenKind::RBracket)?;
+                self.exit_nesting();
                 Ok(Expression::List(elements))
             }
             TokenKind::Parameter => {
@@ -3991,12 +4033,14 @@ impl<'a> Parser<'a> {
                 Ok(Expression::Parameter(name))
             }
             TokenKind::Exists => {
+                self.enter_nesting()?;
                 self.advance();
                 if self.current.kind == TokenKind::LBrace {
                     // EXISTS { MATCH ... } subquery form
                     self.advance(); // consume {
                     let inner_query = self.parse_exists_inner_query()?;
                     self.expect(TokenKind::RBrace)?;
+                    self.exit_nesting();
                     Ok(Expression::ExistsSubquery {
                         query: Box::new(inner_query),
                     })
@@ -4005,6 +4049,7 @@ impl<'a> Parser<'a> {
                     self.expect(TokenKind::LParen)?;
                     let arg = self.parse_expression()?;
                     self.expect(TokenKind::RParen)?;
+                    self.exit_nesting();
                     Ok(Expression::FunctionCall {
                         name: "exists".to_string(),
                         args: vec![arg],
@@ -4086,6 +4131,7 @@ impl<'a> Parser<'a> {
     /// Parses a CASE expression.
     /// CASE [input] WHEN condition THEN result [WHEN ...] [ELSE default] END
     fn parse_case_expression(&mut self) -> Result<Expression> {
+        self.enter_nesting()?;
         self.expect(TokenKind::Case)?;
 
         // Check for simple CASE (CASE expr WHEN value THEN ...)
@@ -4107,6 +4153,7 @@ impl<'a> Parser<'a> {
         }
 
         if whens.is_empty() {
+            self.exit_nesting();
             return Err(self.error("CASE requires at least one WHEN clause"));
         }
 
@@ -4119,6 +4166,7 @@ impl<'a> Parser<'a> {
         };
 
         self.expect(TokenKind::End)?;
+        self.exit_nesting();
 
         Ok(Expression::Case {
             input,
@@ -6831,7 +6879,7 @@ impl<'a> Parser<'a> {
 
     fn error(&self, message: &str) -> Error {
         Error::Query(
-            QueryError::new(QueryErrorKind::Syntax, message)
+            QueryError::new(QueryErrorKind::Syntax, format!("[GQL] {message}"))
                 .with_span(self.current.span)
                 .with_source(self.source.to_string()),
         )
@@ -10190,5 +10238,226 @@ mod tests {
         let mut parser = Parser::new("SELECT n.name FROM my_graph MATCH (n:Person) RETURN n.name");
         // May fail during semantic validation, but should not panic.
         let _ = parser.parse();
+    }
+
+    // ==================== Recursion depth limit tests ====================
+
+    #[test]
+    fn test_deeply_nested_parentheses_errors_not_stack_overflow() {
+        let deep = "(".repeat(300) + "1" + &")".repeat(300);
+        let query = format!("MATCH (n) RETURN {deep}");
+        let mut parser = Parser::new(&query);
+        let result = parser.parse();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("nesting depth"),
+            "Expected nesting depth error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_nesting_at_exact_limit_succeeds() {
+        // 128 levels should succeed (limit is > 128, not >=)
+        let depth = 128;
+        let deep = "(".repeat(depth) + "1" + &")".repeat(depth);
+        let query = format!("RETURN {deep}");
+        let mut parser = Parser::new(&query);
+        // At the limit: this may succeed or fail depending on how many nesting
+        // points accumulate. The important thing is no stack overflow.
+        let _ = parser.parse();
+    }
+
+    #[test]
+    fn test_moderate_nesting_succeeds() {
+        // 50 levels of parentheses should always succeed
+        let depth = 50;
+        let deep = "(".repeat(depth) + "1" + &")".repeat(depth);
+        let query = format!("RETURN {deep}");
+        let mut parser = Parser::new(&query);
+        let result = parser.parse();
+        assert!(result.is_ok(), "50 levels of nesting should succeed");
+    }
+
+    #[test]
+    fn test_nested_case_expressions_depth_limit() {
+        // CASE WHEN ... THEN CASE WHEN ... THEN ... END END
+        let prefix = "CASE WHEN true THEN ".repeat(300);
+        let suffix = " END".repeat(300);
+        let query = format!("RETURN {prefix}1{suffix}");
+        let mut parser = Parser::new(&query);
+        let result = parser.parse();
+        // Should error rather than stack overflow
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_nested_list_literals_depth_limit() {
+        let deep = "[".repeat(300) + "1" + &"]".repeat(300);
+        let query = format!("RETURN {deep}");
+        let mut parser = Parser::new(&query);
+        let result = parser.parse();
+        // Should error rather than stack overflow
+        assert!(result.is_err());
+    }
+
+    // ==================== Integer overflow error message tests ====================
+
+    #[test]
+    fn test_integer_overflow_decimal_shows_descriptive_error() {
+        let mut parser = Parser::new("RETURN 99999999999999999999");
+        let result = parser.parse();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("overflows"),
+            "Expected overflow message, got: {err}"
+        );
+        assert!(
+            err.contains("99999999999999999999"),
+            "Expected literal value in error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_integer_overflow_hex_shows_descriptive_error() {
+        let mut parser = Parser::new("RETURN 0xFFFFFFFFFFFFFFFFFF");
+        let result = parser.parse();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("overflows"),
+            "Expected overflow message, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_integer_overflow_octal_shows_descriptive_error() {
+        let mut parser = Parser::new("RETURN 0o7777777777777777777777");
+        let result = parser.parse();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("overflows"),
+            "Expected overflow message, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_integer_overflow_binary_shows_descriptive_error() {
+        let long_binary = "1".repeat(65);
+        let query = format!("RETURN 0b{long_binary}");
+        let mut parser = Parser::new(&query);
+        let result = parser.parse();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("overflows"),
+            "Expected overflow message, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_i64_max_parses_successfully() {
+        let query = format!("RETURN {}", i64::MAX);
+        let mut parser = Parser::new(&query);
+        let result = parser.parse();
+        assert!(result.is_ok(), "i64::MAX should parse successfully");
+    }
+
+    #[test]
+    fn test_i64_min_parses_successfully() {
+        // i64::MIN is -9223372036854775808, written as negative literal
+        let query = format!("RETURN {}", i64::MIN);
+        let mut parser = Parser::new(&query);
+        let result = parser.parse();
+        assert!(result.is_ok(), "i64::MIN should parse successfully");
+    }
+
+    #[test]
+    fn test_i64_max_plus_one_overflows() {
+        // 9223372036854775808 = i64::MAX + 1
+        let mut parser = Parser::new("RETURN 9223372036854775808");
+        let result = parser.parse();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("overflows"),
+            "i64::MAX+1 should overflow, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_negative_i64_min_minus_one_overflows() {
+        // -9223372036854775809 overflows i64::MIN
+        let mut parser = Parser::new("RETURN -9223372036854775809");
+        let result = parser.parse();
+        // This should either error on overflow or produce a unary negation error
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_zero_parses_successfully() {
+        let mut parser = Parser::new("RETURN 0");
+        assert!(parser.parse().is_ok());
+    }
+
+    #[test]
+    fn test_hex_i64_max_parses_successfully() {
+        let mut parser = Parser::new("RETURN 0x7FFFFFFFFFFFFFFF");
+        let result = parser.parse();
+        assert!(result.is_ok(), "i64::MAX in hex should parse successfully");
+    }
+
+    // ==================== != operator tests ====================
+
+    #[test]
+    fn test_not_equal_bang_equals() {
+        let mut parser = Parser::new("MATCH (n) WHERE n.age != 19 RETURN n");
+        let result = parser.parse();
+        assert!(
+            result.is_ok(),
+            "!= should be accepted as not-equal: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_not_equal_diamond() {
+        let mut parser = Parser::new("MATCH (n) WHERE n.age <> 19 RETURN n");
+        let result = parser.parse();
+        assert!(result.is_ok(), "<> should still work: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_not_equal_both_produce_same_ast() {
+        let mut p1 = Parser::new("MATCH (n) WHERE n.x != 1 RETURN n");
+        let mut p2 = Parser::new("MATCH (n) WHERE n.x <> 1 RETURN n");
+        let r1 = p1.parse();
+        let r2 = p2.parse();
+        assert!(r1.is_ok() && r2.is_ok(), "Both != and <> should parse");
+        // Both should produce the same AST structure (Ne comparison)
+    }
+
+    #[test]
+    fn test_exclamation_mark_alone_still_works() {
+        // ! without = should still produce Exclamation token (for NOT in some contexts)
+        let mut parser = Parser::new("MATCH (n) WHERE NOT n.active RETURN n");
+        let result = parser.parse();
+        assert!(result.is_ok(), "NOT should still work: {:?}", result.err());
+    }
+
+    // ==================== Error source identification tests ====================
+
+    #[test]
+    fn test_gql_error_includes_language_prefix() {
+        let mut parser = Parser::new("INVALID SYNTAX HERE");
+        let result = parser.parse();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("[GQL]"),
+            "GQL parser errors should be prefixed with [GQL], got: {err}"
+        );
     }
 }

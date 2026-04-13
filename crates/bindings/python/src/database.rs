@@ -23,8 +23,9 @@ use crate::types::PyValue;
 
 /// Holds results from async query execution.
 ///
-/// Works like [`PyQueryResult`] but without node/edge extraction (async context
-/// limitations). Iterate directly or call [`rows()`](Self::rows) to get all data.
+/// Works like [`PyQueryResult`], including [`nodes()`](Self::nodes) and
+/// [`edges()`](Self::edges) extraction. Iterate directly or call
+/// [`rows()`](Self::rows) to get all data.
 #[pyclass(name = "AsyncQueryResult")]
 pub struct AsyncQueryResult {
     #[pyo3(get)]
@@ -32,10 +33,22 @@ pub struct AsyncQueryResult {
     rows: Vec<Vec<Value>>,
     #[allow(dead_code)] // Stored for future typed access; currently only raw rows exposed
     column_types: Vec<LogicalType>,
+    nodes: Vec<PyNode>,
+    edges: Vec<PyEdge>,
 }
 
 #[pymethods]
 impl AsyncQueryResult {
+    /// Get all nodes from the result.
+    fn nodes(&self) -> Vec<PyNode> {
+        self.nodes.clone()
+    }
+
+    /// Get all edges from the result.
+    fn edges(&self) -> Vec<PyEdge> {
+        self.edges.clone()
+    }
+
     /// Get all rows as a list of lists.
     fn rows(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let list = pyo3::types::PyList::empty(py);
@@ -407,7 +420,11 @@ impl PyGrafeoDB {
 
     /// Execute a GQL query asynchronously.
     ///
-    /// This method returns a Python awaitable that can be used with asyncio.
+    /// Returns a Python awaitable that can be used with ``asyncio``.
+    /// Internally uses ``spawn_blocking`` to release the GIL while the query
+    /// runs on a thread pool, so other Python coroutines can make progress.
+    /// The underlying database I/O is synchronous: this does not use truly
+    /// non-blocking I/O, but it avoids holding the GIL during execution.
     ///
     /// Example:
     /// ```python
@@ -456,15 +473,21 @@ impl PyGrafeoDB {
             .map_err(|e| PyGrafeoError::Database(e.to_string()))?
             .map_err(PyGrafeoError::from)?;
 
-            // Create PyQueryResult from the result
-            // Note: We can't call extract_entities here because we don't have
-            // Python references in the async context. We return raw data.
+            // Extract entities before consuming the result rows.
+            // Entity extraction only inspects Value::Map markers, no Python needed.
+            let (nodes, edges) = grafeo_bindings_common::entity::extract_and_map(
+                &result,
+                |n| PyNode::new(n.id, n.labels, n.properties),
+                |e| PyEdge::new(e.id, e.edge_type, e.source_id, e.target_id, e.properties),
+            );
             let columns = std::mem::take(&mut result.columns);
             let column_types = std::mem::take(&mut result.column_types);
             Ok(AsyncQueryResult {
                 columns,
                 rows: result.into_rows(),
                 column_types,
+                nodes,
+                edges,
             })
         })
     }
@@ -521,6 +544,57 @@ impl PyGrafeoDB {
         params: Option<&Bound<'_, pyo3::types::PyDict>>,
     ) -> PyResult<PyQueryResult> {
         self.execute_language_impl("sparql", &format!("EXPLAIN {query}"), params)
+    }
+
+    /// Return the physical execution plan for a GQL query without executing it.
+    ///
+    /// Equivalent to ``db.execute("EXPLAIN " + query)``.
+    #[pyo3(signature = (query, params=None))]
+    fn explain(
+        &self,
+        query: &str,
+        params: Option<&Bound<'_, pyo3::types::PyDict>>,
+    ) -> PyResult<PyQueryResult> {
+        self.execute_language_impl("gql", &format!("EXPLAIN {query}"), params)
+    }
+
+    /// Return the physical execution plan for a Cypher query without executing it.
+    ///
+    /// Equivalent to ``db.execute_cypher("EXPLAIN " + query)``.
+    #[cfg(feature = "cypher")]
+    #[pyo3(signature = (query, params=None))]
+    fn explain_cypher(
+        &self,
+        query: &str,
+        params: Option<&Bound<'_, pyo3::types::PyDict>>,
+    ) -> PyResult<PyQueryResult> {
+        self.execute_language_impl("cypher", &format!("EXPLAIN {query}"), params)
+    }
+
+    /// Return the physical execution plan for a SQL/PGQ query without executing it.
+    ///
+    /// Equivalent to ``db.execute_sql("EXPLAIN " + query)``.
+    #[cfg(feature = "sql-pgq")]
+    #[pyo3(signature = (query, params=None))]
+    fn explain_sql(
+        &self,
+        query: &str,
+        params: Option<&Bound<'_, pyo3::types::PyDict>>,
+    ) -> PyResult<PyQueryResult> {
+        self.execute_language_impl("sql-pgq", &format!("EXPLAIN {query}"), params)
+    }
+
+    /// Return the physical execution plan for a Gremlin query without executing it.
+    ///
+    /// Equivalent to ``db.execute_gremlin("EXPLAIN " + query)``.
+    #[cfg(feature = "gremlin")]
+    #[pyo3(signature = (query, params=None))]
+    fn explain_gremlin(
+        &self,
+        query: &str,
+        params: Option<&Bound<'_, pyo3::types::PyDict>>,
+    ) -> PyResult<PyQueryResult> {
+        self.execute_language_impl("gremlin", &format!("EXPLAIN {query}"), params)
     }
 
     /// Validate the default graph against SHACL shapes in a named graph.

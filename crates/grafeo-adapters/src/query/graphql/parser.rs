@@ -7,11 +7,17 @@ use super::ast::*;
 use super::lexer::{Lexer, Token, TokenKind};
 use grafeo_common::utils::error::{Error, Result};
 
+/// Maximum nesting depth for recursive parsing constructs (nested
+/// selection sets, i.e. deeply nested field selections).
+const MAX_NESTING_DEPTH: u32 = 128;
+
 /// GraphQL parser.
 pub struct Parser<'a> {
     tokens: Vec<Token>,
     position: usize,
     source: &'a str,
+    /// Current nesting depth for recursive parsing constructs.
+    nesting_depth: u32,
 }
 
 impl<'a> Parser<'a> {
@@ -23,6 +29,7 @@ impl<'a> Parser<'a> {
             tokens,
             position: 0,
             source,
+            nesting_depth: 0,
         }
     }
 
@@ -203,6 +210,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_selection_set(&mut self) -> Result<SelectionSet> {
+        self.enter_nesting()?;
         self.expect(TokenKind::LBrace)?;
 
         let mut selections = Vec::new();
@@ -211,6 +219,7 @@ impl<'a> Parser<'a> {
         }
 
         self.expect(TokenKind::RBrace)?;
+        self.exit_nesting();
 
         Ok(SelectionSet { selections })
     }
@@ -433,11 +442,27 @@ impl<'a> Parser<'a> {
             )
     }
 
+    /// Increments the nesting depth and returns an error if the limit is exceeded.
+    fn enter_nesting(&mut self) -> Result<()> {
+        self.nesting_depth += 1;
+        if self.nesting_depth > MAX_NESTING_DEPTH {
+            return Err(self.error(&format!(
+                "Maximum nesting depth of {MAX_NESTING_DEPTH} exceeded"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Decrements the nesting depth.
+    fn exit_nesting(&mut self) {
+        self.nesting_depth = self.nesting_depth.saturating_sub(1);
+    }
+
     fn error(&self, message: &str) -> Error {
         Error::Query(
             grafeo_common::utils::error::QueryError::new(
                 grafeo_common::utils::error::QueryErrorKind::Syntax,
-                message,
+                format!("[GraphQL] {message}"),
             )
             .with_span(self.current_span())
             .with_source(self.source.to_string()),
@@ -692,5 +717,51 @@ mod tests {
         if let Definition::Operation(op) = &doc.definitions[0] {
             assert_eq!(op.operation, OperationType::Subscription);
         }
+    }
+
+    // ==================== Recursion depth limit tests ====================
+
+    #[test]
+    fn test_deeply_nested_selection_sets_errors_not_stack_overflow() {
+        // { f { f { f { ... } } } }
+        let open = "f { ".repeat(300);
+        let close = " }".repeat(300);
+        let query = format!("{{ {open}x{close} }}");
+        let mut parser = Parser::new(&query);
+        let result = parser.parse();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("nesting depth"),
+            "Expected nesting depth error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_moderate_selection_nesting_succeeds() {
+        // 10 levels of nesting should succeed
+        let open = "f { ".repeat(10);
+        let close = " }".repeat(10);
+        let query = format!("{{ {open}x{close} }}");
+        let mut parser = Parser::new(&query);
+        let result = parser.parse();
+        assert!(
+            result.is_ok(),
+            "10 levels of selection nesting should succeed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_deeply_nested_inline_fragments() {
+        let open = "... on Type { ".repeat(300);
+        let close = " }".repeat(300);
+        let query = format!("{{ {open}x{close} }}");
+        let mut parser = Parser::new(&query);
+        let result = parser.parse();
+        assert!(
+            result.is_err(),
+            "300 levels of inline fragments should error, not stack overflow"
+        );
     }
 }

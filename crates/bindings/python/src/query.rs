@@ -403,10 +403,19 @@ impl PyQueryBuilder {
     }
 
     /// Set a parameter.
-    fn param(&mut self, name: String, value: &Bound<'_, PyAny>) {
-        if let Ok(v) = PyValue::from_py(value) {
-            self.params.insert(name, v);
-        }
+    ///
+    /// # Errors
+    ///
+    /// Raises `ValueError` if the value cannot be converted to a Grafeo type.
+    fn param(&mut self, name: String, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        let v = PyValue::from_py(value).map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "Cannot convert parameter '{}' to a Grafeo value: {}",
+                name, e
+            ))
+        })?;
+        self.params.insert(name, v);
+        Ok(())
     }
 
     /// Get the query string.
