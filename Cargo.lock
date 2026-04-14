@@ -1476,7 +1476,6 @@ dependencies = [
 name = "grafeo-engine"
 version = "0.5.38"
 dependencies = [
- "anyhow",
  "arcstr",
  "arrow-array",
  "arrow-ipc",
