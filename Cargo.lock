@@ -1557,7 +1557,7 @@ version = "0.5.39"
 dependencies = [
  "grafeo-common",
  "grafeo-engine",
- "md-5",
+ "md5",
 ]
 
 [[package]]
@@ -2220,16 +2220,6 @@ checksum = "a06de3016e9fae57a36fd14dba131fccf49f74b40b7fbdb472f96e361ec71a08"
 dependencies = [
  "autocfg",
  "rawpointer",
-]
-
-[[package]]
-name = "md-5"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69b6441f590336821bb897fb28fc622898ccceb1d6cea3fde5ea86b090c4de98"
-dependencies = [
- "cfg-if",
- "digest 0.11.2",
 ]
 
 [[package]]
