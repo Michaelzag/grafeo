@@ -2,6 +2,33 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
+## [0.5.39] - Unreleased
+
+Performance and architecture release: push-based vectorized execution is now live, Block-STM gains smarter conflict partitioning, and the database can encrypt data at rest with AES-256-GCM.
+
+### Added
+
+- **Push-based pipeline execution**: queries with filter, sort, aggregate, limit, or distinct operators now execute through the push-based pipeline instead of the Volcano pull loop. The converter auto-decomposes operator trees post-planner, falling back to pull for source operators (scan, expand, join) and project (needs store access). New `into_any()` + `into_parts()` decomposition API on all operators.
+- **Encryption at rest** (`encryption`): AES-256-GCM encryption for WAL records and `.grafeo` sections. `PageEncryptor` with HKDF-SHA256 derived data encryption keys, `KeyChain` for key hierarchy, `PasswordKeyProvider` (Argon2id) and `RawKeyProvider`. Counter-based nonces using file byte offsets for crash-safe uniqueness. Zero overhead when feature is disabled.
+- **Block-STM conflict partitioning**: union-find clustering groups conflicting transactions for parallel re-execution. Falls back to round-based when the largest cluster exceeds 80% of the batch. New `conflict_cluster_count` and `largest_cluster_size` fields in `BatchResult`.
+- **Observability metrics**: `MetricsRegistry` with atomic counters for GC, WAL, and Block-STM operations. Prometheus text format export via `to_prometheus()`.
+- **Push pipeline guide**: internal documentation for moving operators between pull and push execution.
+
+### Changed
+
+- **WASM binary size thresholds updated**: profiled with twiggy, showing the binary is ~95% essential application code (665 KB gzipped, competitive with sql.js). CI threshold set to 660 KB warn / 700 KB fail.
+- **grafeo-storage is now optional** in grafeo-engine: only compiled when `wal`, `grafeo-file`, or `encryption` features are enabled. Reduces WASM compile times.
+- **crc32fast is now optional** in grafeo-engine: only compiled when `grafeo-file` feature is enabled.
+- **anyhow removed** from grafeo-engine dependencies (was unused, dead-code eliminated by LTO).
+
+### Fixed
+
+- **WAL nonce reuse on restart** (P0 security): encryption nonces used an ephemeral record counter that reset on restart. Fixed to use file byte offset, which survives restarts because WAL files are append-only.
+- **Section nonce collision** (P1 security): section encryption nonces used an iteration counter, not unique when duplicate section types exist. Fixed to use byte offset within the container file.
+- **Distinct operator hash collisions** (P1 correctness): `DistinctPushOperator` used `format!("{value:?}")` for hashing, causing collisions between structurally different values. Replaced with recursive `hash_value_into()` that properly hashes List, Map, Vector, and Path by content.
+- **CI enterprise profile missing features**: added `metrics,tracing` features to the enterprise CI matrix entry.
+- **Spec test tie-breaking**: added secondary ORDER BY columns to spec tests that relied on implementation-defined tie-breaking between pull and push execution paths.
+
 ## [0.5.38] - 2026-04-13
 
 Hardening, ISO compliance, and vector search improvements driven by persona-based exploratory testing. Parser security limits prevent stack overflow attacks, all six query languages gain EXPLAIN support, Unicode identifiers bring GQL closer to ISO 39075, and quantized vector indexes cut memory usage up to 4x for large embedding workloads.
