@@ -1181,7 +1181,7 @@ mod crash_tests {
         );
     }
 
-    #[cfg(feature = "encryption")]
+    #[cfg(all(feature = "encryption", not(miri)))]
     #[test]
     fn test_encrypted_wal_roundtrip() {
         use grafeo_common::encryption::{KEY_SIZE, KeyChain};
@@ -1216,7 +1216,7 @@ mod crash_tests {
         assert_eq!(records.len(), 2, "should recover both encrypted records");
     }
 
-    #[cfg(feature = "encryption")]
+    #[cfg(all(feature = "encryption", not(miri)))]
     #[test]
     fn test_encrypted_wal_wrong_key_fails() {
         use grafeo_common::encryption::{KEY_SIZE, KeyChain};

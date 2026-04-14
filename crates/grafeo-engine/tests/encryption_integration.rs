@@ -4,7 +4,8 @@
 //! used by WAL and section-level encryption. Engine-level wiring (Config →
 //! WAL/FileManager) is tracked separately.
 
-#![cfg(feature = "encryption")]
+// Miri cannot interpret AES-NI intrinsics used by aes-gcm: skip under Miri.
+#![cfg(all(feature = "encryption", not(miri)))]
 
 #[test]
 fn test_key_chain_deterministic_derivation() {

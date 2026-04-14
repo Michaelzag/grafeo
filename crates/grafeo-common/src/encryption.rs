@@ -327,7 +327,9 @@ pub fn build_nonce(high: u32, low: u64) -> [u8; NONCE_SIZE] {
 // Tests
 // -------------------------------------------------------------------------
 
-#[cfg(test)]
+// Miri cannot interpret AES-NI / CLMUL intrinsics used by aes-gcm,
+// falling back to a software path that takes hours. Skip under Miri.
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
 

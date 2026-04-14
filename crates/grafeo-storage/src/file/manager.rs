@@ -1418,7 +1418,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "encryption")]
+    #[cfg(all(feature = "encryption", not(miri)))]
     fn encrypted_section_roundtrip() {
         use grafeo_common::encryption::KeyChain;
         use grafeo_common::storage::SectionType;
@@ -1457,7 +1457,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "encryption")]
+    #[cfg(all(feature = "encryption", not(miri)))]
     fn encrypted_section_wrong_key_fails() {
         use grafeo_common::encryption::KeyChain;
         use grafeo_common::storage::SectionType;
