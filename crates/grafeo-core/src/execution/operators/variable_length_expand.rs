@@ -1123,4 +1123,24 @@ mod tests {
         assert_eq!(a_results.len(), 1, "Acyclic from a: only a->b");
         assert_eq!(a_results[0].1, b);
     }
+
+    #[test]
+    fn test_variable_length_expand_into_any() {
+        let store = Arc::new(LpgStore::new().unwrap());
+        let scan = Box::new(ScanOperator::with_label(
+            Arc::clone(&store) as Arc<dyn GraphStore>,
+            "Node",
+        ));
+        let op = VariableLengthExpandOperator::new(
+            Arc::clone(&store) as Arc<dyn GraphStore>,
+            scan,
+            0,
+            Direction::Outgoing,
+            vec![],
+            1,
+            3,
+        );
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<VariableLengthExpandOperator>().is_ok());
+    }
 }

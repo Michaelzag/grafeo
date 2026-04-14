@@ -524,6 +524,133 @@ mod tests {
     }
 
     #[test]
+    fn test_executor_type_capture_from_first_chunk() {
+        // When column_types are all Any, types should be captured from the first
+        // non-empty chunk.
+        let executor = Executor::with_columns(vec!["value".to_string()]);
+        // column_types starts as [Any] from with_columns
+        let mut op = MockIntOperator::new(vec![42, 99], 10);
+
+        let result = executor.execute(&mut op).unwrap();
+        assert_eq!(result.row_count(), 2);
+        // After execution, column types should be captured as Int64
+        assert_eq!(result.column_types, vec![LogicalType::Int64]);
+    }
+
+    #[test]
+    fn test_executor_type_capture_with_explicit_types() {
+        // When column_types are explicitly set (not all Any), types should NOT be
+        // overwritten from chunks.
+        let executor =
+            Executor::with_columns_and_types(vec!["value".to_string()], vec![LogicalType::String]);
+        let mut op = MockIntOperator::new(vec![1], 10);
+
+        let result = executor.execute(&mut op).unwrap();
+        assert_eq!(result.row_count(), 1);
+        // Types should remain as explicitly set (String), not changed to Int64
+        assert_eq!(result.column_types, vec![LogicalType::String]);
+    }
+
+    #[test]
+    fn test_execute_pipeline_basic() {
+        let source = Box::new(MockIntOperator::new(vec![10, 20, 30], 10));
+        let executor = Executor::with_columns(vec!["value".to_string()]);
+
+        let result = executor.execute_pipeline(source, vec![]).unwrap();
+        assert_eq!(result.row_count(), 3);
+        assert_eq!(result.rows[0][0], Value::Int64(10));
+        assert_eq!(result.rows[1][0], Value::Int64(20));
+        assert_eq!(result.rows[2][0], Value::Int64(30));
+    }
+
+    #[test]
+    fn test_execute_pipeline_empty_source() {
+        let source = Box::new(EmptyOperator);
+        let executor = Executor::with_columns(vec!["value".to_string()]);
+
+        let result = executor.execute_pipeline(source, vec![]).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_execute_pipeline_type_capture() {
+        // Pipeline should capture column types from first non-empty chunk when
+        // column_types are all Any.
+        let source = Box::new(MockIntOperator::new(vec![1, 2], 10));
+        let executor = Executor::with_columns(vec!["value".to_string()]);
+
+        let result = executor.execute_pipeline(source, vec![]).unwrap();
+        assert_eq!(result.column_types, vec![LogicalType::Int64]);
+    }
+
+    #[test]
+    fn test_execute_pipeline_explicit_types_preserved() {
+        // Pipeline should preserve explicitly set column types.
+        let source = Box::new(MockIntOperator::new(vec![1], 10));
+        let executor =
+            Executor::with_columns_and_types(vec!["value".to_string()], vec![LogicalType::String]);
+
+        let result = executor.execute_pipeline(source, vec![]).unwrap();
+        // Explicit types should not be overwritten
+        assert_eq!(result.column_types, vec![LogicalType::String]);
+    }
+
+    #[test]
+    fn test_execute_with_limit_type_capture() {
+        // execute_with_limit should also capture types from first chunk
+        let executor = Executor::with_columns(vec!["value".to_string()]);
+        let mut op = MockIntOperator::new(vec![1, 2, 3, 4, 5], 2);
+
+        let result = executor.execute_with_limit(&mut op, 3).unwrap();
+        assert_eq!(result.row_count(), 3);
+        assert_eq!(result.column_types, vec![LogicalType::Int64]);
+    }
+
+    #[test]
+    fn test_execute_with_limit_timeout_expired() {
+        use std::time::{Duration, Instant};
+
+        let expired = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
+        let executor =
+            Executor::with_columns(vec!["value".to_string()]).with_deadline(Some(expired));
+        let mut op = MockIntOperator::new(vec![1, 2, 3], 10);
+
+        let result = executor.execute_with_limit(&mut op, 10);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Query exceeded timeout")
+        );
+    }
+
+    #[test]
+    fn test_convert_operator_error_variants() {
+        // Test all OperatorError conversion branches
+        let err = convert_operator_error(OperatorError::TypeMismatch {
+            expected: "Int64".to_string(),
+            found: "String".to_string(),
+        });
+        assert!(matches!(err, Error::TypeMismatch { .. }));
+
+        let err = convert_operator_error(OperatorError::ColumnNotFound("col_x".to_string()));
+        assert!(matches!(err, Error::InvalidValue(_)));
+        assert!(err.to_string().contains("col_x"));
+
+        let err = convert_operator_error(OperatorError::Execution("internal issue".to_string()));
+        assert!(matches!(err, Error::Internal(_)));
+
+        let err = convert_operator_error(OperatorError::ConstraintViolation("unique".to_string()));
+        assert!(matches!(err, Error::InvalidValue(_)));
+        assert!(err.to_string().contains("unique"));
+
+        let err =
+            convert_operator_error(OperatorError::WriteConflict("concurrent write".to_string()));
+        assert!(matches!(err, Error::Transaction(_)));
+    }
+
+    #[test]
     fn test_execute_pipeline_timeout_expired() {
         use std::time::{Duration, Instant};
 

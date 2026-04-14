@@ -522,4 +522,22 @@ mod tests {
         // OFFSET is 0-based
         assert_eq!(offsets, vec![0, 1, 2]);
     }
+
+    #[test]
+    fn test_unwind_into_any() {
+        let mock = MockOperator {
+            chunks: vec![],
+            position: 0,
+        };
+        let op = UnwindOperator::new(
+            Box::new(mock),
+            0,
+            "items".to_string(),
+            vec![LogicalType::Any, LogicalType::Any],
+            false,
+            false,
+        );
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<UnwindOperator>().is_ok());
+    }
 }

@@ -595,6 +595,20 @@ mod tests {
         assert_eq!(chunk.row_count(), 2);
     }
 
+    #[test]
+    fn test_vector_scan_into_any() {
+        let store = Arc::new(LpgStore::new().unwrap());
+        let op = VectorScanOperator::brute_force(
+            Arc::clone(&store) as Arc<dyn GraphStore>,
+            "embedding",
+            vec![0.1, 0.2],
+            10,
+            DistanceMetric::Cosine,
+        );
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<VectorScanOperator>().is_ok());
+    }
+
     #[cfg(feature = "vector-index")]
     #[test]
     fn test_vector_scan_with_hnsw_index() {

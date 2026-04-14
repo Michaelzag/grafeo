@@ -474,3 +474,348 @@ fn test_pipeline_aggregate_group_sort() {
     assert_eq!(result.rows()[0][0].as_str().unwrap(), "Amsterdam");
     assert_eq!(result.rows()[0][1], Value::Int64(3));
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Operator coverage: queries that exercise every operator type through
+// the full engine, covering into_any(), into_parts(), and pipeline
+// conversion for all current and future push operations.
+// ═══════════════════════════════════════════════════════════════════════
+
+// ── Mutation operators (INSERT/DELETE with RETURN) ────────────────────
+
+#[test]
+fn test_mutation_insert_return() {
+    // INSERT ... RETURN exercises mutation operators through the pipeline
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    let result = session
+        .execute("INSERT (p:Robot {name: 'Gort', year: 1951}) RETURN p")
+        .unwrap();
+
+    assert_eq!(result.rows().len(), 1);
+    // INSERT RETURN p returns the full node; verify it exists
+    assert!(!result.rows()[0][0].is_null());
+}
+
+#[test]
+fn test_mutation_insert_multiple_return_count() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    session
+        .execute(
+            "INSERT (:Item {v: 1}), (:Item {v: 2}), (:Item {v: 3}), \
+                    (:Item {v: 4}), (:Item {v: 5})",
+        )
+        .unwrap();
+
+    let result = session
+        .execute("MATCH (i:Item) WHERE i.v > 2 RETURN COUNT(*) AS cnt")
+        .unwrap();
+
+    assert_eq!(result.rows()[0][0], Value::Int64(3));
+}
+
+#[test]
+fn test_mutation_delete_return() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    session
+        .execute("INSERT (:Temp {v: 1}), (:Temp {v: 2}), (:Keep {v: 3})")
+        .unwrap();
+
+    session
+        .execute("MATCH (t:Temp) DELETE t RETURN COUNT(*) AS deleted")
+        .unwrap();
+
+    // Verify delete happened
+    let remaining = session.execute("MATCH (n) RETURN COUNT(*) AS cnt").unwrap();
+    assert_eq!(remaining.rows()[0][0], Value::Int64(1)); // Only :Keep remains
+}
+
+// ── Join operators (multi-pattern MATCH) ─────────────────────────────
+
+#[test]
+fn test_join_cartesian() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    session
+        .execute("INSERT (:Color {name: 'Red'}), (:Color {name: 'Blue'})")
+        .unwrap();
+    session
+        .execute("INSERT (:Size {name: 'Small'}), (:Size {name: 'Large'})")
+        .unwrap();
+
+    // Cartesian join: 2 colors x 2 sizes = 4 combinations
+    let result = session
+        .execute(
+            "MATCH (c:Color), (s:Size) RETURN c.name, s.name \
+             ORDER BY c.name, s.name",
+        )
+        .unwrap();
+
+    assert_eq!(result.rows().len(), 4);
+    assert_eq!(result.rows()[0][0].as_str().unwrap(), "Blue");
+    assert_eq!(result.rows()[0][1].as_str().unwrap(), "Large");
+}
+
+// ── Set operators (UNION) ────────────────────────────────────────────
+
+#[test]
+fn test_union_distinct() {
+    let db = setup_people_db();
+    let session = db.session();
+
+    let result = session
+        .execute(
+            "MATCH (p:Person) WHERE p.city = 'Amsterdam' RETURN p.name \
+             UNION \
+             MATCH (p:Person) WHERE p.age > 40 RETURN p.name",
+        )
+        .unwrap();
+
+    // Amsterdam: Alix, Django, Vincent. Age > 40: Butch, Vincent.
+    // UNION deduplicates: Alix, Django, Vincent, Butch = 4
+    let names: Vec<&str> = result
+        .rows()
+        .iter()
+        .map(|r| r[0].as_str().unwrap())
+        .collect();
+    assert_eq!(names.len(), 4);
+    assert!(names.contains(&"Alix"));
+    assert!(names.contains(&"Butch"));
+    assert!(names.contains(&"Vincent"));
+}
+
+#[test]
+fn test_union_all() {
+    let db = setup_people_db();
+    let session = db.session();
+
+    let result = session
+        .execute(
+            "MATCH (p:Person) WHERE p.city = 'Amsterdam' RETURN p.name \
+             UNION ALL \
+             MATCH (p:Person) WHERE p.age > 40 RETURN p.name",
+        )
+        .unwrap();
+
+    // Amsterdam: 3, Age > 40: 1 (Butch), but Vincent is in both
+    // UNION ALL keeps duplicates: 3 + 1 = 4
+    assert!(result.rows().len() >= 4);
+}
+
+// ── Variable-length expand (path operators) ──────────────────────────
+
+#[test]
+fn test_variable_length_expand() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    session
+        .execute(
+            "INSERT (a:Node {name: 'A'})-[:NEXT]->(b:Node {name: 'B'})-[:NEXT]->(c:Node {name: 'C'})-[:NEXT]->(d:Node {name: 'D'})",
+        )
+        .unwrap();
+
+    // 2..3 hops from A should reach C and D
+    let result = session
+        .execute(
+            "MATCH (a:Node {name: 'A'})-[:NEXT*2..3]->(target) \
+             RETURN target.name ORDER BY target.name",
+        )
+        .unwrap();
+
+    let names: Vec<&str> = result
+        .rows()
+        .iter()
+        .map(|r| r[0].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"C")); // 2 hops
+    assert!(names.contains(&"D")); // 3 hops
+}
+
+#[test]
+fn test_variable_length_expand_with_filter() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    session
+        .execute(
+            "INSERT (:S {name: 'Start'})-[:HOP]->(:M {name: 'Mid', v: 10})-[:HOP]->(:E {name: 'End', v: 20})",
+        )
+        .unwrap();
+
+    let result = session
+        .execute(
+            "MATCH (:S)-[:HOP*1..2]->(t) WHERE t.v > 15 \
+             RETURN t.name",
+        )
+        .unwrap();
+
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0].as_str().unwrap(), "End");
+}
+
+// ── SingleRow operator (RETURN without MATCH) ────────────────────────
+
+#[test]
+fn test_single_row_return_literal() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    let result = session.execute("RETURN 42 AS answer").unwrap();
+
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Int64(42));
+}
+
+#[test]
+fn test_single_row_return_expression() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    let result = session
+        .execute("RETURN 2 + 3 AS sum, 'hello' AS greeting")
+        .unwrap();
+
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0], Value::Int64(5));
+    assert_eq!(result.rows()[0][1].as_str().unwrap(), "hello");
+}
+
+// ── Project operator (RETURN with expressions) ───────────────────────
+
+#[test]
+fn test_project_computed_columns() {
+    let db = setup_people_db();
+    let session = db.session();
+
+    let result = session
+        .execute(
+            "MATCH (p:Person) WHERE p.name = 'Alix' \
+             RETURN p.name, p.age, p.age + 10 AS future_age",
+        )
+        .unwrap();
+
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0].as_str().unwrap(), "Alix");
+    assert_eq!(result.rows()[0][1], Value::Int64(30));
+    assert_eq!(result.rows()[0][2], Value::Int64(40));
+}
+
+// ── Expand operator (traversals) ─────────────────────────────────────
+
+#[test]
+fn test_expand_with_filter_sort_limit() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    session
+        .execute(
+            "INSERT (a:Hub {name: 'Hub'}), \
+                    (b:Spoke {name: 'B', v: 3}), \
+                    (c:Spoke {name: 'C', v: 1}), \
+                    (d:Spoke {name: 'D', v: 2}), \
+                    (a)-[:LINK]->(b), (a)-[:LINK]->(c), (a)-[:LINK]->(d)",
+        )
+        .unwrap();
+
+    // Expand + Filter + Sort + Limit: exercises full pipeline chain
+    let result = session
+        .execute(
+            "MATCH (h:Hub)-[:LINK]->(s:Spoke) WHERE s.v > 1 \
+             RETURN s.name ORDER BY s.v ASC LIMIT 2",
+        )
+        .unwrap();
+
+    assert_eq!(result.rows().len(), 2);
+    assert_eq!(result.rows()[0][0].as_str().unwrap(), "D"); // v=2
+    assert_eq!(result.rows()[1][0].as_str().unwrap(), "B"); // v=3
+}
+
+// ── Complex multi-operator pipelines ─────────────────────────────────
+
+#[test]
+fn test_full_pipeline_chain() {
+    // This query exercises: Scan -> Expand -> Filter -> Aggregate -> Sort -> Limit
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    session
+        .execute(
+            "INSERT (:Dept {name: 'Eng'}), (:Dept {name: 'Sales'}), (:Dept {name: 'HR'}), \
+                    (:Emp {name: 'Alix', salary: 100})-[:IN]->(:Dept {name: 'Eng'}), \
+                    (:Emp {name: 'Gus', salary: 120})-[:IN]->(:Dept {name: 'Eng'}), \
+                    (:Emp {name: 'Jules', salary: 90})-[:IN]->(:Dept {name: 'Sales'})",
+        )
+        .unwrap();
+
+    let result = session
+        .execute(
+            "MATCH (e:Emp)-[:IN]->(d:Dept) \
+             RETURN d.name, COUNT(*) AS headcount, SUM(e.salary) AS total \
+             ORDER BY headcount DESC LIMIT 2",
+        )
+        .unwrap();
+
+    assert!(!result.rows().is_empty());
+    // Eng has 2 employees, should be first
+    assert_eq!(result.rows()[0][0].as_str().unwrap(), "Eng");
+    assert_eq!(result.rows()[0][1], Value::Int64(2));
+}
+
+#[test]
+fn test_distinct_after_expand() {
+    let db = GrafeoDB::new_in_memory();
+    let session = db.session();
+
+    session
+        .execute(
+            "INSERT (a:A {name: 'Alix'})-[:R]->(b:B {name: 'Gus'}), \
+                    (a)-[:R]->(c:B {name: 'Gus'})",
+        )
+        .unwrap();
+
+    // Two edges from A, both targets named "Gus": DISTINCT should collapse
+    let result = session
+        .execute("MATCH (:A)-[:R]->(b) RETURN DISTINCT b.name")
+        .unwrap();
+
+    assert_eq!(result.rows().len(), 1);
+    assert_eq!(result.rows()[0][0].as_str().unwrap(), "Gus");
+}
+
+// ── SKIP operator ────────────────────────────────────────────────────
+
+#[test]
+fn test_skip_with_limit() {
+    let db = setup_people_db();
+    let session = db.session();
+
+    let result = session
+        .execute("MATCH (p:Person) RETURN p.name ORDER BY p.name SKIP 2 LIMIT 3")
+        .unwrap();
+
+    assert_eq!(result.rows().len(), 3);
+    // Sorted: Alix, Butch, Django, Gus, Jules, Mia, Shosanna, Vincent
+    // Skip 2 (Alix, Butch), take 3: Django, Gus, Jules
+    assert_eq!(result.rows()[0][0].as_str().unwrap(), "Django");
+    assert_eq!(result.rows()[1][0].as_str().unwrap(), "Gus");
+    assert_eq!(result.rows()[2][0].as_str().unwrap(), "Jules");
+}
+
+#[test]
+fn test_skip_all() {
+    let db = setup_people_db();
+    let session = db.session();
+
+    let result = session
+        .execute("MATCH (p:Person) RETURN p.name SKIP 100")
+        .unwrap();
+
+    assert_eq!(result.rows().len(), 0);
+}

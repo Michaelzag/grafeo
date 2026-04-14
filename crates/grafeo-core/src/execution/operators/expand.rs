@@ -598,4 +598,13 @@ mod tests {
         let result = expand.next().unwrap();
         assert!(result.is_none());
     }
+
+    #[test]
+    fn test_expand_into_any() {
+        let (_store, dyn_store) = test_store();
+        let scan = Box::new(ScanOperator::with_label(Arc::clone(&dyn_store), "Person"));
+        let op = ExpandOperator::new(Arc::clone(&dyn_store), scan, 0, Direction::Outgoing, vec![]);
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<ExpandOperator>().is_ok());
+    }
 }

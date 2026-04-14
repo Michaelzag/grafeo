@@ -1835,4 +1835,44 @@ mod tests {
         let stdev = result.column(0).unwrap().get_float64(0).unwrap();
         assert!((stdev - 0.0).abs() < 0.01);
     }
+
+    #[test]
+    fn test_hash_aggregate_into_any() {
+        let mock = MockOperator::new(vec![]);
+        let op = HashAggregateOperator::new(
+            Box::new(mock),
+            vec![0],
+            vec![AggregateExpr::count_star()],
+            vec![LogicalType::Int64, LogicalType::Int64],
+        );
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<HashAggregateOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_simple_aggregate_into_any() {
+        let mock = MockOperator::new(vec![]);
+        let op = SimpleAggregateOperator::new(
+            Box::new(mock),
+            vec![AggregateExpr::count_star()],
+            vec![LogicalType::Int64],
+        );
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<SimpleAggregateOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_hash_aggregate_into_parts() {
+        let mock = MockOperator::new(vec![]);
+        let op = HashAggregateOperator::new(
+            Box::new(mock),
+            vec![0, 2],
+            vec![AggregateExpr::sum(1), AggregateExpr::count_star()],
+            vec![LogicalType::Int64, LogicalType::Int64, LogicalType::Int64],
+        );
+        let (mut child, group_columns, aggregates) = op.into_parts();
+        assert_eq!(group_columns, vec![0, 2]);
+        assert_eq!(aggregates.len(), 2);
+        assert!(child.next().unwrap().is_none());
+    }
 }

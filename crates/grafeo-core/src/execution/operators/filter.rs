@@ -6309,4 +6309,28 @@ mod tests {
         });
         assert_eq!(result, Some(Value::Bool(false)));
     }
+
+    #[test]
+    fn test_filter_into_any() {
+        let mock = MockScanOperator {
+            chunks: vec![],
+            position: 0,
+        };
+        let predicate = ComparisonPredicate::new(0, CompareOp::Eq, Value::Int64(1));
+        let op = FilterOperator::new(Box::new(mock), Box::new(predicate));
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<FilterOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_filter_into_parts() {
+        let mock = MockScanOperator {
+            chunks: vec![],
+            position: 0,
+        };
+        let predicate = ComparisonPredicate::new(0, CompareOp::Gt, Value::Int64(5));
+        let op = FilterOperator::new(Box::new(mock), Box::new(predicate));
+        let (mut child, _predicate) = op.into_parts();
+        assert!(child.next().unwrap().is_none());
+    }
 }

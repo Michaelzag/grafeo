@@ -2525,4 +2525,253 @@ mod tests {
         );
         assert_eq!(op.name(), "SetProperty");
     }
+
+    // ── into_any() coverage ─────────────────────────────────────
+
+    #[test]
+    fn test_create_node_into_any() {
+        let store = create_test_store();
+        let op = CreateNodeOperator::new(
+            Arc::clone(&store),
+            None,
+            vec!["Person".to_string()],
+            vec![],
+            vec![LogicalType::Int64],
+            0,
+        );
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<CreateNodeOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_create_edge_into_any() {
+        let store = create_test_store();
+        let op = CreateEdgeOperator::new(
+            Arc::clone(&store),
+            Box::new(EmptyInput),
+            0,
+            1,
+            "KNOWS".to_string(),
+            vec![LogicalType::Int64],
+        );
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<CreateEdgeOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_delete_node_into_any() {
+        let store = create_test_store();
+        let op = DeleteNodeOperator::new(
+            Arc::clone(&store),
+            Box::new(EmptyInput),
+            0,
+            vec![LogicalType::Int64],
+            false,
+        );
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<DeleteNodeOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_delete_edge_into_any() {
+        let store = create_test_store();
+        let op = DeleteEdgeOperator::new(
+            Arc::clone(&store),
+            Box::new(EmptyInput),
+            0,
+            vec![LogicalType::Int64],
+        );
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<DeleteEdgeOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_add_label_into_any() {
+        let store = create_test_store();
+        let op = AddLabelOperator::new(
+            Arc::clone(&store),
+            Box::new(EmptyInput),
+            0,
+            vec!["Label".to_string()],
+            vec![LogicalType::Int64],
+        );
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<AddLabelOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_remove_label_into_any() {
+        let store = create_test_store();
+        let op = RemoveLabelOperator::new(
+            Arc::clone(&store),
+            Box::new(EmptyInput),
+            0,
+            vec!["Label".to_string()],
+            vec![LogicalType::Int64],
+        );
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<RemoveLabelOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_set_property_into_any() {
+        let store = create_test_store();
+        let op = SetPropertyOperator::new_for_node(
+            Arc::clone(&store),
+            Box::new(EmptyInput),
+            0,
+            vec![],
+            vec![LogicalType::Int64],
+        );
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<SetPropertyOperator>().is_ok());
+    }
+
+    // ── ConstraintValidator default methods ──────────────────────
+
+    /// A minimal validator that implements only the required methods,
+    /// relying on defaults for the optional ones.
+    struct MinimalValidator;
+
+    impl ConstraintValidator for MinimalValidator {
+        fn validate_node_property(
+            &self,
+            _labels: &[String],
+            _key: &str,
+            _value: &Value,
+        ) -> Result<(), OperatorError> {
+            Ok(())
+        }
+        fn validate_node_complete(
+            &self,
+            _labels: &[String],
+            _properties: &[(String, Value)],
+        ) -> Result<(), OperatorError> {
+            Ok(())
+        }
+        fn check_unique_node_property(
+            &self,
+            _labels: &[String],
+            _key: &str,
+            _value: &Value,
+        ) -> Result<(), OperatorError> {
+            Ok(())
+        }
+        fn validate_edge_property(
+            &self,
+            _edge_type: &str,
+            _key: &str,
+            _value: &Value,
+        ) -> Result<(), OperatorError> {
+            Ok(())
+        }
+        fn validate_edge_complete(
+            &self,
+            _edge_type: &str,
+            _properties: &[(String, Value)],
+        ) -> Result<(), OperatorError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_constraint_validator_default_node_labels_allowed() {
+        let v = MinimalValidator;
+        assert!(
+            v.validate_node_labels_allowed(&["Person".to_string(), "Actor".to_string()])
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn test_constraint_validator_default_edge_type_allowed() {
+        let v = MinimalValidator;
+        assert!(v.validate_edge_type_allowed("KNOWS").is_ok());
+    }
+
+    #[test]
+    fn test_constraint_validator_default_edge_endpoints() {
+        let v = MinimalValidator;
+        assert!(
+            v.validate_edge_endpoints("KNOWS", &["Person".to_string()], &["Person".to_string()],)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn test_constraint_validator_default_inject_defaults() {
+        let v = MinimalValidator;
+        let mut props = vec![("name".to_string(), Value::String("Alix".into()))];
+        v.inject_defaults(&["Person".to_string()], &mut props);
+        // Default impl is a no-op
+        assert_eq!(props.len(), 1);
+    }
+
+    // ── PropertySource tests ────────────────────────────────────
+
+    #[test]
+    fn test_property_source_column() {
+        let store = LpgStore::new().unwrap();
+        let mut builder = DataChunkBuilder::new(&[LogicalType::Int64]);
+        builder.column_mut(0).unwrap().push_int64(42);
+        builder.advance_row();
+        let chunk = builder.finish();
+
+        let src = PropertySource::Column(0);
+        assert_eq!(src.resolve(&chunk, 0, &store), Value::Int64(42));
+    }
+
+    #[test]
+    fn test_property_source_constant() {
+        let store = LpgStore::new().unwrap();
+        let chunk = DataChunk::empty();
+
+        let src = PropertySource::Constant(Value::String("hello".into()));
+        assert_eq!(
+            src.resolve(&chunk, 0, &store),
+            Value::String("hello".into()),
+        );
+    }
+
+    #[test]
+    fn test_property_source_column_out_of_bounds() {
+        let store = LpgStore::new().unwrap();
+        let chunk = DataChunk::empty();
+
+        let src = PropertySource::Column(99);
+        assert_eq!(src.resolve(&chunk, 0, &store), Value::Null);
+    }
+
+    #[test]
+    fn test_property_source_property_access_from_map() {
+        let store = LpgStore::new().unwrap();
+        let mut map = std::collections::BTreeMap::new();
+        map.insert(PropertyKey::new("age"), Value::Int64(30));
+
+        let mut builder = DataChunkBuilder::new(&[LogicalType::Any]);
+        builder
+            .column_mut(0)
+            .unwrap()
+            .push_value(Value::Map(Arc::new(map)));
+        builder.advance_row();
+        let chunk = builder.finish();
+
+        let src = PropertySource::PropertyAccess {
+            column: 0,
+            property: "age".to_string(),
+        };
+        assert_eq!(src.resolve(&chunk, 0, &store), Value::Int64(30));
+    }
+
+    #[test]
+    fn test_property_source_property_access_missing_column() {
+        let store = LpgStore::new().unwrap();
+        let chunk = DataChunk::empty();
+
+        let src = PropertySource::PropertyAccess {
+            column: 99,
+            property: "name".to_string(),
+        };
+        assert_eq!(src.resolve(&chunk, 0, &store), Value::Null);
+    }
 }

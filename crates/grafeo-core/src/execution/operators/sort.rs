@@ -596,4 +596,31 @@ mod tests {
         );
         assert_eq!(sort.name(), "Sort");
     }
+
+    #[test]
+    fn test_sort_into_any() {
+        let mock = MockOperator::new(vec![]);
+        let op = SortOperator::new(
+            Box::new(mock),
+            vec![SortKey::ascending(0)],
+            vec![LogicalType::Int64],
+        );
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<SortOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_sort_into_parts() {
+        let mock = MockOperator::new(vec![]);
+        let op = SortOperator::new(
+            Box::new(mock),
+            vec![SortKey::ascending(0), SortKey::descending(1)],
+            vec![LogicalType::Int64, LogicalType::String],
+        );
+        let (mut child, sort_keys) = op.into_parts();
+        assert_eq!(sort_keys.len(), 2);
+        assert_eq!(sort_keys[0].column, 0);
+        assert_eq!(sort_keys[1].column, 1);
+        assert!(child.next().unwrap().is_none());
+    }
 }

@@ -6961,4 +6961,286 @@ mod tests {
         let chunk = op.next().unwrap().unwrap();
         assert_eq!(chunk.column(0).unwrap().get_value(0), Some(Value::Int64(5)));
     }
+
+    // ---- into_any() coverage tests ----
+    //
+    // Each RDF operator implements `into_any()` for downcasting support in the
+    // push pipeline. These tests construct minimal instances and verify the
+    // method returns a valid `Box<dyn Any + Send>` that can be downcast back.
+
+    #[test]
+    fn test_into_any_rdf_insert_triple_operator() {
+        let store = Arc::new(RdfStore::new());
+        let triple = Triple::new(
+            Term::iri("http://example.org/s"),
+            Term::iri("http://example.org/p"),
+            Term::literal("o"),
+        );
+        let op: Box<dyn Operator> = Box::new(RdfInsertTripleOperator::new(
+            store,
+            triple,
+            None,
+            None,
+            #[cfg(feature = "wal")]
+            None,
+            #[cfg(feature = "cdc")]
+            None,
+            #[cfg(feature = "cdc")]
+            grafeo_common::types::EpochId(0),
+        ));
+        let any = op.into_any();
+        assert!(any.downcast::<RdfInsertTripleOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_into_any_rdf_insert_pattern_operator() {
+        let store = Arc::new(RdfStore::new());
+        let child: Box<dyn Operator> = Box::new(SingleRowOperator::new());
+        let operands = TripleOperands {
+            subject: TripleComponent::Iri("http://example.org/s".to_string()),
+            predicate: TripleComponent::Iri("http://example.org/p".to_string()),
+            object: TripleComponent::Literal(Value::String("o".into())),
+            column_map: HashMap::new(),
+        };
+        let op: Box<dyn Operator> = Box::new(RdfInsertPatternOperator::new(
+            store,
+            child,
+            operands,
+            #[cfg(feature = "wal")]
+            None,
+            #[cfg(feature = "cdc")]
+            None,
+            #[cfg(feature = "cdc")]
+            grafeo_common::types::EpochId(0),
+        ));
+        let any = op.into_any();
+        assert!(any.downcast::<RdfInsertPatternOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_into_any_rdf_delete_triple_operator() {
+        let store = Arc::new(RdfStore::new());
+        let triple = Triple::new(
+            Term::iri("http://example.org/s"),
+            Term::iri("http://example.org/p"),
+            Term::literal("o"),
+        );
+        let op: Box<dyn Operator> = Box::new(RdfDeleteTripleOperator::new(
+            store,
+            triple,
+            None,
+            None,
+            #[cfg(feature = "wal")]
+            None,
+            #[cfg(feature = "cdc")]
+            None,
+            #[cfg(feature = "cdc")]
+            grafeo_common::types::EpochId(0),
+        ));
+        let any = op.into_any();
+        assert!(any.downcast::<RdfDeleteTripleOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_into_any_rdf_delete_pattern_operator() {
+        let store = Arc::new(RdfStore::new());
+        let child: Box<dyn Operator> = Box::new(SingleRowOperator::new());
+        let operands = TripleOperands {
+            subject: TripleComponent::Iri("http://example.org/s".to_string()),
+            predicate: TripleComponent::Iri("http://example.org/p".to_string()),
+            object: TripleComponent::Literal(Value::String("o".into())),
+            column_map: HashMap::new(),
+        };
+        let op: Box<dyn Operator> = Box::new(RdfDeletePatternOperator::new(
+            store,
+            child,
+            operands,
+            #[cfg(feature = "wal")]
+            None,
+            #[cfg(feature = "cdc")]
+            None,
+            #[cfg(feature = "cdc")]
+            grafeo_common::types::EpochId(0),
+        ));
+        let any = op.into_any();
+        assert!(any.downcast::<RdfDeletePatternOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_into_any_rdf_clear_graph_operator() {
+        let store = Arc::new(RdfStore::new());
+        let op: Box<dyn Operator> = Box::new(RdfClearGraphOperator::new(
+            store,
+            None,
+            false,
+            #[cfg(feature = "wal")]
+            None,
+        ));
+        let any = op.into_any();
+        assert!(any.downcast::<RdfClearGraphOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_into_any_rdf_create_graph_operator() {
+        let store = Arc::new(RdfStore::new());
+        let op: Box<dyn Operator> = Box::new(RdfCreateGraphOperator::new(
+            store,
+            "http://example.org/g".to_string(),
+            true,
+            #[cfg(feature = "wal")]
+            None,
+        ));
+        let any = op.into_any();
+        assert!(any.downcast::<RdfCreateGraphOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_into_any_rdf_drop_graph_operator() {
+        let store = Arc::new(RdfStore::new());
+        let op: Box<dyn Operator> = Box::new(RdfDropGraphOperator::new(
+            store,
+            Some("http://example.org/g".to_string()),
+            true,
+            #[cfg(feature = "wal")]
+            None,
+        ));
+        let any = op.into_any();
+        assert!(any.downcast::<RdfDropGraphOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_into_any_rdf_copy_graph_operator() {
+        let store = Arc::new(RdfStore::new());
+        let op: Box<dyn Operator> = Box::new(RdfCopyGraphOperator::new(
+            store,
+            Some("http://example.org/src".to_string()),
+            Some("http://example.org/dst".to_string()),
+            true,
+        ));
+        let any = op.into_any();
+        assert!(any.downcast::<RdfCopyGraphOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_into_any_rdf_move_graph_operator() {
+        let store = Arc::new(RdfStore::new());
+        let op: Box<dyn Operator> = Box::new(RdfMoveGraphOperator::new(
+            store,
+            Some("http://example.org/src".to_string()),
+            Some("http://example.org/dst".to_string()),
+            true,
+        ));
+        let any = op.into_any();
+        assert!(any.downcast::<RdfMoveGraphOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_into_any_rdf_add_graph_operator() {
+        let store = Arc::new(RdfStore::new());
+        let op: Box<dyn Operator> = Box::new(RdfAddGraphOperator::new(
+            store,
+            Some("http://example.org/src".to_string()),
+            Some("http://example.org/dst".to_string()),
+            true,
+        ));
+        let any = op.into_any();
+        assert!(any.downcast::<RdfAddGraphOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_into_any_rdf_modify_operator() {
+        let store = Arc::new(RdfStore::new());
+        let child: Box<dyn Operator> = Box::new(SingleRowOperator::new());
+        let op: Box<dyn Operator> = Box::new(RdfModifyOperator::new(
+            store,
+            child,
+            vec![],
+            vec![],
+            HashMap::new(),
+            #[cfg(feature = "cdc")]
+            None,
+            #[cfg(feature = "cdc")]
+            grafeo_common::types::EpochId(0),
+        ));
+        let any = op.into_any();
+        assert!(any.downcast::<RdfModifyOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_into_any_rdf_union_operator() {
+        let op: Box<dyn Operator> = Box::new(RdfUnionOperator::new(vec![]));
+        let any = op.into_any();
+        assert!(any.downcast::<RdfUnionOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_into_any_rdf_bind_operator() {
+        let child: Box<dyn Operator> = Box::new(SingleRowOperator::new());
+        let expr = FilterExpression::Literal(Value::String("test".into()));
+        let op: Box<dyn Operator> = Box::new(RdfBindOperator::new(child, expr, HashMap::new()));
+        let any = op.into_any();
+        assert!(any.downcast::<RdfBindOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_into_any_rdf_project_operator() {
+        let child: Box<dyn Operator> = Box::new(SingleRowOperator::new());
+        let op: Box<dyn Operator> = Box::new(RdfProjectOperator::new(
+            child,
+            vec![RdfProjectExpr::Constant(Value::String("x".into()))],
+            vec![LogicalType::String],
+        ));
+        let any = op.into_any();
+        assert!(any.downcast::<RdfProjectOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_into_any_construct_operator() {
+        let child: Box<dyn Operator> = Box::new(SingleRowOperator::new());
+        let op: Box<dyn Operator> = Box::new(ConstructOperator::new(child, vec![], HashMap::new()));
+        let any = op.into_any();
+        assert!(any.downcast::<ConstructOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_into_any_constant_operator() {
+        let chunk = DataChunk::empty();
+        let op: Box<dyn Operator> = Box::new(ConstantOperator::new(chunk));
+        let any = op.into_any();
+        assert!(any.downcast::<ConstantOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_into_any_dict_resolve_operator() {
+        let child: Box<dyn Operator> = Box::new(SingleRowOperator::new());
+        let dict = Arc::new(grafeo_core::graph::rdf::TermDictionary::new());
+        let op: Box<dyn Operator> = Box::new(DictResolveOperator::new(child, dict, vec![]));
+        let any = op.into_any();
+        assert!(any.downcast::<DictResolveOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_into_any_rdf_triple_scan_operator() {
+        let store = Arc::new(RdfStore::new());
+        let pattern = TriplePattern {
+            subject: None,
+            predicate: None,
+            object: None,
+        };
+        let op: Box<dyn Operator> = Box::new(RdfTripleScanOperator::new(
+            store,
+            pattern,
+            [true, true, true, false],
+            1024,
+            GraphContext {
+                graph: None,
+                scan_all_graphs: false,
+                dataset: None,
+            },
+            false,
+            false,
+        ));
+        let any = op.into_any();
+        assert!(any.downcast::<RdfTripleScanOperator>().is_ok());
+    }
 }

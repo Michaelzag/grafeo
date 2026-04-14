@@ -310,4 +310,33 @@ mod tests {
         results.sort_unstable();
         assert_eq!(results, vec![1, 2, 3, 4]);
     }
+
+    #[test]
+    fn test_distinct_into_any() {
+        let mock = MockOperator::new(vec![]);
+        let op = DistinctOperator::new(Box::new(mock), vec![LogicalType::Int64]);
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<DistinctOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_distinct_into_parts() {
+        let mock = MockOperator::new(vec![]);
+        let op = DistinctOperator::on_columns(
+            Box::new(mock),
+            vec![0, 2],
+            vec![LogicalType::Int64, LogicalType::String, LogicalType::Int64],
+        );
+        let (mut child, distinct_columns) = op.into_parts();
+        assert_eq!(distinct_columns, Some(vec![0, 2]));
+        assert!(child.next().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_distinct_into_parts_all_columns() {
+        let mock = MockOperator::new(vec![]);
+        let op = DistinctOperator::new(Box::new(mock), vec![LogicalType::Int64]);
+        let (_child, distinct_columns) = op.into_parts();
+        assert!(distinct_columns.is_none());
+    }
 }

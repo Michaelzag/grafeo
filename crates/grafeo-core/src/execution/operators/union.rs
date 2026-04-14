@@ -215,4 +215,16 @@ mod tests {
         }
         assert_eq!(count, 2);
     }
+
+    #[test]
+    fn test_union_into_any() {
+        let left = MockOperator::new(vec![]);
+        let right = MockOperator::new(vec![]);
+        let op = UnionOperator::new(
+            vec![Box::new(left), Box::new(right)],
+            vec![LogicalType::Int64],
+        );
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<UnionOperator>().is_ok());
+    }
 }
