@@ -270,7 +270,7 @@ async dropVectorIndex(label: string, property: string): Promise<boolean>
 Rebuild a vector index by rescanning all matching nodes. Preserves the original index configuration.
 
 !!! note "Auto-sync: rebuild is rarely needed"
-    Vector indexes auto-sync when you call `setNodeProperty()` or `batchCreateNodes()` with vector data. You only need `rebuildVectorIndex()` after importing data through non-standard paths or to compact the index after many deletions.
+    Vector indexes auto-sync when you call `setNodeProperty()`, `batchCreateNodes()`, or `batchCreateNodesWithProps()` with vector data. You only need `rebuildVectorIndex()` after importing data through non-standard paths or to compact the index after many deletions.
 
 ```typescript
 async rebuildVectorIndex(label: string, property: string): Promise<void>
@@ -525,60 +525,6 @@ Returns the Grafeo engine version string.
 
 ```typescript
 version(): string
-```
-
-### save()
-
-Saves the database to a file path. If in-memory, creates a new persistent database at the given path. If file-backed, creates a copy at the new path. The original database remains unchanged.
-
-```typescript
-save(path: string): void
-```
-
-```typescript
-const db = GrafeoDB.create(); // in-memory
-await db.execute("INSERT (:Person {name: 'Alix'})");
-db.save('./snapshot.grafeo');
-```
-
-### walCheckpoint()
-
-Forces a WAL checkpoint, flushing all pending WAL records to the main storage.
-
-```typescript
-walCheckpoint(): void
-```
-
-### clearPlanCache()
-
-Clear all cached query plans. Forces re-parsing and re-optimization on next execution. Called automatically after DDL operations, but can be invoked manually.
-
-```typescript
-clearPlanCache(): void
-```
-
-### metrics()
-
-Returns runtime metrics as a JSON object. Includes counters for queries, transactions, sessions, cache, and GC. Returns an empty object when the `metrics` feature is not enabled.
-
-```typescript
-metrics(): object
-```
-
-### metricsPrometheus()
-
-Returns runtime metrics in Prometheus text exposition format. Returns an empty string when the `metrics` feature is not enabled.
-
-```typescript
-metricsPrometheus(): string
-```
-
-### resetMetrics()
-
-Resets all metrics counters and histograms to zero. No-op when the `metrics` feature is not enabled.
-
-```typescript
-resetMetrics(): void
 ```
 
 ### compact()
