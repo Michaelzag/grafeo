@@ -367,11 +367,13 @@ internal static partial class NativeMethods
     // Projections
     // =========================================================================
 
-    /// <summary>Create a named graph projection from label/type filters.</summary>
-    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
+    /// <summary>Create a named graph projection from label/type filters.
+    /// All string pointers are manually marshalled to avoid source-gen issues
+    /// with mixed string + pointer parameters.</summary>
+    [LibraryImport(LibName)]
     [return: MarshalAs(UnmanagedType.U1)]
     internal static unsafe partial bool grafeo_create_projection(
-        nint db, string name,
+        nint db, nint name,
         nint nodeLabels, nuint numLabels,
         nint edgeTypes, nuint numTypes);
 

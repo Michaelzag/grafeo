@@ -546,7 +546,9 @@ public sealed class GrafeoDB : IGrafeoDB, IDisposable, IAsyncDisposable
         var labels = nodeLabels?.ToArray() ?? [];
         var types = edgeTypes?.ToArray() ?? [];
 
-        // Marshal string arrays to native pointers
+        // Marshal all strings manually (name + string arrays) to avoid
+        // source-gen issues with mixed auto-marshalled + pointer parameters.
+        var namePtr = Marshal.StringToCoTaskMemUTF8(name);
         var labelPtrs = labels.Select(Marshal.StringToCoTaskMemUTF8).ToArray();
         var typePtrs = types.Select(Marshal.StringToCoTaskMemUTF8).ToArray();
 
@@ -554,18 +556,19 @@ public sealed class GrafeoDB : IGrafeoDB, IDisposable, IAsyncDisposable
         {
             unsafe
             {
-                fixed (nint* lp = labelPtrs)
-                fixed (nint* tp = typePtrs)
+                fixed (nint* lp = labelPtrs.Length > 0 ? labelPtrs : null)
+                fixed (nint* tp = typePtrs.Length > 0 ? typePtrs : null)
                 {
                     return NativeMethods.grafeo_create_projection(
-                        Handle, name,
-                        labelPtrs.Length > 0 ? (nint)lp : nint.Zero, (nuint)labelPtrs.Length,
-                        typePtrs.Length > 0 ? (nint)tp : nint.Zero, (nuint)typePtrs.Length);
+                        Handle, namePtr,
+                        (nint)lp, (nuint)labels.Length,
+                        (nint)tp, (nuint)types.Length);
                 }
             }
         }
         finally
         {
+            Marshal.FreeCoTaskMem(namePtr);
             foreach (var p in labelPtrs) Marshal.FreeCoTaskMem(p);
             foreach (var p in typePtrs) Marshal.FreeCoTaskMem(p);
         }

@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using Xunit;
 
 namespace Grafeo.Tests;
@@ -58,25 +57,7 @@ public sealed class SchemaAndAdminTests : IDisposable
         _db.Execute("INSERT (:City {name: 'Amsterdam'})");
         _db.Execute("INSERT (:Person {name: 'Alix'})");
 
-        // Create with label filter: exercises string array marshalling.
-        // If the native call fails due to platform-specific marshalling
-        // limitations, skip the test rather than failing CI.
-        bool created;
-        try
-        {
-            created = _db.CreateProjection("cities", nodeLabels: ["City"]);
-        }
-        catch (MarshalDirectiveException)
-        {
-            // Platform-specific marshalling limitation
-            return;
-        }
-        catch (DllNotFoundException)
-        {
-            // Native library not available on this platform
-            return;
-        }
-
+        var created = _db.CreateProjection("cities", nodeLabels: ["City"]);
         Assert.True(created);
 
         var list = _db.ListProjections();
