@@ -467,29 +467,45 @@ impl JsGrafeoDB {
     /// Returns runtime metrics as a JSON object.
     ///
     /// Includes counters for queries, transactions, sessions, cache, and GC.
-    /// Requires the `metrics` feature.
-    #[cfg(feature = "metrics")]
+    /// Returns an empty object when the `metrics` feature is not enabled.
     #[napi]
     pub fn metrics(&self) -> Result<serde_json::Value> {
-        let db = self.inner.read();
-        let snap = db.metrics();
-        serde_json::to_value(&snap).map_err(|e| NodeGrafeoError::Database(e.to_string()).into())
+        #[cfg(feature = "metrics")]
+        {
+            let db = self.inner.read();
+            let snap = db.metrics();
+            serde_json::to_value(&snap).map_err(|e| NodeGrafeoError::Database(e.to_string()).into())
+        }
+        #[cfg(not(feature = "metrics"))]
+        {
+            Ok(serde_json::json!({}))
+        }
     }
 
     /// Returns runtime metrics in Prometheus text exposition format.
-    #[cfg(feature = "metrics")]
+    /// Returns an empty string when the `metrics` feature is not enabled.
     #[napi(js_name = "metricsPrometheus")]
     pub fn metrics_prometheus(&self) -> String {
-        let db = self.inner.read();
-        db.metrics_prometheus()
+        #[cfg(feature = "metrics")]
+        {
+            let db = self.inner.read();
+            db.metrics_prometheus()
+        }
+        #[cfg(not(feature = "metrics"))]
+        {
+            String::new()
+        }
     }
 
     /// Resets all metrics counters and histograms to zero.
-    #[cfg(feature = "metrics")]
+    /// No-op when the `metrics` feature is not enabled.
     #[napi(js_name = "resetMetrics")]
     pub fn reset_metrics(&self) {
-        let db = self.inner.read();
-        db.reset_metrics();
+        #[cfg(feature = "metrics")]
+        {
+            let db = self.inner.read();
+            db.reset_metrics();
+        }
     }
 
     /// Returns the Grafeo engine version string.

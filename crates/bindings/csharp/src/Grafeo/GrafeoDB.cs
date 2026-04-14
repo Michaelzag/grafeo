@@ -528,11 +528,40 @@ public sealed class GrafeoDB : IGrafeoDB, IDisposable, IAsyncDisposable
     // Projections
     // =========================================================================
 
-    /// <summary>Create a named graph projection from a query.</summary>
-    public void CreateProjection(string name, string query)
+    /// <summary>Create a named graph projection that includes the specified node labels and edge types.</summary>
+    /// <param name="name">Unique name for the projection.</param>
+    /// <param name="nodeLabels">Node labels to include (null or empty for all).</param>
+    /// <param name="edgeTypes">Edge types to include (null or empty for all).</param>
+    /// <returns><c>true</c> if the projection was created.</returns>
+    public bool CreateProjection(string name, IEnumerable<string>? nodeLabels = null, IEnumerable<string>? edgeTypes = null)
     {
         ThrowIfDisposed();
-        GrafeoException.ThrowIfFailed(NativeMethods.grafeo_create_projection(Handle, name, query));
+        var labels = nodeLabels?.ToArray() ?? [];
+        var types = edgeTypes?.ToArray() ?? [];
+
+        // Marshal string arrays to native pointers
+        var labelPtrs = labels.Select(Marshal.StringToCoTaskMemUTF8).ToArray();
+        var typePtrs = types.Select(Marshal.StringToCoTaskMemUTF8).ToArray();
+
+        try
+        {
+            unsafe
+            {
+                fixed (nint* lp = labelPtrs)
+                fixed (nint* tp = typePtrs)
+                {
+                    return NativeMethods.grafeo_create_projection(
+                        Handle, name,
+                        labelPtrs.Length > 0 ? (nint)lp : nint.Zero, (nuint)labelPtrs.Length,
+                        typePtrs.Length > 0 ? (nint)tp : nint.Zero, (nuint)typePtrs.Length);
+                }
+            }
+        }
+        finally
+        {
+            foreach (var p in labelPtrs) Marshal.FreeCoTaskMem(p);
+            foreach (var p in typePtrs) Marshal.FreeCoTaskMem(p);
+        }
     }
 
     /// <summary>Drop a named graph projection.</summary>

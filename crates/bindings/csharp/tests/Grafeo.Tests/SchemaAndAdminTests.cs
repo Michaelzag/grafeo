@@ -37,7 +37,9 @@ public sealed class SchemaAndAdminTests : IDisposable
         _db.Execute("INSERT (:City {name: 'Amsterdam'})");
         _db.Execute("INSERT (:City {name: 'Berlin'})");
 
-        _db.CreateProjection("cities", "MATCH (c:City) RETURN c");
+        var created = _db.CreateProjection("cities", nodeLabels: ["City"]);
+        Assert.True(created);
+
         var list = _db.ListProjections();
         Assert.Contains("cities", list);
 
