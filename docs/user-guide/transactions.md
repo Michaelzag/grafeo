@@ -209,8 +209,20 @@ When a transaction is rolled back (either fully or to a savepoint), all mutation
 
 Savepoints let you create named checkpoints within a transaction. Rolling back to a savepoint undoes only the changes made after it while preserving earlier work.
 
-!!! note "Rust-only API"
-    Savepoints are currently exposed only through the Rust `Session` API and via GQL statements. The Python `Transaction` object does not have `savepoint()`, `rollback_to_savepoint()`, or `release_savepoint()` methods. Use the GQL syntax shown below to work with savepoints from Python.
+### Usage (Python)
+
+```python
+tx = db.begin_transaction()
+tx.execute("MATCH (a:Account {id: 'A001'}) SET a.balance = 1000")
+
+tx.savepoint("before_bonus")
+tx.execute("MATCH (a:Account {id: 'A001'}) SET a.bonus = 500")
+
+# Undo only the bonus, keep the balance change
+tx.rollback_to_savepoint("before_bonus")
+
+tx.commit()  # balance = 1000, no bonus property
+```
 
 ### Usage (Rust)
 

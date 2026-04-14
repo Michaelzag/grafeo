@@ -80,8 +80,9 @@ with db.begin_transaction() as tx:
     tx.execute("INSERT (:Person {name: 'Harm'})")
     tx.commit()
 
-# With isolation levels (pass as string)
-with db.begin_transaction("serializable") as tx:
+# With isolation levels (string or enum)
+from grafeo import IsolationLevel
+with db.begin_transaction(IsolationLevel.SERIALIZABLE) as tx:
     tx.execute("MATCH (n:Person) SET n.verified = true")
     tx.commit()
 

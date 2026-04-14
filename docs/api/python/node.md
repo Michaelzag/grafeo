@@ -43,6 +43,22 @@ Check whether the node has a specific label.
 def has_label(self, label: str) -> bool
 ```
 
+### keys()
+
+Return a list of all property key names on this node.
+
+```python
+def keys(self) -> list[str]
+```
+
+### items()
+
+Return a list of `(key, value)` pairs for all properties.
+
+```python
+def items(self) -> list[tuple[str, Any]]
+```
+
 ## Operators
 
 ### `node["key"]`
