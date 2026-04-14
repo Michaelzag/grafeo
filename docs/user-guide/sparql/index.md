@@ -42,9 +42,33 @@ Example triples:
 <http://example.org/alix> <http://xmlns.com/foaf/0.1/knows> <http://example.org/gus> .
 ```
 
-## Using SPARQL
+## Enabling SPARQL
 
-SPARQL is enabled by default in Grafeo:
+SPARQL requires the `sparql` feature flag. The default Grafeo features (`lpg`, `gql`, `parallel`) do not include SPARQL.
+
+=== "Rust"
+
+    ```bash
+    cargo add grafeo --features sparql
+    ```
+
+=== "Python"
+
+    The published `grafeo` Python package includes SPARQL support by default:
+
+    ```bash
+    uv add grafeo
+    ```
+
+=== "Node.js"
+
+    The published `@grafeo-db/node` package includes SPARQL support by default:
+
+    ```bash
+    npm install @grafeo-db/node
+    ```
+
+## Using SPARQL
 
 === "Python"
 
@@ -146,6 +170,6 @@ SPARQL is enabled by default in Grafeo:
 
     ---
 
-    Validate RDF data against SHACL shapes with 28 constraint types.
+    Validate RDF data against SHACL shapes with SHACL Core constraint types.
 
 </div>

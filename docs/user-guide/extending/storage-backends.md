@@ -10,6 +10,9 @@ tags:
 
 Implement custom storage backends for specialized use cases.
 
+!!! note "Rust-only"
+    Custom storage backends are a Rust-only extension point. The `StorageBackend` trait must be implemented in Rust and passed to the database via `Config::builder()`. Python, Node.js, WASM, and other language bindings do not expose storage backend configuration.
+
 ## Storage Backend Trait
 
 ```rust

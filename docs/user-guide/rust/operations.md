@@ -39,9 +39,9 @@ let result = session.execute(r#"
     RETURN p.name, p.age
 "#)?;
 
-for row in result {
-    let name = row[0].as_str();
-    let age = row[1].as_i64();
+for row in result.rows() {
+    let name = row[0].as_str().unwrap_or("?");
+    let age = row[1].as_i64().unwrap_or(0);
     println!("{}: {}", name, age);
 }
 ```

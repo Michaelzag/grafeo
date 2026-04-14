@@ -129,7 +129,7 @@ cargo build --release
 ```rust
 use my_grafeo_extension::analyze_connectivity;
 
-let db = GrafeoDB::new("my_graph.db")?;
+let db = GrafeoDB::open("my_graph.db")?;
 let report = analyze_connectivity(&db);
 
 println!("Nodes: {}", report.nodes);

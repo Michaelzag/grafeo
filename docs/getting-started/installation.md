@@ -31,9 +31,12 @@ import grafeo
 # Print version
 print(grafeo.__version__)
 
-# Create a test database
+# Create an in-memory test database
 db = grafeo.GrafeoDB()
 print("Grafeo installed successfully!")
+
+# Or create a persistent database on disk
+db = grafeo.GrafeoDB("/path/to/my_graph.db")
 ```
 
 ### Platform Support

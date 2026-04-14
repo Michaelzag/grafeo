@@ -113,7 +113,7 @@ ordered-float = "5"
 rand = "0.10.1"
 
 [workspace.lints.rust]
-unsafe_code = "warn"
+unsafe_code = "deny"
 missing_docs = "warn"
 
 [workspace.lints.clippy]

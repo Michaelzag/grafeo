@@ -12,14 +12,14 @@ Grafeo is written in Rust and provides a native Rust API.
 ```rust
 use grafeo::GrafeoDB;
 
-fn main() -> Result<(), grafeo_common::utils::error::Error> {
+fn main() -> Result<(), grafeo::Error> {
     let db = GrafeoDB::new_in_memory();
     let mut session = db.session();
 
     session.execute("INSERT (:Person {name: 'Alix'})")?;
 
     let result = session.execute("MATCH (p:Person) RETURN p.name")?;
-    for row in result.rows {
+    for row in result.rows() {
         println!("{:?}", row);
     }
 

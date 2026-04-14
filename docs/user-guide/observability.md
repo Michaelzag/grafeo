@@ -21,7 +21,7 @@ grafeo = { version = "0.5", features = ["metrics"] }
 ```
 
 !!! note
-    The `metrics` feature is included in the `enterprise` profile. For other profiles, add it explicitly with `features = ["metrics"]`.
+    The `metrics` feature is included in the `server` profile. For other profiles, add it explicitly with `features = ["metrics"]`.
 
 ### Retrieving a Snapshot
 
@@ -263,7 +263,7 @@ EXPLAIN works the same way in Rust:
 
 ```rust
 let result = session.execute("EXPLAIN MATCH (n:Person) RETURN n")?;
-println!("{}", result.rows[0][0]);
+println!("{}", result.rows()[0][0]);
 ```
 
 ## PROFILE

@@ -168,18 +168,22 @@ Property values are automatically mapped to the most efficient columnar codec:
 - **No undo**: you cannot switch back to read-write mode
 - **Multi-label nodes**: nodes with multiple labels are stored under a compound key
   (e.g., `"Actor|Person"`, sorted alphabetically). A query like `MATCH (n:Person)` will
-  not match nodes stored under `"Actor|Person"`. Use a single label per node for best results.
+  not match nodes stored under `"Actor|Person"`. Workarounds:
+    - **Preferred:** use a single label per node before compacting.
+    - **Alternative:** query the compound label explicitly, e.g., `MATCH (n:Actor:Person)` (labels in alphabetical order).
+    - **Alternative:** assign a canonical "primary" label and store additional labels as a list property instead.
 - **No disk serialization**: `compact()` operates in memory. To persist a compacted database,
   use snapshot export (WASM) or save before compacting.
 
 ## Feature Flag
 
-CompactStore requires the `compact-store` feature flag, which is included by default in:
+CompactStore requires the `compact-store` feature flag. It is **not** included in the engine-level named profiles (`embedded`, `browser`, `server`, `full`), but it is included in the binding-level defaults:
 
-| Profile | Includes `compact-store` |
-|---------|--------------------------|
-| `lpg` | Yes (Python, Node.js, C) |
-| `edge` | Yes (WASM) |
-| `enterprise` | Yes |
+| Binding | Profile | Includes `compact-store` |
+|---------|---------|--------------------------|
+| Python (`grafeo-python`) | `embedded` | Yes |
+| Node.js (`grafeo-node`) | `embedded` | Yes |
+| C (`grafeo-c`) | `embedded` | Yes |
+| WASM (`grafeo-wasm`) | `edge` | Yes |
 
-For custom builds: `cargo build --features compact-store`.
+For custom Rust builds: `cargo build --features compact-store`.

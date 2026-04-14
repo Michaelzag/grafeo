@@ -10,9 +10,10 @@ tags:
 
 Add user-defined functions (UDFs) to extend GQL.
 
-## Registering Functions
+!!! note "Rust-only"
+    Custom function registration is currently available only through the Rust API. The Python, Node.js, and WASM bindings do not expose function registration methods.
 
-### In Rust
+## Registering Functions
 
 ```rust
 use grafeo::{GrafeoDB, Value};
@@ -28,28 +29,14 @@ db.register_function("double", |args| {
 })?;
 ```
 
-### In Python
-
-```python
-import grafeo
-
-db = grafeo.GrafeoDB()
-
-# Register a Python function
-@db.register_function("greet")
-def greet(name: str) -> str:
-    return f"Hello, {name}!"
-```
-
 ## Using Custom Functions
+
+Once registered, custom functions can be called from any query language:
 
 ```sql
 -- Use the custom function in queries
 MATCH (p:Person)
 RETURN p.name, double(p.age) AS doubled_age
-
-MATCH (p:Person)
-RETURN greet(p.name) AS greeting
 ```
 
 ## Function Types

@@ -53,14 +53,14 @@ for (const row of rows) {
 
 ### rows()
 
-Get all rows as an array of arrays (no column names).
+Get all rows as an array of arrays (no column names). The TypeScript return type is `object`, but the runtime value is an array of arrays.
 
 ```typescript
-rows(): any[][]
+rows(): object  // runtime: any[][]
 ```
 
 ```typescript
-const raw = result.rows();
+const raw = result.rows() as any[][];
 // [[value1, value2], [value3, value4], ...]
 ```
 

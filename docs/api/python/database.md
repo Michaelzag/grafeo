@@ -14,7 +14,9 @@ The main database class.
 
 ```python
 GrafeoDB(
-    path: Optional[str] = None
+    path: Optional[str] = None,
+    *,
+    cdc: bool = False
 )
 ```
 
@@ -23,6 +25,7 @@ GrafeoDB(
 | Parameter | Type | Default | Description |
 | --------- | ---- | ------- | ----------- |
 | `path` | `str` | `None` | Database file path (None for in-memory) |
+| `cdc` | `bool` | `False` | Enable change data capture (keyword-only). When `True`, mutations are tracked and queryable via `node_history()` / `edge_history()`. |
 
 ### Examples
 
@@ -775,6 +778,25 @@ with db.begin_transaction() as tx:
 with db.begin_transaction("serializable") as tx:
     tx.execute("MATCH (n:Counter) SET n.val = n.val + 1")
     tx.commit()
+```
+
+### begin_transaction_with_cdc()
+
+Start a transaction with an explicit CDC (change data capture) override. When `cdc_enabled` is `True`, mutations in this transaction are tracked regardless of the database-level default. When `False`, tracking is disabled for this transaction only. Requires the `cdc` feature.
+
+```python
+def begin_transaction_with_cdc(
+    self,
+    cdc_enabled: bool,
+    isolation_level: Optional[str] = None
+) -> Transaction
+```
+
+```python
+with db.begin_transaction_with_cdc(True) as tx:
+    tx.execute("INSERT (:Person {name: 'Alix'})")
+    tx.commit()
+# This transaction's changes appear in node_history()
 ```
 
 ## Schema Context

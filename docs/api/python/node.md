@@ -21,27 +21,37 @@ Represents a graph node.
 
 ### get()
 
-Get a property value.
+Get a property value by key. Returns `None` if the property does not exist.
 
 ```python
-def get(self, key: str, default: Any = None) -> Any
+def get(self, key: str) -> Optional[Any]
 ```
 
-### keys()
+### properties()
 
-Get all property keys.
+Get all properties as a dictionary.
 
 ```python
-def keys(self) -> List[str]
+def properties(self) -> Dict[str, Any]
 ```
 
-### items()
+### has_label()
 
-Get all property items.
+Check whether the node has a specific label.
 
 ```python
-def items(self) -> List[Tuple[str, Any]]
+def has_label(self, label: str) -> bool
 ```
+
+## Operators
+
+### `node["key"]`
+
+Access a property by key. Raises `KeyError` if the property does not exist.
+
+### `"key" in node`
+
+Check whether the node has a property with the given key.
 
 ## Example
 
@@ -53,6 +63,8 @@ node = row['n']
 print(f"ID: {node.id}")
 print(f"Labels: {node.labels}")
 print(f"Name: {node.get('name')}")
+print(f"Is a Person: {node.has_label('Person')}")
+print(f"All properties: {node.properties()}")
 ```
 
 ## Direct Node Creation

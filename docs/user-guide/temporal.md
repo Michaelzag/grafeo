@@ -9,6 +9,16 @@ tags:
 
 # Temporal Properties & Time-Travel
 
+!!! warning "Feature flag required for versioned properties"
+    Temporal *types* (Date, Time, Duration, etc.) are always available. Temporal *properties* (versioned history, time-travel queries) require the `temporal` feature flag, which is **not** included in any named profile (`embedded`, `browser`, `server`, `full`). Enable it explicitly:
+
+    ```toml
+    [dependencies]
+    grafeo = { version = "0.5", features = ["temporal"] }
+    ```
+
+    Or combine it with a profile: `features = ["embedded", "temporal"]`.
+
 Grafeo supports two complementary temporal features:
 
 1. **Temporal types**: Date, Time, Duration and zoned variants for storing temporal data. These are always available with no feature flags required.
@@ -184,7 +194,7 @@ The simplest way to query a past state: pass an epoch number alongside the query
         "MATCH (p:Person) RETURN p.name, p.city",
         EpochId::new(5),
     )?;
-    for row in &result.rows {
+    for row in result.rows() {
         println!("{:?}", row);
     }
     ```

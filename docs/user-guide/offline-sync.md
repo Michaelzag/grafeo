@@ -12,6 +12,15 @@ tags:
 
 # Offline-First Sync
 
+!!! warning "Feature flag requirements"
+    Offline sync depends on several feature flags:
+
+    - **grafeo (engine):** the `cdc` feature must be enabled for change tracking. It is included in the `ai` and `embedded` profiles.
+    - **grafeo-server:** the `replication` feature must be enabled, and the server must be started with `--replication-mode primary` for the primary instance (or `--replication-mode replica` for replicas).
+    - **grafeo-server:** the `sync` feature must be enabled for the `POST /db/{name}/sync` endpoint.
+
+    The default grafeo-server build includes all of these. Custom builds must opt in explicitly.
+
 Grafeo supports offline-first applications: a local instance (embedded in a Dart/Flutter app or
 running as WASM in the browser) can accumulate changes while disconnected, then sync bidirectionally
 with a remote **grafeo-server** when connectivity is restored.

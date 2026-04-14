@@ -50,7 +50,7 @@ We use conventional commits: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `pe
 | `grafeo-core` | Graph storage, indexes, execution |
 | `grafeo-adapters` | Query parsers (GQL, Cypher, Gremlin, GraphQL, SPARQL, SQL/PGQ) |
 | `grafeo-engine` | Database facade, sessions, transactions |
-| `grafeo-cli` | CLI with interactive shell |
+| `grafeo-cli` | CLI with interactive shell, query execution, import/export, backup, WAL management |
 | `grafeo-bindings-common` | Shared library for all language bindings |
 | `grafeo-python` | Python bindings (PyO3) |
 | `grafeo-node` | Node.js/TypeScript bindings (napi-rs) |

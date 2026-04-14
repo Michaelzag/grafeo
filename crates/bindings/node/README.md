@@ -57,7 +57,8 @@ await db.execute(gql, params?);         // GQL (ISO standard)
 await db.executeCypher(query, params?);  // Cypher
 await db.executeGremlin(query, params?); // Gremlin
 await db.executeGraphql(query, params?); // GraphQL
-await db.executeSparql(query);           // SPARQL
+await db.executeSparql(query, params?);  // SPARQL
+await db.executeSql(query, params?);     // SQL/PGQ (SQL:2023)
 ```
 
 ### Node & Edge CRUD
@@ -109,10 +110,7 @@ result.edges();          // extracted edges
 ### Graph Projections
 
 ```typescript
-await db.createProjection('people', {
-  nodeLabels: ['Person'],
-  edgeTypes: ['KNOWS']
-});
+db.createProjection('people', ['Person'], ['KNOWS']); // returns boolean
 const projections = db.listProjections();  // ['people']
 db.dropProjection('people');
 ```
@@ -121,15 +119,15 @@ db.dropProjection('people');
 
 ```typescript
 const count = await db.importCsv('./users.csv', { label: 'Person', headers: true });
-const count2 = await db.importJsonl('./events.jsonl', 'Event');
+const count2 = await db.importJsonl('./events.jsonl', { label: 'Event' });
 ```
 
 ### Backup and Restore
 
 ```typescript
-await db.backupFull('/backups/full');
-await db.backupIncremental('/backups/incr');
-await GrafeoDB.restoreToEpoch('/backups/full', 100, './restored');
+db.backupFull('/backups/full');
+db.backupIncremental('/backups/incr');
+GrafeoDB.restoreToEpoch('/backups/full', 100, './restored');
 ```
 
 ### Vector Search
@@ -147,7 +145,7 @@ const results = await db.vectorSearch('Document', 'embedding', queryVector, 10);
 
 ## Features
 
-- GQL, Cypher, SPARQL, Gremlin and GraphQL query languages
+- GQL, Cypher, SPARQL, Gremlin, GraphQL and SQL/PGQ query languages
 - Full node/edge CRUD with property management
 - ACID transactions with automatic rollback
 - HNSW vector similarity search with batch operations

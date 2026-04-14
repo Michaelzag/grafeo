@@ -177,18 +177,18 @@ grafeo backup restore backup.grafeo ./restored --force
 grafeo backup full ./mydb -o /backups/full
 grafeo backup incremental ./mydb -o /backups/incr
 grafeo backup status /backups/full
-grafeo backup restore-to-epoch /backups/full ./restored --epoch 100
+grafeo backup restore-to-epoch /backups/full --epoch 100 -o ./restored
 ```
 
 ### Data Import
 
 ```bash
 # Import CSV as graph nodes
-grafeo import csv ./mydb data.csv --label Person
-grafeo import csv ./mydb data.csv --label Person --no-headers --separator ';'
+grafeo import csv data.csv --path ./mydb --label Person
+grafeo import csv data.csv --path ./mydb --label Person --headers false --separator ';'
 
 # Import JSON Lines as graph nodes
-grafeo import jsonl ./mydb events.jsonl --label Event
+grafeo import jsonl events.jsonl --path ./mydb --label Event
 ```
 
 ### Data Export

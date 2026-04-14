@@ -13,12 +13,12 @@ A high-performance, embeddable graph database with a Rust core and no required C
 
 | Query Language | LPG | RDF | Status |
 |----------------|-----|-----|--------|
-| GQL (ISO/IEC 39075) | ✅ | - | Default |
-| Cypher (openCypher 9.0) | ✅ | - | Default |
-| Gremlin (Apache TinkerPop) | ✅ | - | Default |
-| GraphQL | ✅ | ✅ | Default |
-| SPARQL (W3C 1.1) | - | ✅ | Default |
-| SQL/PGQ (SQL:2023) | ✅ | - | Default |
+| GQL (ISO/IEC 39075) | ✅ | - | Default (`embedded` profile) |
+| Cypher (openCypher 9.0) | ✅ | - | `cypher` feature or `languages` group |
+| Gremlin (Apache TinkerPop) | ✅ | - | `gremlin` feature or `languages` group |
+| GraphQL | ✅ | ✅ | `graphql` feature or `languages` group |
+| SPARQL (W3C 1.1) | - | ✅ | `sparql` feature or `languages` group |
+| SQL/PGQ (SQL:2023) | ✅ | - | `sql-pgq` feature or `languages` group |
 
 Grafeo uses a modular translator architecture where query languages are parsed into ASTs, then translated to a unified logical plan that executes against the appropriate storage backend (LPG or RDF).
 
@@ -49,7 +49,7 @@ cargo add grafeo --features embed                            # Add ONNX embeddin
 ```rust
 use grafeo::GrafeoDB;
 
-fn main() -> Result<(), grafeo_common::utils::error::Error> {
+fn main() -> Result<(), grafeo::Error> {
     let db = GrafeoDB::new_in_memory();
     let mut session = db.session();
 
@@ -59,7 +59,7 @@ fn main() -> Result<(), grafeo_common::utils::error::Error> {
 
     // Query
     let result = session.execute("MATCH (p:Person) RETURN p.name, p.age")?;
-    for row in result.rows {
+    for row in result.rows() {
         println!("{:?}", row);
     }
 

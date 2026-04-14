@@ -209,41 +209,43 @@ When a transaction is rolled back (either fully or to a savepoint), all mutation
 
 Savepoints let you create named checkpoints within a transaction. Rolling back to a savepoint undoes only the changes made after it while preserving earlier work.
 
-### Usage
+!!! note "Rust-only API"
+    Savepoints are currently exposed only through the Rust `Session` API and via GQL statements. The Python `Transaction` object does not have `savepoint()`, `rollback_to_savepoint()`, or `release_savepoint()` methods. Use the GQL syntax shown below to work with savepoints from Python.
+
+### Usage (Rust)
+
+```rust
+let session = db.session();
+session.begin_transaction()?;
+
+session.execute("MATCH (a:Account {id: 'A001'}) SET a.balance = 1000")?;
+
+session.savepoint("before_bonus")?;
+
+session.execute("MATCH (a:Account {id: 'A001'}) SET a.bonus = 500")?;
+
+// Undo only the bonus, keep the balance change
+session.rollback_to_savepoint("before_bonus")?;
+
+// Release discards the savepoint but keeps changes
+// session.release_savepoint("before_bonus")?;
+
+session.commit()?;  // balance = 1000, no bonus property
+```
+
+### Usage (Python via GQL)
 
 ```python
 tx = db.begin_transaction()
 
 tx.execute("MATCH (a:Account {id: 'A001'}) SET a.balance = 1000")
-
-tx.savepoint("before_bonus")
-
+tx.execute("SAVEPOINT before_bonus")
 tx.execute("MATCH (a:Account {id: 'A001'}) SET a.bonus = 500")
 
 # Undo only the bonus, keep the balance change
-tx.rollback_to_savepoint("before_bonus")
-
-# Release discards the savepoint but keeps changes
-# tx.release_savepoint("before_bonus")
+tx.execute("ROLLBACK TO SAVEPOINT before_bonus")
 
 tx.commit()  # balance = 1000, no bonus property
-```
-
-### Nested Transactions
-
-Starting a transaction inside an existing one creates an implicit savepoint. Rolling back the inner transaction undoes only its changes:
-
-```python
-tx = db.begin_transaction()
-tx.execute("MATCH (n:Counter) SET n.value = 1")
-
-# Inner transaction (implicit savepoint)
-tx2 = db.begin_transaction()
-tx2.execute("MATCH (n:Counter) SET n.value = 99")
-tx2.rollback()  # Undoes SET n.value = 99
-
-# n.value is still 1
-tx.commit()
 ```
 
 ### Savepoint Rules
@@ -298,19 +300,23 @@ In Rust, the same behavior applies when a `Session` is dropped:
 
 ## Two-Phase Commit
 
+!!! note "Rust-only API"
+    `prepare_commit()` is available on the Rust `Session` type. It is not exposed in the Python, Node.js, or WASM bindings.
+
 For workflows that need to inspect pending mutations before finalizing, use `prepare_commit()`:
 
-```python
-tx = db.begin_transaction()
-tx.execute("INSERT (:Person {name: 'Alix'})")
-tx.execute("MATCH (a:Person {name: 'Alix'}), (b:Person {name: 'Gus'}) INSERT (a)-[:KNOWS]->(b)")
+```rust
+let session = db.session();
+session.begin_transaction()?;
+session.execute("INSERT (:Person {name: 'Alix'})")?;
+session.execute("MATCH (a:Person {name: 'Alix'}), (b:Person {name: 'Gus'}) INSERT (a)-[:KNOWS]->(b)")?;
 
-# Inspect what would be committed
-prepared = tx.prepare_commit()
-print(f"Pending: {prepared.node_count} nodes, {prepared.edge_count} edges")
+// Inspect what would be committed
+let prepared = session.prepare_commit()?;
+println!("Pending: {} nodes, {} edges", prepared.node_count(), prepared.edge_count());
 
-# Finalize
-prepared.commit()
+// Finalize
+prepared.commit()?;
 ```
 
 ## GQL Transaction Syntax
@@ -361,16 +367,11 @@ with db.begin_transaction() as tx:
     tx.execute("CREATE (n:Test)")
     tx.commit()
 
-# Savepoints
-tx.savepoint("sp1")
-tx.rollback_to_savepoint("sp1")
-tx.release_savepoint("sp1")
-
-# Two-phase commit
+# Savepoints via GQL (no dedicated Python methods)
 tx = db.begin_transaction()
-tx.execute("INSERT (:Person {name: 'Alix'})")
-prepared = tx.prepare_commit()
-prepared.commit()
+tx.execute("SAVEPOINT sp1")
+tx.execute("ROLLBACK TO SAVEPOINT sp1")
+tx.execute("RELEASE SAVEPOINT sp1")
 ```
 
 ### Rust
@@ -404,16 +405,22 @@ Grafeo automatically garbage collects old transaction metadata and version chain
 - Aborted transactions are cleaned up immediately
 - Committed transaction metadata is retained until no active transaction can see it
 - Version chains are pruned based on the oldest active transaction's start epoch
-- GC runs every N commits (default 100, configurable); manual trigger via `db.gc()`
+- GC runs every N commits (default 100, configurable); manual trigger via `db.gc()` in Rust
+
+!!! note
+    The `gc()` method is only available on the Rust `GrafeoDB` type. Python and other bindings rely on automatic GC.
 
 ## Error Codes
 
 Transaction errors use standardized `GRAFEO-TXXX` codes:
 
-| Code | Description |
-|------|-------------|
-| `GRAFEO-T001` | Write-write conflict detected |
-| `GRAFEO-T002` | Transaction already committed or rolled back |
-| `GRAFEO-T003` | Read-only transaction attempted mutation |
+| Code | Description | Retryable? |
+|------|-------------|------------|
+| `GRAFEO-T001` | Write-write conflict detected | Yes |
+| `GRAFEO-T002` | Transaction timeout | Yes |
+| `GRAFEO-T003` | Read-only transaction attempted mutation | No |
+| `GRAFEO-T004` | Invalid transaction state (e.g., already committed or rolled back) | No |
+| `GRAFEO-T005` | Serialization failure (SSI violation) | No |
+| `GRAFEO-T006` | Deadlock detected | Yes |
 
-All transaction errors include `is_retryable()` to indicate whether the operation can be safely retried.
+In Rust, error codes expose an `is_retryable()` method to indicate whether the operation can be safely retried. This method is not currently exposed in the Python bindings.

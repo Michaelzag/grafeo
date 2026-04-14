@@ -74,6 +74,23 @@ await db.executeSparql('SELECT ?name WHERE { ?p a :Person ; :name ?name }');
 await db.executeSql("SELECT name FROM GRAPH_TABLE(g MATCH (p:Person) COLUMNS (p.name))");
 ```
 
+## Query Languages on Transactions
+
+The `Transaction` class supports the same query language methods as `GrafeoDB`:
+
+```typescript
+const tx = db.beginTransaction();
+await tx.execute('...');           // GQL
+await tx.executeCypher('...');     // Cypher
+await tx.executeSql('...');        // SQL/PGQ
+await tx.executeGremlin('...');    // Gremlin
+await tx.executeGraphql('...');    // GraphQL
+await tx.executeSparql('...');     // SPARQL
+tx.commit();
+```
+
+Each language method requires its corresponding feature flag (e.g. `cypher`, `sql-pgq`).
+
 ## Sync vs Async
 
 Query execution is always async (returns a `Promise`), because the Rust engine runs queries on a background thread via `tokio::task::spawn_blocking` to avoid blocking the Node.js event loop.
@@ -87,6 +104,8 @@ CRUD operations (`createNode`, `deleteNode`, etc.) and transaction control (`com
 | `setNodeProperty`, `setEdgeProperty` | Sync |
 | `nodeCount`, `edgeCount`, `info`, `schema` | Sync |
 | `beginTransaction`, `commit`, `rollback` | Sync |
-| `execute`, `executeCypher`, etc. | **Async** |
+| `save`, `walCheckpoint`, `backupFull`, `backupIncremental` | Sync |
+| `execute`, `executeCypher`, `executeSql`, etc. | **Async** |
 | `createVectorIndex`, `vectorSearch` | **Async** |
 | `batchCreateNodes`, `batchVectorSearch` | **Async** |
+| `importCsv`, `importJsonl` | **Async** |

@@ -25,7 +25,7 @@ Persistent mode stores data durably on disk.
     ```rust
     use grafeo::GrafeoDB;
 
-    let db = GrafeoDB::new("my_graph.db")?;
+    let db = GrafeoDB::open("my_graph.db")?;
     ```
 
 ## File Structure
@@ -46,11 +46,9 @@ my_graph.db/
 ## Configuration
 
 ```python
-db = grafeo.GrafeoDB(
-    path="my_graph.db",
-    # Sync mode: 'full' (default), 'normal', 'off'
-    sync_mode='full'
-)
+# Python constructor accepts path and cdc only.
+# Sync mode configuration is available via the Rust Config builder.
+db = grafeo.GrafeoDB(path="my_graph.db")
 ```
 
 | Sync Mode | Durability | Performance |
@@ -72,7 +70,7 @@ Since 0.5.21, Grafeo supports a single-file database format. The entire database
 === "Rust"
 
     ```rust
-    let db = GrafeoDB::new("my_graph.grafeo")?;
+    let db = GrafeoDB::open("my_graph.grafeo")?;
     ```
 
 Features:

@@ -32,7 +32,7 @@ Four tiers are published to Docker Hub on every release:
 | **standard** | `grafeo-server:latest` | HTTP (:7474) | All 6 | No | Studio | ~21 MB |
 | **full** | `grafeo-server:full` | HTTP + GWP + Bolt | All 6 | Yes + embed | Studio | ~25 MB |
 
-Versioned tags follow the pattern: `0.5.32`, `0.5.32-gwp`, `0.5.32-bolt`, `0.5.32-full`.
+Versioned tags follow the pattern: `0.5.38`, `0.5.38-gwp`, `0.5.38-bolt`, `0.5.38-full`.
 
 ### GWP
 

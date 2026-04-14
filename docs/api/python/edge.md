@@ -15,27 +15,37 @@ Represents a graph edge.
 | Property | Type | Description |
 |----------|------|-------------|
 | `id` | `int` | Internal edge ID |
-| `type` | `str` | Edge type |
-| `source` | `int` | Source node ID |
-| `target` | `int` | Target node ID |
+| `edge_type` | `str` | Edge type |
+| `source_id` | `int` | Source node ID |
+| `target_id` | `int` | Target node ID |
 
 ## Methods
 
 ### get()
 
-Get a property value.
+Get a property value by key. Returns `None` if the property does not exist.
 
 ```python
-def get(self, key: str, default: Any = None) -> Any
+def get(self, key: str) -> Optional[Any]
 ```
 
-### keys()
+### properties()
 
-Get all property keys.
+Get all properties as a dictionary.
 
 ```python
-def keys(self) -> List[str]
+def properties(self) -> Dict[str, Any]
 ```
+
+## Operators
+
+### `edge["key"]`
+
+Access a property by key. Raises `KeyError` if the property does not exist.
+
+### `"key" in edge`
+
+Check whether the edge has a property with the given key.
 
 ## Example
 
@@ -47,7 +57,8 @@ result = db.execute("""
 row = next(iter(result))
 edge = row['r']
 
-print(f"Type: {edge.type}")
-print(f"From: {edge.source} To: {edge.target}")
+print(f"Type: {edge.edge_type}")
+print(f"From: {edge.source_id} To: {edge.target_id}")
 print(f"Since: {edge.get('since')}")
+print(f"All properties: {edge.properties()}")
 ```

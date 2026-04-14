@@ -27,7 +27,7 @@ For temporary data or maximum performance:
     ```rust
     use grafeo::GrafeoDB;
 
-    let db = GrafeoDB::new_in_memory()?;
+    let db = GrafeoDB::new_in_memory();
     ```
 
 !!! note "Data Persistence"
@@ -51,72 +51,56 @@ For durable storage:
     ```rust
     use grafeo::GrafeoDB;
 
-    let db = GrafeoDB::new("my_graph.db")?;
+    let db = GrafeoDB::open("my_graph.db")?;
     ```
 
 ## Configuration Options
 
-### Memory Limit
+!!! note "Python and Node.js constructors"
+    The Python and Node.js constructors accept only `path` and `cdc` parameters.
+    Advanced configuration options (`memory_limit`, `threads`, `read_only`, etc.)
+    are only available in the Rust API via the `Config` builder.
+
+### Memory Limit (Rust only)
 
 Control the maximum memory usage:
 
-=== "Python"
+```rust
+use grafeo::{GrafeoDB, Config};
 
-    ```python
-    db = grafeo.GrafeoDB(
-        path="my_graph.db",
-        memory_limit=4 * 1024 * 1024 * 1024  # 4 GB
-    )
-    ```
+let config = Config::builder()
+    .memory_limit(4 * 1024 * 1024 * 1024)  // 4 GB
+    .build()?;
 
-=== "Rust"
+let db = GrafeoDB::with_config(config)?;
+```
 
-    ```rust
-    use grafeo::{GrafeoDB, Config};
-
-    let config = Config::builder()
-        .memory_limit(4 * 1024 * 1024 * 1024)  // 4 GB
-        .build()?;
-
-    let db = GrafeoDB::with_config(config)?;
-    ```
-
-### Thread Pool Size
+### Thread Pool Size (Rust only)
 
 Configure parallelism:
 
-=== "Python"
+```rust
+use grafeo::{GrafeoDB, Config};
 
-    ```python
-    db = grafeo.GrafeoDB(
-        path="my_graph.db",
-        threads=8
-    )
-    ```
+let config = Config::builder()
+    .threads(8)
+    .build()?;
 
-=== "Rust"
-
-    ```rust
-    use grafeo::{GrafeoDB, Config};
-
-    let config = Config::builder()
-        .threads(8)
-        .build()?;
-
-    let db = GrafeoDB::with_config(config)?;
-    ```
+let db = GrafeoDB::with_config(config)?;
+```
 
 !!! tip "Default Thread Count"
     By default, Grafeo uses the number of available CPU cores.
 
 ## Configuration Reference
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `path` | `string` | `None` | Database file path (None for in-memory) |
-| `memory_limit` | `int` | System RAM | Maximum memory usage in bytes |
-| `threads` | `int` | CPU cores | Number of worker threads |
-| `read_only` | `bool` | `false` | Open database in read-only mode |
+| Option | Type | Default | Availability | Description |
+|--------|------|---------|--------------|-------------|
+| `path` | `string` | `None` | All (Rust, Python, Node.js) | Database file path (None for in-memory) |
+| `cdc` | `bool` | `false` | All (Rust, Python, Node.js) | Enable change data capture |
+| `memory_limit` | `int` | System RAM | Rust only (`Config` builder) | Maximum memory usage in bytes |
+| `threads` | `int` | CPU cores | Rust only (`Config` builder) | Number of worker threads |
+| `read_only` | `bool` | `false` | Rust only (`Config` builder) | Open database in read-only mode |
 
 ## Environment Variables
 
@@ -128,36 +112,51 @@ Grafeo can also be configured via environment variables:
 | `GRAFEO_THREADS` | Number of worker threads |
 | `GRAFEO_LOG_LEVEL` | Logging level (error, warn, info, debug, trace) |
 
-## Performance Tuning
+## Performance Tuning (Rust)
+
+Advanced tuning is available via the Rust `Config` builder. Python and Node.js
+users get sensible defaults automatically.
 
 ### For High-Throughput Workloads
 
-```python
-db = grafeo.GrafeoDB(
-    path="high_throughput.db",
-    memory_limit=8 * 1024 * 1024 * 1024,  # 8 GB
-    threads=16
-)
+```rust
+use grafeo::{GrafeoDB, Config};
+
+let config = Config::builder()
+    .path("high_throughput.db")
+    .memory_limit(8 * 1024 * 1024 * 1024)  // 8 GB
+    .threads(16)
+    .build()?;
+
+let db = GrafeoDB::with_config(config)?;
 ```
 
 ### For Low-Memory Environments
 
-```python
-db = grafeo.GrafeoDB(
-    path="embedded.db",
-    memory_limit=256 * 1024 * 1024,  # 256 MB
-    threads=2
-)
+```rust
+use grafeo::{GrafeoDB, Config};
+
+let config = Config::builder()
+    .path("embedded.db")
+    .memory_limit(256 * 1024 * 1024)  // 256 MB
+    .threads(2)
+    .build()?;
+
+let db = GrafeoDB::with_config(config)?;
 ```
 
 ### For Read-Heavy Workloads
 
-```python
-# Multiple read replicas can be opened read-only
-db = grafeo.GrafeoDB(
-    path="replica.db",
-    read_only=True
-)
+```rust
+use grafeo::{GrafeoDB, Config};
+
+// Multiple read replicas can be opened read-only
+let config = Config::builder()
+    .path("replica.db")
+    .read_only(true)
+    .build()?;
+
+let db = GrafeoDB::with_config(config)?;
 ```
 
 ## Next Steps

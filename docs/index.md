@@ -134,7 +134,7 @@ hide:
     ```rust
     use grafeo::GrafeoDB;
 
-    fn main() -> Result<(), grafeo_common::utils::error::Error> {
+    fn main() -> Result<(), grafeo::Error> {
         // Create an in-memory database
         let db = GrafeoDB::new_in_memory();
 
@@ -157,7 +157,7 @@ hide:
             RETURN p.name, friend.name
         "#)?;
 
-        for row in result.rows {
+        for row in result.rows() {
             println!("{:?}", row);
         }
 

@@ -229,6 +229,9 @@ LOAD CSV WITH HEADERS FROM 'file:///data/people.csv' AS row
 RETURN row.name
 ```
 
+!!! note "File path restrictions"
+    LOAD CSV reads from the local filesystem only. You can specify a relative path (e.g., `'data/people.csv'`) or a `file://` URI (e.g., `'file:///data/people.csv'`). Remote URLs such as `http://` or `https://` are not supported. The `file://` prefix is stripped before opening the file, so both `'data/file.csv'` and `'file:///data/file.csv'` resolve to the same local path.
+
 ## Schema DDL
 
 Create and manage indexes and constraints:
