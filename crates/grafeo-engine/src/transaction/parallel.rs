@@ -1152,4 +1152,99 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_cluster_skip_threshold_large_cluster() {
+        // When the largest conflict cluster is >80% of invalid set,
+        // the cluster-based path is skipped in favor of round-based
+        let executor = ParallelExecutor::new(4);
+        let ops: Vec<String> = (0..10).map(|i| format!("op{i}")).collect();
+        let batch = BatchRequest::new(ops);
+
+        // All transactions write to the same entity: one giant cluster
+        let shared = EntityId::Node(NodeId::new(1));
+        let result = executor.execute_batch(batch, |_idx, _, result| {
+            result.record_read(shared, EpochId::new(0));
+            result.record_write(shared);
+        });
+
+        assert!(result.all_succeeded());
+        // With one huge cluster (100% of conflicts), cluster skip threshold triggers
+        // Either all in one cluster or sequential fallback
+        assert!(
+            result.largest_cluster_size >= result.conflict_cluster_count,
+            "largest cluster should dominate"
+        );
+    }
+
+    #[test]
+    fn test_multiple_disjoint_clusters() {
+        // Two separate groups of conflicting transactions should form two clusters
+        let executor = ParallelExecutor::new(4);
+        let ops: Vec<String> = (0..8).map(|i| format!("op{i}")).collect();
+        let batch = BatchRequest::new(ops);
+
+        let entity_a = EntityId::Node(NodeId::new(100));
+        let entity_b = EntityId::Node(NodeId::new(200));
+
+        let result = executor.execute_batch(batch, |idx, _, result| {
+            // Even indices conflict on entity A, odd on entity B
+            let entity = if idx % 2 == 0 { entity_a } else { entity_b };
+            result.record_read(entity, EpochId::new(0));
+            result.record_write(entity);
+        });
+
+        assert!(result.all_succeeded());
+        // Should detect multiple clusters (or fall back if conflict rate is too high)
+        if result.conflict_cluster_count > 1 {
+            assert!(
+                result.largest_cluster_size < 8,
+                "with disjoint conflicts, no single cluster should contain all transactions"
+            );
+        }
+    }
+
+    #[test]
+    fn test_batch_result_metrics_fields() {
+        // Verify BatchResult fields are populated correctly.
+        // Use a conflict-free batch so all operations succeed deterministically.
+        let executor = ParallelExecutor::new(4);
+        let ops: Vec<String> = (0..10).map(|i| format!("op{i}")).collect();
+        let batch = BatchRequest::new(ops);
+
+        let result = executor.execute_batch(batch, |idx, _, result| {
+            // Each transaction writes to a unique entity (no conflicts)
+            let entity = EntityId::Node(NodeId::new(idx as u64 + 1000));
+            result.record_write(entity);
+        });
+
+        assert!(result.all_succeeded(), "conflict-free batch should succeed");
+        assert_eq!(result.success_count, 10);
+        assert_eq!(result.failure_count, 0);
+        assert_eq!(result.reexecution_count, 0);
+        assert!(result.parallel_executed);
+        assert_eq!(result.conflict_cluster_count, 0);
+        assert_eq!(result.largest_cluster_size, 0);
+    }
+
+    #[test]
+    fn test_no_conflicts_no_reexecution() {
+        // When transactions don't conflict, no re-execution should happen
+        let executor = ParallelExecutor::new(4);
+        let ops: Vec<String> = (0..8).map(|i| format!("op{i}")).collect();
+        let batch = BatchRequest::new(ops);
+
+        let result = executor.execute_batch(batch, |idx, _, result| {
+            // Each transaction writes to a unique entity
+            let entity = EntityId::Node(NodeId::new(idx as u64));
+            result.record_write(entity);
+        });
+
+        assert!(result.all_succeeded());
+        assert_eq!(
+            result.reexecution_count, 0,
+            "no conflicts means no re-execution"
+        );
+        assert_eq!(result.conflict_cluster_count, 0);
+    }
 }

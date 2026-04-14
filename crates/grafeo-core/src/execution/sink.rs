@@ -381,6 +381,83 @@ mod tests {
         sink.consume(create_test_chunk(&[4, 5])).unwrap();
         sink.finalize().unwrap();
 
-        // No assertions - just verifies it doesn't error
+        // NullSink discards everything, no assertion needed
+    }
+
+    #[test]
+    fn test_collector_sink_empty() {
+        let sink = CollectorSink::new();
+        assert!(sink.is_empty());
+        assert_eq!(sink.row_count(), 0);
+        assert_eq!(sink.chunks().len(), 0);
+    }
+
+    #[test]
+    fn test_collector_sink_into_chunks() {
+        let mut sink = CollectorSink::new();
+        sink.consume(create_test_chunk(&[1, 2])).unwrap();
+        sink.consume(create_test_chunk(&[3])).unwrap();
+
+        assert!(!sink.is_empty());
+        let chunks = sink.into_chunks();
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].len(), 2);
+        assert_eq!(chunks[1].len(), 1);
+    }
+
+    #[test]
+    fn test_materializing_sink_memory_bytes() {
+        let mut sink = MaterializingSink::new();
+        assert_eq!(sink.memory_bytes(), 0);
+
+        sink.consume(create_test_chunk(&[1, 2, 3])).unwrap();
+        assert!(sink.memory_bytes() > 0);
+    }
+
+    #[test]
+    fn test_materializing_sink_into_chunks() {
+        let mut sink = MaterializingSink::new();
+        sink.consume(create_test_chunk(&[1, 2])).unwrap();
+        sink.consume(create_test_chunk(&[3, 4])).unwrap();
+
+        let chunks = sink.into_chunks();
+        assert_eq!(chunks.len(), 2);
+    }
+
+    #[test]
+    fn test_limiting_sink_limit_getter() {
+        let sink = LimitingSink::new(42);
+        assert_eq!(sink.limit(), 42);
+        assert!(!sink.is_full());
+    }
+
+    #[test]
+    fn test_limiting_sink_into_chunks() {
+        let mut sink = LimitingSink::new(5);
+        sink.consume(create_test_chunk(&[1, 2])).unwrap();
+        sink.consume(create_test_chunk(&[3, 4])).unwrap();
+
+        let chunks = sink.into_chunks();
+        assert_eq!(chunks.len(), 2);
+    }
+
+    #[test]
+    fn test_counting_sink_empty() {
+        let sink = CountingSink::new();
+        assert_eq!(sink.count(), 0);
+    }
+
+    #[test]
+    fn test_null_sink_into_any() {
+        let sink: Box<dyn Sink> = Box::new(NullSink::new());
+        let any_box = sink.into_any();
+        assert!(any_box.downcast::<NullSink>().is_ok());
+    }
+
+    #[test]
+    fn test_collector_sink_into_any() {
+        let sink: Box<dyn Sink> = Box::new(CollectorSink::new());
+        let any_box = sink.into_any();
+        assert!(any_box.downcast::<CollectorSink>().is_ok());
     }
 }

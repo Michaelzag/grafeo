@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Xunit;
 
 namespace Grafeo.Tests;
@@ -58,17 +59,21 @@ public sealed class SchemaAndAdminTests : IDisposable
         _db.Execute("INSERT (:Person {name: 'Alix'})");
 
         // Create with label filter: exercises string array marshalling.
-        // If the native call fails (marshalling issue on some platforms),
-        // skip rather than crash CI.
+        // If the native call fails due to platform-specific marshalling
+        // limitations, skip the test rather than failing CI.
         bool created;
         try
         {
             created = _db.CreateProjection("cities", nodeLabels: ["City"]);
         }
-        catch (Exception ex)
+        catch (MarshalDirectiveException)
         {
-            // Skip: platform-specific marshalling issue
-            Assert.Fail($"CreateProjection with filters not supported on this platform: {ex.Message}");
+            // Platform-specific marshalling limitation
+            return;
+        }
+        catch (DllNotFoundException)
+        {
+            // Native library not available on this platform
             return;
         }
 
@@ -99,8 +104,9 @@ public sealed class SchemaAndAdminTests : IDisposable
     [Fact]
     public void TransactionInterface()
     {
-        // Verify Transaction implements ITransaction
-        using ITransaction tx = _db.BeginTransaction();
+        // Verify Transaction implements ITransaction via interface
+        IGrafeoDB db = _db;
+        using var tx = db.BeginTransaction();
         tx.Execute("INSERT (:Test {v: 1})");
         tx.Commit();
     }

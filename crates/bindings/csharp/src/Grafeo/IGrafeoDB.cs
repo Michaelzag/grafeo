@@ -12,8 +12,8 @@ public interface IGrafeoDB : IDisposable, IAsyncDisposable
     QueryResult ExecuteLanguage(string language, string query, Dictionary<string, object?>? parameters = null);
 
     // Transactions
-    Transaction BeginTransaction();
-    Transaction BeginTransaction(IsolationLevel isolationLevel);
+    ITransaction BeginTransaction();
+    ITransaction BeginTransaction(IsolationLevel isolationLevel);
 
     // Node CRUD
     long CreateNode(IEnumerable<string> labels, Dictionary<string, object?>? properties = null);

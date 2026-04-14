@@ -279,8 +279,8 @@ impl DataChunk {
         };
 
         // Build permutation index sorted by the column values.
-        // NodeId columns sort by raw ID; Int64 columns sort numerically;
-        // other types use a best-effort u64 key (nulls sort last).
+        // NodeId columns sort by raw ID; Int64 columns sort numerically
+        // (offset-encoded so negative values sort correctly); nulls sort last.
         let mut indices: Vec<usize> = self.selected_indices().collect();
         indices.sort_by_key(|&i| {
             sort_col
@@ -288,7 +288,10 @@ impl DataChunk {
                 .map(|id| id.as_u64())
                 .or_else(|| {
                     sort_col.get_value(i).and_then(|v| match v {
-                        grafeo_common::types::Value::Int64(n) => Some(n as u64),
+                        // XOR with sign bit flips the ordering so that
+                        // i64::MIN maps to 0 and i64::MAX maps to u64::MAX-1,
+                        // preserving the natural signed ordering.
+                        grafeo_common::types::Value::Int64(n) => Some((n as u64) ^ (1u64 << 63)),
                         _ => None,
                     })
                 })

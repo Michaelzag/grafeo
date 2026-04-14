@@ -1416,4 +1416,81 @@ mod tests {
         assert_eq!(copy.read_snapshot().unwrap(), b"read-only copy data");
         copy.close().unwrap();
     }
+
+    #[test]
+    #[cfg(feature = "encryption")]
+    fn encrypted_section_roundtrip() {
+        use grafeo_common::encryption::KeyChain;
+        use grafeo_common::storage::SectionType;
+
+        let dir = test_dir();
+        let path = dir.path().join("encrypted.grafeo");
+
+        let kc = KeyChain::new([0xAB; 32]);
+
+        let section_data = b"sensitive graph data that must be encrypted";
+
+        // Write with encryption
+        {
+            let mut manager = GrafeoFileManager::create(&path).unwrap();
+            manager.set_section_encryptor(kc.encryptor_for("section", b"test"));
+            manager
+                .write_sections(&[(SectionType::LpgStore, &section_data[..])], 1, 0, 0, 0)
+                .unwrap();
+            manager.close().unwrap();
+        }
+
+        // Read back with same key
+        {
+            let mut manager = GrafeoFileManager::open(&path).unwrap();
+            manager.set_section_encryptor(kc.encryptor_for("section", b"test"));
+            let dir_opt = manager.read_section_directory().unwrap();
+            let section_dir = dir_opt.expect("directory should exist");
+            let entry = section_dir
+                .entries()
+                .iter()
+                .find(|e| e.section_type == SectionType::LpgStore)
+                .expect("LpgStore section should exist");
+            let decrypted = manager.read_section_data(entry).unwrap();
+            assert_eq!(decrypted, section_data);
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "encryption")]
+    fn encrypted_section_wrong_key_fails() {
+        use grafeo_common::encryption::KeyChain;
+        use grafeo_common::storage::SectionType;
+
+        let dir = test_dir();
+        let path = dir.path().join("wrong_key.grafeo");
+
+        let kc_a = KeyChain::new([0xAA; 32]);
+        let kc_b = KeyChain::new([0xBB; 32]);
+
+        // Write with key A
+        {
+            let mut manager = GrafeoFileManager::create(&path).unwrap();
+            manager.set_section_encryptor(kc_a.encryptor_for("section", b"test"));
+            manager
+                .write_sections(&[(SectionType::LpgStore, b"secret data")], 1, 0, 0, 0)
+                .unwrap();
+            manager.close().unwrap();
+        }
+
+        // Read with key B: CRC passes (computed on encrypted bytes), but decryption fails
+        {
+            let mut manager = GrafeoFileManager::open(&path).unwrap();
+            manager.set_section_encryptor(kc_b.encryptor_for("section", b"test"));
+            let dir_opt = manager.read_section_directory().unwrap();
+            let section_dir = dir_opt.expect("directory should exist");
+            let entry = section_dir
+                .entries()
+                .iter()
+                .find(|e| e.section_type == SectionType::LpgStore)
+                .expect("section should exist");
+            let result = manager.read_section_data(entry);
+            assert!(result.is_err(), "decryption with wrong key should fail");
+        }
+    }
 }

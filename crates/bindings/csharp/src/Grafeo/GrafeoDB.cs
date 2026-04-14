@@ -266,6 +266,10 @@ public sealed class GrafeoDB : IGrafeoDB, IDisposable, IAsyncDisposable
         return new Transaction(txPtr);
     }
 
+    // Explicit interface implementations for ITransaction return type
+    ITransaction IGrafeoDB.BeginTransaction() => BeginTransaction();
+    ITransaction IGrafeoDB.BeginTransaction(IsolationLevel level) => BeginTransaction(level);
+
     // =========================================================================
     // Node CRUD
     // =========================================================================
@@ -506,11 +510,14 @@ public sealed class GrafeoDB : IGrafeoDB, IDisposable, IAsyncDisposable
         GrafeoException.ThrowIfFailed(NativeMethods.grafeo_backup_incremental(Handle, path));
     }
 
-    /// <summary>Restore database state to a specific epoch.</summary>
-    public void RestoreToEpoch(ulong epoch)
+    /// <summary>Restore database to a specific epoch from a backup directory.</summary>
+    /// <param name="backupDir">Directory containing backup files.</param>
+    /// <param name="epoch">Target epoch to restore to.</param>
+    /// <param name="outputPath">Path for the restored database.</param>
+    public static void RestoreToEpoch(string backupDir, ulong epoch, string outputPath)
     {
-        ThrowIfDisposed();
-        GrafeoException.ThrowIfFailed(NativeMethods.grafeo_restore_to_epoch(Handle, epoch));
+        GrafeoException.ThrowIfFailed(
+            NativeMethods.grafeo_restore_to_epoch(backupDir, epoch, outputPath));
     }
 
     // =========================================================================

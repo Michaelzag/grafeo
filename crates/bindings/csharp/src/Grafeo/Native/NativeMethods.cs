@@ -351,9 +351,9 @@ internal static partial class NativeMethods
     [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int grafeo_backup_incremental(nint db, string path);
 
-    /// <summary>Restore database state to a specific epoch.</summary>
-    [LibraryImport(LibName)]
-    internal static partial int grafeo_restore_to_epoch(nint db, ulong epoch);
+    /// <summary>Restore database to a specific epoch from a backup directory.</summary>
+    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int grafeo_restore_to_epoch(string backupDir, ulong epoch, string outputPath);
 
     // =========================================================================
     // Maintenance

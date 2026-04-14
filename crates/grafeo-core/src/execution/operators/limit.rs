@@ -487,4 +487,20 @@ mod tests {
 
         assert_eq!(results, vec![4, 5, 6]);
     }
+
+    #[test]
+    fn test_limit_into_parts() {
+        let child = Box::new(MockOperator::new(vec![]));
+        let limit = LimitOperator::new(child, 42, vec![LogicalType::Int64]);
+        let (_, limit_value) = limit.into_parts();
+        assert_eq!(limit_value, 42);
+    }
+
+    #[test]
+    fn test_limit_into_any() {
+        let child = Box::new(MockOperator::new(vec![]));
+        let limit: Box<dyn Operator> = Box::new(LimitOperator::new(child, 10, vec![]));
+        let any = limit.into_any();
+        assert!(any.downcast::<LimitOperator>().is_ok());
+    }
 }
