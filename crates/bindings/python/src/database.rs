@@ -2060,6 +2060,66 @@ impl PyGrafeoDB {
         Ok(dict.into())
     }
 
+    /// Returns runtime metrics as a dict.
+    ///
+    /// Requires the `metrics` feature to be enabled. Returns counters for
+    /// queries, transactions, sessions, cache, and GC.
+    ///
+    /// Returns:
+    ///     dict with metric names as keys and numeric values
+    ///
+    /// Example:
+    ///     m = db.metrics()
+    ///     print(f"Queries: {m['query_count']}, Cache hits: {m['cache_hits']}")
+    #[cfg(feature = "metrics")]
+    fn metrics(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let db = self.inner.read();
+        let snap = db.metrics();
+
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("query_count", snap.query_count)?;
+        dict.set_item("query_errors", snap.query_errors)?;
+        dict.set_item("query_timeouts", snap.query_timeouts)?;
+        dict.set_item("rows_returned", snap.rows_returned)?;
+        dict.set_item("rows_scanned", snap.rows_scanned)?;
+        dict.set_item("tx_committed", snap.tx_committed)?;
+        dict.set_item("tx_rolled_back", snap.tx_rolled_back)?;
+        dict.set_item("tx_conflicts", snap.tx_conflicts)?;
+        dict.set_item("tx_active", snap.tx_active)?;
+        dict.set_item("session_created", snap.session_created)?;
+        dict.set_item("session_active", snap.session_active)?;
+        dict.set_item("gc_runs", snap.gc_runs)?;
+        dict.set_item("cache_hits", snap.cache_hits)?;
+        dict.set_item("cache_misses", snap.cache_misses)?;
+        dict.set_item("cache_size", snap.cache_size)?;
+        dict.set_item("cache_invalidations", snap.cache_invalidations)?;
+
+        Ok(dict.into())
+    }
+
+    /// Returns runtime metrics in Prometheus text exposition format.
+    ///
+    /// Returns:
+    ///     str: Prometheus-compatible text output
+    ///
+    /// Example:
+    ///     print(db.metrics_prometheus())
+    #[cfg(feature = "metrics")]
+    fn metrics_prometheus(&self) -> String {
+        let db = self.inner.read();
+        db.metrics_prometheus()
+    }
+
+    /// Resets all metrics counters and histograms to zero.
+    ///
+    /// Example:
+    ///     db.reset_metrics()
+    #[cfg(feature = "metrics")]
+    fn reset_metrics(&self) {
+        let db = self.inner.read();
+        db.reset_metrics();
+    }
+
     /// Returns schema information (labels, edge types, property keys).
     ///
     /// Returns:
