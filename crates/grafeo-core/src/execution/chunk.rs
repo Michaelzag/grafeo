@@ -283,19 +283,23 @@ impl DataChunk {
         // (offset-encoded so negative values sort correctly); nulls sort last.
         let mut indices: Vec<usize> = self.selected_indices().collect();
         indices.sort_by_key(|&i| {
+            // Returns (is_null, key): nulls get (1, 0) so they sort strictly
+            // after all non-null values (0, _), regardless of the key value.
             sort_col
                 .get_node_id(i)
-                .map(|id| id.as_u64())
+                .map(|id| (0u8, id.as_u64()))
                 .or_else(|| {
                     sort_col.get_value(i).and_then(|v| match v {
                         // XOR with sign bit flips the ordering so that
-                        // i64::MIN maps to 0 and i64::MAX maps to u64::MAX-1,
+                        // i64::MIN maps to 0 and i64::MAX maps to u64::MAX,
                         // preserving the natural signed ordering.
-                        grafeo_common::types::Value::Int64(n) => Some((n as u64) ^ (1u64 << 63)),
+                        grafeo_common::types::Value::Int64(n) => {
+                            Some((0u8, (n as u64) ^ (1u64 << 63)))
+                        }
                         _ => None,
                     })
                 })
-                .unwrap_or(u64::MAX)
+                .unwrap_or((1u8, 0u64))
         });
 
         // Apply permutation to all columns
