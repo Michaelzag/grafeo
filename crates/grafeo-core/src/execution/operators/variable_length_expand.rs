@@ -247,9 +247,16 @@ impl VariableLengthExpandOperator {
     fn materialize_input(&mut self) -> Result<(), OperatorError> {
         let mut rows = Vec::new();
 
+        /// Minimum chunk size for locality sort to be worthwhile.
+        const LOCALITY_SORT_THRESHOLD: usize = 1024;
+
         while let Some(mut chunk) = self.input.next()? {
             // Flatten to handle selection vectors
             chunk.flatten();
+            // Sort by source node ID for cache locality during adjacency lookups
+            if chunk.len() > LOCALITY_SORT_THRESHOLD {
+                chunk = chunk.sort_by_column(self.source_column);
+            }
 
             for row_idx in 0..chunk.row_count() {
                 // Extract the source node ID
