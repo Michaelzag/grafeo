@@ -400,7 +400,7 @@ jobs:
             engine_features: "--features lpg,gql,regex-lite"
           # Enterprise persona: Platform Operator (observability + async I/O)
           - profile: enterprise
-            features: "--features metrics,tracing"
+            features: "--features tracing"
             engine_features: "--features metrics,tracing,async-storage"
           # Full: all features combined (deprecated in 0.6.0, replace with persona combos)
           - profile: full

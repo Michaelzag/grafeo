@@ -47,6 +47,7 @@ impl super::GrafeoDB {
     /// # Errors
     ///
     /// Returns an error if parsing or execution fails.
+    #[cfg(feature = "gql")]
     pub fn execute_at_epoch(
         &self,
         query: &str,

@@ -4,7 +4,7 @@
 
 #[cfg(feature = "algos")]
 pub mod procedure_call;
-#[cfg(feature = "algos")]
+#[cfg(all(feature = "algos", feature = "gql"))]
 pub mod user_procedure;
 
 use std::time::Instant;
