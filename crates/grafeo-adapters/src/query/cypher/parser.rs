@@ -1465,17 +1465,34 @@ impl<'a> Parser<'a> {
             TokenKind::Integer => {
                 let text = &self.current.text;
                 let value = if text.starts_with("0x") || text.starts_with("0X") {
-                    i64::from_str_radix(&text[2..], 16).unwrap_or(0)
+                    i64::from_str_radix(&text[2..], 16)
                 } else if text.starts_with("0o") || text.starts_with("0O") {
-                    i64::from_str_radix(&text[2..], 8).unwrap_or(0)
+                    i64::from_str_radix(&text[2..], 8)
                 } else {
-                    text.parse().unwrap_or(0)
-                };
+                    text.parse()
+                }
+                .map_err(|e: std::num::ParseIntError| {
+                    if *e.kind() == std::num::IntErrorKind::PosOverflow
+                        || *e.kind() == std::num::IntErrorKind::NegOverflow
+                    {
+                        self.error(&format!(
+                            "Integer literal '{}' overflows the valid range ({} to {})",
+                            text,
+                            i64::MIN,
+                            i64::MAX
+                        ))
+                    } else {
+                        self.error(&format!("Invalid integer literal: '{}'", text))
+                    }
+                })?;
                 self.advance();
                 Ok(Expression::Literal(Literal::Integer(value)))
             }
             TokenKind::Float => {
-                let value = self.current.text.parse().unwrap_or(0.0);
+                let text = &self.current.text;
+                let value = text.parse().map_err(|_: std::num::ParseFloatError| {
+                    self.error(&format!("Invalid float literal: '{}'", text))
+                })?;
                 self.advance();
                 Ok(Expression::Literal(Literal::Float(value)))
             }

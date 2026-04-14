@@ -415,7 +415,7 @@ impl PyGrafeoDB {
         params: Option<&Bound<'_, pyo3::types::PyDict>>,
         _py: Python<'_>,
     ) -> PyResult<PyQueryResult> {
-        self.execute_language_impl("sql-pgq", query, params)
+        self.execute_language_impl("sql", query, params)
     }
 
     /// Execute a GQL query asynchronously.
@@ -581,7 +581,7 @@ impl PyGrafeoDB {
         query: &str,
         params: Option<&Bound<'_, pyo3::types::PyDict>>,
     ) -> PyResult<PyQueryResult> {
-        self.execute_language_impl("sql-pgq", &format!("EXPLAIN {query}"), params)
+        self.execute_language_impl("sql", &format!("EXPLAIN {query}"), params)
     }
 
     /// Return the physical execution plan for a Gremlin query without executing it.
@@ -1837,8 +1837,12 @@ impl PyGrafeoDB {
     ///     tx.commit()
     /// ```
     #[pyo3(signature = (isolation_level=None))]
-    fn begin_transaction(&self, isolation_level: Option<&str>) -> PyResult<PyTransaction> {
-        PyTransaction::new(self.inner.clone(), isolation_level, None)
+    fn begin_transaction(
+        &self,
+        isolation_level: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyTransaction> {
+        let level_str = extract_isolation_level(isolation_level)?;
+        PyTransaction::new(self.inner.clone(), level_str.as_deref(), None)
     }
 
     /// Begin a transaction with an explicit CDC override.
@@ -1862,6 +1866,16 @@ impl PyGrafeoDB {
         isolation_level: Option<&str>,
     ) -> PyResult<PyTransaction> {
         PyTransaction::new(self.inner.clone(), isolation_level, Some(cdc_enabled))
+    }
+
+    /// Trigger manual garbage collection of old MVCC versions.
+    ///
+    /// Normally GC runs automatically after a configurable number of commits.
+    /// Call this to force an immediate GC pass, freeing memory from old
+    /// transaction snapshots that are no longer needed.
+    fn gc(&self) {
+        let db = self.inner.read();
+        db.gc();
     }
 
     /// Get database statistics.
@@ -3282,6 +3296,79 @@ impl PyGrafeoDB {
     }
 }
 
+/// Extract isolation level from either a string or an `IsolationLevel` enum value.
+fn extract_isolation_level(value: Option<&Bound<'_, PyAny>>) -> PyResult<Option<String>> {
+    match value {
+        None => Ok(None),
+        Some(v) => {
+            // Try enum first
+            if let Ok(level) = v.extract::<PyIsolationLevel>() {
+                return Ok(Some(level.as_str().to_string()));
+            }
+            // Fall back to string
+            if let Ok(s) = v.extract::<String>() {
+                return Ok(Some(s));
+            }
+            Err(pyo3::exceptions::PyTypeError::new_err(
+                "isolation_level must be a string or IsolationLevel enum",
+            ))
+        }
+    }
+}
+
+/// Isolation level for transactions.
+///
+/// Pass to ``begin_transaction()`` to control visibility of concurrent writes:
+///
+/// ```python
+/// from grafeo import IsolationLevel
+/// tx = db.begin_transaction(IsolationLevel.SERIALIZABLE)
+/// ```
+///
+/// String values ``"read_committed"``, ``"snapshot"``, ``"serializable"`` are also accepted.
+#[pyclass(
+    name = "IsolationLevel",
+    eq,
+    eq_int,
+    rename_all = "SCREAMING_SNAKE_CASE"
+)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PyIsolationLevel {
+    /// Each statement sees committed writes from other transactions.
+    ReadCommitted = 0,
+    /// The transaction sees a consistent snapshot taken at begin time.
+    Snapshot = 1,
+    /// Full serializability with conflict detection.
+    Serializable = 2,
+}
+
+impl PyIsolationLevel {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ReadCommitted => "read_committed",
+            Self::Snapshot => "snapshot",
+            Self::Serializable => "serializable",
+        }
+    }
+}
+
+#[pymethods]
+impl PyIsolationLevel {
+    #[allow(clippy::trivially_copy_pass_by_ref)]
+    fn __repr__(&self) -> &'static str {
+        match self {
+            Self::ReadCommitted => "IsolationLevel.READ_COMMITTED",
+            Self::Snapshot => "IsolationLevel.SNAPSHOT",
+            Self::Serializable => "IsolationLevel.SERIALIZABLE",
+        }
+    }
+
+    #[allow(clippy::trivially_copy_pass_by_ref)]
+    fn __str__(&self) -> &'static str {
+        self.as_str()
+    }
+}
+
 /// Groups multiple operations into an atomic unit.
 ///
 /// Use as a context manager - changes are isolated until you commit, and
@@ -3461,6 +3548,72 @@ impl PyTransaction {
         Ok(())
     }
 
+    /// Create a savepoint within this transaction.
+    ///
+    /// Savepoints let you partially roll back a transaction without
+    /// aborting all of it.
+    ///
+    /// Example:
+    /// ```python
+    /// tx.savepoint("sp1")
+    /// tx.execute("INSERT (:Temp {x: 1})")
+    /// tx.rollback_to_savepoint("sp1")  # undo the insert
+    /// tx.commit()  # commits without the Temp node
+    /// ```
+    fn savepoint(&self, name: &str) -> PyResult<()> {
+        if self.committed || self.rolled_back {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Transaction already completed",
+            ));
+        }
+        let session_guard = self.session.lock();
+        let session = session_guard.as_ref().ok_or_else(|| {
+            pyo3::exceptions::PyRuntimeError::new_err("Transaction session not available")
+        })?;
+        session.savepoint(name).map_err(PyGrafeoError::from)?;
+        Ok(())
+    }
+
+    /// Roll back to a named savepoint.
+    ///
+    /// Undoes all writes made after the savepoint was created.
+    /// The savepoint remains active and can be rolled back to again.
+    fn rollback_to_savepoint(&self, name: &str) -> PyResult<()> {
+        if self.committed || self.rolled_back {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Transaction already completed",
+            ));
+        }
+        let session_guard = self.session.lock();
+        let session = session_guard.as_ref().ok_or_else(|| {
+            pyo3::exceptions::PyRuntimeError::new_err("Transaction session not available")
+        })?;
+        session
+            .rollback_to_savepoint(name)
+            .map_err(PyGrafeoError::from)?;
+        Ok(())
+    }
+
+    /// Release a savepoint without rolling back.
+    ///
+    /// Frees resources associated with the savepoint. Changes made after the
+    /// savepoint become permanent within the transaction scope.
+    fn release_savepoint(&self, name: &str) -> PyResult<()> {
+        if self.committed || self.rolled_back {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Transaction already completed",
+            ));
+        }
+        let session_guard = self.session.lock();
+        let session = session_guard.as_ref().ok_or_else(|| {
+            pyo3::exceptions::PyRuntimeError::new_err("Transaction session not available")
+        })?;
+        session
+            .release_savepoint(name)
+            .map_err(PyGrafeoError::from)?;
+        Ok(())
+    }
+
     /// Execute a query within this transaction.
     ///
     /// All queries executed through this method see the same snapshot
@@ -3496,7 +3649,7 @@ impl PyTransaction {
         params: Option<&Bound<'_, pyo3::types::PyDict>>,
         _py: Python<'_>,
     ) -> PyResult<PyQueryResult> {
-        self.execute_language_impl("sql-pgq", query, params)
+        self.execute_language_impl("sql", query, params)
     }
 
     /// Execute a Gremlin query within this transaction.

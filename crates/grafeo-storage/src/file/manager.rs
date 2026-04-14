@@ -478,7 +478,7 @@ impl GrafeoFileManager {
             #[cfg(not(feature = "encryption"))]
             let (write_data, checksum, length) = {
                 let crc = crc32fast::hash(data);
-                (data, crc, data.len() as u64)
+                (data.to_vec(), crc, data.len() as u64)
             };
 
             file.seek(SeekFrom::Start(current_offset))?;

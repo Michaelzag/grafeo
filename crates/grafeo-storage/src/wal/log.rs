@@ -240,8 +240,18 @@ impl WalManager {
                 // record count. The byte offset survives restarts (file is append-only)
                 // and is unique per record within a file. Combined with the file sequence,
                 // this guarantees nonce uniqueness even after crash + restart.
+                //
+                // The nonce high word is 4 bytes, so the file sequence must fit in u32.
+                // With one rotation per ~64 MB of WAL, this allows ~256 exabytes of
+                // total WAL writes before exhaustion, which is effectively unlimited.
+                let seq_u32 = u32::try_from(file_seq).map_err(|_| {
+                    Error::Internal(
+                        "WAL file sequence exceeds u32::MAX: encryption nonce space exhausted"
+                            .to_string(),
+                    )
+                })?;
                 let byte_offset = log_file.size;
-                let nonce = grafeo_common::encryption::build_nonce(file_seq as u32, byte_offset);
+                let nonce = grafeo_common::encryption::build_nonce(seq_u32, byte_offset);
                 let aad = b"grafeo-wal";
                 let encrypted = enc
                     .encrypt(data, &nonce, aad)
@@ -379,7 +389,11 @@ impl WalManager {
         transaction_id: TransactionId,
         epoch: EpochId,
     ) -> Result<()> {
-        // Force sync on checkpoint
+        // Ordering guarantee: fsync all WAL data before writing checkpoint
+        // metadata. This ensures that on recovery, any WAL entries referenced
+        // by the checkpoint metadata are durable on disk. Without this barrier,
+        // a crash between metadata write and WAL sync could cause recovery to
+        // skip replaying un-synced WAL records.
         self.sync()?;
 
         // Get current log sequence
@@ -481,11 +495,11 @@ impl WalManager {
             path: new_path,
         };
 
-        // Replace active log
+        // Replace active log, syncing the old one to ensure durability
         let mut guard = self.active_log.lock();
-        if let Some(old_log) = guard.take() {
-            // Ensure old log is flushed
-            drop(old_log);
+        if let Some(mut old_log) = guard.take() {
+            old_log.writer.flush()?;
+            old_log.writer.get_ref().sync_all()?;
         }
         *guard = Some(new_log);
 
