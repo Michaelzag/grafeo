@@ -2,15 +2,15 @@
 
 All notable changes to Grafeo, for future reference (and enjoyment).
 
-## [0.5.39] - Unreleased
+## [0.5.39] - 2026-04-15
 
 Push-based vectorized execution for filter, sort, aggregate, limit, and distinct queries. AES-256-GCM encryption at rest. Smarter Block-STM conflict partitioning. Runtime metrics with Prometheus export.
 
 ### Added
 
-- **Push-based pipeline execution**: queries with filter, sort, aggregate, limit, or distinct now execute through a push-based pipeline instead of the Volcano pull loop, reducing per-row overhead on analytical workloads.
 - **Encryption at rest** (`encryption` feature): AES-256-GCM for WAL records and `.grafeo` sections. Password-based (Argon2id) or raw-key setup. Counter-based nonces tied to file offsets for crash-safe uniqueness. Zero overhead when disabled.
 - **Block-STM conflict partitioning**: re-execution groups conflicting transactions into clusters via union-find, enabling parallel re-execution of disjoint conflict sets.
+- **Push-based pipeline execution**: queries with filter, sort, aggregate, limit, or distinct now execute through a push-based pipeline instead of the Volcano pull loop, reducing per-row overhead on analytical workloads.
 - **Runtime metrics**: query, transaction, session, cache, and GC counters with Prometheus text export. Python `db.metrics()` / `db.metrics_prometheus()` and Node.js equivalents (requires `metrics` feature).
 - **C# enterprise APIs**: `SetSchema` / `ResetSchema` / `CurrentSchema`, backup/restore, compact, projections, CDC toggle, `ClearPlanCache`. `IGrafeoDB` and `ITransaction` interfaces for dependency injection and mocking.
 
@@ -26,6 +26,11 @@ Push-based vectorized execution for filter, sort, aggregate, limit, and distinct
 - **WAL nonce reuse on restart**: encryption nonces now use file byte offsets instead of an ephemeral counter that reset on restart.
 - **Section nonce collision**: section encryption nonces now use byte offsets instead of iteration counters that collided across duplicate section types.
 - **Distinct hash collisions**: replaced Debug-format hashing with recursive content hashing for List, Map, Vector, and Path values.
+- **Silent integer overflow in Cypher, SQL/PGQ, Gremlin, GraphQL parsers**: overflowing integer literals (e.g. `99999999999999999999`) now return a parse error instead of silently producing `0`.
+- **WAL nonce truncation**: file sequence was silently truncated from u64 to u32 when building encryption nonces; now validated with an explicit error.
+- **WAL rotation durability**: old log file is now explicitly fsynced before rotation, preventing data loss on crash.
+- **Arena alignment checks**: bounds and alignment validation in `read_at`/`read_at_mut` promoted from debug-only to release builds.
+- **Python `execute_sql` language mismatch**: standardized all bindings to pass `"sql"` to the engine (Python was passing `"sql-pgq"`).
 
 ## [0.5.38] - 2026-04-13
 
