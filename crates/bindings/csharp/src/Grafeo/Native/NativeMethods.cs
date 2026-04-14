@@ -105,10 +105,6 @@ internal static partial class NativeMethods
     [LibraryImport(LibName)]
     internal static partial nint grafeo_result_json(nint result);
 
-    /// <summary>Get the row count from a result.</summary>
-    [LibraryImport(LibName)]
-    internal static partial nuint grafeo_result_row_count(nint result);
-
     /// <summary>Get the execution time in milliseconds.</summary>
     [LibraryImport(LibName)]
     internal static partial double grafeo_result_execution_time_ms(nint result);
@@ -176,10 +172,6 @@ internal static partial class NativeMethods
     /// <summary>Remove a label from a node. Returns 1 if removed, 0 if not present.</summary>
     [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int grafeo_remove_node_label(nint db, ulong id, string label);
-
-    /// <summary>Get labels for a node as JSON array. Caller must free with grafeo_free_string.</summary>
-    [LibraryImport(LibName)]
-    internal static partial nint grafeo_get_node_labels(nint db, ulong id);
 
     /// <summary>Free a GrafeoNode.</summary>
     [LibraryImport(LibName)]
@@ -342,6 +334,64 @@ internal static partial class NativeMethods
     /// <summary>Checkpoint the WAL.</summary>
     [LibraryImport(LibName)]
     internal static partial int grafeo_wal_checkpoint(nint db);
+
+    /// <summary>Clear all cached query plans.</summary>
+    [LibraryImport(LibName)]
+    internal static partial int grafeo_clear_plan_cache(nint db);
+
+    // =========================================================================
+    // Backup / Restore
+    // =========================================================================
+
+    /// <summary>Create a full backup at the given path.</summary>
+    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int grafeo_backup_full(nint db, string path);
+
+    /// <summary>Create an incremental backup at the given path.</summary>
+    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int grafeo_backup_incremental(nint db, string path);
+
+    /// <summary>Restore database state to a specific epoch.</summary>
+    [LibraryImport(LibName)]
+    internal static partial int grafeo_restore_to_epoch(nint db, ulong epoch);
+
+    // =========================================================================
+    // Maintenance
+    // =========================================================================
+
+    /// <summary>Compact the database store.</summary>
+    [LibraryImport(LibName)]
+    internal static partial int grafeo_compact(nint db);
+
+    // =========================================================================
+    // Projections
+    // =========================================================================
+
+    /// <summary>Create a named graph projection from a query.</summary>
+    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int grafeo_create_projection(nint db, string name, string query);
+
+    /// <summary>Drop a named graph projection. Returns true if it existed.</summary>
+    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool grafeo_drop_projection(nint db, string name);
+
+    /// <summary>List all projections as JSON. Caller must free with grafeo_free_string.</summary>
+    [LibraryImport(LibName)]
+    internal static partial nint grafeo_list_projections(nint db);
+
+    // =========================================================================
+    // Change Data Capture
+    // =========================================================================
+
+    /// <summary>Enable or disable CDC tracking.</summary>
+    [LibraryImport(LibName)]
+    internal static partial void grafeo_set_cdc_enabled(nint db, [MarshalAs(UnmanagedType.U1)] bool enabled);
+
+    /// <summary>Check if CDC is enabled.</summary>
+    [LibraryImport(LibName)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool grafeo_is_cdc_enabled(nint db);
 
     // =========================================================================
     // Transactions

@@ -28,7 +28,7 @@ public enum IsolationLevel
 /// Implements <see cref="IDisposable"/> and <see cref="IAsyncDisposable"/>
 /// for deterministic cleanup via <c>using</c>/<c>await using</c>.
 /// </summary>
-public sealed class GrafeoDB : IDisposable, IAsyncDisposable
+public sealed class GrafeoDB : IGrafeoDB, IDisposable, IAsyncDisposable
 {
     private readonly DatabaseHandle _handle;
     private volatile bool _disposed;
@@ -453,6 +453,129 @@ public sealed class GrafeoDB : IDisposable, IAsyncDisposable
     {
         ThrowIfDisposed();
         GrafeoException.ThrowIfFailed(NativeMethods.grafeo_save(Handle, path));
+    }
+
+    /// <summary>Clear all cached query plans, forcing re-parsing on next execution.</summary>
+    public void ClearPlanCache()
+    {
+        ThrowIfDisposed();
+        GrafeoException.ThrowIfFailed(NativeMethods.grafeo_clear_plan_cache(Handle));
+    }
+
+    // =========================================================================
+    // Schema Context
+    // =========================================================================
+
+    /// <summary>Set the current schema for subsequent queries.</summary>
+    public void SetSchema(string name)
+    {
+        ThrowIfDisposed();
+        GrafeoException.ThrowIfFailed(NativeMethods.grafeo_set_schema(Handle, name));
+    }
+
+    /// <summary>Clear the current schema context.</summary>
+    public void ResetSchema()
+    {
+        ThrowIfDisposed();
+        GrafeoException.ThrowIfFailed(NativeMethods.grafeo_reset_schema(Handle));
+    }
+
+    /// <summary>Get the current schema name, or <c>null</c> if none is set.</summary>
+    public string? CurrentSchema()
+    {
+        ThrowIfDisposed();
+        var ptr = NativeMethods.grafeo_current_schema(Handle);
+        return ptr == nint.Zero ? null : Marshal.PtrToStringUTF8(ptr);
+    }
+
+    // =========================================================================
+    // Backup / Restore
+    // =========================================================================
+
+    /// <summary>Create a full backup at the given directory path.</summary>
+    public void BackupFull(string path)
+    {
+        ThrowIfDisposed();
+        GrafeoException.ThrowIfFailed(NativeMethods.grafeo_backup_full(Handle, path));
+    }
+
+    /// <summary>Create an incremental backup at the given directory path.</summary>
+    public void BackupIncremental(string path)
+    {
+        ThrowIfDisposed();
+        GrafeoException.ThrowIfFailed(NativeMethods.grafeo_backup_incremental(Handle, path));
+    }
+
+    /// <summary>Restore database state to a specific epoch.</summary>
+    public void RestoreToEpoch(ulong epoch)
+    {
+        ThrowIfDisposed();
+        GrafeoException.ThrowIfFailed(NativeMethods.grafeo_restore_to_epoch(Handle, epoch));
+    }
+
+    // =========================================================================
+    // Maintenance
+    // =========================================================================
+
+    /// <summary>Compact the database, reclaiming storage from deleted data.</summary>
+    public void Compact()
+    {
+        ThrowIfDisposed();
+        GrafeoException.ThrowIfFailed(NativeMethods.grafeo_compact(Handle));
+    }
+
+    // =========================================================================
+    // Projections
+    // =========================================================================
+
+    /// <summary>Create a named graph projection from a query.</summary>
+    public void CreateProjection(string name, string query)
+    {
+        ThrowIfDisposed();
+        GrafeoException.ThrowIfFailed(NativeMethods.grafeo_create_projection(Handle, name, query));
+    }
+
+    /// <summary>Drop a named graph projection.</summary>
+    /// <returns><c>true</c> if the projection existed, <c>false</c> otherwise.</returns>
+    public bool DropProjection(string name)
+    {
+        ThrowIfDisposed();
+        return NativeMethods.grafeo_drop_projection(Handle, name);
+    }
+
+    /// <summary>List all named graph projections as a JSON array.</summary>
+    public string ListProjections()
+    {
+        ThrowIfDisposed();
+        var ptr = NativeMethods.grafeo_list_projections(Handle);
+        if (ptr == nint.Zero) return "[]";
+        try
+        {
+            return Marshal.PtrToStringUTF8(ptr) ?? "[]";
+        }
+        finally
+        {
+            NativeMethods.grafeo_free_string(ptr);
+        }
+    }
+
+    // =========================================================================
+    // Change Data Capture
+    // =========================================================================
+
+    /// <summary>Gets or sets whether Change Data Capture is enabled.</summary>
+    public bool CdcEnabled
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return NativeMethods.grafeo_is_cdc_enabled(Handle);
+        }
+        set
+        {
+            ThrowIfDisposed();
+            NativeMethods.grafeo_set_cdc_enabled(Handle, value);
+        }
     }
 
     // =========================================================================
