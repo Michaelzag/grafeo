@@ -454,6 +454,10 @@ mod tests {
         fn name(&self) -> &'static str {
             "Mock"
         }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
+        }
     }
 
     /// Creates a `DataChunk` with the given schema and pushes two rows of dummy data.

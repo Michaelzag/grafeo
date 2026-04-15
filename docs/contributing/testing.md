@@ -41,15 +41,21 @@ npm test
 
 ## Coverage
 
-```bash
-# Install tarpaulin
-cargo install cargo-tarpaulin
+CI uses `cargo-llvm-cov` (not tarpaulin) with the `--all-features` flag:
 
-# Generate report
-cargo tarpaulin --workspace --out Html
+```bash
+# Install cargo-llvm-cov
+rustup component add llvm-tools-preview
+cargo install cargo-llvm-cov
+
+# Generate report (matches CI)
+cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info \
+  --ignore-filename-regex '(crates/bindings/|build\.rs|tests/|benches/)'
 ```
 
 ## Coverage Targets
+
+Crate names here match the workspace member paths used by `cargo test -p <name>`:
 
 | Crate | Target |
 |-------|--------|
@@ -57,8 +63,6 @@ cargo tarpaulin --workspace --out Html
 | grafeo-core | 90% |
 | grafeo-adapters | 85% |
 | grafeo-engine | 85% |
-| grafeo-python | 80% |
-| grafeo-node | 80% |
 | Overall workspace | 82%+ |
 
 ## Test Categories

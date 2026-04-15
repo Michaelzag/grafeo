@@ -289,16 +289,16 @@ tests:
       gql: |
         MATCH (c:Customer)-[r:REVIEWED]->(p:Product)
         RETURN p.name, avg(r.rating) AS avg_rating, count(r) AS reviews
-        ORDER BY avg_rating DESC
+        ORDER BY avg_rating DESC, p.name ASC
       cypher: |
         MATCH (c:Customer)-[r:REVIEWED]->(p:Product)
         RETURN p.name, avg(r.rating) AS avg_rating, count(r) AS reviews
-        ORDER BY avg_rating DESC
+        ORDER BY avg_rating DESC, p.name ASC
     expect:
       ordered: true
       precision: 1
       rows:
-        - [Laptop Pro, 5.0, 1]
         - [Graph Databases, 5.0, 2]
+        - [Laptop Pro, 5.0, 1]
         - [Tablet Mini, 4.0, 1]
         - [Wireless Headphones, 3.5, 2]

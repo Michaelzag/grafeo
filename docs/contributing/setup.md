@@ -10,8 +10,8 @@ tags:
 ## Prerequisites
 
 - Rust 1.91.1+
-- Python 3.12+ (for Python bindings)
-- Node.js 20+ (for Node.js bindings)
+- Python 3.12+ (for Python bindings, CI tests 3.12, 3.13 and 3.14)
+- Node.js 22+ (for Node.js bindings, CI tests 22 and 24)
 - Git
 
 ## Clone Repository

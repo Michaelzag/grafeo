@@ -56,6 +56,10 @@ impl Operator for SingleRowOperator {
     fn name(&self) -> &'static str {
         "SingleRow"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// An operator that produces no rows.
@@ -85,6 +89,10 @@ impl Operator for EmptyOperator {
 
     fn name(&self) -> &'static str {
         "Empty"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }
 
@@ -162,6 +170,10 @@ impl Operator for NodeListOperator {
     fn name(&self) -> &'static str {
         "NodeList"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(test)]
@@ -238,5 +250,26 @@ mod tests {
         // Empty list returns None immediately
         let chunk = op.next().unwrap();
         assert!(chunk.is_none());
+    }
+
+    #[test]
+    fn test_single_row_into_any() {
+        let op = SingleRowOperator::new();
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<SingleRowOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_empty_operator_into_any() {
+        let op = EmptyOperator::new(vec![LogicalType::Int64]);
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<EmptyOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_node_list_operator_into_any() {
+        let op = NodeListOperator::new(vec![NodeId::new(1)], 10);
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<NodeListOperator>().is_ok());
     }
 }

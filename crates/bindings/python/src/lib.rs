@@ -49,7 +49,7 @@ mod types;
 
 #[cfg(feature = "algos")]
 use bridges::{PyAlgorithms, PyNetworkXAdapter, PySolvORAdapter};
-use database::{AsyncQueryResult, AsyncQueryResultIter, PyGrafeoDB};
+use database::{AsyncQueryResult, AsyncQueryResultIter, PyGrafeoDB, PyIsolationLevel};
 use graph::{PyEdge, PyNode};
 use query::PyQueryResult;
 use types::PyValue;
@@ -78,6 +78,7 @@ fn grafeo(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<AsyncQueryResult>()?;
     m.add_class::<AsyncQueryResultIter>()?;
     m.add_class::<PyValue>()?;
+    m.add_class::<PyIsolationLevel>()?;
     #[cfg(feature = "algos")]
     {
         m.add_class::<PyAlgorithms>()?;

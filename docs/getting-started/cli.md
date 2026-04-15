@@ -97,7 +97,7 @@ grafeo shell ./mydb
 ```
 
 ```
-Grafeo 0.5.38 - Lpg mode, 42 nodes, 87 edges
+Grafeo 0.5.39 - Lpg mode, 42 nodes, 87 edges
 Type :help for commands, :quit to exit.
 
 grafeo> MATCH (n:Person) RETURN n.name, n.age
@@ -177,18 +177,18 @@ grafeo backup restore backup.grafeo ./restored --force
 grafeo backup full ./mydb -o /backups/full
 grafeo backup incremental ./mydb -o /backups/incr
 grafeo backup status /backups/full
-grafeo backup restore-to-epoch /backups/full ./restored --epoch 100
+grafeo backup restore-to-epoch /backups/full --epoch 100 -o ./restored
 ```
 
 ### Data Import
 
 ```bash
 # Import CSV as graph nodes
-grafeo import csv ./mydb data.csv --label Person
-grafeo import csv ./mydb data.csv --label Person --no-headers --separator ';'
+grafeo import csv data.csv --path ./mydb --label Person
+grafeo import csv data.csv --path ./mydb --label Person --headers false --separator ';'
 
 # Import JSON Lines as graph nodes
-grafeo import jsonl ./mydb events.jsonl --label Event
+grafeo import jsonl events.jsonl --path ./mydb --label Event
 ```
 
 ### Data Export
@@ -231,7 +231,7 @@ grafeo completions powershell >> $PROFILE
 
 ```bash
 $ grafeo version
-grafeo 0.5.38
+grafeo 0.5.39
 
 Build:
   rustc:    1.91.1

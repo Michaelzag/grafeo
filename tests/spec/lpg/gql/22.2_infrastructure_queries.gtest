@@ -105,7 +105,7 @@ tests:
     query: |
       MATCH (s:Service)-[:RUNS_ON]->(sv:Server)
       RETURN sv.name, count(s) AS service_count
-      ORDER BY service_count DESC
+      ORDER BY service_count DESC, sv.name ASC
     expect:
       ordered: true
       rows:

@@ -4,7 +4,7 @@
 
 #[cfg(feature = "algos")]
 pub mod procedure_call;
-#[cfg(feature = "algos")]
+#[cfg(all(feature = "algos", feature = "gql"))]
 pub mod user_procedure;
 
 use std::time::Instant;
@@ -16,7 +16,8 @@ use grafeo_common::types::{LogicalType, Value};
 use grafeo_common::utils::error::{Error, QueryError, Result};
 use grafeo_core::execution::operators::{Operator, OperatorError};
 use grafeo_core::execution::{
-    AdaptiveContext, AdaptiveSummary, CardinalityTrackingWrapper, DataChunk, SharedAdaptiveContext,
+    AdaptiveContext, AdaptiveSummary, CardinalityTrackingWrapper, DataChunk, Pipeline,
+    SharedAdaptiveContext,
 };
 
 /// Executes a physical operator tree and collects results.
@@ -104,6 +105,59 @@ impl Executor {
                 Ok(None) => break,
                 Err(err) => return Err(convert_operator_error(err)),
             }
+        }
+
+        Ok(result)
+    }
+
+    /// Executes a push-based pipeline.
+    ///
+    /// The source operator is wrapped in `OperatorSource`, push operators form
+    /// the pipeline body, and a `ChunkCollector` gathers results.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal sink downcast fails (should never happen since we
+    /// create the `ChunkCollector` ourselves).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if pipeline execution fails or the query timeout is exceeded.
+    pub fn execute_pipeline(
+        &self,
+        source: Box<dyn Operator>,
+        push_ops: Vec<Box<dyn grafeo_core::execution::pipeline::PushOperator>>,
+    ) -> Result<QueryResult> {
+        use grafeo_core::execution::{ChunkCollector, OperatorSource};
+
+        let _span = grafeo_debug_span!("grafeo::query::execute_pipeline");
+
+        let source = Box::new(OperatorSource::new(source));
+        let collector = ChunkCollector::new();
+
+        // Build and execute the pipeline with deadline enforcement
+        let mut pipeline = Pipeline::new(source, push_ops, Box::new(collector));
+        pipeline.set_deadline(self.deadline);
+        pipeline.execute().map_err(convert_operator_error)?;
+
+        // Extract the sink (ChunkCollector) and get the chunks
+        // Safety: we know the sink is a ChunkCollector because we just created it
+        let sink_box = pipeline.into_sink();
+        let any_sink: Box<dyn std::any::Any> = sink_box.into_any();
+        let collector = any_sink
+            .downcast::<ChunkCollector>()
+            .expect("sink should be ChunkCollector");
+        let chunks = collector.into_chunks();
+
+        let mut result = QueryResult::with_types(self.columns.clone(), self.column_types.clone());
+        let mut types_captured = !result.column_types.iter().all(|t| *t == LogicalType::Any);
+
+        for chunk in &chunks {
+            if !types_captured && chunk.column_count() > 0 {
+                self.capture_column_types(chunk, &mut result);
+                types_captured = true;
+            }
+            self.collect_chunk(chunk, &mut result)?;
         }
 
         Ok(result)
@@ -384,6 +438,10 @@ mod tests {
         fn name(&self) -> &'static str {
             "MockInt"
         }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
+        }
     }
 
     /// Empty mock operator for testing empty results.
@@ -398,6 +456,10 @@ mod tests {
 
         fn name(&self) -> &'static str {
             "Empty"
+        }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
         }
     }
 
@@ -459,5 +521,192 @@ mod tests {
 
         let result = executor.execute(&mut op).unwrap();
         assert_eq!(result.row_count(), 3);
+    }
+
+    #[test]
+    fn test_executor_type_capture_from_first_chunk() {
+        // When column_types are all Any, types should be captured from the first
+        // non-empty chunk.
+        let executor = Executor::with_columns(vec!["value".to_string()]);
+        // column_types starts as [Any] from with_columns
+        let mut op = MockIntOperator::new(vec![42, 99], 10);
+
+        let result = executor.execute(&mut op).unwrap();
+        assert_eq!(result.row_count(), 2);
+        // After execution, column types should be captured as Int64
+        assert_eq!(result.column_types, vec![LogicalType::Int64]);
+    }
+
+    #[test]
+    fn test_executor_type_capture_with_explicit_types() {
+        // When column_types are explicitly set (not all Any), types should NOT be
+        // overwritten from chunks.
+        let executor =
+            Executor::with_columns_and_types(vec!["value".to_string()], vec![LogicalType::String]);
+        let mut op = MockIntOperator::new(vec![1], 10);
+
+        let result = executor.execute(&mut op).unwrap();
+        assert_eq!(result.row_count(), 1);
+        // Types should remain as explicitly set (String), not changed to Int64
+        assert_eq!(result.column_types, vec![LogicalType::String]);
+    }
+
+    #[test]
+    fn test_execute_pipeline_basic() {
+        let source = Box::new(MockIntOperator::new(vec![10, 20, 30], 10));
+        let executor = Executor::with_columns(vec!["value".to_string()]);
+
+        let result = executor.execute_pipeline(source, vec![]).unwrap();
+        assert_eq!(result.row_count(), 3);
+        assert_eq!(result.rows[0][0], Value::Int64(10));
+        assert_eq!(result.rows[1][0], Value::Int64(20));
+        assert_eq!(result.rows[2][0], Value::Int64(30));
+    }
+
+    #[test]
+    fn test_execute_pipeline_empty_source() {
+        let source = Box::new(EmptyOperator);
+        let executor = Executor::with_columns(vec!["value".to_string()]);
+
+        let result = executor.execute_pipeline(source, vec![]).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_execute_pipeline_type_capture() {
+        // Pipeline should capture column types from first non-empty chunk when
+        // column_types are all Any.
+        let source = Box::new(MockIntOperator::new(vec![1, 2], 10));
+        let executor = Executor::with_columns(vec!["value".to_string()]);
+
+        let result = executor.execute_pipeline(source, vec![]).unwrap();
+        assert_eq!(result.column_types, vec![LogicalType::Int64]);
+    }
+
+    #[test]
+    fn test_execute_pipeline_explicit_types_preserved() {
+        // Pipeline should preserve explicitly set column types.
+        let source = Box::new(MockIntOperator::new(vec![1], 10));
+        let executor =
+            Executor::with_columns_and_types(vec!["value".to_string()], vec![LogicalType::String]);
+
+        let result = executor.execute_pipeline(source, vec![]).unwrap();
+        // Explicit types should not be overwritten
+        assert_eq!(result.column_types, vec![LogicalType::String]);
+    }
+
+    #[test]
+    fn test_execute_with_limit_type_capture() {
+        // execute_with_limit should also capture types from first chunk
+        let executor = Executor::with_columns(vec!["value".to_string()]);
+        let mut op = MockIntOperator::new(vec![1, 2, 3, 4, 5], 2);
+
+        let result = executor.execute_with_limit(&mut op, 3).unwrap();
+        assert_eq!(result.row_count(), 3);
+        assert_eq!(result.column_types, vec![LogicalType::Int64]);
+    }
+
+    #[test]
+    fn test_execute_with_limit_timeout_expired() {
+        use std::time::{Duration, Instant};
+
+        let expired = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
+        let executor =
+            Executor::with_columns(vec!["value".to_string()]).with_deadline(Some(expired));
+        let mut op = MockIntOperator::new(vec![1, 2, 3], 10);
+
+        let result = executor.execute_with_limit(&mut op, 10);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Query exceeded timeout")
+        );
+    }
+
+    #[test]
+    fn test_convert_operator_error_variants() {
+        // Test all OperatorError conversion branches
+        let err = convert_operator_error(OperatorError::TypeMismatch {
+            expected: "Int64".to_string(),
+            found: "String".to_string(),
+        });
+        assert!(matches!(err, Error::TypeMismatch { .. }));
+
+        let err = convert_operator_error(OperatorError::ColumnNotFound("col_x".to_string()));
+        assert!(matches!(err, Error::InvalidValue(_)));
+        assert!(err.to_string().contains("col_x"));
+
+        let err = convert_operator_error(OperatorError::Execution("internal issue".to_string()));
+        assert!(matches!(err, Error::Internal(_)));
+
+        let err = convert_operator_error(OperatorError::ConstraintViolation("unique".to_string()));
+        assert!(matches!(err, Error::InvalidValue(_)));
+        assert!(err.to_string().contains("unique"));
+
+        let err =
+            convert_operator_error(OperatorError::WriteConflict("concurrent write".to_string()));
+        assert!(matches!(err, Error::Transaction(_)));
+    }
+
+    #[test]
+    fn test_execute_pipeline_timeout_expired() {
+        use std::time::{Duration, Instant};
+
+        use grafeo_core::execution::pipeline::{Sink as PipelineSink, Source as PipelineSource};
+
+        struct PipelineTestSource {
+            remaining: usize,
+        }
+
+        impl PipelineSource for PipelineTestSource {
+            fn next_chunk(
+                &mut self,
+                _chunk_size: usize,
+            ) -> std::result::Result<Option<DataChunk>, OperatorError> {
+                if self.remaining == 0 {
+                    return Ok(None);
+                }
+                self.remaining -= 1;
+                Ok(Some(DataChunk::empty()))
+            }
+            fn reset(&mut self) {}
+            fn name(&self) -> &'static str {
+                "PipelineTestSource"
+            }
+        }
+
+        struct PipelineTestSink;
+
+        impl PipelineSink for PipelineTestSink {
+            fn consume(&mut self, _chunk: DataChunk) -> std::result::Result<bool, OperatorError> {
+                Ok(true)
+            }
+            fn finalize(&mut self) -> std::result::Result<(), OperatorError> {
+                Ok(())
+            }
+            fn name(&self) -> &'static str {
+                "PipelineTestSink"
+            }
+            fn into_any(self: Box<Self>) -> Box<dyn std::any::Any> {
+                self
+            }
+        }
+
+        let expired = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
+        let mut pipeline = Pipeline::simple(
+            Box::new(PipelineTestSource { remaining: 10 }),
+            Box::new(PipelineTestSink),
+        )
+        .with_deadline(Some(expired));
+
+        let result = pipeline.execute().map_err(convert_operator_error);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("Query exceeded timeout"),
+            "Expected timeout error, got: {err}"
+        );
     }
 }

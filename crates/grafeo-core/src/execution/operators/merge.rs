@@ -313,6 +313,10 @@ impl Operator for MergeOperator {
     fn name(&self) -> &'static str {
         "Merge"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// Configuration for a relationship merge operation.
@@ -571,6 +575,10 @@ impl Operator for MergeRelationshipOperator {
     fn name(&self) -> &'static str {
         "MergeRelationship"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(all(test, feature = "lpg"))]
@@ -723,5 +731,26 @@ mod tests {
             node.properties.get(&PropertyKey::new("updated")),
             Some(&Value::Bool(true))
         );
+    }
+
+    #[test]
+    fn test_merge_into_any() {
+        let store: Arc<dyn GraphStoreMut> = Arc::new(LpgStore::new().unwrap());
+        let op = MergeOperator::new(
+            Arc::clone(&store),
+            None,
+            MergeConfig {
+                variable: "n".to_string(),
+                labels: vec!["Person".to_string()],
+                match_properties: vec![],
+                on_create_properties: vec![],
+                on_match_properties: vec![],
+                output_schema: vec![LogicalType::Node],
+                output_column: 0,
+                bound_variable_column: None,
+            },
+        );
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<MergeOperator>().is_ok());
     }
 }

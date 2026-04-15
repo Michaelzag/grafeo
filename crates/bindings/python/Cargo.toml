@@ -2,6 +2,8 @@
 name = "grafeo-python"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Python bindings for Grafeo graph database"
@@ -46,6 +48,7 @@ compact-store = ["grafeo-engine/compact-store"]
 arrow-export = ["grafeo-engine/arrow-export"]
 jsonl-import = ["grafeo-engine/jsonl-import"]
 parquet-import = ["grafeo-engine/parquet-import"]
+metrics = ["grafeo-engine/metrics"]
 languages = ["gql", "cypher", "sparql", "gremlin", "graphql", "sql-pgq"]
 ai = ["vector-index", "text-index", "hybrid-search", "cdc"]
 storage = ["grafeo-engine/storage"]

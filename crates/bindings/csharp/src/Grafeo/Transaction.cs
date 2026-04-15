@@ -15,7 +15,7 @@ namespace Grafeo;
 /// tx.Commit(); // if this line is not reached, the transaction rolls back
 /// </code>
 /// </summary>
-public sealed class Transaction : IDisposable, IAsyncDisposable
+public sealed class Transaction : ITransaction, IDisposable, IAsyncDisposable
 {
     private readonly TransactionHandle _handle;
     private volatile bool _finished;

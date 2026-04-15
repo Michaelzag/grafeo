@@ -5,7 +5,7 @@ description: API reference for the @grafeo-db/wasm package.
 
 # WebAssembly API
 
-Run Grafeo in the browser, Deno or Cloudflare Workers. ~660 KB gzipped.
+Run Grafeo in the browser, Deno or Cloudflare Workers. ~513 KB gzipped.
 
 ```bash
 npm install @grafeo-db/wasm
@@ -182,8 +182,8 @@ The `full` feature enables all languages. The default npm package includes only 
 
 | Build | Size |
 |-------|------|
-| Default (GQL only) | ~660 KB gzipped |
-| Full (all languages) | ~800 KB gzipped |
+| Lite (GQL only) | ~513 KB gzipped |
+| AI variant (GQL + vector/text/hybrid search) | ~531 KB gzipped |
 
 ## Links
 

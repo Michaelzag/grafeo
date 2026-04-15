@@ -959,6 +959,7 @@ impl Session {
                 self.set_time_zone(&tz);
                 Ok(QueryResult::empty())
             }
+            #[cfg(feature = "gql")]
             SessionCommand::SessionSetParameter(key, expr) => {
                 if key.eq_ignore_ascii_case("viewing_epoch") {
                     match Self::eval_integer_literal(&expr) {
@@ -2652,12 +2653,22 @@ impl Session {
                 transaction_id,
                 read_only,
             );
-            let mut physical_plan = planner.plan(&optimized_plan)?;
+            let physical_plan = planner.plan(&optimized_plan)?;
 
-            // Execute the plan
+            // Execute the plan via push-based pipeline when possible
             let executor = Executor::with_columns(physical_plan.columns.clone())
                 .with_deadline(self.query_deadline());
-            let mut result = executor.execute(physical_plan.operator.as_mut())?;
+            let (mut source, push_ops) =
+                grafeo_core::execution::pipeline_convert::convert_to_pipeline(
+                    physical_plan.into_operator(),
+                );
+            let mut result = if push_ops.is_empty() {
+                // Pure source query: use traditional pull-based execution
+                executor.execute(source.as_mut())?
+            } else {
+                // Pipeline execution: push data from source through operators
+                executor.execute_pipeline(source, push_ops)?
+            };
 
             // Add execution metrics
             let rows_scanned = result.rows.len() as u64;
@@ -3774,14 +3785,29 @@ impl Session {
         if self.gc_interval > 0 {
             let count = self.commit_counter.fetch_add(1, Ordering::Relaxed) + 1;
             if count.is_multiple_of(self.gc_interval) {
+                #[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
+                let gc_start = std::time::Instant::now();
+
                 let min_epoch = self.transaction_manager.min_active_epoch();
                 for graph_name in &touched {
                     let store = self.resolve_store(graph_name);
                     store.gc_versions(min_epoch);
                 }
                 self.transaction_manager.gc();
+
                 #[cfg(feature = "metrics")]
-                crate::metrics::record_metric!(self.metrics, gc_runs, inc);
+                {
+                    crate::metrics::record_metric!(self.metrics, gc_runs, inc);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        let gc_duration_ms = gc_start.elapsed().as_secs_f64() * 1000.0;
+                        crate::metrics::record_metric!(
+                            self.metrics,
+                            gc_duration,
+                            observe gc_duration_ms
+                        );
+                    }
+                }
             }
         }
 
@@ -4261,6 +4287,7 @@ impl Session {
     }
 
     /// Evaluates a simple integer literal from a session parameter expression.
+    #[cfg(feature = "gql")]
     fn eval_integer_literal(expr: &grafeo_adapters::query::gql::ast::Expression) -> Option<i64> {
         use grafeo_adapters::query::gql::ast::{Expression, Literal};
         match expr {

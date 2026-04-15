@@ -18,7 +18,7 @@ use grafeo::GrafeoDB;
 // In-memory database
 let db = GrafeoDB::new_in_memory();
 
-// Persistent database (requires `wal` or `storage` feature)
+// Persistent database (requires `wal` feature)
 let db = GrafeoDB::open("my_graph.db")?;
 ```
 
@@ -39,7 +39,7 @@ let db = GrafeoDB::with_config(config)?;
 ```rust
 use grafeo::GrafeoDB;
 
-fn main() -> Result<(), grafeo_common::utils::error::Error> {
+fn main() -> Result<(), grafeo::Error> {
     // Create database
     let db = GrafeoDB::open("my_graph.db")?;
 

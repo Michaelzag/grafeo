@@ -248,6 +248,8 @@ pub enum TokenKind {
     // End of input
     /// End of input.
     Eof,
+    /// Lexer error (e.g. integer overflow).
+    Error(String),
 }
 
 /// A token with its position.
@@ -421,9 +423,25 @@ impl<'a> Lexer<'a> {
         }
 
         if is_float {
-            TokenKind::Float(value.parse().unwrap_or(0.0))
+            match value.parse() {
+                Ok(f) => TokenKind::Float(f),
+                Err(_) => TokenKind::Error(format!("Invalid float literal: '{value}'")),
+            }
         } else {
-            TokenKind::Integer(value.parse().unwrap_or(0))
+            match value.parse::<i64>() {
+                Ok(n) => TokenKind::Integer(n),
+                Err(e)
+                    if *e.kind() == std::num::IntErrorKind::PosOverflow
+                        || *e.kind() == std::num::IntErrorKind::NegOverflow =>
+                {
+                    TokenKind::Error(format!(
+                        "Integer literal '{value}' overflows the valid range ({} to {})",
+                        i64::MIN,
+                        i64::MAX
+                    ))
+                }
+                Err(_) => TokenKind::Error(format!("Invalid integer literal: '{value}'")),
+            }
         }
     }
 

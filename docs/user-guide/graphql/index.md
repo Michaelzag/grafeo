@@ -418,7 +418,14 @@ Translates to:
 ### Mutation Operations
 
 - `create<Type>` - Create new nodes with properties
+- `update<Type>` - Update node properties by filter match
 - `delete<Type>` - Delete nodes by property match
+
+Mutations operate on node properties only. Relationship creation, update, or deletion is not supported through GraphQL mutations. Use GQL or Cypher for relationship manipulation.
+
+### Subscriptions
+
+GraphQL subscriptions are **not supported**. The `subscription` keyword is parsed, but rejected at execution time with an error.
 
 ### Type Mapping
 - GraphQL types map to node labels

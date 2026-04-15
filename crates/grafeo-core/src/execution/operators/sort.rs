@@ -116,6 +116,11 @@ impl SortOperator {
         }
     }
 
+    /// Decomposes this operator into its child and sort keys for push-based conversion.
+    pub fn into_parts(self) -> (Box<dyn Operator>, Vec<SortKey>) {
+        (self.child, self.sort_keys)
+    }
+
     /// Materializes and sorts the input.
     fn sort(&mut self) -> Result<(), OperatorError> {
         // Materialize all input
@@ -236,6 +241,10 @@ impl Operator for SortOperator {
     fn name(&self) -> &'static str {
         "Sort"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(test)]
@@ -274,6 +283,10 @@ mod tests {
 
         fn name(&self) -> &'static str {
             "Mock"
+        }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
         }
     }
 
@@ -582,5 +595,32 @@ mod tests {
             vec![LogicalType::Int64],
         );
         assert_eq!(sort.name(), "Sort");
+    }
+
+    #[test]
+    fn test_sort_into_any() {
+        let mock = MockOperator::new(vec![]);
+        let op = SortOperator::new(
+            Box::new(mock),
+            vec![SortKey::ascending(0)],
+            vec![LogicalType::Int64],
+        );
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<SortOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_sort_into_parts() {
+        let mock = MockOperator::new(vec![]);
+        let op = SortOperator::new(
+            Box::new(mock),
+            vec![SortKey::ascending(0), SortKey::descending(1)],
+            vec![LogicalType::Int64, LogicalType::String],
+        );
+        let (mut child, sort_keys) = op.into_parts();
+        assert_eq!(sort_keys.len(), 2);
+        assert_eq!(sort_keys[0].column, 0);
+        assert_eq!(sort_keys[1].column, 1);
+        assert!(child.next().unwrap().is_none());
     }
 }

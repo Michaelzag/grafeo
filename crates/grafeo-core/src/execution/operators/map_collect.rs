@@ -70,6 +70,10 @@ impl Operator for MapCollectOperator {
     fn name(&self) -> &'static str {
         "MapCollect"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(test)]
@@ -108,6 +112,10 @@ mod tests {
 
         fn name(&self) -> &'static str {
             "Mock"
+        }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
         }
     }
 
@@ -304,5 +312,13 @@ mod tests {
             }
             other => panic!("Expected Value::Map, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_map_collect_into_any() {
+        let mock = MockOperator::new(vec![]);
+        let op = MapCollectOperator::new(Box::new(mock), 0, 1);
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<MapCollectOperator>().is_ok());
     }
 }

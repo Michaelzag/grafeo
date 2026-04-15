@@ -3625,6 +3625,11 @@ impl FilterOperator {
     pub fn new(child: Box<dyn Operator>, predicate: Box<dyn Predicate>) -> Self {
         Self { child, predicate }
     }
+
+    /// Decomposes this operator into its child and predicate for push-based conversion.
+    pub fn into_parts(self) -> (Box<dyn Operator>, Box<dyn Predicate>) {
+        (self.child, self.predicate)
+    }
 }
 
 impl Operator for FilterOperator {
@@ -3675,6 +3680,10 @@ impl Operator for FilterOperator {
 
     fn name(&self) -> &'static str {
         "Filter"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }
 
@@ -3727,6 +3736,10 @@ mod tests {
 
         fn name(&self) -> &'static str {
             "MockScan"
+        }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
         }
     }
 
@@ -6295,5 +6308,29 @@ mod tests {
             args: vec![FilterExpression::Literal(Value::Null)],
         });
         assert_eq!(result, Some(Value::Bool(false)));
+    }
+
+    #[test]
+    fn test_filter_into_any() {
+        let mock = MockScanOperator {
+            chunks: vec![],
+            position: 0,
+        };
+        let predicate = ComparisonPredicate::new(0, CompareOp::Eq, Value::Int64(1));
+        let op = FilterOperator::new(Box::new(mock), Box::new(predicate));
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<FilterOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_filter_into_parts() {
+        let mock = MockScanOperator {
+            chunks: vec![],
+            position: 0,
+        };
+        let predicate = ComparisonPredicate::new(0, CompareOp::Gt, Value::Int64(5));
+        let op = FilterOperator::new(Box::new(mock), Box::new(predicate));
+        let (mut child, _predicate) = op.into_parts();
+        assert!(child.next().unwrap().is_none());
     }
 }

@@ -15,6 +15,9 @@ const CHECKPOINT_METADATA_FILE: &str = "checkpoint.meta";
 pub struct WalRecovery {
     /// Directory containing WAL files.
     dir: std::path::PathBuf,
+    /// Encryptor for decrypting WAL records (None = unencrypted).
+    #[cfg(feature = "encryption")]
+    encryptor: Option<grafeo_common::encryption::PageEncryptor>,
 }
 
 impl WalRecovery {
@@ -22,7 +25,15 @@ impl WalRecovery {
     pub fn new(dir: impl AsRef<Path>) -> Self {
         Self {
             dir: dir.as_ref().to_path_buf(),
+            #[cfg(feature = "encryption")]
+            encryptor: None,
         }
+    }
+
+    /// Sets the encryptor for decrypting WAL records during recovery.
+    #[cfg(feature = "encryption")]
+    pub fn set_encryptor(&mut self, encryptor: grafeo_common::encryption::PageEncryptor) {
+        self.encryptor = Some(encryptor);
     }
 
     /// Creates a recovery handler from a WAL manager.
@@ -30,6 +41,8 @@ impl WalRecovery {
     pub fn from_wal(wal: &WalManager) -> Self {
         Self {
             dir: wal.dir().to_path_buf(),
+            #[cfg(feature = "encryption")]
+            encryptor: None,
         }
     }
 
@@ -259,21 +272,51 @@ impl WalRecovery {
         }
         let len = u32::from_le_bytes(len_buf) as usize;
 
-        // Read data
-        let mut data = vec![0u8; len];
-        reader.read_exact(&mut data)?;
+        // Read payload (either encrypted or plaintext+checksum)
+        #[cfg(feature = "encryption")]
+        let data = if let Some(ref enc) = self.encryptor {
+            // Encrypted frame: payload is nonce(12) || ciphertext || tag(16)
+            let mut encrypted = vec![0u8; len];
+            reader.read_exact(&mut encrypted)?;
+            let aad = b"grafeo-wal";
+            enc.decrypt(&encrypted, aad).map_err(|_| {
+                Error::Storage(StorageError::Corruption(
+                    "WAL decryption failed: wrong key or corrupted record".to_string(),
+                ))
+            })?
+        } else {
+            // Plaintext frame: data + crc32
+            let mut data = vec![0u8; len];
+            reader.read_exact(&mut data)?;
 
-        // Read and verify checksum
-        let mut checksum_buf = [0u8; 4];
-        reader.read_exact(&mut checksum_buf)?;
-        let stored_checksum = u32::from_le_bytes(checksum_buf);
-        let computed_checksum = crc32fast::hash(&data);
+            let mut checksum_buf = [0u8; 4];
+            reader.read_exact(&mut checksum_buf)?;
+            let stored_checksum = u32::from_le_bytes(checksum_buf);
+            let computed_checksum = crc32fast::hash(&data);
+            if stored_checksum != computed_checksum {
+                return Err(Error::Storage(StorageError::Corruption(
+                    "WAL checksum mismatch".to_string(),
+                )));
+            }
+            data
+        };
 
-        if stored_checksum != computed_checksum {
-            return Err(Error::Storage(StorageError::Corruption(
-                "WAL checksum mismatch".to_string(),
-            )));
-        }
+        #[cfg(not(feature = "encryption"))]
+        let data = {
+            let mut data = vec![0u8; len];
+            reader.read_exact(&mut data)?;
+
+            let mut checksum_buf = [0u8; 4];
+            reader.read_exact(&mut checksum_buf)?;
+            let stored_checksum = u32::from_le_bytes(checksum_buf);
+            let computed_checksum = crc32fast::hash(&data);
+            if stored_checksum != computed_checksum {
+                return Err(Error::Storage(StorageError::Corruption(
+                    "WAL checksum mismatch".to_string(),
+                )));
+            }
+            data
+        };
 
         // Deserialize
         let (record, _): (R, _) =
@@ -1135,6 +1178,89 @@ mod crash_tests {
             records.len(),
             2,
             "Aborted + crashed records should both be discarded"
+        );
+    }
+
+    #[cfg(all(feature = "encryption", not(miri)))]
+    #[test]
+    fn test_encrypted_wal_roundtrip() {
+        use grafeo_common::encryption::{KEY_SIZE, KeyChain};
+
+        let dir = tempdir().unwrap();
+        let key = [42u8; KEY_SIZE];
+        let chain = KeyChain::new(key);
+
+        // Write encrypted records
+        {
+            let mut wal = WalManager::open(dir.path()).unwrap();
+            wal.set_encryptor(chain.encryptor_for("grafeo-wal", &0u64.to_be_bytes()));
+
+            wal.log(&WalRecord::CreateNode {
+                id: NodeId::new(1),
+                labels: vec!["Person".to_string()],
+            })
+            .unwrap();
+
+            wal.log(&WalRecord::TransactionCommit {
+                transaction_id: TransactionId::new(1),
+            })
+            .unwrap();
+
+            wal.sync().unwrap();
+        }
+
+        // Recover with same key
+        let mut recovery = WalRecovery::new(dir.path());
+        recovery.set_encryptor(chain.encryptor_for("grafeo-wal", &0u64.to_be_bytes()));
+        let records = recovery.recover().unwrap();
+        assert_eq!(records.len(), 2, "should recover both encrypted records");
+    }
+
+    #[cfg(all(feature = "encryption", not(miri)))]
+    #[test]
+    fn test_encrypted_wal_wrong_key_fails() {
+        use grafeo_common::encryption::{KEY_SIZE, KeyChain};
+
+        let dir = tempdir().unwrap();
+        let key = [42u8; KEY_SIZE];
+        let chain = KeyChain::new(key);
+
+        // Write with key A
+        {
+            let mut wal = WalManager::open(dir.path()).unwrap();
+            wal.set_encryptor(chain.encryptor_for("grafeo-wal", &0u64.to_be_bytes()));
+
+            wal.log(&WalRecord::CreateNode {
+                id: NodeId::new(1),
+                labels: vec!["Test".to_string()],
+            })
+            .unwrap();
+
+            wal.log(&WalRecord::TransactionCommit {
+                transaction_id: TransactionId::new(1),
+            })
+            .unwrap();
+
+            wal.sync().unwrap();
+        }
+
+        // Try recovery with wrong key B: decryption fails, treated as corruption,
+        // best-effort recovery returns no usable records
+        let wrong_key = [99u8; KEY_SIZE];
+        let wrong_chain = KeyChain::new(wrong_key);
+        let mut recovery = WalRecovery::new(dir.path());
+        recovery.set_encryptor(wrong_chain.encryptor_for("grafeo-wal", &0u64.to_be_bytes()));
+
+        let result = recovery.recover();
+        assert!(
+            result.is_ok(),
+            "recovery should succeed (best-effort), got: {result:?}"
+        );
+        let records = result.unwrap();
+        assert!(
+            records.is_empty(),
+            "wrong key should produce no recoverable records, got {}",
+            records.len()
         );
     }
 }

@@ -378,20 +378,34 @@ jobs:
           # GQL-only: minimal viable config (no AI, no RDF, no extra languages)
           - profile: gql-only
             features: "--features gql"
-          # GQL + vector search: common embedded AI workload
-          - profile: gql+vector
-            features: "--features gql,vector-index"
-          # GQL + RDF: mixed LPG/RDF without extra languages
-          - profile: gql+rdf
-            features: "--features gql,rdf"
-          # Embedded profile: foundation features differ from engine (cdc is engine-only)
-          - profile: embedded
-            features: "--features gql,vector-index,text-index,hybrid-search,algos,parallel,regex,mmap"
-            engine_features: "--features embedded"
-          # Browser profile: WASM-targeted minimal set
-          - profile: browser
-            features: "--features gql,regex-lite"
-            engine_features: "--features browser"
+          # LPG persona: Graph App Developer (LPG model + all LPG query languages)
+          - profile: lpg
+            features: "--features lpg,gql,cypher,gremlin,sql-pgq,spill,mmap,regex"
+            engine_features: "--features lpg,gql,cypher,gremlin,sql-pgq,wal,grafeo-file,spill,mmap,regex"
+          # RDF persona: Knowledge Engineer (RDF model + SPARQL/GraphQL + SHACL)
+          - profile: rdf
+            features: "--features gql,sparql,graphql,triple-store,spill,mmap,regex"
+            engine_features: "--features gql,sparql,graphql,triple-store,shacl,wal,grafeo-file,spill,mmap,regex"
+          # Analytics persona: Data Scientist (algorithms + search + bulk import)
+          - profile: analytics
+            features: "--features algos,vector-index,text-index,hybrid-search,jsonl-import,parquet-import"
+            engine_features: "--features algos,vector-index,text-index,hybrid-search,jsonl-import,parquet-import"
+          # AI persona: AI/Agent Developer (search + change tracking)
+          - profile: ai
+            features: "--features vector-index,text-index,hybrid-search"
+            engine_features: "--features vector-index,text-index,hybrid-search,cdc"
+          # Edge persona: Frontend/Edge Developer (minimal WASM-friendly)
+          - profile: edge
+            features: "--features lpg,gql,regex-lite"
+            engine_features: "--features lpg,gql,regex-lite"
+          # Enterprise persona: Platform Operator (observability + async I/O)
+          - profile: enterprise
+            features: "--features tracing"
+            engine_features: "--features metrics,tracing,async-storage"
+          # Full: all features combined (deprecated in 0.6.0, replace with persona combos)
+          - profile: full
+            features: "--features lpg,languages,triple-store,algos,parallel,vector-index,text-index,hybrid-search,spill,mmap,regex,jsonl-import,parquet-import"
+            engine_features: "--features full"
     steps:
       - uses: actions/checkout@v4
 
@@ -576,7 +590,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        node: ['20', '22', '24']
+        node: ['22', '24']
     steps:
       - uses: actions/checkout@v4
 

@@ -258,6 +258,10 @@ impl Operator for FactorizedExpandOperator {
     fn name(&self) -> &'static str {
         "FactorizedExpand"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 impl FactorizedOperator for FactorizedExpandOperator {
@@ -566,6 +570,10 @@ impl Operator for SingleChunkOperator {
     fn name(&self) -> &'static str {
         "SingleChunk"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// Configuration for a single expand step in a lazy chain.
@@ -730,6 +738,10 @@ impl Operator for LazyFactorizedChainOperator {
 
     fn name(&self) -> &'static str {
         "LazyFactorizedChain"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }
 
@@ -959,5 +971,23 @@ mod tests {
         // Flatten and verify correctness
         let flat = factorized.flatten();
         assert_eq!(flat.row_count(), 10);
+    }
+
+    #[test]
+    fn test_factorized_expand_into_any() {
+        let store = Arc::new(LpgStore::new().unwrap());
+        let scan = Box::new(ScanOperator::with_label(store.clone(), "Person"));
+        let op = FactorizedExpandOperator::new(store.clone(), scan, 0, Direction::Outgoing, vec![]);
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<FactorizedExpandOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_lazy_factorized_chain_into_any() {
+        let store = Arc::new(LpgStore::new().unwrap());
+        let scan = Box::new(ScanOperator::with_label(store.clone(), "Person"));
+        let op = LazyFactorizedChainOperator::new(store.clone(), scan, vec![]);
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<LazyFactorizedChainOperator>().is_ok());
     }
 }

@@ -113,6 +113,10 @@ impl Operator for ParameterScanOperator {
     fn name(&self) -> &'static str {
         "ParameterScan"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(test)]
@@ -163,5 +167,13 @@ mod tests {
 
         // No values set: should return None
         assert!(op.next().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_parameter_scan_into_any() {
+        let state = Arc::new(ParameterState::new(vec!["x".to_string()]));
+        let op = ParameterScanOperator::new(state);
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<ParameterScanOperator>().is_ok());
     }
 }

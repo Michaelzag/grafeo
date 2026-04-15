@@ -458,6 +458,10 @@ impl Operator for VectorJoinOperator {
             "VectorJoin(BruteForce)"
         }
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(all(test, feature = "lpg"))]
@@ -599,5 +603,22 @@ mod tests {
         );
 
         assert_eq!(join.name(), "VectorJoin(BruteForce)");
+    }
+
+    #[test]
+    fn test_vector_join_into_any() {
+        let store: StdArc<dyn GraphStoreMut> = StdArc::new(LpgStore::new().unwrap());
+        let left = Box::new(NodeListOperator::new(vec![], 1024));
+
+        let op = VectorJoinOperator::with_static_query(
+            left,
+            store as StdArc<dyn GraphStore>,
+            vec![1.0],
+            "embedding",
+            5,
+            DistanceMetric::Cosine,
+        );
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<VectorJoinOperator>().is_ok());
     }
 }

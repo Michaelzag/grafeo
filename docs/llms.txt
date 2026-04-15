@@ -135,7 +135,7 @@ console.log(result.rows);
 ```rust
 use grafeo::GrafeoDB;
 
-fn main() -> Result<(), grafeo_common::utils::error::Error> {
+fn main() -> Result<(), grafeo::Error> {
     let db = GrafeoDB::new_in_memory();
     let mut session = db.session();
 
@@ -147,7 +147,7 @@ fn main() -> Result<(), grafeo_common::utils::error::Error> {
         MATCH (p:Person) RETURN p.name, p.age
     "#)?;
 
-    for row in result.rows {
+    for row in result.rows() {
         println!("{:?}", row);
     }
 

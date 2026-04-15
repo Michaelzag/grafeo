@@ -85,8 +85,8 @@ g.V().has('name', 'Alix').repeat(out('KNOWS')).emit()
 
 `repeat().times(n)` maps to variable-length expansion with a fixed depth. `repeat().emit()` returns intermediate results at every depth. Both work inside `union()`, `coalesce()` and other nested traversals.
 
-!!! note "Pending steps"
-    `until()` predicates, `path()`, `simplePath()` and `loops()` are not yet supported.
+!!! warning "Silently ignored steps"
+    `path()`, `simplePath()`, and `loops()` are parsed but silently ignored at execution time: the query will succeed without error, but these steps will not produce correct results. The `until()` termination modifier is accepted in `repeat().until(predicate)` syntax, but the predicate itself is ignored; the traversal falls back to a default maximum depth of 32 hops. Until these steps are fully implemented, avoid relying on them for correctness.
 
 ### Getting Properties
 

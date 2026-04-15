@@ -25,7 +25,7 @@ session.execute("INSERT (:Person {name: 'Alix'})")?;
 ## Transactions
 
 ```rust
-let session = db.session();
+let mut session = db.session();
 
 // Begin explicit transaction
 session.begin_transaction()?;
@@ -40,7 +40,7 @@ session.commit()?;
 ## Rollback
 
 ```rust
-let session = db.session();
+let mut session = db.session();
 
 session.begin_transaction()?;
 session.execute("INSERT (:Person {name: 'Alix'})")?;
@@ -55,7 +55,7 @@ session.rollback()?;
 let db = GrafeoDB::new_in_memory();
 
 // Each session has isolated transactions
-let session1 = db.session();
+let mut session1 = db.session();
 let session2 = db.session();
 
 session1.begin_transaction()?;

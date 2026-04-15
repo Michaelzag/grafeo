@@ -786,6 +786,10 @@ impl Operator for StaticResultOperator {
     fn name(&self) -> &'static str {
         "StaticResult"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(test)]

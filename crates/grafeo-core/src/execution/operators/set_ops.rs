@@ -148,6 +148,10 @@ impl Operator for ExceptOperator {
     fn name(&self) -> &'static str {
         "Except"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// INTERSECT operator: rows common to both inputs.
@@ -239,6 +243,10 @@ impl Operator for IntersectOperator {
     fn name(&self) -> &'static str {
         "Intersect"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// OTHERWISE operator: use left result if non-empty, otherwise use right.
@@ -317,5 +325,239 @@ impl Operator for OtherwiseOperator {
 
     fn name(&self) -> &'static str {
         "Otherwise"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::execution::chunk::DataChunkBuilder;
+
+    struct MockOperator {
+        chunks: Vec<DataChunk>,
+        position: usize,
+    }
+
+    impl MockOperator {
+        fn new(chunks: Vec<DataChunk>) -> Self {
+            Self {
+                chunks,
+                position: 0,
+            }
+        }
+    }
+
+    impl Operator for MockOperator {
+        fn next(&mut self) -> OperatorResult {
+            if self.position < self.chunks.len() {
+                let chunk = std::mem::replace(&mut self.chunks[self.position], DataChunk::empty());
+                self.position += 1;
+                Ok(Some(chunk))
+            } else {
+                Ok(None)
+            }
+        }
+
+        fn reset(&mut self) {
+            self.position = 0;
+        }
+
+        fn name(&self) -> &'static str {
+            "Mock"
+        }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
+        }
+    }
+
+    fn create_int_chunk(values: &[i64]) -> DataChunk {
+        let mut builder = DataChunkBuilder::new(&[LogicalType::Int64]);
+        for &v in values {
+            builder.column_mut(0).unwrap().push_int64(v);
+            builder.advance_row();
+        }
+        builder.finish()
+    }
+
+    fn collect_ints(op: &mut dyn Operator) -> Vec<i64> {
+        let mut result = Vec::new();
+        while let Some(chunk) = op.next().unwrap() {
+            for row in chunk.selected_indices() {
+                if let Some(v) = chunk.column(0).and_then(|c| c.get_int64(row)) {
+                    result.push(v);
+                }
+            }
+        }
+        result
+    }
+
+    #[test]
+    fn test_except_distinct() {
+        let left = MockOperator::new(vec![create_int_chunk(&[1, 2, 3, 2])]);
+        let right = MockOperator::new(vec![create_int_chunk(&[2, 4])]);
+        let mut op = ExceptOperator::new(
+            Box::new(left),
+            Box::new(right),
+            false,
+            vec![LogicalType::Int64],
+        );
+
+        let mut result = collect_ints(&mut op);
+        result.sort_unstable();
+        assert_eq!(result, vec![1, 3]);
+    }
+
+    #[test]
+    fn test_except_all() {
+        let left = MockOperator::new(vec![create_int_chunk(&[1, 2, 2, 3])]);
+        let right = MockOperator::new(vec![create_int_chunk(&[2])]);
+        let mut op = ExceptOperator::new(
+            Box::new(left),
+            Box::new(right),
+            true,
+            vec![LogicalType::Int64],
+        );
+
+        let mut result = collect_ints(&mut op);
+        result.sort_unstable();
+        // EXCEPT ALL removes one occurrence of 2
+        assert_eq!(result, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_except_empty_right() {
+        let left = MockOperator::new(vec![create_int_chunk(&[1, 2])]);
+        let right = MockOperator::new(vec![]);
+        let mut op = ExceptOperator::new(
+            Box::new(left),
+            Box::new(right),
+            false,
+            vec![LogicalType::Int64],
+        );
+
+        let mut result = collect_ints(&mut op);
+        result.sort_unstable();
+        assert_eq!(result, vec![1, 2]);
+    }
+
+    #[test]
+    fn test_intersect_distinct() {
+        let left = MockOperator::new(vec![create_int_chunk(&[1, 2, 3, 2])]);
+        let right = MockOperator::new(vec![create_int_chunk(&[2, 3, 4])]);
+        let mut op = IntersectOperator::new(
+            Box::new(left),
+            Box::new(right),
+            false,
+            vec![LogicalType::Int64],
+        );
+
+        let mut result = collect_ints(&mut op);
+        result.sort_unstable();
+        assert_eq!(result, vec![2, 3]);
+    }
+
+    #[test]
+    fn test_intersect_all() {
+        let left = MockOperator::new(vec![create_int_chunk(&[1, 2, 2, 3])]);
+        let right = MockOperator::new(vec![create_int_chunk(&[2, 2, 4])]);
+        let mut op = IntersectOperator::new(
+            Box::new(left),
+            Box::new(right),
+            true,
+            vec![LogicalType::Int64],
+        );
+
+        let mut result = collect_ints(&mut op);
+        result.sort_unstable();
+        assert_eq!(result, vec![2, 2]);
+    }
+
+    #[test]
+    fn test_intersect_no_overlap() {
+        let left = MockOperator::new(vec![create_int_chunk(&[1, 2])]);
+        let right = MockOperator::new(vec![create_int_chunk(&[3, 4])]);
+        let mut op = IntersectOperator::new(
+            Box::new(left),
+            Box::new(right),
+            false,
+            vec![LogicalType::Int64],
+        );
+
+        let result = collect_ints(&mut op);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_otherwise_left_nonempty() {
+        let left = MockOperator::new(vec![create_int_chunk(&[1, 2])]);
+        let right = MockOperator::new(vec![create_int_chunk(&[10, 20])]);
+        let mut op = OtherwiseOperator::new(Box::new(left), Box::new(right));
+
+        let result = collect_ints(&mut op);
+        assert_eq!(result, vec![1, 2]);
+    }
+
+    #[test]
+    fn test_otherwise_left_empty() {
+        let left = MockOperator::new(vec![]);
+        let right = MockOperator::new(vec![create_int_chunk(&[10, 20])]);
+        let mut op = OtherwiseOperator::new(Box::new(left), Box::new(right));
+
+        let result = collect_ints(&mut op);
+        assert_eq!(result, vec![10, 20]);
+    }
+
+    #[test]
+    fn test_otherwise_both_empty() {
+        let left = MockOperator::new(vec![]);
+        let right = MockOperator::new(vec![]);
+        let mut op = OtherwiseOperator::new(Box::new(left), Box::new(right));
+
+        let result = collect_ints(&mut op);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_operator_names() {
+        let empty = || MockOperator::new(vec![]);
+
+        let op = ExceptOperator::new(Box::new(empty()), Box::new(empty()), false, vec![]);
+        assert_eq!(op.name(), "Except");
+
+        let op = IntersectOperator::new(Box::new(empty()), Box::new(empty()), false, vec![]);
+        assert_eq!(op.name(), "Intersect");
+
+        let op = OtherwiseOperator::new(Box::new(empty()), Box::new(empty()));
+        assert_eq!(op.name(), "Otherwise");
+    }
+
+    #[test]
+    fn test_into_any() {
+        let empty = || MockOperator::new(vec![]);
+
+        let op: Box<dyn Operator> = Box::new(ExceptOperator::new(
+            Box::new(empty()),
+            Box::new(empty()),
+            false,
+            vec![],
+        ));
+        assert!(op.into_any().downcast::<ExceptOperator>().is_ok());
+
+        let op: Box<dyn Operator> = Box::new(IntersectOperator::new(
+            Box::new(empty()),
+            Box::new(empty()),
+            false,
+            vec![],
+        ));
+        assert!(op.into_any().downcast::<IntersectOperator>().is_ok());
+
+        let op: Box<dyn Operator> =
+            Box::new(OtherwiseOperator::new(Box::new(empty()), Box::new(empty())));
+        assert!(op.into_any().downcast::<OtherwiseOperator>().is_ok());
     }
 }

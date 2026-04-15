@@ -53,6 +53,7 @@ result = db.execute_cypher(query)               # Cypher
 result = db.execute_sparql(query)               # SPARQL
 result = db.execute_gremlin(query)              # Gremlin
 result = db.execute_graphql(query)              # GraphQL
+result = db.execute_sql(query)                  # SQL/PGQ (SQL:2023)
 ```
 
 ### Node & Edge CRUD
@@ -79,7 +80,7 @@ with db.begin_transaction() as tx:
     tx.execute("INSERT (:Person {name: 'Harm'})")
     tx.commit()
 
-# With isolation levels
+# With isolation levels (string or enum)
 from grafeo import IsolationLevel
 with db.begin_transaction(IsolationLevel.SERIALIZABLE) as tx:
     tx.execute("MATCH (n:Person) SET n.verified = true")
@@ -109,10 +110,7 @@ db.reset_schema()
 ### Graph Projections
 
 ```python
-db.create_projection("people", {
-    "node_labels": ["Person"],
-    "edge_types": ["KNOWS"]
-})
+db.create_projection("people", node_labels=["Person"], edge_types=["KNOWS"])
 print(db.list_projections())  # ['people']
 db.drop_projection("people")
 ```
@@ -139,7 +137,7 @@ result = db.execute("MATCH (n:Person) RETURN n.name, n.age")
 
 result.columns          # column names
 len(result)             # row count
-result.execution_time   # execution time (seconds)
+result.execution_time_ms  # execution time (milliseconds)
 
 for row in result:      # iterate rows
     print(row)
@@ -163,7 +161,7 @@ results = db.vector_search("Document", "embedding", query_vector, k=10)
 
 ## Features
 
-- GQL, Cypher, SPARQL, Gremlin and GraphQL query languages
+- GQL, Cypher, SPARQL, Gremlin, GraphQL, and SQL/PGQ query languages
 - Full node/edge CRUD with native Python types
 - ACID transactions with configurable isolation levels
 - HNSW vector similarity search

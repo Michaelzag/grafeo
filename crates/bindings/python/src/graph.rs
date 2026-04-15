@@ -59,6 +59,19 @@ impl PyNode {
         self.labels.iter().any(|l| l == label)
     }
 
+    /// Return a list of property key names.
+    fn keys(&self) -> Vec<String> {
+        self.properties.keys().map(|k| k.to_string()).collect()
+    }
+
+    /// Return a list of (key, value) pairs for all properties.
+    fn items(&self, py: Python<'_>) -> Vec<(String, Py<PyAny>)> {
+        self.properties
+            .iter()
+            .map(|(k, v)| (k.to_string(), PyValue::to_py(v, py)))
+            .collect()
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "Node(id={}, labels={:?}, properties={{...}})",
@@ -153,6 +166,19 @@ impl PyEdge {
                 .expect("dict.set_item only fails on memory exhaustion");
         }
         dict.unbind().into_any()
+    }
+
+    /// Return a list of property key names.
+    fn keys(&self) -> Vec<String> {
+        self.properties.keys().map(|k| k.to_string()).collect()
+    }
+
+    /// Return a list of (key, value) pairs for all properties.
+    fn items(&self, py: Python<'_>) -> Vec<(String, Py<PyAny>)> {
+        self.properties
+            .iter()
+            .map(|(k, v)| (k.to_string(), PyValue::to_py(v, py)))
+            .collect()
     }
 
     fn __repr__(&self) -> String {

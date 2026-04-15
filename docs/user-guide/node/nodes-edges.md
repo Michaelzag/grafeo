@@ -105,6 +105,6 @@ db.deleteEdge(0); // returns true if existed
 Both `JsNode` and `JsEdge` have a `toString()` method for debugging:
 
 ```typescript
-console.log(node.toString()); // (:Person {name: 'Alix', age: 30})
-console.log(edge.toString()); // [:KNOWS {since: 2024}]
+console.log(node.toString()); // (:Person {id: 0})
+console.log(edge.toString()); // ()-[:KNOWS]->() (id=0)
 ```

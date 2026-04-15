@@ -150,6 +150,10 @@ impl Operator for HorizontalAggregateOperator {
     fn name(&self) -> &'static str {
         "HorizontalAggregate"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(all(test, feature = "lpg"))]
@@ -189,6 +193,10 @@ mod tests {
 
         fn name(&self) -> &'static str {
             "Mock"
+        }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
         }
     }
 
@@ -565,5 +573,22 @@ mod tests {
         );
 
         assert!(op.next().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_horizontal_aggregate_into_any() {
+        let store: Arc<dyn GraphStore> = Arc::new(LpgStore::new().unwrap());
+        let mock = MockOperator::new(vec![]);
+        let op = HorizontalAggregateOperator::new(
+            Box::new(mock),
+            0,
+            EntityKind::Node,
+            AggregateFunction::Count,
+            "name".to_string(),
+            store,
+            1,
+        );
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<HorizontalAggregateOperator>().is_ok());
     }
 }

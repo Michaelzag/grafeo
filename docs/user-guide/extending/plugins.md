@@ -10,6 +10,9 @@ tags:
 
 Plugins extend Grafeo with custom functionality.
 
+!!! note "Rust-only"
+    The plugin system is a Rust-only extension point. Python, Node.js, WASM, and other language bindings do not expose plugin loading or registration APIs. To use plugins, embed Grafeo directly in a Rust application.
+
 ## Plugin Architecture
 
 Grafeo uses a trait-based plugin system:

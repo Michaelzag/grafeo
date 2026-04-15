@@ -52,8 +52,9 @@ func main() {
 ## Database
 
 ```go
-db, err := grafeo.OpenInMemory()       // in-memory
-db, err := grafeo.Open("./path")       // persistent
+db, err := grafeo.OpenInMemory()                // in-memory
+db, err := grafeo.Open("./path")                // persistent (auto-detects format)
+db, err := grafeo.OpenSingleFile("./data.grafeo") // single-file .grafeo format
 defer db.Close()
 
 db.NodeCount()   // number of nodes
@@ -75,6 +76,16 @@ result, err := db.ExecuteParams(
     "MATCH (p:Person) WHERE p.age > $min RETURN p.name",
     map[string]any{"min": 25},
 )
+
+// Each language also has a WithParams variant (accepts raw JSON string)
+result, err := db.ExecuteCypherWithParams(query, paramsJSON)
+result, err := db.ExecuteGremlinWithParams(query, paramsJSON)
+result, err := db.ExecuteGraphQLWithParams(query, paramsJSON)
+result, err := db.ExecuteSPARQLWithParams(query, paramsJSON)
+result, err := db.ExecuteSQLWithParams(query, paramsJSON)
+
+// Generic language dispatch: "gql", "cypher", "gremlin", "graphql", "sparql", "sql"
+result, err := db.ExecuteLanguage("cypher", query, paramsJSON)
 ```
 
 ## Node & Edge CRUD

@@ -307,7 +307,7 @@ impl Arena {
             .first()
             .expect("Arena should have at least one chunk");
 
-        debug_assert!(
+        assert!(
             (offset as usize) + std::mem::size_of::<T>() <= chunk.used(),
             "read_at: offset {} + size_of::<{}>() = {} exceeds chunk used bytes {}",
             offset,
@@ -315,7 +315,7 @@ impl Arena {
             (offset as usize) + std::mem::size_of::<T>(),
             chunk.used()
         );
-        debug_assert!(
+        assert!(
             (offset as usize).is_multiple_of(std::mem::align_of::<T>()),
             "read_at: offset {} is not aligned for {} (alignment {})",
             offset,
@@ -349,7 +349,7 @@ impl Arena {
             .first()
             .expect("Arena should have at least one chunk");
 
-        debug_assert!(
+        assert!(
             (offset as usize) + std::mem::size_of::<T>() <= chunk.capacity,
             "read_at_mut: offset {} + size_of::<{}>() = {} exceeds chunk capacity {}",
             offset,
@@ -357,7 +357,7 @@ impl Arena {
             (offset as usize) + std::mem::size_of::<T>(),
             chunk.capacity
         );
-        debug_assert!(
+        assert!(
             (offset as usize).is_multiple_of(std::mem::align_of::<T>()),
             "read_at_mut: offset {} is not aligned for {} (alignment {})",
             offset,

@@ -247,9 +247,16 @@ impl VariableLengthExpandOperator {
     fn materialize_input(&mut self) -> Result<(), OperatorError> {
         let mut rows = Vec::new();
 
+        /// Minimum chunk size for locality sort to be worthwhile.
+        const LOCALITY_SORT_THRESHOLD: usize = 1024;
+
         while let Some(mut chunk) = self.input.next()? {
             // Flatten to handle selection vectors
             chunk.flatten();
+            // Sort by source node ID for cache locality during adjacency lookups
+            if chunk.len() > LOCALITY_SORT_THRESHOLD {
+                chunk = chunk.sort_by_column(self.source_column);
+            }
 
             for row_idx in 0..chunk.row_count() {
                 // Extract the source node ID
@@ -647,6 +654,10 @@ impl Operator for VariableLengthExpandOperator {
 
     fn name(&self) -> &'static str {
         "VariableLengthExpand"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }
 
@@ -1111,5 +1122,25 @@ mod tests {
         let a_results: Vec<_> = results.iter().filter(|(s, _)| *s == a).collect();
         assert_eq!(a_results.len(), 1, "Acyclic from a: only a->b");
         assert_eq!(a_results[0].1, b);
+    }
+
+    #[test]
+    fn test_variable_length_expand_into_any() {
+        let store = Arc::new(LpgStore::new().unwrap());
+        let scan = Box::new(ScanOperator::with_label(
+            Arc::clone(&store) as Arc<dyn GraphStore>,
+            "Node",
+        ));
+        let op = VariableLengthExpandOperator::new(
+            Arc::clone(&store) as Arc<dyn GraphStore>,
+            scan,
+            0,
+            Direction::Outgoing,
+            vec![],
+            1,
+            3,
+        );
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<VariableLengthExpandOperator>().is_ok());
     }
 }

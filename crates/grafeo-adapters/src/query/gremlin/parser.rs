@@ -1194,9 +1194,14 @@ impl<'a> Parser<'a> {
     }
 
     fn advance_token(&mut self) -> Result<Token> {
-        self.advance()
+        let token = self
+            .advance()
             .cloned()
-            .ok_or_else(|| self.error("Unexpected end of input"))
+            .ok_or_else(|| self.error("Unexpected end of input"))?;
+        if let TokenKind::Error(msg) = &token.kind {
+            return Err(self.error(msg));
+        }
+        Ok(token)
     }
 
     fn expect(&mut self, kind: TokenKind) -> Result<Token> {

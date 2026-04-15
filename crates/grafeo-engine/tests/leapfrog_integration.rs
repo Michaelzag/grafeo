@@ -50,6 +50,10 @@ impl Operator for MockScanOperator {
     fn name(&self) -> &'static str {
         "MockScan"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[test]

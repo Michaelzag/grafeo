@@ -314,22 +314,15 @@ pub fn assert_rows_with_precision(result: &QueryResult, expected: &[Vec<String>]
 ///
 /// Panics if the computed MD5 hash of the sorted, pipe-delimited rows does not match `expected_hash`.
 pub fn assert_hash(result: &QueryResult, expected_hash: &str) {
-    use md5::{Digest, Md5};
-
     let mut rows = result_to_strings(result);
     rows.sort();
 
-    let mut hasher = Md5::new();
+    let mut ctx = md5::Context::new();
     for row in &rows {
-        hasher.update(row.join("|").as_bytes());
-        hasher.update(b"\n");
+        ctx.consume(row.join("|").as_bytes());
+        ctx.consume(b"\n");
     }
-    let digest = hasher.finalize();
-    let hash = digest.iter().fold(String::new(), |mut acc, b| {
-        use std::fmt::Write;
-        write!(acc, "{b:02x}").unwrap();
-        acc
-    });
+    let hash = format!("{:x}", ctx.finalize());
 
     assert_eq!(
         hash, expected_hash,

@@ -414,6 +414,10 @@ impl Operator for ShortestPathOperator {
     fn name(&self) -> &'static str {
         "ShortestPath"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(all(test, feature = "lpg"))]
@@ -461,6 +465,10 @@ mod tests {
 
         fn name(&self) -> &'static str {
             "MockPair"
+        }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
         }
     }
 
@@ -1023,5 +1031,21 @@ mod tests {
         let chunk = op.next().unwrap().unwrap();
         let path_col = chunk.column(2).unwrap();
         assert_eq!(path_col.get_value(0).unwrap(), Value::Int64(2));
+    }
+
+    #[test]
+    fn test_shortest_path_into_any() {
+        let store = Arc::new(LpgStore::new().unwrap());
+        let input = Box::new(MockPairOperator::new(vec![]));
+        let op = ShortestPathOperator::new(
+            store.clone() as Arc<dyn GraphStore>,
+            input,
+            0,
+            1,
+            vec![],
+            Direction::Outgoing,
+        );
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<ShortestPathOperator>().is_ok());
     }
 }

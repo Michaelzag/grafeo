@@ -32,7 +32,7 @@ A social network with:
     ```rust
     use grafeo::GrafeoDB;
 
-    let db = GrafeoDB::new("social_network.db")?;
+    let db = GrafeoDB::open("social_network.db")?;
     ```
 
 ## Step 2: Add People

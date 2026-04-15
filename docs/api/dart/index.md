@@ -14,7 +14,7 @@ Add the package from [pub.dev](https://pub.dev/packages/grafeo):
 ```yaml
 # pubspec.yaml
 dependencies:
-  grafeo: ^0.5.0
+  grafeo: ^0.5.39
 ```
 
 ```bash
@@ -32,13 +32,13 @@ void main() {
   final db = GrafeoDB.memory();
 
   db.execute('''
-    CREATE (:Person {name: "Alix", age: 30}),
+    INSERT (:Person {name: "Alix", age: 30}),
            (:Person {name: "Gus",  age: 28})
   ''');
 
   db.execute('''
     MATCH (a:Person {name: "Alix"}), (b:Person {name: "Gus"})
-    CREATE (a)-[:KNOWS]->(b)
+    INSERT (a)-[:KNOWS]->(b)
   ''');
 
   final result = db.execute('''
@@ -129,7 +129,7 @@ static String version({String? libraryPath})
 ```
 
 ```dart
-print(GrafeoDB.version()); // "0.5.25"
+print(GrafeoDB.version()); // "0.5.39"
 ```
 
 ### Query Execution
@@ -315,7 +315,8 @@ Transaction beginTransaction()
 ```dart
 final tx = db.beginTransaction();
 try {
-  tx.execute('CREATE (:Person {name: "Vincent"})');
+  tx.execute('INSERT (:Person {name: "Vincent"})');
+
   tx.commit();
 } catch (_) {
   tx.rollback();

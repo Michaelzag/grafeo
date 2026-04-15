@@ -781,6 +781,11 @@ impl HashAggregateOperator {
         }
     }
 
+    /// Decomposes this operator for push-based conversion.
+    pub fn into_parts(self) -> (Box<dyn Operator>, Vec<usize>, Vec<AggregateExpr>) {
+        (self.child, self.group_columns, self.aggregates)
+    }
+
     /// Performs the aggregation.
     fn aggregate(&mut self) -> Result<(), OperatorError> {
         while let Some(chunk) = self.child.next()? {
@@ -939,6 +944,10 @@ impl Operator for HashAggregateOperator {
     fn name(&self) -> &'static str {
         "HashAggregate"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 /// Simple (non-grouping) aggregate operator for global aggregations.
@@ -1077,6 +1086,10 @@ impl Operator for SimpleAggregateOperator {
     fn name(&self) -> &'static str {
         "SimpleAggregate"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(test)]
@@ -1115,6 +1128,10 @@ mod tests {
 
         fn name(&self) -> &'static str {
             "Mock"
+        }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
         }
     }
 
@@ -1817,5 +1834,45 @@ mod tests {
         // Population stdev of single value is 0
         let stdev = result.column(0).unwrap().get_float64(0).unwrap();
         assert!((stdev - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_hash_aggregate_into_any() {
+        let mock = MockOperator::new(vec![]);
+        let op = HashAggregateOperator::new(
+            Box::new(mock),
+            vec![0],
+            vec![AggregateExpr::count_star()],
+            vec![LogicalType::Int64, LogicalType::Int64],
+        );
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<HashAggregateOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_simple_aggregate_into_any() {
+        let mock = MockOperator::new(vec![]);
+        let op = SimpleAggregateOperator::new(
+            Box::new(mock),
+            vec![AggregateExpr::count_star()],
+            vec![LogicalType::Int64],
+        );
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<SimpleAggregateOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_hash_aggregate_into_parts() {
+        let mock = MockOperator::new(vec![]);
+        let op = HashAggregateOperator::new(
+            Box::new(mock),
+            vec![0, 2],
+            vec![AggregateExpr::sum(1), AggregateExpr::count_star()],
+            vec![LogicalType::Int64, LogicalType::Int64, LogicalType::Int64],
+        );
+        let (mut child, group_columns, aggregates) = op.into_parts();
+        assert_eq!(group_columns, vec![0, 2]);
+        assert_eq!(aggregates.len(), 2);
+        assert!(child.next().unwrap().is_none());
     }
 }

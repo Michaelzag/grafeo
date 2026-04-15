@@ -41,18 +41,61 @@ impl RowKey {
 
 fn hash_value(value: &Value) -> u64 {
     use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
+    use std::hash::Hasher;
 
     let mut hasher = DefaultHasher::new();
-    match value {
-        Value::Null => 0u8.hash(&mut hasher),
-        Value::Bool(b) => b.hash(&mut hasher),
-        Value::Int64(i) => i.hash(&mut hasher),
-        Value::Float64(f) => f.to_bits().hash(&mut hasher),
-        Value::String(s) => s.hash(&mut hasher),
-        _ => 0u8.hash(&mut hasher),
-    }
+    hash_value_into(value, &mut hasher);
     hasher.finish()
+}
+
+/// Recursively hashes a Value into a Hasher without relying on Debug output.
+///
+/// Each variant is prefixed with a discriminant tag to prevent cross-type collisions.
+fn hash_value_into(value: &Value, hasher: &mut impl std::hash::Hasher) {
+    use std::hash::Hash;
+
+    std::mem::discriminant(value).hash(hasher);
+    match value {
+        Value::Null => {}
+        Value::Bool(b) => b.hash(hasher),
+        Value::Int64(i) => i.hash(hasher),
+        Value::Float64(f) => f.to_bits().hash(hasher),
+        Value::String(s) => s.hash(hasher),
+        Value::Bytes(b) => b.hash(hasher),
+        Value::List(items) => {
+            items.len().hash(hasher);
+            for item in items.iter() {
+                hash_value_into(item, hasher);
+            }
+        }
+        Value::Map(map) => {
+            map.len().hash(hasher);
+            // BTreeMap iterates in key order: deterministic
+            for (k, v) in map.iter() {
+                k.as_str().hash(hasher);
+                hash_value_into(v, hasher);
+            }
+        }
+        Value::Vector(vec) => {
+            vec.len().hash(hasher);
+            for f in vec.iter() {
+                f.to_bits().hash(hasher);
+            }
+        }
+        Value::Path { nodes, edges } => {
+            nodes.len().hash(hasher);
+            for n in nodes.iter() {
+                hash_value_into(n, hasher);
+            }
+            edges.len().hash(hasher);
+            for e in edges.iter() {
+                hash_value_into(e, hasher);
+            }
+        }
+        // Temporal and other scalar types: use their Display representation
+        // which is stable and semantically meaningful (ISO 8601 for dates, etc.)
+        _ => format!("{value}").hash(hasher),
+    }
 }
 
 /// Push-based distinct operator.
@@ -336,5 +379,176 @@ mod tests {
         let chunks = sink.into_chunks();
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].len(), 7); // 7 unique values
+    }
+
+    fn create_mixed_chunk(values: &[Value]) -> DataChunk {
+        let vector = ValueVector::from_values(values);
+        DataChunk::new(vec![vector])
+    }
+
+    #[test]
+    fn test_distinct_null_values() {
+        let mut distinct = DistinctPushOperator::new();
+        let mut sink = CollectorSink::new();
+
+        let chunk = create_mixed_chunk(&[Value::Null, Value::Null, Value::Int64(1)]);
+        distinct.push(chunk, &mut sink).unwrap();
+        distinct.finalize(&mut sink).unwrap();
+        assert_eq!(distinct.unique_count(), 2); // Null + 1
+    }
+
+    #[test]
+    fn test_distinct_bool_values() {
+        let mut distinct = DistinctPushOperator::new();
+        let mut sink = CollectorSink::new();
+
+        let chunk = create_mixed_chunk(&[Value::Bool(true), Value::Bool(false), Value::Bool(true)]);
+        distinct.push(chunk, &mut sink).unwrap();
+        distinct.finalize(&mut sink).unwrap();
+        assert_eq!(distinct.unique_count(), 2);
+    }
+
+    #[test]
+    fn test_distinct_float_values() {
+        let mut distinct = DistinctPushOperator::new();
+        let mut sink = CollectorSink::new();
+
+        let chunk = create_mixed_chunk(&[
+            Value::Float64(1.0),
+            Value::Float64(2.0),
+            Value::Float64(1.0),
+            Value::Float64(f64::NAN),
+        ]);
+        distinct.push(chunk, &mut sink).unwrap();
+        distinct.finalize(&mut sink).unwrap();
+        assert_eq!(distinct.unique_count(), 3); // 1.0, 2.0, NaN
+    }
+
+    #[test]
+    fn test_distinct_string_values() {
+        let mut distinct = DistinctPushOperator::new();
+        let mut sink = CollectorSink::new();
+
+        let chunk =
+            create_mixed_chunk(&[Value::from("Alix"), Value::from("Gus"), Value::from("Alix")]);
+        distinct.push(chunk, &mut sink).unwrap();
+        distinct.finalize(&mut sink).unwrap();
+        assert_eq!(distinct.unique_count(), 2);
+    }
+
+    #[test]
+    fn test_distinct_bytes_values() {
+        let mut distinct = DistinctPushOperator::new();
+        let mut sink = CollectorSink::new();
+
+        let chunk = create_mixed_chunk(&[
+            Value::Bytes(vec![1u8, 2, 3].into()),
+            Value::Bytes(vec![4u8, 5, 6].into()),
+            Value::Bytes(vec![1u8, 2, 3].into()),
+        ]);
+        distinct.push(chunk, &mut sink).unwrap();
+        distinct.finalize(&mut sink).unwrap();
+        assert_eq!(distinct.unique_count(), 2);
+    }
+
+    #[test]
+    fn test_distinct_list_values() {
+        let mut distinct = DistinctPushOperator::new();
+        let mut sink = CollectorSink::new();
+
+        let chunk = create_mixed_chunk(&[
+            Value::List(vec![Value::Int64(1), Value::Int64(2)].into()),
+            Value::List(vec![Value::Int64(3), Value::Int64(4)].into()),
+            Value::List(vec![Value::Int64(1), Value::Int64(2)].into()),
+        ]);
+        distinct.push(chunk, &mut sink).unwrap();
+        distinct.finalize(&mut sink).unwrap();
+        assert_eq!(distinct.unique_count(), 2);
+    }
+
+    #[test]
+    fn test_distinct_map_values() {
+        use std::collections::BTreeMap;
+
+        let mut map1 = BTreeMap::new();
+        map1.insert("a".into(), Value::Int64(1));
+        let mut map2 = BTreeMap::new();
+        map2.insert("b".into(), Value::Int64(2));
+
+        let mut distinct = DistinctPushOperator::new();
+        let mut sink = CollectorSink::new();
+
+        let chunk = create_mixed_chunk(&[
+            Value::Map(map1.clone().into()),
+            Value::Map(map2.into()),
+            Value::Map(map1.into()),
+        ]);
+        distinct.push(chunk, &mut sink).unwrap();
+        distinct.finalize(&mut sink).unwrap();
+        assert_eq!(distinct.unique_count(), 2);
+    }
+
+    #[test]
+    fn test_distinct_vector_values() {
+        let mut distinct = DistinctPushOperator::new();
+        let mut sink = CollectorSink::new();
+
+        let chunk = create_mixed_chunk(&[
+            Value::Vector(vec![1.0_f32, 2.0].into()),
+            Value::Vector(vec![3.0_f32, 4.0].into()),
+            Value::Vector(vec![1.0_f32, 2.0].into()),
+        ]);
+        distinct.push(chunk, &mut sink).unwrap();
+        distinct.finalize(&mut sink).unwrap();
+        assert_eq!(distinct.unique_count(), 2);
+    }
+
+    #[test]
+    fn test_distinct_path_values() {
+        let mut distinct = DistinctPushOperator::new();
+        let mut sink = CollectorSink::new();
+
+        let path1 = Value::Path {
+            nodes: vec![Value::Int64(1), Value::Int64(2)].into(),
+            edges: vec![Value::Int64(10)].into(),
+        };
+        let path2 = Value::Path {
+            nodes: vec![Value::Int64(3), Value::Int64(4)].into(),
+            edges: vec![Value::Int64(20)].into(),
+        };
+
+        let chunk = create_mixed_chunk(&[path1.clone(), path2, path1]);
+        distinct.push(chunk, &mut sink).unwrap();
+        distinct.finalize(&mut sink).unwrap();
+        assert_eq!(distinct.unique_count(), 2);
+    }
+
+    #[test]
+    fn test_distinct_mixed_types_are_distinct() {
+        let mut distinct = DistinctPushOperator::new();
+        let mut sink = CollectorSink::new();
+
+        // Different types with "similar" content should be distinct
+        let chunk = create_mixed_chunk(&[
+            Value::Int64(1),
+            Value::Float64(1.0),
+            Value::from("1"),
+            Value::Bool(true),
+        ]);
+        distinct.push(chunk, &mut sink).unwrap();
+        distinct.finalize(&mut sink).unwrap();
+        assert_eq!(distinct.unique_count(), 4);
+    }
+
+    #[test]
+    fn test_hash_value_deterministic() {
+        // Same value should always produce the same hash
+        let v1 = Value::from("test");
+        let v2 = Value::from("test");
+        assert_eq!(hash_value(&v1), hash_value(&v2));
+
+        // Different values should (almost certainly) produce different hashes
+        let v3 = Value::from("other");
+        assert_ne!(hash_value(&v1), hash_value(&v3));
     }
 }

@@ -940,12 +940,29 @@ impl<'a> Parser<'a> {
                 Ok(Expression::Literal(Literal::Bool(false)))
             }
             TokenKind::Integer => {
-                let value = self.current.text.parse().unwrap_or(0);
+                let text = &self.current.text;
+                let value = text.parse().map_err(|e: std::num::ParseIntError| {
+                    if *e.kind() == std::num::IntErrorKind::PosOverflow
+                        || *e.kind() == std::num::IntErrorKind::NegOverflow
+                    {
+                        self.error(&format!(
+                            "Integer literal '{}' overflows the valid range ({} to {})",
+                            text,
+                            i64::MIN,
+                            i64::MAX
+                        ))
+                    } else {
+                        self.error(&format!("Invalid integer literal: '{}'", text))
+                    }
+                })?;
                 self.advance();
                 Ok(Expression::Literal(Literal::Integer(value)))
             }
             TokenKind::Float => {
-                let value = self.current.text.parse().unwrap_or(0.0);
+                let text = &self.current.text;
+                let value = text.parse().map_err(|_: std::num::ParseFloatError| {
+                    self.error(&format!("Invalid float literal: '{}'", text))
+                })?;
                 self.advance();
                 Ok(Expression::Literal(Literal::Float(value)))
             }
@@ -1121,7 +1138,20 @@ impl<'a> Parser<'a> {
 
     fn parse_integer_literal(&mut self) -> Result<u64> {
         if self.current.kind == TokenKind::Integer {
-            let value = self.current.text.parse().unwrap_or(0);
+            let text = &self.current.text;
+            let value = text.parse().map_err(|e: std::num::ParseIntError| {
+                if *e.kind() == std::num::IntErrorKind::PosOverflow
+                    || *e.kind() == std::num::IntErrorKind::NegOverflow
+                {
+                    self.error(&format!(
+                        "Integer literal '{}' overflows the valid range (0 to {})",
+                        text,
+                        u64::MAX
+                    ))
+                } else {
+                    self.error(&format!("Invalid integer literal: '{}'", text))
+                }
+            })?;
             self.advance();
             Ok(value)
         } else {

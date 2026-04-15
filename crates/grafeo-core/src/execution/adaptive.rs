@@ -574,6 +574,10 @@ impl Sink for CardinalityTrackingSink {
     fn name(&self) -> &'static str {
         self.inner.name()
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any> {
+        self
+    }
 }
 
 /// Decision about whether to re-optimize a query.
@@ -1004,6 +1008,10 @@ impl Operator for CardinalityTrackingWrapper {
 
     fn name(&self) -> &'static str {
         self.inner.name()
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }
 

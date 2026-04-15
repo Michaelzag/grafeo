@@ -71,6 +71,8 @@ impl QueryLanguage {
             Self::Sparql => false,
             #[cfg(all(feature = "graphql", feature = "triple-store"))]
             Self::GraphQLRdf => false,
+            #[allow(unreachable_patterns)]
+            _ => false,
         }
     }
 }

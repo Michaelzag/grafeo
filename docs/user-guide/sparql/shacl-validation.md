@@ -78,7 +78,7 @@ Shapes can be **node shapes** (constraints on focus nodes directly) or **propert
 
 ## Supported Constraint Types
 
-Grafeo supports all 28 SHACL Core constraint types.
+Grafeo supports all SHACL Core constraint types, listed below by category.
 
 ### Value Type Constraints
 

@@ -65,6 +65,10 @@ impl Operator for UnionOperator {
     fn name(&self) -> &'static str {
         "Union"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(test)]
@@ -105,6 +109,10 @@ mod tests {
 
         fn name(&self) -> &'static str {
             "Mock"
+        }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
         }
     }
 
@@ -206,5 +214,17 @@ mod tests {
             count += 1;
         }
         assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn test_union_into_any() {
+        let left = MockOperator::new(vec![]);
+        let right = MockOperator::new(vec![]);
+        let op = UnionOperator::new(
+            vec![Box::new(left), Box::new(right)],
+            vec![LogicalType::Int64],
+        );
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<UnionOperator>().is_ok());
     }
 }

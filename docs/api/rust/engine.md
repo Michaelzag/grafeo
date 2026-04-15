@@ -36,7 +36,7 @@ let mut session = db.session();
 session.execute("INSERT (:Person {name: 'Alix'})")?;
 
 let result = session.execute("MATCH (p:Person) RETURN p.name")?;
-for row in result.rows {
+for row in result.rows() {
     println!("{:?}", row);
 }
 ```

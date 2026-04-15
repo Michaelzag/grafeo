@@ -26,6 +26,7 @@ graph BT
     WASM[grafeo-wasm]
     CSHARP[grafeo-csharp]
     DART[grafeo-dart]
+    GO[grafeo-go]
     COMMON_BIND[grafeo-bindings-common]
     CLI[grafeo-cli]
 
@@ -45,6 +46,7 @@ graph BT
     WASM --> COMMON_BIND
     CSHARP --> CFFI
     DART --> CFFI
+    GO --> CFFI
     CLI --> ENGINE
 ```
 
@@ -182,17 +184,27 @@ C FFI layer for cross-language interop. Located at `crates/bindings/c`.
 
 Also used by Go (CGO), C# (P/Invoke) and Dart (dart:ffi) bindings.
 
-## grafeo-csharp
+## Non-Workspace FFI Bindings
+
+The following bindings live under `crates/bindings/` but are **not** Rust workspace members. They use FFI to call the `grafeo-c` shared library rather than linking as Rust crates. Their source is in the respective language (C#, Dart, Go), not Rust.
+
+### grafeo-csharp
 
 C# / .NET 8 bindings via source-generated P/Invoke. Located at `crates/bindings/csharp`.
 
 Wraps grafeo-c with a .NET-native API including `GrafeoDB`, typed CRUD, transactions, vector search and `SafeHandle`-based resource management.
 
-## grafeo-dart
+### grafeo-dart
 
 Dart bindings via dart:ffi. Located at `crates/bindings/dart`.
 
 Wraps grafeo-c with `NativeFinalizer` for automatic resource cleanup, sealed exception hierarchy and `late final` cached FFI lookups.
+
+### grafeo-go
+
+Go bindings via CGO. Located at `crates/bindings/go`.
+
+Wraps grafeo-c with a Go-native API using `runtime.SetFinalizer` for resource cleanup.
 
 ## grafeo-bindings-common
 

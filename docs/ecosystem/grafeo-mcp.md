@@ -22,7 +22,7 @@ uv tool install grafeo-mcp
 pip install grafeo-mcp
 ```
 
-Requires Python 3.12+ and grafeo >= 0.4.4.
+Requires Python 3.12+ and grafeo >= 0.5.0. Current grafeo-mcp version: 0.2.0.
 
 ## Quick Start
 
@@ -97,7 +97,7 @@ Supports stdio (default), SSE and streamable HTTP transports.
 ## Requirements
 
 - Python 3.12+
-- grafeo >= 0.4.4
+- grafeo >= 0.5.0
 - mcp >= 1.20
 
 ## See Also

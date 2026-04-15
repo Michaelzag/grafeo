@@ -1140,7 +1140,13 @@ fn generate_execute_and_assert(
         for row in &expect.rows {
             let cols: Vec<String> = row
                 .iter()
-                .map(|c| format!("\"{}\".to_string()", escape_rust_string(c)))
+                .map(|c| {
+                    if c.is_empty() {
+                        "String::new()".to_string()
+                    } else {
+                        format!("\"{}\".to_string()", escape_rust_string(c))
+                    }
+                })
                 .collect();
             writeln!(output, "            vec![{}],", cols.join(", ")).unwrap();
         }

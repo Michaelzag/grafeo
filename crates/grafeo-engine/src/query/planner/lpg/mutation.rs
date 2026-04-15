@@ -741,7 +741,8 @@ impl super::Planner {
             return self.plan_static_result(result, &call.yield_items);
         }
 
-        // Check user-defined procedures first
+        // Check user-defined procedures first (requires GQL for body re-parsing)
+        #[cfg(feature = "gql")]
         if let Some(catalog) = &self.catalog {
             let proc_name = if call.name.len() == 1 {
                 &call.name[0]
@@ -854,7 +855,7 @@ impl super::Planner {
     }
 
     /// Plans a user-defined procedure call.
-    #[cfg(feature = "algos")]
+    #[cfg(all(feature = "algos", feature = "gql"))]
     fn plan_user_procedure(
         &self,
         call: &CallProcedureOp,

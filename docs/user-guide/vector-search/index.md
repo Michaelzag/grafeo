@@ -91,6 +91,56 @@ for row in result:
     print(f"{row['d.title']}: {row['similarity']:.3f}")
 ```
 
+## Batch Operations
+
+For high-throughput ingestion and multi-query search, use the batch APIs:
+
+### `batch_create_nodes()`
+
+Create many nodes at once, each with a vector property. Returns a list of node IDs.
+
+```python
+import grafeo
+
+db = grafeo.GrafeoDB()
+db.create_vector_index("Document", "embedding", dimensions=3)
+
+# Create 3 nodes, each with label "Document" and an "embedding" vector
+ids = db.batch_create_nodes("Document", "embedding", [
+    [0.1, 0.2, 0.3],
+    [0.4, 0.5, 0.6],
+    [0.7, 0.8, 0.9],
+])
+print(f"Created node IDs: {ids}")
+```
+
+For nodes with additional properties, use `batch_create_nodes_with_props()`:
+
+```python
+ids = db.batch_create_nodes_with_props("Document", [
+    {"title": "Graph databases", "embedding": [0.1, 0.2, 0.3]},
+    {"title": "Vector search",   "embedding": [0.4, 0.5, 0.6]},
+])
+```
+
+### `batch_vector_search()`
+
+Search for nearest neighbors of multiple query vectors in a single call. Queries run in parallel across all available CPU cores.
+
+```python
+results = db.batch_vector_search(
+    "Document", "embedding",
+    queries=[[0.1, 0.2, 0.3], [0.7, 0.8, 0.9]],
+    k=5,
+)
+for i, matches in enumerate(results):
+    print(f"Query {i}:")
+    for node_id, distance in matches:
+        print(f"  Node {node_id}: distance={distance:.4f}")
+```
+
+An optional `ef` parameter controls the search beam width (higher values improve recall at the cost of speed). An optional `filters` dict applies property-based pre-filtering.
+
 ## Text Search (BM25)
 
 Create inverted indexes for full-text keyword search with BM25 scoring:

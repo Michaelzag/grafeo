@@ -19,7 +19,7 @@ Studio UI available at `http://localhost:7474/studio/`.
 ```yaml
 services:
   grafeo:
-    image: grafeodb/grafeo-server:latest
+    image: grafeo/grafeo-server:latest
     ports:
       - "7474:7474"
     volumes:

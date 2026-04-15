@@ -48,6 +48,7 @@ async-storage = ["wal"]
 grafeo-file = ["wal", "fs2"]
 tracing = ["dep:tracing", "grafeo-common/tracing"]
 testing-crash-injection = ["grafeo-common/testing-crash-injection"]
+encryption = ["grafeo-common/encryption"]
 
 [lints]
 workspace = true

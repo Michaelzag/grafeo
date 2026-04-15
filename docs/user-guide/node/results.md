@@ -65,10 +65,10 @@ for (const edge of result.edges()) {
 
 ## Raw Rows
 
-For performance-sensitive code, access rows as arrays (no column name mapping):
+For performance-sensitive code, access rows as arrays (no column name mapping). The TypeScript return type is `object`, but the runtime value is an array of arrays:
 
 ```typescript
-const raw = result.rows();
+const raw = result.rows() as any[][];
 // [[value, value], [value, value], ...]
 ```
 

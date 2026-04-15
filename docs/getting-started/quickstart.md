@@ -131,7 +131,7 @@ Retrieve data using pattern matching:
         ORDER BY p.age
     "#)?;
 
-    for row in result.rows {
+    for row in result.rows() {
         println!("{:?}", row);
     }
 
@@ -141,7 +141,7 @@ Retrieve data using pattern matching:
         RETURN friend.name
     "#)?;
 
-    for row in result.rows {
+    for row in result.rows() {
         println!("Alix knows {:?}", row);
     }
     ```
@@ -235,7 +235,7 @@ For atomic operations, use transactions:
     let mut session = db.session();
 
     // Begin a transaction
-    session.begin_tx()?;
+    session.begin_transaction()?;
 
     session.execute("INSERT (:Person {name: 'Dave'})")?;
     session.execute("INSERT (:Person {name: 'Eve'})")?;

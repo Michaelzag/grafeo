@@ -77,6 +77,11 @@ impl DistinctOperator {
         }
     }
 
+    /// Decomposes this operator for push-based conversion.
+    pub fn into_parts(self) -> (Box<dyn Operator>, Option<Vec<usize>>) {
+        (self.child, self.distinct_columns)
+    }
+
     /// Creates a distinct operator that considers only specified columns.
     pub fn on_columns(
         child: Box<dyn Operator>,
@@ -143,6 +148,10 @@ impl Operator for DistinctOperator {
     fn name(&self) -> &'static str {
         "Distinct"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(test)]
@@ -181,6 +190,10 @@ mod tests {
 
         fn name(&self) -> &'static str {
             "Mock"
+        }
+
+        fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+            self
         }
     }
 
@@ -296,5 +309,34 @@ mod tests {
         // Should have 4 unique values: 1, 2, 3, 4
         results.sort_unstable();
         assert_eq!(results, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_distinct_into_any() {
+        let mock = MockOperator::new(vec![]);
+        let op = DistinctOperator::new(Box::new(mock), vec![LogicalType::Int64]);
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<DistinctOperator>().is_ok());
+    }
+
+    #[test]
+    fn test_distinct_into_parts() {
+        let mock = MockOperator::new(vec![]);
+        let op = DistinctOperator::on_columns(
+            Box::new(mock),
+            vec![0, 2],
+            vec![LogicalType::Int64, LogicalType::String, LogicalType::Int64],
+        );
+        let (mut child, distinct_columns) = op.into_parts();
+        assert_eq!(distinct_columns, Some(vec![0, 2]));
+        assert!(child.next().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_distinct_into_parts_all_columns() {
+        let mock = MockOperator::new(vec![]);
+        let op = DistinctOperator::new(Box::new(mock), vec![LogicalType::Int64]);
+        let (_child, distinct_columns) = op.into_parts();
+        assert!(distinct_columns.is_none());
     }
 }

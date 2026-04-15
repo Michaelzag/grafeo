@@ -180,7 +180,7 @@ dotnet add package Grafeo
 ```yaml
 # pubspec.yaml
 dependencies:
-  grafeo: ^0.5.37
+  grafeo: ^0.5.39
 ```
 
 ### Python
@@ -386,14 +386,14 @@ grafeo schema ./mydb            # Labels, edge types, property keys
 grafeo validate ./mydb          # Integrity check
 
 # Data import
-grafeo import csv ./mydb data.csv --label Person
-grafeo import jsonl ./mydb events.jsonl --label Event
+grafeo import csv data.csv --path ./mydb --label Person
+grafeo import jsonl events.jsonl --path ./mydb --label Event
 
 # Backup & restore
 grafeo backup create ./mydb -o backup
 grafeo backup full ./mydb -o /backups/full
 grafeo backup incremental ./mydb -o /backups/incr
-grafeo backup restore-to-epoch /backups/full ./restored --epoch 100
+grafeo backup restore-to-epoch /backups/full --epoch 100 -o ./restored
 grafeo backup status /backups/full
 
 # Data export

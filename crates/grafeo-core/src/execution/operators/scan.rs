@@ -149,6 +149,10 @@ impl Operator for ScanOperator {
     fn name(&self) -> &'static str {
         "Scan"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 #[cfg(all(test, feature = "lpg"))]
@@ -242,5 +246,13 @@ mod tests {
 
         let chunk_all = scan_all.next().unwrap().unwrap();
         assert_eq!(chunk_all.row_count(), 3, "Should see 3 nodes at epoch 5");
+    }
+
+    #[test]
+    fn test_scan_into_any() {
+        let store: Arc<dyn GraphStoreMut> = Arc::new(LpgStore::new().unwrap());
+        let op = ScanOperator::with_label(store.clone() as Arc<dyn GraphStore>, "Person");
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<ScanOperator>().is_ok());
     }
 }

@@ -219,6 +219,9 @@ Snapshots also include named graph state. Both incremental and full snapshots ca
 
 ## Schema-Scoped Graphs
 
+!!! warning "Experimental"
+    Schema-scoped graph resolution is experimental and incomplete. The session schema is parsed and stored, but full catalog-level schema isolation (e.g., preventing cross-schema graph access, schema-qualified names in queries) is not yet implemented. Use this feature for forward-compatible session state only.
+
 Grafeo supports ISO/IEC 39075 session schemas. When a schema is set, graph names are resolved within that schema context. `CREATE GRAPH` creates the graph under the active schema, and `SHOW GRAPHS` only returns graphs belonging to that schema.
 
 ```sql

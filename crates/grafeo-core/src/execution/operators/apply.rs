@@ -272,4 +272,8 @@ impl Operator for ApplyOperator {
     fn name(&self) -> &'static str {
         "Apply"
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }

@@ -15,14 +15,19 @@ The current system uses deployment-target names:
 
 | Profile | Contents | Use case |
 | --- | --- | --- |
-| `embedded` | gql, ai, algos, parallel, regex, grafeo-file | Python, Node.js, C, MCP, in-process |
-| `browser` | gql, regex-lite | WASM, grafeo-web |
-| `server` | embedded, languages, storage, rdf, cdc, async-storage, tracing | grafeo-server |
-| `full` | server | Everything (except embed) |
+| `embedded` | lpg, gql, ai, algos, parallel, regex, jsonl-import, grafeo-file, arrow-export | Python, Node.js, C, MCP, in-process |
+| `browser` | lpg, gql, regex-lite | WASM, grafeo-web |
+| `server` | full, async-storage, metrics, tracing | grafeo-server |
+| `full` | lpg, languages, ai, triple-store, parallel, algos, storage, jsonl-import, parquet-import | Everything (except embed) |
 
 **Defaults**: grafeo facade and bindings use `embedded`. WASM uses `browser`. CLI uses `gql` + storage.
 
+---
+
 ## Proposed Profiles
+
+!!! warning "Not yet implemented"
+    The profiles below are **proposals for a future release**. They do not exist in version 0.5.39. The active profile system is described in "Current Profiles" above.
 
 The proposed system replaces deployment-target names with persona-driven names that describe *what you're building*, not *where it runs*.
 
@@ -98,7 +103,7 @@ Structured memory for LLMs, agents, and RAG pipelines. Temporal history tracks h
 
 > **Note:** `embed` (ONNX embedding generation, ~17 MB) is deliberately excluded from this profile. Most AI memory use cases (grafeo-memory, MCP, LangChain) bring embeddings via API calls. Opt in explicitly with `features = ["ai", "embed"]` if you need in-process embedding.
 >
-> This redefines the current `ai` group. Today, `ai` = `["vector-index", "text-index", "hybrid-search", "cdc"]` at the engine level. The proposed definition adds `temporal` and removes `cdc`'s implicit inclusion (it becomes explicit).
+> This would redefine the current `ai` group. In 0.5.39, `ai` = `["vector-index", "text-index", "hybrid-search", "cdc"]` at the engine level (without `temporal`). The proposed definition adds `temporal` and removes `cdc`'s implicit inclusion (it becomes explicit). This change has not been made yet.
 
 ### Edge
 
@@ -266,8 +271,9 @@ The complete list of individual feature flags (Layer 2) that profiles are compos
 | Atom | Profile | Description | Status |
 | --- | --- | --- | --- |
 | `parallel` | (standalone) | Morsel-driven parallelism (rayon) | Implemented |
-| `block-stm` | (standalone) | Parallel batch transaction execution | Implemented |
 | `tiered-storage` | (standalone) | Hot/cold version storage with epochs | Implemented |
+
+> **Note:** Block-STM parallel transaction execution is compiled unconditionally (see `grafeo-engine/src/transaction/parallel.rs`). It is not gated behind a feature flag.
 
 ### Operations (grafeo-server only)
 

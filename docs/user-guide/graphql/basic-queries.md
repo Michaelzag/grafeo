@@ -220,3 +220,7 @@ let result = db.execute_graphql(r#"
 }
 "#).unwrap();
 ```
+
+## Mutations
+
+GraphQL mutations (`create<Type>`, `update<Type>`, `delete<Type>`) are limited to node property CRUD operations. Relationship creation, update, or deletion is not supported in GraphQL mutation payloads. Use GQL or Cypher for relationship manipulation. See the [GraphQL overview](index.md#mutations) for mutation syntax and examples.

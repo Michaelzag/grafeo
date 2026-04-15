@@ -287,6 +287,17 @@ pub struct MetricsRegistry {
 
     // -- GC --
     pub(crate) gc_runs: AtomicU64,
+    pub(crate) gc_versions_reclaimed: AtomicU64,
+    pub(crate) gc_duration: AtomicHistogram,
+
+    // -- WAL --
+    pub(crate) wal_records_written: AtomicU64,
+    pub(crate) wal_flush_duration: AtomicHistogram,
+
+    // -- Block-STM --
+    pub(crate) block_stm_batches: AtomicU64,
+    pub(crate) block_stm_reexecutions: AtomicU64,
+    pub(crate) block_stm_sequential_fallbacks: AtomicU64,
 }
 
 impl MetricsRegistry {
@@ -312,6 +323,15 @@ impl MetricsRegistry {
             session_created: AtomicU64::new(0),
 
             gc_runs: AtomicU64::new(0),
+            gc_versions_reclaimed: AtomicU64::new(0),
+            gc_duration: AtomicHistogram::new(LATENCY_BUCKETS),
+
+            wal_records_written: AtomicU64::new(0),
+            wal_flush_duration: AtomicHistogram::new(LATENCY_BUCKETS),
+
+            block_stm_batches: AtomicU64::new(0),
+            block_stm_reexecutions: AtomicU64::new(0),
+            block_stm_sequential_fallbacks: AtomicU64::new(0),
         }
     }
 
@@ -344,6 +364,15 @@ impl MetricsRegistry {
             session_active: self.session_active.load(Ordering::Relaxed),
             session_created: self.session_created.load(Ordering::Relaxed),
             gc_runs: self.gc_runs.load(Ordering::Relaxed),
+            gc_versions_reclaimed: self.gc_versions_reclaimed.load(Ordering::Relaxed),
+            gc_duration_mean_ms: self.gc_duration.mean(),
+            wal_records_written: self.wal_records_written.load(Ordering::Relaxed),
+            wal_flush_duration_mean_ms: self.wal_flush_duration.mean(),
+            block_stm_batches: self.block_stm_batches.load(Ordering::Relaxed),
+            block_stm_reexecutions: self.block_stm_reexecutions.load(Ordering::Relaxed),
+            block_stm_sequential_fallbacks: self
+                .block_stm_sequential_fallbacks
+                .load(Ordering::Relaxed),
             cache_hits: 0,
             cache_misses: 0,
             cache_size: 0,
@@ -516,6 +545,47 @@ impl MetricsRegistry {
             "Total garbage collection runs.",
             self.gc_runs.load(Ordering::Relaxed)
         );
+        counter!(
+            "grafeo_gc_versions_reclaimed",
+            "MVCC versions reclaimed by GC.",
+            self.gc_versions_reclaimed.load(Ordering::Relaxed)
+        );
+        Self::write_histogram(
+            &mut out,
+            "grafeo_gc_duration_ms",
+            "GC pass duration in milliseconds.",
+            &self.gc_duration,
+        );
+
+        // WAL metrics
+        counter!(
+            "grafeo_wal_records_written",
+            "Total WAL records written.",
+            self.wal_records_written.load(Ordering::Relaxed)
+        );
+        Self::write_histogram(
+            &mut out,
+            "grafeo_wal_flush_duration_ms",
+            "WAL flush duration in milliseconds.",
+            &self.wal_flush_duration,
+        );
+
+        // Block-STM metrics
+        counter!(
+            "grafeo_block_stm_batches",
+            "Parallel batches executed.",
+            self.block_stm_batches.load(Ordering::Relaxed)
+        );
+        counter!(
+            "grafeo_block_stm_reexecutions",
+            "Operations re-executed due to conflicts.",
+            self.block_stm_reexecutions.load(Ordering::Relaxed)
+        );
+        counter!(
+            "grafeo_block_stm_sequential_fallbacks",
+            "Batches that fell back to sequential.",
+            self.block_stm_sequential_fallbacks.load(Ordering::Relaxed)
+        );
 
         out
     }
@@ -560,6 +630,16 @@ impl MetricsRegistry {
         self.session_created.store(0, Ordering::Relaxed);
 
         self.gc_runs.store(0, Ordering::Relaxed);
+        self.gc_versions_reclaimed.store(0, Ordering::Relaxed);
+        self.gc_duration.reset();
+
+        self.wal_records_written.store(0, Ordering::Relaxed);
+        self.wal_flush_duration.reset();
+
+        self.block_stm_batches.store(0, Ordering::Relaxed);
+        self.block_stm_reexecutions.store(0, Ordering::Relaxed);
+        self.block_stm_sequential_fallbacks
+            .store(0, Ordering::Relaxed);
     }
 }
 
@@ -631,6 +711,24 @@ pub struct MetricsSnapshot {
     // -- GC --
     /// Total garbage collection runs.
     pub gc_runs: u64,
+    /// Total MVCC versions reclaimed by GC.
+    pub gc_versions_reclaimed: u64,
+    /// Mean GC pass duration in milliseconds.
+    pub gc_duration_mean_ms: f64,
+
+    // -- WAL --
+    /// Total WAL records written.
+    pub wal_records_written: u64,
+    /// Mean WAL flush duration in milliseconds.
+    pub wal_flush_duration_mean_ms: f64,
+
+    // -- Block-STM --
+    /// Total parallel batches executed.
+    pub block_stm_batches: u64,
+    /// Total operations re-executed due to conflicts.
+    pub block_stm_reexecutions: u64,
+    /// Batches that fell back to sequential execution.
+    pub block_stm_sequential_fallbacks: u64,
 
     // -- Cache --
     /// Total plan cache hits (parsed + optimized).

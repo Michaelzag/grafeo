@@ -100,12 +100,21 @@ impl ExpandOperator {
         self
     }
 
+    /// Minimum chunk size for locality sort to be worthwhile.
+    /// Below this threshold, the sort cost exceeds the cache savings.
+    const LOCALITY_SORT_THRESHOLD: usize = 1024;
+
     /// Loads the next input chunk.
     fn load_next_input(&mut self) -> Result<bool, OperatorError> {
         match self.input.next() {
             Ok(Some(mut chunk)) => {
                 // Flatten the chunk if it has a selection vector so we can use direct indexing
                 chunk.flatten();
+                // Sort by source node ID for cache locality during adjacency lookups.
+                // Only worthwhile for larger chunks where the sort cost is amortized.
+                if chunk.len() > Self::LOCALITY_SORT_THRESHOLD {
+                    chunk = chunk.sort_by_column(self.source_column);
+                }
                 self.current_input = Some(chunk);
                 self.current_row = 0;
                 self.current_edges.clear();
@@ -303,6 +312,10 @@ impl Operator for ExpandOperator {
 
     fn name(&self) -> &'static str {
         "Expand"
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
     }
 }
 
@@ -584,5 +597,14 @@ mod tests {
 
         let result = expand.next().unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_expand_into_any() {
+        let (_store, dyn_store) = test_store();
+        let scan = Box::new(ScanOperator::with_label(Arc::clone(&dyn_store), "Person"));
+        let op = ExpandOperator::new(Arc::clone(&dyn_store), scan, 0, Direction::Outgoing, vec![]);
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<ExpandOperator>().is_ok());
     }
 }

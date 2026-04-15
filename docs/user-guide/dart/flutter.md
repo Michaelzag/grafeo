@@ -10,12 +10,17 @@ covers building the native library and bundling it for each platform.
 
 ## Building grafeo-c
 
-Build the shared library with the `lpg` profile (includes GQL, Cypher,
-Gremlin, SQL/PGQ, and storage):
+Build the shared library with the `lpg` profile, which includes GQL, Cypher,
+Gremlin, SQL/PGQ, storage, and regex support:
 
 ```bash
 cargo build --release -p grafeo-c --features lpg
 ```
+
+Other available profiles include `embedded` (GQL + AI + algorithms), `rdf`
+(SPARQL + GraphQL + triple store), and `full` (all languages + AI + triple
+store). See the [feature flags documentation](https://grafeo.dev/reference/features/)
+for details.
 
 The output location depends on your host OS:
 
@@ -83,12 +88,15 @@ startup, so the library is found automatically.
 
 ### Android / iOS
 
-Cross-compilation for mobile targets is not yet fully supported. The Dart FFI
-loader handles iOS (`DynamicLibrary.process()` for statically linked builds) and
-Android/Linux (`libgrafeo_c.so`), but prebuilt mobile binaries are not yet
-published. You will need to cross-compile `grafeo-c` yourself using `cargo-ndk`
-(Android) or `cargo-lipo` (iOS). Track progress in the
-[Grafeo roadmap](https://grafeo.dev/roadmap/).
+!!! warning "Mobile platforms are not yet supported"
+    Prebuilt native binaries for iOS and Android are **not published**. The Dart
+    FFI loader has platform detection for iOS (`DynamicLibrary.process()` for
+    statically linked builds) and Android (`libgrafeo_c.so`), but you must
+    cross-compile `grafeo-c` yourself using `cargo-ndk` (Android) or
+    `cargo-lipo` (iOS). This is an advanced workflow that requires a working
+    Rust cross-compilation toolchain for each target architecture.
+
+Track progress in the [Grafeo roadmap](https://grafeo.dev/roadmap/).
 
 ## Custom Library Path
 

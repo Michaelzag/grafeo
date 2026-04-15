@@ -63,10 +63,18 @@ Write-Host "Output: $OutDir\"
 Write-Host "  Raw:    $([math]::Round($rawSize / 1024)) KB"
 Write-Host "  Gzip:   $([math]::Round($gzSize / 1024)) KB"
 
-if ($gzSize -gt 409600) {
-    Write-Host "  WARNING: Exceeds 400 KB gzip target" -ForegroundColor Yellow
-} elseif ($gzSize -gt 307200) {
-    Write-Host "  Note: Within 300-400 KB gzip target range" -ForegroundColor Cyan
+# Size thresholds (gzipped bytes)
+# 660 KB = 675840 bytes: warning threshold for browser profile
+# Binary is ~95% essential application code (parser, planner, executor),
+# competitive with sql.js (~600 KB). Profiled with twiggy in 0.5.39.
+$warnThreshold = 675840
+$failThreshold = 716800  # 700 KB: hard limit
+
+if ($gzSize -gt $failThreshold) {
+    Write-Host "  ERROR: $gzSize bytes gzipped exceeds 700 KB limit" -ForegroundColor Red
+    exit 1
+} elseif ($gzSize -gt $warnThreshold) {
+    Write-Host "  WARNING: $gzSize bytes gzipped exceeds 660 KB threshold" -ForegroundColor Yellow
 } else {
-    Write-Host "  OK: Under 300 KB gzip target" -ForegroundColor Green
+    Write-Host "  OK: $gzSize bytes gzipped (under 660 KB threshold)" -ForegroundColor Green
 }

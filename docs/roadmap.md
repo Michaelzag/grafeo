@@ -106,14 +106,27 @@ The beta series focuses on correctness, completeness and real-world durability. 
 
 ### Delivered in 0.5.38
 
-- **Incremental backup fix** (#267): `backup_incremental` always failed after a full backup because the WAL cursor was not rotated, making post-backup writes invisible
-- **Edge variable resolution** (#268): multi-hop queries returned edge variables as raw IDs instead of maps; centralized edge column registration in the query planner
+- **Quantized vector indexes**: `"scalar"`, `"binary"`, `"product"` quantization for 4x memory reduction on large vector datasets
+- **EXPLAIN/PROFILE for all 6 query languages**: Gremlin, GraphQL, and SQL/PGQ now support `EXPLAIN` and `EXPLAIN ANALYZE`, matching GQL, Cypher, and SPARQL
+- **Unicode identifiers**: GQL, Cypher, and SQL/PGQ parsers accept Unicode letters per ISO GQL 39075
+- **Parser recursion depth limits**: 128-level nesting limit across all 6 parsers, preventing stack overflow on malicious input
+- **Incremental backup fix** (#267): `backup_incremental` always failed after a full backup because the WAL cursor was not rotated
+- **Edge variable resolution** (#268): multi-hop queries returned edge variables as raw IDs instead of maps
+- **Arrow/DataFrame structural column rename** (#272): underscore-prefixed columns (`_id`, `_type`, `_source`, `_target`) prevent collision with user properties
+
+### Delivered in 0.5.39 (current, unreleased)
+
+- **Push-based pipeline execution**: queries with filter, sort, aggregate, limit, or distinct now execute through a push-based pipeline instead of the Volcano pull loop
+- **Encryption at rest** (`encryption` feature): AES-256-GCM for WAL records and `.grafeo` sections with password-based (Argon2id) or raw-key setup
+- **Block-STM conflict partitioning**: union-find clustering of conflicting transactions for parallel re-execution of disjoint conflict sets
+- **Runtime metrics**: query, transaction, session, cache, and GC counters with Prometheus text export
+- **WASM binary size**: reduced to 650 KB gzipped (competitive with sql.js)
+- **C# enterprise APIs**: schema management, backup/restore, compact, projections, CDC toggle, `IGrafeoDB`/`ITransaction` interfaces
 
 ### Planned Releases
 
 | Version    | Focus                                                                                |
 |------------|--------------------------------------------------------------------------------------|
-| **0.5.39** | Performance and parallelism: Block-STM batch execution, WASM size optimization, cache-line aligned chunks, observability (metrics, spans, telemetry), graph analytics in Python/Node.js/WASM bindings |
 | **0.5.40** | API stability and developer experience: stable/beta/experimental tier annotations, cursor-based streaming results, memory introspection, contributor documentation |
 | **0.5.41** | Improved temporal queries: temporal indexes, GQL temporal syntax extensions, async storage server integration |
 | **0.5.42** | Offline-first sync protocol, cross-language query translation, final 0.6.x blocker audit |

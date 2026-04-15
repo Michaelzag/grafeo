@@ -303,6 +303,10 @@ impl Operator for LoadDataOperator {
             LoadDataFormat::Parquet => "LoadParquet",
         }
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
 }
 
 // ============================================================================
@@ -634,6 +638,19 @@ mod tests {
         assert_eq!(format_name(LoadDataFormat::Csv), "CSV");
         assert_eq!(format_name(LoadDataFormat::Jsonl), "JSONL");
         assert_eq!(format_name(LoadDataFormat::Parquet), "Parquet");
+    }
+
+    #[test]
+    fn test_load_data_into_any() {
+        let op = LoadDataOperator::new(
+            "test.csv".to_string(),
+            LoadDataFormat::Csv,
+            true,
+            None,
+            "row".to_string(),
+        );
+        let any = Box::new(op).into_any();
+        assert!(any.downcast::<LoadDataOperator>().is_ok());
     }
 
     #[cfg(feature = "jsonl-import")]

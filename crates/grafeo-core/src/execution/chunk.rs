@@ -258,6 +258,71 @@ impl DataChunk {
         self.capacity = selected_count;
     }
 
+    /// Returns a new chunk with rows sorted by the values in the given column.
+    ///
+    /// For NodeId columns, sorts by the raw node ID. For other types, sorts by
+    /// the Value's natural ordering. Rows with null values in the sort column
+    /// are placed last.
+    ///
+    /// This is used for locality optimization: sorting by source node ID before
+    /// an expand operator groups nearby nodes together, improving cache locality
+    /// during adjacency index lookups.
+    #[must_use]
+    pub fn sort_by_column(&self, col_idx: usize) -> DataChunk {
+        let row_count = self.len();
+        if row_count <= 1 {
+            return self.clone();
+        }
+
+        let Some(sort_col) = self.column(col_idx) else {
+            return self.clone();
+        };
+
+        // Build permutation index sorted by the column values.
+        // NodeId columns sort by raw ID; Int64 columns sort numerically
+        // (offset-encoded so negative values sort correctly); nulls sort last.
+        let mut indices: Vec<usize> = self.selected_indices().collect();
+        indices.sort_by_key(|&i| {
+            // Returns (is_null, key): nulls get (1, 0) so they sort strictly
+            // after all non-null values (0, _), regardless of the key value.
+            sort_col
+                .get_node_id(i)
+                .map(|id| (0u8, id.as_u64()))
+                .or_else(|| {
+                    sort_col.get_value(i).and_then(|v| match v {
+                        // XOR with sign bit flips the ordering so that
+                        // i64::MIN maps to 0 and i64::MAX maps to u64::MAX,
+                        // preserving the natural signed ordering.
+                        grafeo_common::types::Value::Int64(n) => {
+                            Some((0u8, (n as u64) ^ (1u64 << 63)))
+                        }
+                        _ => None,
+                    })
+                })
+                .unwrap_or((1u8, 0u64))
+        });
+
+        // Apply permutation to all columns
+        let mut result_columns = Vec::with_capacity(self.columns.len());
+        for col in &self.columns {
+            let mut new_col = ValueVector::with_type(col.data_type().clone());
+            for &idx in &indices {
+                if let Some(val) = col.get(idx) {
+                    new_col.push(val);
+                }
+            }
+            result_columns.push(new_col);
+        }
+
+        DataChunk {
+            columns: result_columns,
+            selection: None,
+            count: row_count,
+            capacity: row_count,
+            zone_hints: None,
+        }
+    }
+
     /// Returns an iterator over selected row indices.
     pub fn selected_indices(&self) -> Box<dyn Iterator<Item = usize> + '_> {
         match &self.selection {
@@ -470,6 +535,7 @@ impl DataChunkBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use grafeo_common::types::Value;
 
     #[test]
     fn test_chunk_creation() {
@@ -702,5 +768,103 @@ mod tests {
         // Reset should clear zone hints
         chunk.reset();
         assert!(chunk.zone_hints().is_none());
+    }
+
+    #[test]
+    fn test_sort_by_column_int64() {
+        let v = ValueVector::from_values(&[Value::Int64(30), Value::Int64(10), Value::Int64(20)]);
+        let names = ValueVector::from_values(&[
+            Value::from("Alix"),
+            Value::from("Gus"),
+            Value::from("Jules"),
+        ]);
+        let chunk = DataChunk::new(vec![v, names]);
+        let sorted = chunk.sort_by_column(0);
+
+        assert_eq!(sorted.len(), 3);
+        // Values should be sorted: 10, 20, 30
+        assert_eq!(
+            sorted.column(0).unwrap().get_value(0),
+            Some(Value::Int64(10))
+        );
+        assert_eq!(
+            sorted.column(0).unwrap().get_value(1),
+            Some(Value::Int64(20))
+        );
+        assert_eq!(
+            sorted.column(0).unwrap().get_value(2),
+            Some(Value::Int64(30))
+        );
+        // Names should follow the permutation: Gus, Jules, Alix
+        assert_eq!(
+            sorted.column(1).unwrap().get_value(0),
+            Some(Value::from("Gus"))
+        );
+        assert_eq!(
+            sorted.column(1).unwrap().get_value(1),
+            Some(Value::from("Jules"))
+        );
+        assert_eq!(
+            sorted.column(1).unwrap().get_value(2),
+            Some(Value::from("Alix"))
+        );
+    }
+
+    #[test]
+    fn test_sort_by_column_node_ids() {
+        use grafeo_common::types::NodeId;
+
+        let mut id_col = ValueVector::new();
+        id_col.push_node_id(NodeId::new(100));
+        id_col.push_node_id(NodeId::new(5));
+        id_col.push_node_id(NodeId::new(50));
+
+        let data_col = ValueVector::from_values(&[
+            Value::from("hundred"),
+            Value::from("five"),
+            Value::from("fifty"),
+        ]);
+
+        let chunk = DataChunk::new(vec![id_col, data_col]);
+        let sorted = chunk.sort_by_column(0);
+
+        assert_eq!(sorted.len(), 3);
+        // Node IDs should be sorted: 5, 50, 100
+        assert_eq!(
+            sorted.column(0).unwrap().get_node_id(0),
+            Some(NodeId::new(5))
+        );
+        assert_eq!(
+            sorted.column(0).unwrap().get_node_id(1),
+            Some(NodeId::new(50))
+        );
+        assert_eq!(
+            sorted.column(0).unwrap().get_node_id(2),
+            Some(NodeId::new(100))
+        );
+        // Data should follow: five, fifty, hundred
+        assert_eq!(
+            sorted.column(1).unwrap().get_value(0),
+            Some(Value::from("five"))
+        );
+    }
+
+    #[test]
+    fn test_sort_by_column_empty() {
+        let chunk = DataChunk::empty();
+        let sorted = chunk.sort_by_column(0);
+        assert_eq!(sorted.len(), 0);
+    }
+
+    #[test]
+    fn test_sort_by_column_single_row() {
+        let v = ValueVector::from_values(&[Value::Int64(42)]);
+        let chunk = DataChunk::new(vec![v]);
+        let sorted = chunk.sort_by_column(0);
+        assert_eq!(sorted.len(), 1);
+        assert_eq!(
+            sorted.column(0).unwrap().get_value(0),
+            Some(Value::Int64(42))
+        );
     }
 }
